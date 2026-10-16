@@ -284,6 +284,40 @@ async function fyersReadOnlyGet(url) {
   return data;
 }
 
+
+app.get('/api/market/candles', async (req, res) => {
+  const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
+  const allowed = new Set([...allowedSymbols, ...moversSymbols]);
+  const resolution = String(req.query.resolution || '5');
+  const allowedResolutions = new Set(['1', '3', '5', '15', '30', '60', 'D']);
+  const datePattern = /^\\d{4}-\\d{2}-\\d{2}$/;
+  const today = new Date().toISOString().slice(0, 10);
+  const defaultFrom = new Date(Date.now() - (resolution === 'D' ? 29 : 6) * 86400000).toISOString().slice(0, 10);
+  const rangeFrom = String(req.query.from || defaultFrom);
+  const rangeTo = String(req.query.to || today);
+  if (!allowed.has(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported candle symbol.' });
+  if (!allowedResolutions.has(resolution)) return res.status(400).json({ ok: false, error: 'Unsupported candle resolution.' });
+  if (!datePattern.test(rangeFrom) || !datePattern.test(rangeTo) || rangeFrom > rangeTo) return res.status(400).json({ ok: false, error: 'Use valid YYYY-MM-DD date ranges.' });
+  const spanDays = (Date.parse(rangeTo + 'T00:00:00Z') - Date.parse(rangeFrom + 'T00:00:00Z')) / 86400000;
+  if (!Number.isFinite(spanDays) || spanDays > (resolution === 'D' ? 365 : 30)) return res.status(400).json({ ok: false, error: 'Requested candle range is too large.' });
+  try {
+    const url = new URL('https://api-t1.fyers.in/data/history');
+    url.searchParams.set('symbol', symbol);
+    url.searchParams.set('resolution', resolution);
+    url.searchParams.set('date_format', '1');
+    url.searchParams.set('range_from', rangeFrom);
+    url.searchParams.set('range_to', rangeTo);
+    url.searchParams.set('cont_flag', '1');
+    const result = await fyersReadOnlyGet(url);
+    const candles = Array.isArray(result.candles) ? result.candles : [];
+    const valid = candles.filter(row => Array.isArray(row) && row.length >= 6 && row.slice(0, 5).every(value => Number.isFinite(Number(value))));
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, symbol, resolution, from: rangeFrom, to: rangeTo, fetchedAt: new Date().toISOString(), data: valid });
+  } catch (error) {
+    return res.status(error.statusCode || 502).json({ ok: false, error: error.statusCode === 401 ? 'Connect FYERS to load historical candles.' : 'FYERS historical-candle request failed.', detail: String(error.message || 'Upstream request failed.').slice(0, 220) });
+  }
+});
+
 const moversSymbols = ["NSE:RELIANCE-EQ","NSE:HDFCBANK-EQ","NSE:ICICIBANK-EQ","NSE:INFY-EQ","NSE:TCS-EQ","NSE:BHARTIARTL-EQ","NSE:SBIN-EQ","NSE:ITC-EQ","NSE:LT-EQ","NSE:AXISBANK-EQ","NSE:KOTAKBANK-EQ","NSE:BAJFINANCE-EQ","NSE:HINDUNILVR-EQ","NSE:MARUTI-EQ","NSE:SUNPHARMA-EQ","NSE:TATAMOTORS-EQ","NSE:M&M-EQ","NSE:NTPC-EQ","NSE:TATASTEEL-EQ","NSE:POWERGRID-EQ","NSE:ONGC-EQ","NSE:JSWSTEEL-EQ","NSE:ADANIENT-EQ","NSE:ADANIPORTS-EQ","NSE:COALINDIA-EQ","NSE:WIPRO-EQ","NSE:ULTRACEMCO-EQ","NSE:NESTLEIND-EQ","NSE:TITAN-EQ","NSE:BAJAJFINSV-EQ","NSE:ASIANPAINT-EQ","NSE:GRASIM-EQ","NSE:TECHM-EQ","NSE:HCLTECH-EQ","NSE:INDUSINDBK-EQ","NSE:DRREDDY-EQ","NSE:CIPLA-EQ","NSE:EICHERMOT-EQ","NSE:TRENT-EQ","NSE:BEL-EQ","NSE:SHRIRAMFIN-EQ","NSE:APOLLOHOSP-EQ","NSE:DIVISLAB-EQ","NSE:BPCL-EQ","NSE:HINDALCO-EQ","NSE:TATACONSUM-EQ","NSE:HEROMOTOCO-EQ","NSE:BRITANNIA-EQ","NSE:SBILIFE-EQ","NSE:LTIM-EQ"];
 
 app.get('/api/market/movers', async (_req, res) => {
