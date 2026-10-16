@@ -40,6 +40,8 @@ app.use(cors({
 
 let accessToken = '';
 let authenticatedAt = null;
+const pendingAuthStates = new Map();
+const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 let marketSocket = null;
 let streamConnected = false;
 let streamError = '';
@@ -191,16 +193,24 @@ app.get('/api/fyers/auth/start', (_req, res) => {
     return res.status(503).json({ error: 'FYERS environment settings are incomplete.' });
   }
 
+  const now = Date.now();
+  for (const [key, value] of pendingAuthStates) {
+    if (now - value.createdAt > AUTH_STATE_TTL_MS) pendingAuthStates.delete(key);
+  }
+  const state = crypto.randomBytes(24).toString('hex');
+  pendingAuthStates.set(state, { createdAt: now });
   const url = new URL('https://api-t1.fyers.in/api/v3/generate-authcode');
   url.searchParams.set('client_id', appId);
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('state', 'dhanpulse');
+  url.searchParams.set('state', state);
+  res.set('Cache-Control', 'no-store');
   res.json({ authorizationUrl: url.toString() });
 });
 
 app.post('/api/fyers/auth/exchange', async (req, res) => {
   const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  const state = typeof req.body?.state === 'string' ? req.body.state.trim() : '';
 
   if (!appId || !appSecret || !redirectUri) {
     return res.status(503).json({ error: 'FYERS environment settings are incomplete.' });
@@ -208,6 +218,13 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
   if (!code || code.length > 4096) {
     return res.status(400).json({ error: 'Invalid authorization code.' });
   }
+  const pending = pendingAuthStates.get(state);
+  if (!state || !pending || Date.now() - pending.createdAt > AUTH_STATE_TTL_MS) {
+    if (state) pendingAuthStates.delete(state);
+    return res.status(400).json({ error: 'FYERS login state is invalid or expired. Start Connect FYERS again.' });
+  }
+  // One-time state prevents callback replay and cross-site login mix-ups.
+  pendingAuthStates.delete(state);
 
   try {
     const appIdHash = crypto.createHash('sha256')
