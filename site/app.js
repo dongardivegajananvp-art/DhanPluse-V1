@@ -1,5 +1,6 @@
 const BACKEND_URL = 'https://dhanpluse-v1.onrender.com';
-const QUOTE_POLL_MS = 15000;
+const QUOTE_POLL_MS = 30000;
+const QUOTE_POLL_MAX_MS = 120000;
 
 const nav = document.querySelector('#nav');
 const title = document.querySelector('#pageTitle');
@@ -9,6 +10,7 @@ const featureDesc = document.querySelector('#featureDesc');
 const featureContent = document.querySelector('#featureContent');
 
 let quoteTimer = null;
+let quotePollDelay = QUOTE_POLL_MS;
 let quoteRequestRunning = false;
 let authInProgress = false;
 
@@ -303,6 +305,18 @@ async function fetchLiveQuotes() {
 
     const data = await response.json().catch(() => ({}));
 
+    if (response.status === 429) {
+      // Respect the backend/FYERS cooldown instead of polling every 15 seconds.
+      const retrySeconds = Number(data.retryAfterSeconds) || 30;
+      quotePollDelay = Math.min(
+        Math.max((retrySeconds + 5) * 1000, QUOTE_POLL_MS),
+        QUOTE_POLL_MAX_MS
+      );
+      setStatus('FYERS RATE LIMIT — WAITING');
+      showMessage(`FYERS is rate-limiting quote requests. Retrying in about ${Math.ceil(quotePollDelay / 1000)} seconds.`, true);
+      return;
+    }
+
     if (!response.ok || data.ok !== true || !Array.isArray(data.data)) {
       resetQuoteDisplay();
 
@@ -318,6 +332,8 @@ async function fetchLiveQuotes() {
       return;
     }
 
+    quotePollDelay = QUOTE_POLL_MS;
+
     if (!updateQuoteCards(data.data, data.fetchedAt)) {
       resetQuoteDisplay();
       setStatus('INCOMPLETE QUOTE RESPONSE');
@@ -332,6 +348,8 @@ async function fetchLiveQuotes() {
     showMessage('Cannot reach the quote API. Check network and backend status.', true);
   } finally {
     quoteRequestRunning = false;
+    if (quoteTimer) window.clearTimeout(quoteTimer);
+    quoteTimer = window.setTimeout(fetchLiveQuotes, quotePollDelay);
   }
 }
 
@@ -394,5 +412,5 @@ testBackend();
 exchangeAuthCode();
 
 // REST quote polling only; this is not a WebSocket streaming connection.
+// Use adaptive timeouts so HTTP 429 responses do not trigger repeated requests.
 fetchLiveQuotes();
-quoteTimer = window.setInterval(fetchLiveQuotes, QUOTE_POLL_MS);
