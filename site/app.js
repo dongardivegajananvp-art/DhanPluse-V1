@@ -520,7 +520,7 @@ function updateQuoteCards(quotes, fetchedAt) {
           price: price,
           change: Number.isFinite(Number(item.v.ch)) ? Number(item.v.ch) : null,
           changePct: Number.isFinite(Number(item.v.chp)) ? Number(item.v.chp) : null,
-          receivedAt: Date.now(),
+          receivedAt: Number.isFinite(Date.parse(fetchedAt)) ? Date.parse(fetchedAt) : Date.now(),
           sourceTime: fetchedAt || null
         };
       }
@@ -538,6 +538,20 @@ function updateQuoteCards(quotes, fetchedAt) {
       if (history.length > 180) history.splice(0, history.length - 180);
     }
     if (old && old.price !== next.price) checkAlerts(item.symbol, next.price);
+  });
+  const metrics = document.querySelectorAll('.metrics .metric');
+  SYMBOLS.forEach((item, index) => {
+    const metric = metrics[index + 1];
+    const quote = latestQuotes[item.symbol];
+    if (!metric || !quote) return;
+    const valueEl = metric.querySelector('strong');
+    const detailEl = metric.querySelector('small');
+    if (valueEl) { valueEl.textContent = formatPrice(quote.price); valueEl.classList.remove('muted'); }
+    if (detailEl) {
+      const change = quote.change;
+      const pct = quote.changePct;
+      detailEl.textContent = change === null ? 'FYERS quote received' : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)');
+    }
   });
   setStatus('FYERS QUOTES RECEIVED');
   setConnection('FYERS Connected', false);
@@ -678,9 +692,21 @@ async function fetchLiveQuotes() {
     }
     if (!response.ok || data.ok !== true || !Array.isArray(data.data)) {
       if (response.status === 401) {
+        latestQuotes = {};
         setStatus('FYERS LOGIN REQUIRED');
         setFyersStatus('NOT CONNECTED');
         setConnection('Not connected', true);
+        document.querySelectorAll('.metrics .metric').forEach((metric, index) => {
+          if (index === 1 || index === 2) {
+            const value = metric.querySelector('strong');
+            const detail = metric.querySelector('small');
+            if (value) { value.textContent = '—'; value.classList.add('muted'); }
+            if (detail) detail.textContent = 'No authenticated quote available';
+          }
+        });
+        const staleUpdate = document.querySelector('#lastUpdate');
+        if (staleUpdate) { staleUpdate.textContent = '—'; staleUpdate.classList.add('muted'); }
+        updateDynamicPanel();
         showMessage('FYERS is not authenticated. Open FYERS Settings to connect.', true);
       } else if (response.status === 503) {
         if (Object.keys(latestQuotes).length) setStatus('LIVE DATA STALE');
