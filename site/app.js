@@ -17,6 +17,7 @@ let quoteTimer = null;
 let quotePollDelay = QUOTE_POLL_MS;
 let quoteRequestRunning = false;
 let authInProgress = false;
+let deferredInstallPrompt = null;
 let optionRequestRunning = false;
 let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
@@ -420,7 +421,7 @@ function alertListMarkup() {
 }
 
 function settingsMarkup() {
-  return '<div class="settings-grid"><article class="console-section"><h4>Secure connection</h4><p>FYERS credentials stay on the Render backend. Do not paste app secrets or access tokens into this page.</p><div class="data-row"><span>Backend URL</span><b>Render</b></div><code class="backend-url">' + BACKEND_URL + '</code><div class="button-row"><button class="primary" id="testBackendBtn">Test backend</button><button class="primary" id="connectFyersBtn">Connect FYERS</button><button class="secondary" id="testQuotesBtn">Refresh live quotes</button></div></article><article class="console-section"><h4>Connection diagnostics</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend health</span><b id="settingsBackend">CHECKING</b></div><div class="data-row"><span>Latest quotes</span><b id="settingsFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div><p class="hint">Backend health alone does not prove that FYERS authentication or live market data is connected.</p></article></div>';
+  return '<div class="settings-grid"><article class="console-section"><h4>Secure connection</h4><p>FYERS credentials stay on the Render backend. Do not paste app secrets or access tokens into this page.</p><div class="data-row"><span>Backend URL</span><b>Render</b></div><code class="backend-url">' + BACKEND_URL + '</code><div class="button-row"><button class="primary" id="testBackendBtn">Test backend</button><button class="primary" id="connectFyersBtn">Connect FYERS</button><button class="secondary" id="testQuotesBtn">Refresh live quotes</button><button class="secondary" id="installPwaBtn">Install DhanPulse app</button></div><p class="hint">Install on desktop/laptop from the browser install icon, or on mobile use the browser menu → Install app / Add to Home Screen.</p></article><article class="console-section"><h4>Connection diagnostics</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend health</span><b id="settingsBackend">CHECKING</b></div><div class="data-row"><span>Latest quotes</span><b id="settingsFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div><p class="hint">Backend health alone does not prove that FYERS authentication or live market data is connected.</p></article></div>';
 }
 
 function escapeHtml(value) {
@@ -628,6 +629,17 @@ function bindTabActions() {
   if (connect) connect.addEventListener('click', startFyersLogin);
   const quotes = document.querySelector('#testQuotesBtn');
   if (quotes) quotes.addEventListener('click', fetchLiveQuotes);
+  const installButton = document.querySelector('#installPwaBtn');
+  if (installButton) installButton.addEventListener('click', async () => {
+    if (!deferredInstallPrompt) {
+      showMessage('If the browser does not show an install prompt, open its menu and choose Install app or Add to Home Screen.');
+      return;
+    }
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice.catch(() => null);
+    deferredInstallPrompt = null;
+    showMessage('If installation was accepted, DhanPulse is available from your device app launcher.');
+  });
   const setupRefresh=document.querySelector('#refreshSetupBtn');
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
   const setupSymbol=document.querySelector('#setupSymbol');
@@ -969,6 +981,15 @@ async function exchangeAuthCode() {
     logEvent('FYERS authentication failed.', 'error');
   }
 }
+
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  showMessage('DhanPulse app installed successfully.');
+});
 
 nav.addEventListener('click', event => {
   const button = event.target.closest('button[data-tab]');
