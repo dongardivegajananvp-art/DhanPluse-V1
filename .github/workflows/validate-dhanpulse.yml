@@ -27,7 +27,7 @@ jobs:
           node --check site/sw.js
       - name: Validate PWA manifest and required assets
         run: |
-          node -e "const m=require('./site/manifest.webmanifest'); if(!m.name || !m.start_url || !m.icons?.length) process.exit(1); console.log('PWA manifest valid')"
+          node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('./site/manifest.webmanifest','utf8')); if(!m.name || !m.start_url || !m.icons?.length) process.exit(1); console.log('PWA manifest valid')"
           test -s site/index.html
           test -s site/style.css
           test -s site/app.js
