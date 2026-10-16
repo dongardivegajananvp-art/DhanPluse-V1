@@ -290,7 +290,7 @@ app.get('/api/market/candles', async (req, res) => {
   const allowed = new Set([...allowedSymbols, ...moversSymbols]);
   const resolution = String(req.query.resolution || '5');
   const allowedResolutions = new Set(['1', '3', '5', '15', '30', '60', 'D']);
-  const datePattern = /^\\d{4}-\\d{2}-\\d{2}$/;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
   const today = new Date().toISOString().slice(0, 10);
   const defaultFrom = new Date(Date.now() - (resolution === 'D' ? 29 : 6) * 86400000).toISOString().slice(0, 10);
   const rangeFrom = String(req.query.from || defaultFrom);
