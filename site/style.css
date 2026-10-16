@@ -98,3 +98,5 @@
 #nav button[data-tab="Sureshot CE/PE"]{color:#8de9d7}
 #nav button[data-tab="Breakout Scanner"],#nav button[data-tab="Momentum Scanner"],#nav button[data-tab="Zero-to-Hero"]{color:#c5d3ff}
 @media(max-width:700px){.movers-toolbar{align-items:stretch}.movers-toolbar button{width:100%}.option-controls{flex-wrap:wrap}.option-controls label{min-width:130px}}
+
+.candle-chart{width:100%;height:auto;max-height:300px}.pattern-chart{width:100%;overflow:hidden}.option-controls label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted,#98a6bc)}.option-controls select{min-height:38px;border-radius:9px;padding:8px 10px;background:#111a29;color:inherit;border:1px solid #2a3850}
