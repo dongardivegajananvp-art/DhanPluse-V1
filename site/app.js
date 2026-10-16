@@ -1,6 +1,6 @@
 const BACKEND_URL = 'https://dhanpluse-v1.onrender.com';
-const QUOTE_POLL_MS = 30000;
-const QUOTE_POLL_MAX_MS = 120000;
+const QUOTE_POLL_MS = 5000;
+const QUOTE_POLL_MAX_MS = 30000;
 
 const nav = document.querySelector('#nav');
 const title = document.querySelector('#pageTitle');
@@ -324,6 +324,10 @@ async function fetchLiveQuotes() {
         setStatus('FYERS LOGIN REQUIRED');
         setFyersStatus('NOT CONNECTED');
         showMessage('FYERS is not authenticated. Use FYERS Settings to connect.', true);
+      } else if (response.status === 503 && /waiting|not ready/i.test(String(data.detail || data.error || ''))) {
+        quotePollDelay = QUOTE_POLL_MS;
+        setStatus('WAITING FOR LIVE TICKS');
+        showMessage(data.detail || data.error || 'FYERS WebSocket is connecting. Waiting for live ticks.');
       } else {
         setStatus('LIVE DATA UNAVAILABLE');
         showMessage(data.error || 'The backend did not return verified quotes.', true);
@@ -411,6 +415,6 @@ resetQuoteDisplay();
 testBackend();
 exchangeAuthCode();
 
-// REST quote polling only; this is not a WebSocket streaming connection.
-// Use adaptive timeouts so HTTP 429 responses do not trigger repeated requests.
+// Poll the backend's cached WebSocket ticks; the backend no longer polls FYERS REST quotes.
+// Use adaptive timeouts for any service cooldown responses.
 fetchLiveQuotes();
