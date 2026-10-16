@@ -16,6 +16,8 @@ const featureContent = document.querySelector('#featureContent');
 let quoteTimer = null;
 let quotePollDelay = QUOTE_POLL_MS;
 let quoteRequestRunning = false;
+let backendHealthState = 'CHECKING';
+let fyersAuthState = 'NOT CONNECTED';
 let authInProgress = false;
 let deferredInstallPrompt = null;
 let optionRequestRunning = false;
@@ -101,11 +103,17 @@ function setStatus(message) {
 }
 
 function setBackendStatus(message) {
+  backendHealthState = message;
   const el = document.querySelector('#backendStatus');
   if (el) el.textContent = message;
+  const dash = document.querySelector('#dashBackend');
+  const settings = document.querySelector('#settingsBackend');
+  if (dash) dash.textContent = message;
+  if (settings) settings.textContent = message;
 }
 
 function setFyersStatus(message) {
+  fyersAuthState = message;
   const rows = document.querySelectorAll('.statusrow');
   if (rows[2] && rows[2].lastElementChild) rows[2].lastElementChild.textContent = message;
 }
@@ -819,11 +827,11 @@ function updateDynamicPanel() {
     if (detail) detail.textContent = signal.detail;
   });
   const dashBackend = document.querySelector('#dashBackend');
-  if (dashBackend) dashBackend.textContent = 'ONLINE';
+  if (dashBackend) dashBackend.textContent = backendHealthState;
   const dashFeed = document.querySelector('#dashFeed');
   if (dashFeed) dashFeed.textContent = SYMBOLS.every(item => quoteFor(item.symbol) && quoteAgeMs(quoteFor(item.symbol)) < 15000) ? 'LIVE' : 'WAITING';
   const settingsBackend = document.querySelector('#settingsBackend');
-  if (settingsBackend) settingsBackend.textContent = 'ONLINE';
+  if (settingsBackend) settingsBackend.textContent = backendHealthState;
   const settingsFeed = document.querySelector('#settingsFeed');
   if (settingsFeed) settingsFeed.textContent = SYMBOLS.every(item => quoteFor(item.symbol) && quoteAgeMs(quoteFor(item.symbol)) < 15000) ? 'LIVE' : 'WAITING';
   const sampleCount = document.querySelector('#chartSampleCount');
@@ -855,8 +863,20 @@ async function testBackend() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.ok) throw new Error('Backend health check failed.');
     setBackendStatus('ONLINE');
+    try {
+      const statusResponse = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const status = await statusResponse.json().catch(() => ({}));
+      if (statusResponse.ok) {
+        setFyersStatus(status.fyers === 'connected' ? 'CONNECTED' : 'NOT CONNECTED');
+        if (status.liveData === 'streaming') setStatus('FYERS QUOTES RECEIVED');
+      } else {
+        setFyersStatus('STATUS UNKNOWN');
+      }
+    } catch {
+      setFyersStatus('STATUS UNKNOWN');
+    }
     logEvent('Backend health check succeeded.', 'info');
-    showMessage('Backend is online. Live quote status is verified separately.');
+    showMessage('Backend is online. FYERS authentication and live quotes are checked separately.');
     return data;
   } catch {
     setBackendStatus('UNREACHABLE');
