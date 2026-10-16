@@ -32,6 +32,7 @@ const descriptions = {
   'NIFTY': ['NIFTY 50 workspace', 'Live index quote and recent received-price history.'],
   'BANKNIFTY': ['BANK NIFTY workspace', 'Live index quote and recent received-price history.'],
   'Watchlist': ['Live watchlist', 'Verified symbols currently streamed by the FYERS backend.'],
+  'Gainers & Losers': ['Gainers & losers', 'Verified FYERS quote snapshot for a selected large-cap NSE universe; not the entire exchange.'],
   'Option Chain': ['Option chain & open interest', 'Option-chain values must come from a verified FYERS response.'],
   'Technical Indicators': ['Technical indicators', 'Calculated from received quote samples; these are not candle-based indicators.'],
   'AI Signals': ['Market signals', 'Transparent momentum summaries from recent received quotes, not investment advice.'],
@@ -225,6 +226,46 @@ function watchlistMarkup() {
       const quote = quoteFor(item.symbol);
       return '<tr><td><b>' + item.label + '</b><small>' + item.symbol + '</small></td><td data-price-symbol="' + item.symbol + '">' + (quote ? formatPrice(quote.price) : '—') + '</td><td data-change-symbol="' + item.symbol + '">' + (quote && Number.isFinite(quote.change) ? (quote.change > 0 ? '+' : '') + quote.change.toFixed(2) : '—') + '</td><td><span class="live-tag">' + (quote && quoteAgeMs(quote) < 15000 ? 'LIVE' : 'WAITING') + '</span></td><td class="quote-time" data-time-symbol="' + item.symbol + '">' + (quote ? new Date(quote.receivedAt).toLocaleTimeString('en-IN') : '—') + '</td></tr>';
     }).join('') + '</tbody></table></div><p class="hint">This watchlist currently contains the two index symbols streamed by the configured backend. Other symbols are not subscribed yet.</p>';
+}
+
+function moversMarkup() {
+  return '<div class="movers-toolbar"><div><b>Selected NSE large-cap stocks</b><p>Snapshot requested from the authenticated FYERS Quotes API. This is not a full-market scan.</p></div><button class="primary" id="refreshMoversBtn">Refresh movers</button></div><div id="moversStatus" class="hint">Load a verified FYERS snapshot to rank gainers and losers.</div><div class="console-grid console-grid-2"><article class="console-section"><div class="console-section-head"><h4>Top gainers</h4><span class="signal-tone positive">UP</span></div><div id="gainersTable" class="table-wrap"><div class="chart-empty">No snapshot loaded.</div></div></article><article class="console-section"><div class="console-section-head"><h4>Top losers</h4><span class="signal-tone negative">DOWN</span></div><div id="losersTable" class="table-wrap"><div class="chart-empty">No snapshot loaded.</div></div></article></div><p class="hint">Percent change comes directly from FYERS quotes. Symbols without a valid price/change are omitted. Refresh is manual to avoid excessive API requests.</p>';
+}
+
+async function loadMovers() {
+  if (currentTab !== 'Gainers & Losers') return;
+  const status = document.querySelector('#moversStatus');
+  const gainers = document.querySelector('#gainersTable');
+  const losers = document.querySelector('#losersTable');
+  const button = document.querySelector('#refreshMoversBtn');
+  if (!status || !gainers || !losers) return;
+  if (button) button.disabled = true;
+  status.textContent = 'Requesting a verified stock-quote snapshot from FYERS…';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/movers', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
+      throw new Error(result.error || result.detail || 'FYERS market-mover snapshot unavailable.');
+    }
+    const rows = result.data.filter(item => Number.isFinite(Number(item.price)) && Number(item.price) > 0 && Number.isFinite(Number(item.changePct)));
+    const table = list => !list.length
+      ? '<div class="chart-empty">FYERS returned no valid rows for this group.</div>'
+      : '<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th></tr></thead><tbody>' +
+        list.map(item => '<tr><td><b>' + escapeHtml(item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')) + '</b></td><td>' + formatPrice(item.price) + '</td><td class="' + (item.changePct >= 0 ? 'positive-text' : 'negative-text') + '">' + (item.changePct > 0 ? '+' : '') + item.changePct.toFixed(2) + '%</td></tr>').join('') +
+        '</tbody></table>';
+    const sorted = rows.slice().sort((a, b) => b.changePct - a.changePct);
+    gainers.innerHTML = table(sorted.filter(item => item.changePct > 0).slice(0, 10));
+    losers.innerHTML = table(sorted.filter(item => item.changePct < 0).slice(-10).reverse());
+    status.textContent = 'FYERS snapshot received at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + ' · ' + rows.length + ' valid symbols.';
+    logEvent('FYERS gainers/losers snapshot received (' + rows.length + ' symbols).', 'info');
+  } catch (error) {
+    gainers.innerHTML = '<div class="chart-empty">No verified mover data available. No values have been fabricated.</div>';
+    losers.innerHTML = '<div class="chart-empty">No verified mover data available. No values have been fabricated.</div>';
+    status.textContent = (error.message || 'Could not load movers.') + ' Reconnect FYERS if authentication expired.';
+    logEvent('FYERS market-mover request failed.', 'warn');
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function indicatorsMarkup() {
@@ -456,6 +497,7 @@ function render(tab) {
   else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
   else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
   else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
+  else if (tab === 'Gainers & Losers') featureContent.innerHTML = moversMarkup();
   else if (tab === 'Option Chain') featureContent.innerHTML = optionChainMarkup();
   else if (tab === 'Technical Indicators') featureContent.innerHTML = indicatorsMarkup();
   else if (tab === 'AI Signals') featureContent.innerHTML = signalsMarkup();
@@ -465,6 +507,7 @@ function render(tab) {
   else featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
   bindTabActions();
   updateDynamicPanel();
+  if (tab === 'Gainers & Losers') loadMovers();
   if (tab === 'Option Chain') loadOptionChain();
   if (tab === 'Holdings') loadPortfolio();
   if (tab === 'Logs') renderLogs();
@@ -478,6 +521,8 @@ function bindTabActions() {
   if (connect) connect.addEventListener('click', startFyersLogin);
   const quotes = document.querySelector('#testQuotesBtn');
   if (quotes) quotes.addEventListener('click', fetchLiveQuotes);
+  const refreshMovers = document.querySelector('#refreshMoversBtn');
+  if (refreshMovers) refreshMovers.addEventListener('click', loadMovers);
   const loadChain = document.querySelector('#loadOptionChainBtn');
   if (loadChain) loadChain.addEventListener('click', loadOptionChain);
   const expiry = document.querySelector('#ocExpiry');
