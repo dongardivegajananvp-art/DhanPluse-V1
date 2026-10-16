@@ -263,6 +263,85 @@ app.get('/api/market/quotes', (_req, res) => {
   return res.json(snapshot);
 });
 
+
+async function fyersReadOnlyGet(url) {
+  if (!accessToken) {
+    const error = new Error('Connect FYERS first.');
+    error.statusCode = 401;
+    throw error;
+  }
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { Authorization: appId + ':' + accessToken, Accept: 'application/json' },
+    cache: 'no-store'
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.s !== 'ok') {
+    const error = new Error(String(data.message || data.error || 'FYERS read-only API request failed.').slice(0, 220));
+    error.statusCode = response.status === 401 ? 401 : 502;
+    throw error;
+  }
+  return data;
+}
+
+app.get('/api/fyers/options-chain', async (req, res) => {
+  const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
+  const allowed = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX'];
+  const strikeCount = Number.parseInt(String(req.query.strikecount || '10'), 10);
+  const timestamp = req.query.timestamp == null ? '' : String(req.query.timestamp);
+  if (!allowed.includes(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported underlying symbol.' });
+  if (!Number.isInteger(strikeCount) || strikeCount < 1 || strikeCount > 50) {
+    return res.status(400).json({ ok: false, error: 'strikecount must be between 1 and 50.' });
+  }
+  if (timestamp && !/^\d{9,12}$/.test(timestamp)) {
+    return res.status(400).json({ ok: false, error: 'Invalid expiry timestamp.' });
+  }
+  try {
+    const url = new URL('https://api-t1.fyers.in/data/options-chain-v3');
+    url.searchParams.set('symbol', symbol);
+    url.searchParams.set('strikecount', String(strikeCount));
+    url.searchParams.set('greeks', '1');
+    if (timestamp) url.searchParams.set('timestamp', timestamp);
+    const result = await fyersReadOnlyGet(url);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, fetchedAt: new Date().toISOString(), data: result.data });
+  } catch (error) {
+    return res.status(error.statusCode || 502).json({
+      ok: false,
+      error: error.statusCode === 401 ? 'Connect FYERS to view option-chain data.' : 'FYERS option-chain request failed.',
+      detail: String(error.message || 'Upstream request failed.').slice(0, 220)
+    });
+  }
+});
+
+app.get('/api/fyers/holdings', async (_req, res) => {
+  try {
+    const result = await fyersReadOnlyGet('https://api-t1.fyers.in/api/v3/holdings');
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, fetchedAt: new Date().toISOString(), data: result });
+  } catch (error) {
+    return res.status(error.statusCode || 502).json({
+      ok: false,
+      error: error.statusCode === 401 ? 'Connect FYERS to view holdings.' : 'FYERS holdings request failed.',
+      detail: String(error.message || 'Upstream request failed.').slice(0, 220)
+    });
+  }
+});
+
+app.get('/api/fyers/positions', async (_req, res) => {
+  try {
+    const result = await fyersReadOnlyGet('https://api-t1.fyers.in/api/v3/positions');
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, fetchedAt: new Date().toISOString(), data: result });
+  } catch (error) {
+    return res.status(error.statusCode || 502).json({
+      ok: false,
+      error: error.statusCode === 401 ? 'Connect FYERS to view positions.' : 'FYERS positions request failed.',
+      detail: String(error.message || 'Upstream request failed.').slice(0, 220)
+    });
+  }
+});
+
 app.all('/api/orders/*', (_req, res) => {
   res.status(403).json({ error: 'Order placement is disabled during testing.' });
 });
