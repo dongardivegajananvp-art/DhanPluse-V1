@@ -89,3 +89,12 @@
 .movers-toolbar button:disabled{opacity:.6;cursor:wait}
 .negative-text{color:#ff8d9a!important}
 @media(max-width:620px){.movers-toolbar{align-items:flex-start;flex-direction:column}.movers-toolbar button{width:100%}}
+
+
+/* DhanPulse Ultimate scanner modules */
+.movers-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.movers-toolbar p{margin:5px 0 0;color:var(--muted,#98a6bc);font-size:13px}
+.pattern-chart{margin-top:14px;min-height:190px}
+#nav button[data-tab="Sureshot CE/PE"]{color:#8de9d7}
+#nav button[data-tab="Breakout Scanner"],#nav button[data-tab="Momentum Scanner"],#nav button[data-tab="Zero-to-Hero"]{color:#c5d3ff}
+@media(max-width:700px){.movers-toolbar{align-items:stretch}.movers-toolbar button{width:100%}.option-controls{flex-wrap:wrap}.option-controls label{min-width:130px}}
