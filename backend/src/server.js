@@ -138,6 +138,7 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
 const quoteCache = new Map();
 const quoteInflight = new Map();
 let quotesRateLimitedUntil = 0;
+let consecutiveQuoteRateLimits = 0;
 
 app.get('/api/market/quotes', async (req, res) => {
   if (!accessToken) {
@@ -164,7 +165,7 @@ app.get('/api/market/quotes', async (req, res) => {
   const now = Date.now();
   const cached = quoteCache.get(cacheKey);
 
-  if (cached && now - cached.savedAt < 5000) {
+  if (cached && now - cached.savedAt < 30000) {
     res.set('Cache-Control', 'no-store');
     return res.json({ ...cached.payload, cached: true });
   }
@@ -197,7 +198,9 @@ app.get('/api/market/quotes', async (req, res) => {
 
         if (response.status === 429) {
           const header = response.headers.get('retry-after');
-          let retryMs = 15000;
+          consecutiveQuoteRateLimits += 1;
+          // Start with a longer pause and back off further if FYERS keeps returning 429.
+          let retryMs = Math.min(60000 * (2 ** (consecutiveQuoteRateLimits - 1)), 300000);
           if (header) {
             const seconds = Number(header);
             const parsed = Number.isFinite(seconds) && seconds > 0
@@ -205,7 +208,7 @@ app.get('/api/market/quotes', async (req, res) => {
               : Date.parse(header) - Date.now();
             if (Number.isFinite(parsed) && parsed > 0) retryMs = Math.max(retryMs, parsed);
           }
-          quotesRateLimitedUntil = Date.now() + Math.min(retryMs, 120000);
+          quotesRateLimitedUntil = Date.now() + Math.min(retryMs, 300000);
           return {
             status: 429,
             body: {
@@ -227,6 +230,7 @@ app.get('/api/market/quotes', async (req, res) => {
           };
         }
 
+        consecutiveQuoteRateLimits = 0;
         const payload = {
           ok: true,
           fetchedAt: new Date().toISOString(),
