@@ -81,3 +81,11 @@
 .option-table td:nth-child(5){background:#111c2b;text-align:center}
 .option-table td:nth-child(1),.option-table td:nth-child(6){color:#d4e5ff}
 @media(max-width:700px){.option-controls{grid-template-columns:1fr 1fr}.option-controls button{grid-column:1/-1;justify-self:start}}
+
+
+/* Gainers & losers module */
+.movers-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 14px;padding:16px;border:1px solid var(--line,#243044);border-radius:14px;background:rgba(255,255,255,.025)}
+.movers-toolbar p{margin:6px 0 0;color:var(--muted,#94a3b8);font-size:12px}
+.movers-toolbar button:disabled{opacity:.6;cursor:wait}
+.negative-text{color:#ff8d9a!important}
+@media(max-width:620px){.movers-toolbar{align-items:flex-start;flex-direction:column}.movers-toolbar button{width:100%}}
