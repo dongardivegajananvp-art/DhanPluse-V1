@@ -935,7 +935,18 @@ async function fetchLiveQuotes() {
 async function exchangeAuthCode() {
   const params = new URLSearchParams(window.location.search);
   const code = params.get('auth_code');
-  if (!code) return;
+  const state = params.get('state');
+  const brokerError = params.get('error_description') || params.get('error');
+  if (!code) {
+    if (brokerError) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setStatus('FYERS AUTH FAILED');
+      setFyersStatus('AUTH FAILED');
+      showMessage('FYERS login was cancelled or rejected: ' + brokerError, true);
+      logEvent('FYERS login returned an authorization error.', 'warn');
+    }
+    return;
+  }
   window.history.replaceState({}, document.title, window.location.pathname);
   setStatus('VERIFYING FYERS LOGIN…');
   setFyersStatus('VERIFYING…');
@@ -944,7 +955,7 @@ async function exchangeAuthCode() {
     const response = await fetch(BACKEND_URL + '/api/fyers/auth/exchange', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ code: code })
+      body: JSON.stringify({ code: code, state: state })
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok !== true) throw new Error(data.error || data.detail || 'Authentication failed.');
