@@ -54,25 +54,39 @@ function logEvent(message, level) {
   if (currentTab === 'Logs') renderLogs();
 }
 
+function isRegularMarketSession() {
+  // NSE cash-market hours in India; exchange holidays are not checked here.
+  const parts = new Intl.DateTimeFormat('en-GB', {timeZone:'Asia/Kolkata',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  if (!['Mon','Tue','Wed','Thu','Fri'].includes(values.weekday)) return false;
+  const minutes = Number(values.hour) * 60 + Number(values.minute);
+  return minutes >= 9 * 60 + 15 && minutes < 15 * 60 + 30;
+}
+
 function setStatus(message) {
   const el = document.querySelector('#marketStatus');
   if (el) el.textContent = message;
-  const connected = message === 'FYERS QUOTES RECEIVED';
+  const quoteReceived = message === 'FYERS QUOTES RECEIVED';
+  const marketOpen = isRegularMarketSession();
+  const connected = quoteReceived && marketOpen;
+  const closedQuote = quoteReceived && !marketOpen;
   const waiting = document.querySelector('#sideFeedStatus') || document.querySelector('.sidefoot span:last-child');
   const footer = document.querySelector('#footerFeedStatus') || document.querySelector('footer span:last-child');
   const dot = document.querySelector('#sideFeedDot') || document.querySelector('.sidefoot .dot');
   const headerDot = document.querySelector('.market-pill .dot');
-  if (waiting) waiting.textContent = connected ? 'Live feed connected' : message === 'LIVE DATA STALE' ? 'Live feed stale' : 'Waiting for verified live feed';
-  if (footer) footer.textContent = connected ? 'Live FYERS quotes received' : message === 'LIVE DATA STALE' ? 'Last quote is stale' : 'Waiting for verified live feed';
+  if (el && closedQuote) el.textContent = 'MARKET CLOSED · LAST QUOTES';
+  if (waiting) waiting.textContent = connected ? 'Live feed connected' : closedQuote ? 'Market closed · last quotes' : message === 'LIVE DATA STALE' ? 'Live feed stale' : 'Waiting for verified live feed';
+  if (footer) footer.textContent = connected ? 'Live FYERS quotes received' : closedQuote ? 'Last received quotes · market closed' : message === 'LIVE DATA STALE' ? 'Last quote is stale' : 'Waiting for verified live feed';
   [dot, headerDot].filter(Boolean).forEach(item => {
     item.style.background = connected ? '#63e6d0' : '#64738a';
     item.title = connected ? 'Verified quote response received' : 'No fresh verified quote response';
   });
   const connectionDetail = document.querySelector('.metrics .metric:first-child small');
-  if (connectionDetail) connectionDetail.textContent = connected ? 'Live quotes verified from backend' : 'Awaiting verified response';
+  if (connectionDetail) connectionDetail.textContent = connected ? 'Live quotes verified from backend' : closedQuote ? 'Market closed · last quotes only' : 'Awaiting verified response';
   const welcomeCopy = document.querySelector('.welcome > div > p:last-child');
   if (welcomeCopy) welcomeCopy.textContent = connected
     ? 'FYERS live market ticks are arriving for NIFTY 50 and BANK NIFTY.'
+    : closedQuote ? 'Indian market hours have ended. These are the latest quotes returned by FYERS, not a live-moving feed.'
     : 'Live quotes appear here only after the backend returns verified FYERS data.';
   const empty = document.querySelector('.empty');
   if (empty) {
@@ -696,7 +710,9 @@ function updateQuoteCards(quotes, fetchedAt) {
     if (detailEl) {
       const change = quote.change;
       const pct = quote.changePct;
-      detailEl.textContent = change === null ? 'FYERS quote received' : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)');
+      detailEl.textContent = !isRegularMarketSession()
+        ? 'Last received · market closed'
+        : change === null ? 'FYERS live quote received' : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)');
     }
   });
   setStatus('FYERS QUOTES RECEIVED');
