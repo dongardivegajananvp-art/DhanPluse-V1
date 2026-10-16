@@ -238,7 +238,8 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
         grant_type: 'authorization_code',
         appIdHash,
         code
-      })
+      }),
+      signal: AbortSignal.timeout(12000)
     });
 
     const data = await response.json().catch(() => ({}));
@@ -251,6 +252,8 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
 
     accessToken = data.access_token;
     authenticatedAt = new Date().toISOString();
+    restQuoteCache = null;
+    restQuoteFetchedAt = 0;
     startMarketDataStream(accessToken);
 
     res.json({
@@ -351,7 +354,8 @@ async function fyersReadOnlyGet(url) {
   const response = await fetch(url, {
     method: 'GET',
     headers: { Authorization: appId + ':' + accessToken, Accept: 'application/json' },
-    cache: 'no-store'
+    cache: 'no-store',
+    signal: AbortSignal.timeout(12000)
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.s !== 'ok') {
