@@ -110,6 +110,7 @@ function startMarketDataStream(token) {
     });
 
     socket.connect();
+    if (typeof socket.autoreconnect === 'function') socket.autoreconnect();
   } catch {
     streamConnected = false;
     streamError = 'Could not start the FYERS market data socket.';
