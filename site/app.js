@@ -31,15 +31,37 @@ function setStatus(message) {
   if (el) el.textContent = message;
 
   const connected = message === 'FYERS QUOTES RECEIVED';
-  const waiting = document.querySelector('#sideFeedStatus');
-  const footer = document.querySelector('#footerFeedStatus');
-  const dot = document.querySelector('#sideFeedDot');
+  // Support both the current markup and older cached Netlify HTML.
+  const waiting = document.querySelector('#sideFeedStatus') || document.querySelector('.sidefoot span:last-child');
+  const footer = document.querySelector('#footerFeedStatus') || document.querySelector('footer span:last-child');
+  const dot = document.querySelector('#sideFeedDot') || document.querySelector('.sidefoot .dot');
+  const headerDot = document.querySelector('.market-pill .dot');
 
   if (waiting) waiting.textContent = connected ? 'Live feed connected' : 'Waiting for verified live feed';
   if (footer) footer.textContent = connected ? 'Live FYERS quotes received' : 'Waiting for verified live feed';
-  if (dot) {
-    dot.style.background = connected ? '#63e6d0' : '#64738a';
-    dot.title = connected ? 'Verified quote response received' : 'No verified live quote response yet';
+  [dot, headerDot].filter(Boolean).forEach(item => {
+    item.style.background = connected ? '#63e6d0' : '#64738a';
+    item.title = connected ? 'Verified quote response received' : 'No verified live quote response yet';
+  });
+
+  const connectionDetail = document.querySelector('.metrics .metric:first-child small');
+  if (connectionDetail) connectionDetail.textContent = connected ? 'Live quotes verified from backend' : 'Awaiting verified response';
+
+  const welcomeCopy = document.querySelector('.welcome > div > p:last-child');
+  if (welcomeCopy) {
+    welcomeCopy.textContent = connected
+      ? 'FYERS WebSocket is delivering market ticks for NIFTY 50 and BANK NIFTY.'
+      : 'Connect FYERS to view verified market data. Until connected, no market prices are shown.';
+  }
+
+  const empty = document.querySelector('.empty');
+  if (empty) {
+    const heading = empty.querySelector('h3');
+    const copy = empty.querySelector('p');
+    if (heading) heading.textContent = connected ? 'Live market feed connected' : 'Connect your FYERS account';
+    if (copy) copy.textContent = connected
+      ? 'Verified FYERS WebSocket ticks are arriving for NIFTY 50 and BANK NIFTY.'
+      : 'Live quotes and charts will appear here after the backend authenticates successfully.';
   }
 }
 
