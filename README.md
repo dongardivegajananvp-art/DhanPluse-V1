@@ -8,7 +8,7 @@ DhanPulse is a read-only FYERS market dashboard with a Netlify frontend and a pe
 - FYERS OAuth authorization-code exchange with short-lived, one-time state validation.
 - Live market-data WebSocket stream and read-only REST quote fallback.
 - Historical OHLC candles, selected large-cap movers, option-chain request, holdings and positions endpoints.
-- Watchlist/scanner views, indicators based on received samples, local price alerts, logs and connection diagnostics.
+- Watchlist/scanner views, OHLC-based EMA/RSI/ATR/volume indicators for the indices, live-sample momentum summaries, local price alerts, logs and connection diagnostics.
 - Premium responsive dark theme with colorful navigation and cards.
 - Installable Progressive Web App (PWA) for desktop, laptop and mobile browsers, with an app manifest, branded icon, and a safe offline shell cache. API/live market responses are never cached as offline data.
 
@@ -37,4 +37,4 @@ Order placement is intentionally disabled. Do not add credentials or access toke
 
 ## Data integrity
 
-The dashboard does not fabricate market prices. Market-closed values are described as the latest quotes returned by FYERS, not guaranteed official closing prices. Exchange holidays are not inferred by the frontend session-hours helper. Scanners use a selected large-cap universe and are not a full-exchange scan. Momentum indicators based on in-session samples are not substitutes for full historical indicators. No trade signal guarantees a result.
+The dashboard does not fabricate market prices. Market-closed values are described as the latest quotes returned by FYERS, not guaranteed official closing prices. Exchange holidays are not inferred by the frontend session-hours helper. Scanners use a selected large-cap universe and are not a full-exchange scan. AI/momentum summaries based on in-session quote samples are not substitutes for the OHLC-based technical-indicator panel, which requires sufficient verified historical candles. No trade signal guarantees a result.
