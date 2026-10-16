@@ -44,6 +44,9 @@ let marketSocket = null;
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
+let restQuoteCache = null;
+let restQuoteFetchedAt = 0;
+let restQuoteInFlight = null;
 
 function parseTick(raw) {
   let parsed = raw;
@@ -246,21 +249,79 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
 
 // The dashboard reads the latest WebSocket ticks. This endpoint does not poll
 // the FYERS REST Quotes API, avoiding repeated requests and REST rate limits.
-app.get('/api/market/quotes', (_req, res) => {
+app.get('/api/market/quotes', async (_req, res) => {
   if (!accessToken) {
     return res.status(401).json({ error: 'Connect FYERS first.' });
   }
 
   const snapshot = liveSnapshot();
-  if (!streamConnected || !snapshot) {
-    return res.status(503).json({
-      error: 'FYERS live market data is not ready yet.',
-      detail: streamError || 'Waiting for fresh NIFTY 50 and BANK NIFTY WebSocket ticks.'
-    });
+  if (streamConnected && snapshot) {
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ...snapshot, source: 'websocket' });
   }
 
-  res.set('Cache-Control', 'no-store');
-  return res.json(snapshot);
+  // WebSocket errors should not blank the dashboard when the same FYERS
+  // access token can still read the official Quotes API. Cache for 5 seconds
+  // because the frontend polls this endpoint frequently.
+  try {
+    const now = Date.now();
+    if (restQuoteCache && now - restQuoteFetchedAt < 5000) {
+      res.set('Cache-Control', 'no-store');
+      return res.json(restQuoteCache);
+    }
+
+    if (!restQuoteInFlight) {
+      const url = new URL('https://api-t1.fyers.in/data/quotes');
+      url.searchParams.set('symbols', allowedSymbols.join(','));
+      restQuoteInFlight = fyersReadOnlyGet(url).then(result => {
+        const rows = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
+        const normalized = rows.map(item => {
+          const value = item && (item.v || item);
+          const symbol = item && (item.n || item.symbol || value.symbol);
+          const lp = Number(value && (value.lp ?? value.ltp));
+          if (!allowedSymbols.includes(symbol) || !Number.isFinite(lp) || lp <= 0) return null;
+          const ch = Number(value.ch);
+          const chp = Number(value.chp);
+          return {
+            n: symbol,
+            v: {
+              lp,
+              ...(Number.isFinite(ch) ? { ch } : {}),
+              ...(Number.isFinite(chp) ? { chp } : {})
+            }
+          };
+        }).filter(Boolean);
+
+        if (allowedSymbols.some(symbol => !rows.some(item => (item?.n || item?.symbol || item?.v?.symbol) === symbol)) ||
+            allowedSymbols.some(symbol => !normalized.some(item => item.n === symbol))) {
+          throw new Error('FYERS Quotes API did not return both configured index symbols.');
+        }
+
+        const payload = {
+          ok: true,
+          fetchedAt: new Date().toISOString(),
+          source: 'rest-quotes-fallback',
+          data: normalized
+        };
+        restQuoteCache = payload;
+        restQuoteFetchedAt = Date.now();
+        return payload;
+      }).finally(() => {
+        restQuoteInFlight = null;
+      });
+    }
+
+    const fallback = await restQuoteInFlight;
+    res.set('Cache-Control', 'no-store');
+    return res.json(fallback);
+  } catch (error) {
+    return res.status(error.statusCode || 503).json({
+      error: error.statusCode === 401
+        ? 'FYERS rejected the access token. Reconnect FYERS.'
+        : 'FYERS WebSocket and Quotes API are not currently returning live data.',
+      detail: String(error.message || streamError || 'Waiting for fresh index quotes.').slice(0, 220)
+    });
+  }
 });
 
 
