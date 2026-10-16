@@ -17,6 +17,8 @@ let quoteTimer = null;
 let quotePollDelay = QUOTE_POLL_MS;
 let quoteRequestRunning = false;
 let authInProgress = false;
+let optionRequestRunning = false;
+let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
 let latestQuotes = {};
 let historyBySymbol = {};
@@ -243,11 +245,11 @@ function signalsMarkup() {
 }
 
 function optionChainMarkup() {
-  return '<div class="feature-placeholder"><div class="placeholder-icon">▤</div><h4>Option chain &amp; OI integration</h4><p>The current backend streams NIFTY 50 and BANK NIFTY index quotes only. It does not yet return verified option-chain strikes, premiums, volume, or open interest, so this panel will not display invented values.</p><div class="data-row"><span>Index live feed</span><b class="positive-text">AVAILABLE</b></div><div class="data-row"><span>Option-chain endpoint</span><b class="warning-text">NOT IMPLEMENTED</b></div><div class="data-row"><span>Open interest / PCR</span><b class="warning-text">NOT VERIFIED</b></div></div>';
+  return '<div class="console-section"><div class="option-controls"><label>Underlying<select id="ocSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option></select></label><label>Strikes each side<select id="ocStrikeCount"><option value="5">5</option><option value="10" selected>10</option><option value="15">15</option><option value="20">20</option></select></label><label>Expiry<select id="ocExpiry"><option value="">Nearest expiry</option></select></label><button class="primary" id="loadOptionChainBtn">Load option chain</button></div><div id="ocStatus" class="hint">Option chain will load from the authenticated FYERS read-only endpoint.</div><div class="console-grid console-grid-3" id="ocSummary"><article class="console-section"><small>Total Call OI</small><strong id="ocCallOi">—</strong></article><article class="console-section"><small>Total Put OI</small><strong id="ocPutOi">—</strong></article><article class="console-section"><small>Put / Call Ratio</small><strong id="ocPcr">—</strong></article></div><div id="ocTable" class="table-wrap"><div class="chart-empty">Open the panel to load verified strikes.</div></div></div><p class="hint">Market-data display only. Option premiums and OI can change quickly; verify with FYERS before acting. No orders can be placed from this console.</p>';
 }
 
 function holdingsMarkup() {
-  return '<div class="feature-placeholder"><div class="placeholder-icon">▥</div><h4>Holdings &amp; positions</h4><p>Account endpoints are not yet implemented in this backend. No holdings or P&amp;L will be fabricated. This panel is read-only until the official authenticated FYERS account responses are wired and tested.</p><div class="data-row"><span>Holdings endpoint</span><b class="warning-text">NOT IMPLEMENTED</b></div><div class="data-row"><span>Positions endpoint</span><b class="warning-text">NOT IMPLEMENTED</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div></div>';
+  return '<div class="button-row"><button class="primary" id="refreshPortfolioBtn">Refresh account data</button><span class="live-tag">READ ONLY</span></div><div id="portfolioStatus" class="hint">Loading authenticated FYERS account data when available…</div><article class="console-section"><div class="console-section-head"><div><h4>Holdings</h4><p>Demat holdings returned by FYERS</p></div></div><div id="holdingsTable" class="table-wrap"><div class="chart-empty">Waiting for account response.</div></div></article><article class="console-section"><div class="console-section-head"><div><h4>Positions</h4><p>Current trading-day net positions returned by FYERS</p></div></div><div id="positionsTable" class="table-wrap"><div class="chart-empty">Waiting for account response.</div></div></article><p class="hint">This panel is read-only. No order placement, position exit, or conversion actions are available.</p>';
 }
 
 function loadAlerts() {
@@ -275,6 +277,164 @@ function alertListMarkup() {
 
 function settingsMarkup() {
   return '<div class="settings-grid"><article class="console-section"><h4>Secure connection</h4><p>FYERS credentials stay on the Render backend. Do not paste app secrets or access tokens into this page.</p><div class="data-row"><span>Backend URL</span><b>Render</b></div><code class="backend-url">' + BACKEND_URL + '</code><div class="button-row"><button class="primary" id="testBackendBtn">Test backend</button><button class="primary" id="connectFyersBtn">Connect FYERS</button><button class="secondary" id="testQuotesBtn">Refresh live quotes</button></div></article><article class="console-section"><h4>Connection diagnostics</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend health</span><b id="settingsBackend">CHECKING</b></div><div class="data-row"><span>Latest quotes</span><b id="settingsFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div><p class="hint">Backend health alone does not prove that FYERS authentication or live market data is connected.</p></article></div>';
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function displayNumber(value, digits) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString('en-IN', { maximumFractionDigits: digits == null ? 2 : digits }) : '—';
+}
+
+async function loadOptionChain() {
+  if (optionRequestRunning || currentTab !== 'Option Chain') return;
+  const status = document.querySelector('#ocStatus');
+  const table = document.querySelector('#ocTable');
+  const symbolEl = document.querySelector('#ocSymbol');
+  const countEl = document.querySelector('#ocStrikeCount');
+  const expiryEl = document.querySelector('#ocExpiry');
+  if (!status || !table || !symbolEl || !countEl || !expiryEl) return;
+  optionRequestRunning = true;
+  status.textContent = 'Requesting verified option-chain data from FYERS…';
+  try {
+    const params = new URLSearchParams({
+      symbol: symbolEl.value,
+      strikecount: countEl.value
+    });
+    if (expiryEl.value) params.set('timestamp', expiryEl.value);
+    const response = await fetch(BACKEND_URL + '/api/fyers/options-chain?' + params.toString(), {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !result.data) {
+      throw new Error(result.error || result.detail || 'Option-chain response unavailable.');
+    }
+    const data = result.data;
+    const expiries = Array.isArray(data.expiryData) ? data.expiryData : [];
+    const selectedBefore = expiryEl.value;
+    if (expiries.length) {
+      expiryEl.innerHTML = expiries.map((item, index) => '<option value="' + escapeHtml(item.expiry) + '">' + escapeHtml(item.date || ('Expiry ' + (index + 1))) + (item.expiry_flag ? ' · ' + escapeHtml(item.expiry_flag) : '') + '</option>').join('');
+      if (selectedBefore && expiries.some(item => String(item.expiry) === selectedBefore)) expiryEl.value = selectedBefore;
+      else if (!selectedBefore && expiries[0]) expiryEl.value = String(expiries[0].expiry);
+    }
+    const callOi = Number(data.callOi);
+    const putOi = Number(data.putOi);
+    const callEl = document.querySelector('#ocCallOi');
+    const putEl = document.querySelector('#ocPutOi');
+    const pcrEl = document.querySelector('#ocPcr');
+    if (callEl) callEl.textContent = displayNumber(callOi, 0);
+    if (putEl) putEl.textContent = displayNumber(putOi, 0);
+    if (pcrEl) pcrEl.textContent = Number.isFinite(callOi) && callOi > 0 && Number.isFinite(putOi) ? (putOi / callOi).toFixed(2) : '—';
+    const chain = Array.isArray(data.optionsChain) ? data.optionsChain : [];
+    const byStrike = new Map();
+    chain.forEach(leg => {
+      if (!leg || !['CE', 'PE'].includes(leg.option_type)) return;
+      const strike = Number(leg.strike_price);
+      if (!Number.isFinite(strike) || strike <= 0) return;
+      if (!byStrike.has(strike)) byStrike.set(strike, {});
+      byStrike.get(strike)[leg.option_type] = leg;
+    });
+    const strikes = Array.from(byStrike.keys()).sort((a, b) => a - b);
+    if (!strikes.length) {
+      table.innerHTML = '<div class="chart-empty">FYERS returned no option strikes for this selection.</div>';
+    } else {
+      table.innerHTML = '<table class="console-table option-table"><thead><tr><th colspan="4">CALL OPTIONS</th><th>STRIKE</th><th colspan="4">PUT OPTIONS</th></tr><tr><th>LTP</th><th>Chg %</th><th>OI</th><th>Volume</th><th>Price</th><th>LTP</th><th>Chg %</th><th>OI</th><th>Volume</th></tr></thead><tbody>' +
+        strikes.map(strike => {
+          const row = byStrike.get(strike);
+          const ce = row.CE || {};
+          const pe = row.PE || {};
+          return '<tr><td>' + displayNumber(ce.ltp) + '</td><td>' + displayNumber(ce.ltpchp) + '</td><td>' + displayNumber(ce.oi, 0) + '</td><td>' + displayNumber(ce.volume, 0) + '</td><td><b>' + displayNumber(strike, 0) + '</b></td><td>' + displayNumber(pe.ltp) + '</td><td>' + displayNumber(pe.ltpchp) + '</td><td>' + displayNumber(pe.oi, 0) + '</td><td>' + displayNumber(pe.volume, 0) + '</td></tr>';
+        }).join('') + '</tbody></table>';
+    }
+    status.textContent = 'Verified FYERS option-chain response received at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + '. ' + strikes.length + ' strikes shown.';
+    logEvent('FYERS option-chain data received for ' + symbolEl.value + '.', 'info');
+  } catch (error) {
+    status.textContent = (error.message || 'Could not load option chain.') + ' Use FYERS Settings to reconnect if authentication expired.';
+    table.innerHTML = '<div class="chart-empty">No verified option-chain data available. No values have been fabricated.</div>';
+    logEvent('Option-chain request failed.', 'warn');
+  } finally {
+    optionRequestRunning = false;
+  }
+}
+
+function extractRows(payload, keys) {
+  for (const key of keys) {
+    if (Array.isArray(payload && payload[key])) return payload[key];
+  }
+  return [];
+}
+
+function renderPortfolioTable(targetId, rows, type) {
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  if (!rows.length) {
+    target.innerHTML = '<div class="chart-empty">No ' + type + ' rows were returned by FYERS for this account/session.</div>';
+    return;
+  }
+  const columns = type === 'holdings'
+    ? [
+      ['Symbol', ['symbol', 'fyToken']],
+      ['Quantity', ['quantity', 'qty', 'holdingQty', 'remainingQuantity']],
+      ['Avg cost', ['costPrice', 'avgPrice', 'cost_price']],
+      ['LTP', ['ltp', 'marketPrice', 'currentPrice']],
+      ['P&L', ['pl', 'pnl', 'unrealized_profit']]
+    ]
+    : [
+      ['Symbol', ['symbol']],
+      ['Net qty', ['netQty', 'qty', 'quantity']],
+      ['Side', ['side']],
+      ['Product', ['productType']],
+      ['Avg price', ['avgPrice', 'buyAvg', 'sellAvg']],
+      ['LTP', ['ltp']],
+      ['P&L', ['pl', 'unrealized_profit', 'realized_profit']]
+    ];
+  const findValue = (row, candidates) => {
+    for (const key of candidates) if (row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
+    return '—';
+  };
+  target.innerHTML = '<table class="console-table"><thead><tr>' + columns.map(col => '<th>' + escapeHtml(col[0]) + '</th>').join('') + '</tr></thead><tbody>' +
+    rows.map(row => '<tr>' + columns.map((col, index) => {
+      const value = findValue(row, col[1]);
+      const formatted = typeof value === 'number' && index > 0 ? displayNumber(value) : String(value);
+      return '<td>' + escapeHtml(formatted) + '</td>';
+    }).join('') + '</tr>').join('') + '</tbody></table>';
+}
+
+async function loadPortfolio() {
+  if (portfolioRequestRunning || currentTab !== 'Holdings') return;
+  portfolioRequestRunning = true;
+  const status = document.querySelector('#portfolioStatus');
+  if (status) status.textContent = 'Fetching read-only FYERS holdings and positions…';
+  try {
+    const responses = await Promise.all([
+      fetch(BACKEND_URL + '/api/fyers/holdings', { headers: { Accept: 'application/json' }, cache: 'no-store' }),
+      fetch(BACKEND_URL + '/api/fyers/positions', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+    ]);
+    const results = await Promise.all(responses.map(response => response.json().catch(() => ({}))));
+    if (responses.some(response => !response.ok) || results.some(result => result.ok !== true)) {
+      const message = results.find(result => result.error || result.detail);
+      throw new Error(message ? (message.error || message.detail) : 'FYERS account data unavailable.');
+    }
+    const holdingPayload = results[0].data || {};
+    const positionPayload = results[1].data || {};
+    const holdings = extractRows(holdingPayload, ['holdings', 'data', 'holdingsData']);
+    const positions = extractRows(positionPayload, ['netPositions', 'positions', 'data']);
+    renderPortfolioTable('holdingsTable', holdings, 'holdings');
+    renderPortfolioTable('positionsTable', positions, 'positions');
+    if (status) status.textContent = 'Read-only FYERS account responses received at ' + new Date().toLocaleTimeString('en-IN') + '.';
+    logEvent('FYERS holdings and positions loaded in read-only mode.', 'info');
+  } catch (error) {
+    if (status) status.textContent = (error.message || 'Account data unavailable.') + ' Connect or reconnect FYERS from settings if needed.';
+    const holdingsTable = document.querySelector('#holdingsTable');
+    const positionsTable = document.querySelector('#positionsTable');
+    if (holdingsTable) holdingsTable.innerHTML = '<div class="chart-empty">Verified holdings data is unavailable.</div>';
+    if (positionsTable) positionsTable.innerHTML = '<div class="chart-empty">Verified positions data is unavailable.</div>';
+    logEvent('FYERS portfolio read failed.', 'warn');
+  } finally {
+    portfolioRequestRunning = false;
+  }
 }
 
 function renderLogs() {
@@ -305,6 +465,8 @@ function render(tab) {
   else featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
   bindTabActions();
   updateDynamicPanel();
+  if (tab === 'Option Chain') loadOptionChain();
+  if (tab === 'Holdings') loadPortfolio();
   if (tab === 'Logs') renderLogs();
 }
 
@@ -316,6 +478,18 @@ function bindTabActions() {
   if (connect) connect.addEventListener('click', startFyersLogin);
   const quotes = document.querySelector('#testQuotesBtn');
   if (quotes) quotes.addEventListener('click', fetchLiveQuotes);
+  const loadChain = document.querySelector('#loadOptionChainBtn');
+  if (loadChain) loadChain.addEventListener('click', loadOptionChain);
+  const expiry = document.querySelector('#ocExpiry');
+  if (expiry) expiry.addEventListener('change', loadOptionChain);
+  const ocSymbol = document.querySelector('#ocSymbol');
+  if (ocSymbol) ocSymbol.addEventListener('change', () => {
+    const exp = document.querySelector('#ocExpiry');
+    if (exp) exp.innerHTML = '<option value="">Nearest expiry</option>';
+    loadOptionChain();
+  });
+  const portfolioRefresh = document.querySelector('#refreshPortfolioBtn');
+  if (portfolioRefresh) portfolioRefresh.addEventListener('click', loadPortfolio);
   const form = document.querySelector('#alertForm');
   if (form) form.addEventListener('submit', event => {
     event.preventDefault();
