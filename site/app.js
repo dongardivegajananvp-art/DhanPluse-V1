@@ -282,7 +282,7 @@ function advancedScannerMarkup(tab) {
     return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
   }
   if (tab === 'Charts & Patterns') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Live index chart lab</h4><p>Recent received quotes, not OHLC candles</p></div><span class="live-tag">LIVE SAMPLES</span></div><label>Underlying<select id="patternSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option></select></label><div id="patternChart" class="pattern-chart">'+svgChart(SYMBOLS[0].symbol,250)+'</div><div id="patternSummary" class="hint">Collecting samples. Candlestick patterns will not be guessed from tick samples.</div></div><p class="hint">For confirmed double tops, triangles, flags and candle-based indicators, the backend must supply verified historical OHLC data. This panel intentionally avoids inventing pattern detections.</p>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Historical candle lab</h4><p>OHLC candles requested from authenticated FYERS history API</p></div><span class="live-tag">FYERS DATA</span></div><div class="option-controls"><label>Symbol<select id="patternSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option><option value="NSE:RELIANCE-EQ">RELIANCE</option><option value="NSE:HDFCBANK-EQ">HDFC BANK</option><option value="NSE:INFY-EQ">INFOSYS</option></select></label><label>Interval<select id="patternResolution"><option value="1">1 min</option><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><button class="primary" id="loadCandlesBtn">Load candles</button></div><div id="patternStatus" class="hint">Load verified historical candles to inspect OHLC movement.</div><div id="patternChart" class="pattern-chart"><div class="chart-empty">No candles loaded.</div></div><div id="patternSummary" class="hint">No pattern analysis yet.</div><div id="candleTable" class="table-wrap"></div></div><p class="hint">Pattern descriptions are heuristic and historical, not predictions or trade recommendations. Data availability depends on FYERS permissions.</p>';
   }
   const title = tab === 'Breakout Scanner' ? 'Breakout candidates to review' : tab === 'Momentum Scanner' ? 'Momentum leaders' : 'High-momentum candidates';
   const desc = tab === 'Breakout Scanner' ? 'Snapshot candidates only — confirm resistance, volume and candle close.' : tab === 'Momentum Scanner' ? 'Ranked by verified percentage change from the selected large-cap universe.' : 'Large percentage movers for research; not a “cheap option” guarantee.';
@@ -600,7 +600,7 @@ function render(tab) {
   if (tab === 'Gainers & Losers') loadMovers();
   if (tab === 'Sureshot CE/PE') loadSureshotSetup();
   if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(tab)) loadAdvancedScanner();
-  if (tab === 'Charts & Patterns') updatePatternPanel();
+  if (tab === 'Charts & Patterns') loadCandles();
   if (tab === 'Option Chain') loadOptionChain();
   if (tab === 'Holdings') loadPortfolio();
   if (tab === 'Logs') renderLogs();
@@ -620,8 +620,8 @@ function bindTabActions() {
   if(setupSymbol) setupSymbol.addEventListener('change',loadSureshotSetup);
   const advancedRefresh=document.querySelector('#refreshAdvancedBtn');
   if(advancedRefresh) advancedRefresh.addEventListener('click',loadAdvancedScanner);
-  const patternSymbol=document.querySelector('#patternSymbol');
-  if(patternSymbol) patternSymbol.addEventListener('change',updatePatternPanel);
+  const loadCandlesBtn=document.querySelector('#loadCandlesBtn');
+  if(loadCandlesBtn) loadCandlesBtn.addEventListener('click',loadCandles);
   const refreshMovers = document.querySelector('#refreshMoversBtn');
   if (refreshMovers) refreshMovers.addEventListener('click', loadMovers);
   const loadChain = document.querySelector('#loadOptionChainBtn');
@@ -713,17 +713,37 @@ function updateQuoteCards(quotes, fetchedAt) {
   return true;
 }
 
-function updatePatternPanel() {
-  const selector=document.querySelector('#patternSymbol');
-  const symbol=selector?selector.value:SYMBOLS[0].symbol;
-  const chart=document.querySelector('#patternChart');
-  const summary=document.querySelector('#patternSummary');
-  if(chart) chart.innerHTML=svgChart(symbol,250);
-  if(summary) {
-    const h=historyBySymbol[symbol]||[];
-    const ind=calculateIndicators(symbol);
-    summary.textContent=h.length>=20?'Collected '+h.length+' distinct price samples. SMA5 '+(ind.sma5===null?'—':formatPrice(ind.sma5))+' · SMA20 '+(ind.sma20===null?'—':formatPrice(ind.sma20))+'. Candlestick pattern labels withheld until verified OHLC candles are available.':'Collecting distinct live price samples ('+h.length+'/20). No pattern is claimed from insufficient data.';
-  }
+function candleSvg(candles) {
+  if(!Array.isArray(candles)||candles.length<2) return '<div class="chart-empty">At least two verified candles are needed.</div>';
+  const rows=candles.slice(-70), highs=rows.map(x=>Number(x[2])), lows=rows.map(x=>Number(x[3]));
+  const hi=Math.max(...highs), lo=Math.min(...lows), span=hi-lo||1, width=720, height=260, pad=12, slot=(width-pad*2)/rows.length;
+  const y=v=>height-pad-((v-lo)/span)*(height-pad*2);
+  return '<svg class="live-chart candle-chart" viewBox="0 0 '+width+' '+height+'" role="img" aria-label="Verified FYERS historical OHLC candles">'+rows.map((x,i)=>{const open=Number(x[1]),high=Number(x[2]),low=Number(x[3]),close=Number(x[4]),cx=pad+i*slot+slot/2,up=close>=open,color=up?'#63e6d0':'#ff8d9a',bodyY=Math.min(y(open),y(close)),bodyH=Math.max(1,Math.abs(y(open)-y(close)));return '<line x1="'+cx.toFixed(2)+'" y1="'+y(high).toFixed(2)+'" x2="'+cx.toFixed(2)+'" y2="'+y(low).toFixed(2)+'" stroke="'+color+'" stroke-width="1.2"/><rect x="'+(cx-slot*0.28).toFixed(2)+'" y="'+bodyY.toFixed(2)+'" width="'+Math.max(2,slot*0.56).toFixed(2)+'" height="'+bodyH.toFixed(2)+'" fill="'+color+'" rx="1"/>';}).join('')+'<text x="12" y="13" class="chart-label">HIGH '+formatPrice(hi)+'</text><text x="12" y="'+(height-3)+'" class="chart-label">LOW '+formatPrice(lo)+'</text></svg>';
+}
+function summarizeCandles(candles) {
+  if(!Array.isArray(candles)||candles.length<3) return 'Not enough verified OHLC candles to analyse.';
+  const last=candles[candles.length-1],prev=candles[candles.length-2],prior=candles[candles.length-3],close=Number(last[4]);
+  let note='No simple range break confirmed by the latest candle.';
+  if(close>Number(prev[2])) note='Latest close is above the previous candle high — bullish range-break candidate.';
+  else if(close<Number(prev[3])) note='Latest close is below the previous candle low — bearish range-break candidate.';
+  else if(Number(last[2])>Number(prev[2])&&Number(last[3])>Number(prev[3])&&Number(prev[2])>Number(prior[2])) note='Recent candles show higher highs and higher lows — upward structure candidate.';
+  else if(Number(last[2])<Number(prev[2])&&Number(last[3])<Number(prev[3])&&Number(prev[2])<Number(prior[2])) note='Recent candles show lower highs and lower lows — downward structure candidate.';
+  return note+' Latest OHLC: O '+formatPrice(last[1])+' · H '+formatPrice(last[2])+' · L '+formatPrice(last[3])+' · C '+formatPrice(close)+'.';
+}
+async function loadCandles() {
+  const se=document.querySelector('#patternSymbol'),re=document.querySelector('#patternResolution'),status=document.querySelector('#patternStatus'),chart=document.querySelector('#patternChart'),summary=document.querySelector('#patternSummary'),table=document.querySelector('#candleTable');
+  if(!se||!re||!status||!chart||!summary||!table)return;
+  status.textContent='Requesting verified historical OHLC candles from FYERS…';chart.innerHTML='<div class="chart-empty">Loading candles…</div>';table.innerHTML='';
+  try{
+    const params=new URLSearchParams({symbol:se.value,resolution:re.value});
+    const response=await fetch(BACKEND_URL+'/api/market/candles?'+params.toString(),{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||result.detail||'Historical candles unavailable.');
+    const rows=result.data;chart.innerHTML=candleSvg(rows);summary.textContent=summarizeCandles(rows);
+    table.innerHTML=rows.length?'<table class="console-table"><thead><tr><th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody>'+rows.slice(-12).reverse().map(row=>'<tr><td>'+escapeHtml(new Date(Number(row[0])*1000).toLocaleString('en-IN'))+'</td>'+row.slice(1,6).map((v,i)=>'<td>'+displayNumber(v,i===4?0:2)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="chart-empty">FYERS returned no candles for this range.</div>';
+    status.textContent='Verified FYERS history response · '+rows.length+' candles · '+re.value+' interval · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
+    logEvent('Historical candles loaded for '+se.value+' ('+rows.length+').','info');
+  }catch(error){status.textContent=(error.message||'Historical candles unavailable.')+' No chart values were fabricated.';chart.innerHTML='<div class="chart-empty">Verified candles unavailable.</div>';summary.textContent='Pattern analysis withheld until verified OHLC data is available.';table.innerHTML='';logEvent('Historical candle request failed.','warn');}
 }
 
 function updateDynamicPanel() {
@@ -778,7 +798,6 @@ function updateDynamicPanel() {
   if (settingsBackend) settingsBackend.textContent = 'ONLINE';
   const settingsFeed = document.querySelector('#settingsFeed');
   if (settingsFeed) settingsFeed.textContent = SYMBOLS.every(item => quoteFor(item.symbol) && quoteAgeMs(quoteFor(item.symbol)) < 15000) ? 'LIVE' : 'WAITING';
-  updatePatternPanel();
   const sampleCount = document.querySelector('#chartSampleCount');
   if (sampleCount) sampleCount.textContent = 'Samples: ' + (historyBySymbol[SYMBOLS[0].symbol] || []).length;
 }
