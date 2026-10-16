@@ -180,7 +180,7 @@ function svgChart(symbol, height) {
   const latest = prices[prices.length - 1];
   const first = prices[0];
   const stroke = latest >= first ? '#63e6d0' : '#ff8d9a';
-  return '<svg id="liveChart" class="live-chart" viewBox="0 0 ' + width + ' ' + h + '" role="img" aria-label="Recent received quote samples">' +
+  return '<svg class="live-chart" viewBox="0 0 ' + width + ' ' + h + '" role="img" aria-label="Recent received quote samples">' +
     '<line x1="8" y1="' + (h * 0.25) + '" x2="' + (width - 8) + '" y2="' + (h * 0.25) + '" class="chart-grid"/>' +
     '<line x1="8" y1="' + (h * 0.5) + '" x2="' + (width - 8) + '" y2="' + (h * 0.5) + '" class="chart-grid"/>' +
     '<line x1="8" y1="' + (h * 0.75) + '" x2="' + (width - 8) + '" y2="' + (h * 0.75) + '" class="chart-grid"/>' +
