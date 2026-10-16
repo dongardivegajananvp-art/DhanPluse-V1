@@ -32,6 +32,12 @@ const descriptions = {
   'NIFTY': ['NIFTY 50 workspace', 'Live index quote and recent received-price history.'],
   'BANKNIFTY': ['BANK NIFTY workspace', 'Live index quote and recent received-price history.'],
   'Watchlist': ['Live watchlist', 'Verified symbols currently streamed by the FYERS backend.'],
+  'Sureshot CE/PE': ['CE / PE setup desk', 'Rule-based option candidates using live index samples and a verified FYERS option-chain response. No setup is guaranteed.'],
+  'Breakout Scanner': ['Breakout watchlist', 'Ranked live movers for review. A quote snapshot alone does not confirm a technical breakout.'],
+  'Momentum Scanner': ['Momentum scanner', 'Selected NSE stocks ranked by verified FYERS percentage change.'],
+  'Zero-to-Hero': ['High-momentum watchlist', 'Unusual movers to investigate; option prices and risk must be verified in the option chain.'],
+  'FII/DII Flow': ['Institutional flow', 'No FII/DII values are shown unless a verified source is available.'],
+  'Charts & Patterns': ['Charts & pattern lab', 'Recent live index samples are plotted; confirmed candlestick patterns require historical OHLC candles.'],
   'Gainers & Losers': ['Gainers & losers', 'Verified FYERS quote snapshot for a selected large-cap NSE universe; not the entire exchange.'],
   'Option Chain': ['Option chain & open interest', 'Option-chain values must come from a verified FYERS response.'],
   'Technical Indicators': ['Technical indicators', 'Calculated from received quote samples; these are not candle-based indicators.'],
@@ -268,6 +274,89 @@ async function loadMovers() {
   }
 }
 
+function advancedScannerMarkup(tab) {
+  if (tab === 'Sureshot CE/PE') {
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Rule-based CE / PE candidates</h4><p>Trend filter + live option-chain verification</p></div><span class="live-tag">ANALYSIS ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option></select></label><button class="primary" id="refreshSetupBtn">Analyse live setup</button></div><div id="setupStatus" class="hint">Load a fresh option chain and collect sufficient live quote samples. No trade setup is shown without verified data.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">“Sureshot” is the requested module name, not a profit guarantee. Entry/target/stop values are rule-based examples from the live option premium; verify liquidity, spread, expiry and risk before any decision. No orders can be placed here.</p>';
+  }
+  if (tab === 'FII/DII Flow') {
+    return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
+  }
+  if (tab === 'Charts & Patterns') {
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Live index chart lab</h4><p>Recent received quotes, not OHLC candles</p></div><span class="live-tag">LIVE SAMPLES</span></div><label>Underlying<select id="patternSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option></select></label><div id="patternChart" class="pattern-chart">'+svgChart(SYMBOLS[0].symbol,250)+'</div><div id="patternSummary" class="hint">Collecting samples. Candlestick patterns will not be guessed from tick samples.</div></div><p class="hint">For confirmed double tops, triangles, flags and candle-based indicators, the backend must supply verified historical OHLC data. This panel intentionally avoids inventing pattern detections.</p>';
+  }
+  const title = tab === 'Breakout Scanner' ? 'Breakout candidates to review' : tab === 'Momentum Scanner' ? 'Momentum leaders' : 'High-momentum candidates';
+  const desc = tab === 'Breakout Scanner' ? 'Snapshot candidates only — confirm resistance, volume and candle close.' : tab === 'Momentum Scanner' ? 'Ranked by verified percentage change from the selected large-cap universe.' : 'Large percentage movers for research; not a “cheap option” guarantee.';
+  return '<div class="movers-toolbar"><div><b>'+title+'</b><p>'+desc+'</p></div><button class="primary" id="refreshAdvancedBtn">Refresh FYERS snapshot</button></div><div id="advancedStatus" class="hint">Fetching no data until you request a verified FYERS snapshot.</div><div id="advancedTable" class="table-wrap"><div class="chart-empty">No snapshot loaded.</div></div><p class="hint">Universe: selected large-cap NSE symbols returned by FYERS Quotes API, not the entire exchange. Snapshot momentum alone does not confirm a breakout or predict future returns.</p>';
+}
+
+async function loadSureshotSetup() {
+  if (currentTab !== 'Sureshot CE/PE') return;
+  const status=document.querySelector('#setupStatus'), cards=document.querySelector('#setupCards'), symbolEl=document.querySelector('#setupSymbol');
+  if(!status||!cards||!symbolEl) return;
+  status.textContent='Checking live trend samples and requesting a verified FYERS option chain…';
+  cards.innerHTML='<div class="chart-empty">Analysing verified data…</div>';
+  const symbol=symbolEl.value;
+  const history=historyBySymbol[symbol]||[];
+  const ind=calculateIndicators(symbol);
+  const last=quoteFor(symbol);
+  let bias='NEUTRAL', reason='Need at least 20 distinct live price samples for the trend filter.';
+  if(last && ind.samples>=20 && ind.sma5!==null && ind.sma20!==null && ind.rsi14!==null) {
+    if(last.price>ind.sma5 && ind.sma5>ind.sma20 && ind.rsi14>=50 && ind.rsi14<=70) {bias='CE WATCH';reason='Upward sample trend: price > SMA5 > SMA20 and RSI in 50–70 band.';}
+    else if(last.price<ind.sma5 && ind.sma5<ind.sma20 && ind.rsi14>=30 && ind.rsi14<=50) {bias='PE WATCH';reason='Downward sample trend: price < SMA5 < SMA20 and RSI in 30–50 band.';}
+    else reason='Trend filters are mixed; no directional setup is selected.';
+  }
+  try {
+    const params=new URLSearchParams({symbol, strikecount:'10'});
+    const response=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+params.toString(),{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!result.data) throw new Error(result.error||result.detail||'Verified option-chain data unavailable.');
+    const chain=Array.isArray(result.data.optionsChain)?result.data.optionsChain:[];
+    const spot=Number(result.data.optionsChain?.[0]?.underlying_price)||last?.price||null;
+    const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
+    const atm=strikes.length&&spot ? strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]) : null;
+    const legs=chain.filter(x=>Number(x.strike_price)===atm&&['CE','PE'].includes(x.option_type));
+    const legCard=(type)=> {
+      const leg=legs.find(x=>x.option_type===type);
+      if(!leg||!(Number(leg.ltp)>0)) return '<article class="console-section"><h4>'+type+' candidate</h4><div class="chart-empty">No verified premium returned for this leg.</div></article>';
+      const premium=Number(leg.ltp), target=premium*1.15, stop=premium*0.90;
+      const preferred=(bias==='CE WATCH'&&type==='CE')||(bias==='PE WATCH'&&type==='PE');
+      return '<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+atm+'</h4><span class="signal-tone '+(preferred?'positive':'neutral')+'">'+(preferred?'FILTER MATCH':'REFERENCE')+'</span></div><strong class="console-price">₹'+formatPrice(premium)+'</strong><div class="data-row"><span>Indicative +15% target</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Indicative −10% stop</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>OI / Volume</span><b>'+displayNumber(leg.oi,0)+' / '+displayNumber(leg.volume,0)+'</b></div><p class="hint">Illustrative premium levels only; not an order or prediction.</p></article>';
+    };
+    cards.innerHTML=legCard('CE')+legCard('PE');
+    status.textContent='FYERS option chain received '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · underlying '+(last?'₹'+formatPrice(last.price):'price unavailable')+' · '+bias+'. '+reason;
+    logEvent('CE/PE setup analysis refreshed from verified option-chain data.','info');
+  } catch(error) {
+    cards.innerHTML='<div class="chart-empty">No setup generated because verified option-chain data is unavailable. '+escapeHtml(error.message||'Reconnect FYERS and retry.')+'</div>';
+    status.textContent=reason+' No premiums or signals have been invented.';
+    logEvent('CE/PE setup analysis could not verify option-chain data.','warn');
+  }
+}
+
+async function loadAdvancedScanner() {
+  if(!['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(currentTab)) return;
+  const status=document.querySelector('#advancedStatus'), table=document.querySelector('#advancedTable'), button=document.querySelector('#refreshAdvancedBtn');
+  if(!status||!table) return;
+  if(button) button.disabled=true;
+  status.textContent='Requesting a fresh selected-universe quote snapshot from FYERS…';
+  try {
+    const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data)) throw new Error(result.error||result.detail||'Verified snapshot unavailable.');
+    const rows=result.data.filter(x=>x&&Number.isFinite(Number(x.changePct))&&Number.isFinite(Number(x.price))&&Number(x.price)>0);
+    let sorted=rows.slice().sort((x,y)=>Number(y.changePct)-Number(x.changePct));
+    if(currentTab==='Breakout Scanner') sorted=sorted.filter(x=>Number(x.changePct)>0).slice(0,15);
+    else if(currentTab==='Momentum Scanner') sorted=sorted.sort((x,y)=>Math.abs(Number(y.changePct))-Math.abs(Number(x.changePct))).slice(0,20);
+    else sorted=sorted.sort((x,y)=>Math.abs(Number(y.changePct))-Math.abs(Number(x.changePct))).slice(0,15);
+    table.innerHTML=sorted.length?'<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>Research note</th></tr></thead><tbody>'+sorted.map(x=>'<tr><td><b>'+escapeHtml(x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+'</b></td><td>₹'+formatPrice(x.price)+'</td><td class="'+(x.changePct>=0?'positive-text':'negative-text')+'">'+(x.changePct>0?'+':'')+Number(x.changePct).toFixed(2)+'%</td><td>'+ (currentTab==='Breakout Scanner'?'Review chart resistance/volume':currentTab==='Momentum Scanner'?'Snapshot momentum':'Check option-chain liquidity/risk')+'</td></tr>').join('')+'</tbody></table>':'<div class="chart-empty">No qualifying rows in this verified snapshot.</div>';
+    status.textContent='Verified FYERS snapshot '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · '+rows.length+' valid symbols. '+(currentTab==='Breakout Scanner'?'Positive movers are candidates only, not confirmed breakouts.':'');
+    logEvent(currentTab+' refreshed from verified FYERS quotes.','info');
+  } catch(error) {
+    status.textContent=(error.message||'Snapshot unavailable.')+' No demo prices shown.';
+    table.innerHTML='<div class="chart-empty">No verified FYERS data available.</div>';
+    logEvent(currentTab+' request failed.','warn');
+  } finally {if(button)button.disabled=false;}
+}
+
 function indicatorsMarkup() {
   return '<div class="table-wrap"><table class="console-table"><thead><tr><th>Indicator</th><th>NIFTY 50</th><th>BANK NIFTY</th><th>Meaning</th></tr></thead><tbody>' +
     '<tr><td><b>SMA (5 samples)</b></td><td id="ind-sma5-0">Collecting…</td><td id="ind-sma5-1">Collecting…</td><td>Mean of last 5 received prices</td></tr>' +
@@ -497,6 +586,7 @@ function render(tab) {
   else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
   else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
   else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
+  else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','FII/DII Flow','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gainers & Losers') featureContent.innerHTML = moversMarkup();
   else if (tab === 'Option Chain') featureContent.innerHTML = optionChainMarkup();
   else if (tab === 'Technical Indicators') featureContent.innerHTML = indicatorsMarkup();
@@ -508,6 +598,9 @@ function render(tab) {
   bindTabActions();
   updateDynamicPanel();
   if (tab === 'Gainers & Losers') loadMovers();
+  if (tab === 'Sureshot CE/PE') loadSureshotSetup();
+  if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(tab)) loadAdvancedScanner();
+  if (tab === 'Charts & Patterns') updatePatternPanel();
   if (tab === 'Option Chain') loadOptionChain();
   if (tab === 'Holdings') loadPortfolio();
   if (tab === 'Logs') renderLogs();
@@ -521,6 +614,14 @@ function bindTabActions() {
   if (connect) connect.addEventListener('click', startFyersLogin);
   const quotes = document.querySelector('#testQuotesBtn');
   if (quotes) quotes.addEventListener('click', fetchLiveQuotes);
+  const setupRefresh=document.querySelector('#refreshSetupBtn');
+  if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
+  const setupSymbol=document.querySelector('#setupSymbol');
+  if(setupSymbol) setupSymbol.addEventListener('change',loadSureshotSetup);
+  const advancedRefresh=document.querySelector('#refreshAdvancedBtn');
+  if(advancedRefresh) advancedRefresh.addEventListener('click',loadAdvancedScanner);
+  const patternSymbol=document.querySelector('#patternSymbol');
+  if(patternSymbol) patternSymbol.addEventListener('change',updatePatternPanel);
   const refreshMovers = document.querySelector('#refreshMoversBtn');
   if (refreshMovers) refreshMovers.addEventListener('click', loadMovers);
   const loadChain = document.querySelector('#loadOptionChainBtn');
@@ -612,6 +713,19 @@ function updateQuoteCards(quotes, fetchedAt) {
   return true;
 }
 
+function updatePatternPanel() {
+  const selector=document.querySelector('#patternSymbol');
+  const symbol=selector?selector.value:SYMBOLS[0].symbol;
+  const chart=document.querySelector('#patternChart');
+  const summary=document.querySelector('#patternSummary');
+  if(chart) chart.innerHTML=svgChart(symbol,250);
+  if(summary) {
+    const h=historyBySymbol[symbol]||[];
+    const ind=calculateIndicators(symbol);
+    summary.textContent=h.length>=20?'Collected '+h.length+' distinct price samples. SMA5 '+(ind.sma5===null?'—':formatPrice(ind.sma5))+' · SMA20 '+(ind.sma20===null?'—':formatPrice(ind.sma20))+'. Candlestick pattern labels withheld until verified OHLC candles are available.':'Collecting distinct live price samples ('+h.length+'/20). No pattern is claimed from insufficient data.';
+  }
+}
+
 function updateDynamicPanel() {
   SYMBOLS.forEach(item => {
     const quote = quoteFor(item.symbol);
@@ -664,6 +778,7 @@ function updateDynamicPanel() {
   if (settingsBackend) settingsBackend.textContent = 'ONLINE';
   const settingsFeed = document.querySelector('#settingsFeed');
   if (settingsFeed) settingsFeed.textContent = SYMBOLS.every(item => quoteFor(item.symbol) && quoteAgeMs(quoteFor(item.symbol)) < 15000) ? 'LIVE' : 'WAITING';
+  updatePatternPanel();
   const sampleCount = document.querySelector('#chartSampleCount');
   if (sampleCount) sampleCount.textContent = 'Samples: ' + (historyBySymbol[SYMBOLS[0].symbol] || []).length;
 }
