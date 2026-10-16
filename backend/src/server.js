@@ -161,6 +161,24 @@ function liveSnapshot() {
   };
 }
 
+app.get('/', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    ok: true,
+    service: 'dhanpulse-backend',
+    message: 'Backend is online. Check /api/status for FYERS authentication and live-data state.',
+    endpoints: {
+      health: '/health',
+      status: '/api/status',
+      quotes: '/api/market/quotes',
+      candles: '/api/market/candles',
+      movers: '/api/market/movers',
+      optionsChain: '/api/fyers/options-chain'
+    },
+    orderPlacement: 'disabled'
+  });
+});
+
 app.get('/health', (_req, res) => {
   const snapshot = liveSnapshot();
   res.json({
