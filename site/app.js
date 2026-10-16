@@ -43,7 +43,7 @@ const descriptions = {
   'Charts & Patterns': ['Charts & pattern lab', 'Recent live index samples are plotted; confirmed candlestick patterns require historical OHLC candles.'],
   'Gainers & Losers': ['Gainers & losers', 'Verified FYERS quote snapshot for a selected large-cap NSE universe; not the entire exchange.'],
   'Option Chain': ['Option chain & open interest', 'Option-chain values must come from a verified FYERS response.'],
-  'Technical Indicators': ['Technical indicators', 'Calculated from received quote samples; these are not candle-based indicators.'],
+  'Technical Indicators': ['Technical indicators', 'EMA, RSI, ATR, volume and trend calculated from verified FYERS historical OHLC candles.'],
   'AI Signals': ['Market signals', 'Transparent momentum summaries from recent received quotes, not investment advice.'],
   'Holdings': ['Holdings & positions', 'Account data is private and shown only after a verified account endpoint is available.'],
   'Alerts': ['Price alerts', 'Browser-local alerts for the two live index quotes.'],
@@ -381,12 +381,103 @@ async function loadAdvancedScanner() {
 }
 
 function indicatorsMarkup() {
-  return '<div class="table-wrap"><table class="console-table"><thead><tr><th>Indicator</th><th>NIFTY 50</th><th>BANK NIFTY</th><th>Meaning</th></tr></thead><tbody>' +
-    '<tr><td><b>SMA (5 samples)</b></td><td id="ind-sma5-0">Collecting…</td><td id="ind-sma5-1">Collecting…</td><td>Mean of last 5 received prices</td></tr>' +
-    '<tr><td><b>SMA (20 samples)</b></td><td id="ind-sma20-0">Collecting…</td><td id="ind-sma20-1">Collecting…</td><td>Mean of last 20 received prices</td></tr>' +
-    '<tr><td><b>RSI (14 changes)</b></td><td id="ind-rsi-0">Collecting…</td><td id="ind-rsi-1">Collecting…</td><td>Approximate RSI from quote-to-quote changes</td></tr>' +
-    '<tr><td><b>Sample count</b></td><td id="ind-count-0">0</td><td id="ind-count-1">0</td><td>Received quote observations</td></tr></tbody></table></div>' +
-    '<p class="hint">These are approximate tick-sample indicators, not candle-based technical indicators. They are not trading advice. For proper chart indicators, a verified historical-candles endpoint is required.</p>';
+  return '<div class="movers-toolbar"><div><b>OHLC-based technical indicators</b><p>Calculated from verified FYERS 5-minute historical candles.</p></div><button class="primary" id="refreshIndicatorsBtn">Refresh indicators</button></div>' +
+    '<div id="indicatorStatus" class="hint">Loading historical candles for both indices…</div>' +
+    '<div class="table-wrap"><table class="console-table"><thead><tr><th>Metric</th><th>NIFTY 50</th><th>BANK NIFTY</th><th>Interpretation</th></tr></thead><tbody>' +
+    '<tr><td><b>Latest candle close</b></td><td id="candle-close-0">—</td><td id="candle-close-1">—</td><td>Last returned OHLC close</td></tr>' +
+    '<tr><td><b>EMA 20</b></td><td id="candle-ema20-0">—</td><td id="candle-ema20-1">—</td><td>Short-term trend reference</td></tr>' +
+    '<tr><td><b>EMA 50</b></td><td id="candle-ema50-0">—</td><td id="candle-ema50-1">—</td><td>Medium-term trend reference</td></tr>' +
+    '<tr><td><b>RSI 14</b></td><td id="candle-rsi-0">—</td><td id="candle-rsi-1">—</td><td>Momentum oscillator (Wilder smoothing)</td></tr>' +
+    '<tr><td><b>ATR 14</b></td><td id="candle-atr-0">—</td><td id="candle-atr-1">—</td><td>Average true range / volatility</td></tr>' +
+    '<tr><td><b>Last volume / 20-candle average</b></td><td id="candle-volume-0">—</td><td id="candle-volume-1">—</td><td>Volume expansion ratio where available</td></tr>' +
+    '<tr><td><b>Trend structure</b></td><td id="candle-trend-0">—</td><td id="candle-trend-1">—</td><td>Close vs EMA20 vs EMA50</td></tr>' +
+    '</tbody></table></div><p class="hint">These indicators use historical OHLC data, not tick samples. They are descriptive tools, not predictions or guaranteed trading signals. Values remain unavailable when FYERS data is missing.</p>';
+}
+
+function calculateCandleIndicators(rows) {
+  const candles = (Array.isArray(rows) ? rows : []).filter(row => Array.isArray(row) && row.length >= 6 && row.slice(1, 6).every(v => Number.isFinite(Number(v)))).map(row => ({
+    open: Number(row[1]), high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5])
+  }));
+  const closes = candles.map(row => row.close);
+  const ema = period => {
+    if (closes.length < period) return null;
+    const alpha = 2 / (period + 1);
+    let value = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    for (let i = period; i < closes.length; i++) value = closes[i] * alpha + value * (1 - alpha);
+    return value;
+  };
+  let rsi = null;
+  if (closes.length >= 15) {
+    const changes = closes.slice(1).map((value, i) => value - closes[i]);
+    let gain = changes.slice(0, 14).reduce((sum, value) => sum + Math.max(0, value), 0) / 14;
+    let loss = changes.slice(0, 14).reduce((sum, value) => sum + Math.max(0, -value), 0) / 14;
+    for (let i = 14; i < changes.length; i++) {
+      gain = (gain * 13 + Math.max(0, changes[i])) / 14;
+      loss = (loss * 13 + Math.max(0, -changes[i])) / 14;
+    }
+    rsi = loss === 0 ? (gain === 0 ? 50 : 100) : 100 - 100 / (1 + gain / loss);
+  }
+  const trueRanges = [];
+  for (let i = 0; i < candles.length; i++) {
+    const current = candles[i];
+    const previousClose = i ? candles[i - 1].close : current.close;
+    trueRanges.push(Math.max(current.high - current.low, Math.abs(current.high - previousClose), Math.abs(current.low - previousClose)));
+  }
+  let atr = null;
+  if (trueRanges.length >= 14) {
+    atr = trueRanges.slice(0, 14).reduce((sum, value) => sum + value, 0) / 14;
+    for (let i = 14; i < trueRanges.length; i++) atr = (atr * 13 + trueRanges[i]) / 14;
+  }
+  const last = candles[candles.length - 1] || null;
+  const ema20 = ema(20), ema50 = ema(50);
+  const priorVolumes = candles.slice(-21, -1).map(row => row.volume).filter(v => Number.isFinite(v) && v > 0);
+  const averageVolume = priorVolumes.length ? priorVolumes.reduce((a, b) => a + b, 0) / priorVolumes.length : null;
+  const volumeRatio = last && averageVolume && last.volume > 0 ? last.volume / averageVolume : null;
+  let trend = 'Insufficient candles';
+  if (last && ema20 !== null && ema50 !== null) {
+    if (last.close > ema20 && ema20 > ema50) trend = 'Bullish alignment';
+    else if (last.close < ema20 && ema20 < ema50) trend = 'Bearish alignment';
+    else trend = 'Mixed / range';
+  }
+  return { count: candles.length, last, ema20, ema50, rsi, atr, volumeRatio, trend };
+}
+
+async function loadTechnicalIndicators() {
+  const status = document.querySelector('#indicatorStatus');
+  if (!status) return;
+  status.textContent = 'Requesting verified 5-minute OHLC candles from FYERS…';
+  const targets = SYMBOLS.map((item, index) => ({ item, index }));
+  try {
+    const results = await Promise.all(targets.map(async target => {
+      const params = new URLSearchParams({ symbol: target.item.symbol, resolution: '5' });
+      const response = await fetch(BACKEND_URL + '/api/market/candles?' + params.toString(), { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok !== true || !Array.isArray(result.data)) throw new Error(result.error || result.detail || 'Verified candles unavailable.');
+      return { ...target, result, indicators: calculateCandleIndicators(result.data) };
+    }));
+    results.forEach(({ index, result, indicators }) => {
+      const put = (suffix, value) => {
+        const el = document.getElementById('candle-' + suffix + '-' + index);
+        if (el) el.textContent = value;
+      };
+      put('close', indicators.last ? '₹' + formatPrice(indicators.last.close) : '—');
+      put('ema20', indicators.ema20 === null ? 'Need 20+ candles' : formatPrice(indicators.ema20));
+      put('ema50', indicators.ema50 === null ? 'Need 50+ candles' : formatPrice(indicators.ema50));
+      put('rsi', indicators.rsi === null ? 'Need 15+ candles' : indicators.rsi.toFixed(1));
+      put('atr', indicators.atr === null ? 'Need 14+ candles' : formatPrice(indicators.atr));
+      put('volume', indicators.volumeRatio === null ? 'Unavailable' : indicators.volumeRatio.toFixed(2) + '×');
+      put('trend', indicators.trend);
+      logEvent('OHLC indicators refreshed for ' + targetSymbolName(index) + ' (' + indicators.count + ' candles).', 'info');
+    });
+    status.textContent = 'Verified FYERS candles received for both indices · updated ' + new Date().toLocaleTimeString('en-IN') + '.';
+  } catch (error) {
+    status.textContent = (error.message || 'Historical indicators unavailable.') + ' No values have been fabricated.';
+    logEvent('Historical technical indicator request failed.', 'warn');
+  }
+}
+
+function targetSymbolName(index) {
+  return index === 1 ? 'BANK NIFTY' : 'NIFTY 50';
 }
 
 function signalsMarkup() {
@@ -620,6 +711,7 @@ function render(tab) {
   else featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
   bindTabActions();
   updateDynamicPanel();
+  if (tab === 'Technical Indicators') loadTechnicalIndicators();
   if (tab === 'Gainers & Losers') loadMovers();
   if (tab === 'Sureshot CE/PE') loadSureshotSetup();
   if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(tab)) loadAdvancedScanner();
@@ -656,6 +748,8 @@ function bindTabActions() {
   if(advancedRefresh) advancedRefresh.addEventListener('click',loadAdvancedScanner);
   const loadCandlesBtn=document.querySelector('#loadCandlesBtn');
   if(loadCandlesBtn) loadCandlesBtn.addEventListener('click',loadCandles);
+  const refreshIndicators = document.querySelector('#refreshIndicatorsBtn');
+  if (refreshIndicators) refreshIndicators.addEventListener('click', loadTechnicalIndicators);
   const refreshMovers = document.querySelector('#refreshMoversBtn');
   if (refreshMovers) refreshMovers.addEventListener('click', loadMovers);
   const loadChain = document.querySelector('#loadOptionChainBtn');
