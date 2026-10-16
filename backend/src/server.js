@@ -86,34 +86,53 @@ function startMarketDataStream(token) {
       if (marketSocket !== socket) return;
       streamConnected = true;
       streamError = '';
+      console.log('FYERS market socket connected; subscribing to configured index symbols.');
       try {
         socket.subscribe(allowedSymbols);
         socket.mode(socket.LiteMode);
-      } catch {
+        console.log('FYERS market socket subscription request sent.');
+      } catch (error) {
         streamError = 'Could not subscribe to FYERS index symbols.';
+        console.error('FYERS market socket subscription failed:', String(error?.message || error).slice(0, 240));
       }
     });
 
     socket.on('message', message => {
       if (marketSocket !== socket) return;
+      const before = latestTicks.size;
       parseTick(message);
+      const after = latestTicks.size;
+      if (after > before || after > 0) {
+        const summary = Array.isArray(message)
+          ? message.slice(0, 5).map(x => ({ symbol: x?.symbol || x?.n || null, type: x?.type || null, hasLtp: x?.ltp != null || x?.lp != null || x?.v?.lp != null }))
+          : { symbol: message?.symbol || message?.n || null, type: message?.type || null, hasLtp: message?.ltp != null || message?.lp != null || message?.v?.lp != null };
+        console.log('FYERS market tick received:', JSON.stringify(summary));
+      } else {
+        const shape = message && typeof message === 'object'
+          ? { keys: Object.keys(message).slice(0, 20), type: message.type || null, symbol: message.symbol || message.n || null }
+          : { messageType: typeof message };
+        console.log('FYERS socket message not parsed as an index tick:', JSON.stringify(shape));
+      }
     });
 
-    socket.on('error', () => {
+    socket.on('error', error => {
       if (marketSocket !== socket) return;
       streamError = 'FYERS market data socket reported an error.';
+      console.error('FYERS market socket error:', String(error?.message || error).slice(0, 240));
     });
 
     socket.on('close', () => {
       if (marketSocket !== socket) return;
       streamConnected = false;
+      console.log('FYERS market socket closed.');
     });
 
     socket.connect();
     if (typeof socket.autoreconnect === 'function') socket.autoreconnect();
-  } catch {
+  } catch (error) {
     streamConnected = false;
     streamError = 'Could not start the FYERS market data socket.';
+    console.error('FYERS market socket startup failed:', String(error?.message || error).slice(0, 240));
   }
 }
 
