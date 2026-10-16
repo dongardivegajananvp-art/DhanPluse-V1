@@ -133,6 +133,12 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
   }
 });
 
+// FYERS REST quotes can be rate-limited. Cache successful responses briefly,
+// coalesce concurrent requests, and respect upstream 429 responses.
+const quoteCache = new Map();
+const quoteInflight = new Map();
+let quotesRateLimitedUntil = 0;
+
 app.get('/api/market/quotes', async (req, res) => {
   if (!accessToken) {
     return res.status(401).json({ error: 'Connect FYERS first.' });
@@ -143,49 +149,107 @@ app.get('/api/market/quotes', async (req, res) => {
     'NSE:NIFTYBANK-INDEX'
   ]);
 
-  const symbols = String(
+  const symbols = [...new Set(String(
     req.query.symbols || 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX'
   )
     .split(',')
     .map(s => s.trim())
-    .filter(s => allowedSymbols.has(s));
+    .filter(s => allowedSymbols.has(s)))].sort();
 
   if (!symbols.length) {
     return res.status(400).json({ error: 'No supported symbols requested.' });
   }
 
-  try {
-    const url = new URL('https://api-t1.fyers.in/data/quotes');
-    url.searchParams.set('symbols', symbols.join(','));
+  const cacheKey = symbols.join(',');
+  const now = Date.now();
+  const cached = quoteCache.get(cacheKey);
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `${appId}:${accessToken}`,
-        Accept: 'application/json'
-      }
+  if (cached && now - cached.savedAt < 5000) {
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ...cached.payload, cached: true });
+  }
+
+  if (now < quotesRateLimitedUntil) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((quotesRateLimitedUntil - now) / 1000));
+    res.set('Retry-After', String(retryAfterSeconds));
+    return res.status(429).json({
+      error: 'FYERS quote requests are temporarily rate-limited.',
+      detail: 'The backend is cooling down to avoid repeated requests.',
+      retryAfterSeconds
     });
+  }
 
-    const data = await response.json().catch(() => ({}));
+  try {
+    let pending = quoteInflight.get(cacheKey);
+    if (!pending) {
+      pending = (async () => {
+        const url = new URL('https://api-t1.fyers.in/data/quotes');
+        url.searchParams.set('symbols', symbols.join(','));
 
-    if (!response.ok || data.s !== 'ok') {
-      if (response.status === 401) accessToken = '';
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `${appId}:${accessToken}`,
+            Accept: 'application/json'
+          }
+        });
 
-      return res.status(502).json({
-        error: 'FYERS did not return a verified live quote.',
-        detail: data.message || `HTTP ${response.status}`
-      });
+        const data = await response.json().catch(() => ({}));
+
+        if (response.status === 429) {
+          const header = response.headers.get('retry-after');
+          let retryMs = 15000;
+          if (header) {
+            const seconds = Number(header);
+            const parsed = Number.isFinite(seconds) && seconds > 0
+              ? seconds * 1000
+              : Date.parse(header) - Date.now();
+            if (Number.isFinite(parsed) && parsed > 0) retryMs = Math.max(retryMs, parsed);
+          }
+          quotesRateLimitedUntil = Date.now() + Math.min(retryMs, 120000);
+          return {
+            status: 429,
+            body: {
+              error: 'FYERS quote requests are temporarily rate-limited.',
+              detail: data.message || 'FYERS returned HTTP 429.',
+              retryAfterSeconds: Math.ceil((quotesRateLimitedUntil - Date.now()) / 1000)
+            }
+          };
+        }
+
+        if (!response.ok || data.s !== 'ok') {
+          if (response.status === 401) accessToken = '';
+          return {
+            status: 502,
+            body: {
+              error: 'FYERS did not return a verified live quote.',
+              detail: data.message || `HTTP ${response.status}`
+            }
+          };
+        }
+
+        const payload = {
+          ok: true,
+          fetchedAt: new Date().toISOString(),
+          data: data.d || []
+        };
+        quoteCache.set(cacheKey, { savedAt: Date.now(), payload });
+        return { status: 200, body: payload };
+      })();
+      quoteInflight.set(cacheKey, pending);
     }
 
+    const result = await pending;
     res.set('Cache-Control', 'no-store');
-    res.json({
-      ok: true,
-      fetchedAt: new Date().toISOString(),
-      data: data.d || []
-    });
+    if (result.status === 429) {
+      res.set('Retry-After', String(result.body.retryAfterSeconds || 15));
+    }
+    return res.status(result.status).json(result.body);
   } catch {
-    res.status(502).json({
+    return res.status(502).json({
       error: 'Could not reach FYERS quotes service.'
     });
+  } finally {
+    quoteInflight.delete(cacheKey);
   }
 });
 
