@@ -374,7 +374,7 @@ function updateQuoteCards(quotes, fetchedAt) {
     lastUpdate.textContent = fetchedAt && Number.isFinite(Date.parse(fetchedAt)) ? new Date(fetchedAt).toLocaleTimeString('en-IN') : new Date().toLocaleTimeString('en-IN');
     lastUpdate.classList.remove('muted');
   }
-  logEvent('Verified NIFTY 50 and BANK NIFTY quotes received.', 'info');
+  // Avoid flooding the console log on every 1.5-second refresh.
   updateDynamicPanel();
   return true;
 }
