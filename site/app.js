@@ -29,6 +29,18 @@ const descriptions = {
 function setStatus(message) {
   const el = document.querySelector('#marketStatus');
   if (el) el.textContent = message;
+
+  const connected = message === 'FYERS QUOTES RECEIVED';
+  const waiting = document.querySelector('#sideFeedStatus');
+  const footer = document.querySelector('#footerFeedStatus');
+  const dot = document.querySelector('#sideFeedDot');
+
+  if (waiting) waiting.textContent = connected ? 'Live feed connected' : 'Waiting for verified live feed';
+  if (footer) footer.textContent = connected ? 'Live FYERS quotes received' : 'Waiting for verified live feed';
+  if (dot) {
+    dot.style.background = connected ? '#63e6d0' : '#64738a';
+    dot.title = connected ? 'Verified quote response received' : 'No verified live quote response yet';
+  }
 }
 
 function setBackendStatus(message) {
