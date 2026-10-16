@@ -100,3 +100,25 @@
 @media(max-width:700px){.movers-toolbar{align-items:stretch}.movers-toolbar button{width:100%}.option-controls{flex-wrap:wrap}.option-controls label{min-width:130px}}
 
 .candle-chart{width:100%;height:auto;max-height:300px}.pattern-chart{width:100%;overflow:hidden}.option-controls label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted,#98a6bc)}.option-controls select{min-height:38px;border-radius:9px;padding:8px 10px;background:#111a29;color:inherit;border:1px solid #2a3850}
+
+
+/* DhanPulse Ultimate v4 — richer color system and mobile-first workspace */
+:root{--bg:#080d1b;--panel:#111a2d;--panel2:#17233a;--line:#2b3a59;--text:#f4f7ff;--muted:#9baaca;--cyan:#61f2d2;--blue:#739cff;--amber:#ffd166;--violet:#c5a3ff;--pink:#ff91c8;--green:#5de0a2;--red:#ff8198}
+body{background:radial-gradient(ellipse at 82% 0%,rgba(76,104,221,.22),transparent 35%),radial-gradient(ellipse at 30% 100%,rgba(32,201,171,.09),transparent 36%),var(--bg)}
+.sidebar{background:linear-gradient(180deg,#0e172a 0%,#0a1120 100%);border-right-color:#263656}
+.brandmark{background:linear-gradient(135deg,#5ef2d2 0%,#739cff 52%,#bd91ff 100%);box-shadow:0 8px 28px #658dff2b}
+nav button{transition:background .18s ease,border-color .18s ease,color .18s ease,transform .18s ease}
+nav button:hover{background:#1a2943;border-color:#31496f;color:#fff;transform:translateX(2px)}
+nav button.active{background:linear-gradient(100deg,#1c3650,#222b4d);border-color:#3c6387;color:#f6fbff;box-shadow:inset 3px 0 #61f2d2}
+.panel,.metric,.welcome,.status-card,.feature-panel{border-color:#2a3a5a;box-shadow:0 14px 38px rgba(0,0,0,.15)}
+.metric:nth-child(1){background:linear-gradient(145deg,#152a38,#111a2d)}.metric:nth-child(2){background:linear-gradient(145deg,#172847,#111a2d)}.metric:nth-child(3){background:linear-gradient(145deg,#292044,#111a2d)}.metric:nth-child(4){background:linear-gradient(145deg,#3a2b22,#171b2a)}
+.metric strong{letter-spacing:-.5px}.chip{border-color:#3a4f76;background:linear-gradient(120deg,#172844,#1b2040);color:#c7d8ff}
+button,.btn{transition:filter .15s ease,transform .15s ease}button:hover,.btn:hover{filter:brightness(1.12)}
+.market-pill{border-color:#3b5278;background:#121f35}.dot{box-shadow:0 0 0 4px rgba(97,242,210,.08)}
+.welcome{background:linear-gradient(115deg,rgba(30,61,85,.85),rgba(33,34,70,.88) 60%,rgba(53,31,76,.6));border-color:#38517b}
+.welcome h2,.welcome h3{background:linear-gradient(90deg,#fff,#b6e9ff 52%,#d2b8ff);background-clip:text;-webkit-background-clip:text;color:transparent}
+.panel-head{border-bottom-color:#293957}input,select,textarea{border-color:#33466b!important;background:#0e1728!important;color:var(--text)!important}
+input:focus,select:focus,textarea:focus{outline:1px solid #61f2d2;box-shadow:0 0 0 3px #61f2d21c}footer{color:#91a2c3}
+#nav button[data-tab="NIFTY"]{color:#74e9d3}#nav button[data-tab="BANKNIFTY"]{color:#8eafff}#nav button[data-tab="Option Chain"]{color:#d1a8ff}#nav button[data-tab="AI Signals"]{color:#ffb6d8}#nav button[data-tab="FYERS Settings"]{color:#ffd48a}#nav button[data-tab="Logs"]{color:#a9b8d5}
+@media(max-width:900px){body{display:block}.sidebar{position:relative;inset:auto;width:100%;height:auto;padding:14px 12px;z-index:5;border-right:0;border-bottom:1px solid var(--line)}.brand{padding:0 5px 12px}#nav{display:flex;gap:7px;overflow-x:auto;overscroll-behavior-x:contain;padding:2px 2px 8px;scrollbar-width:thin}#nav button{flex:0 0 auto;white-space:nowrap;padding:9px 12px;font-size:12px}main,.main,.workspace{margin-left:0!important;width:100%;padding:18px 12px!important}}
+@media(max-width:520px){.metric{min-width:0}.panel,.welcome{border-radius:14px}.welcome{padding:18px!important}.welcome h2{font-size:clamp(23px,7vw,34px)}}
