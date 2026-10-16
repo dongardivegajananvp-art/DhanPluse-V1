@@ -10,6 +10,7 @@ DhanPulse is a read-only FYERS market dashboard with a Netlify frontend and a pe
 - Historical OHLC candles, selected large-cap movers, option-chain request, holdings and positions endpoints.
 - Watchlist/scanner views, indicators based on received samples, local price alerts, logs and connection diagnostics.
 - Premium responsive dark theme with colorful navigation and cards.
+- Installable Progressive Web App (PWA) for desktop, laptop and mobile browsers, with an app manifest, branded icon, and a safe offline shell cache. API/live market responses are never cached as offline data.
 
 ## Deployment layout
 
@@ -17,6 +18,10 @@ DhanPulse is a read-only FYERS market dashboard with a Netlify frontend and a pe
 - Backend service root: `backend/`; start command: `npm start`.
 - Backend secrets belong only in the backend host's environment: `FYERS_APP_ID`, `FYERS_APP_SECRET`, `FYERS_REDIRECT_URI`. `ALLOWED_ORIGIN` can list allowed frontend origins separated by commas.
 - Keep the FYERS redirect URI exactly aligned with the value registered in the FYERS developer app and the backend environment.
+
+## Automated checks
+
+GitHub Actions validates frontend/backend JavaScript syntax, the PWA manifest and required site assets, and audits backend production dependencies on pushes and pull requests.
 
 ## Read-only safety
 
