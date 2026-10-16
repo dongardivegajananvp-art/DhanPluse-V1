@@ -284,6 +284,35 @@ async function fyersReadOnlyGet(url) {
   return data;
 }
 
+const moversSymbols = ["NSE:RELIANCE-EQ","NSE:HDFCBANK-EQ","NSE:ICICIBANK-EQ","NSE:INFY-EQ","NSE:TCS-EQ","NSE:BHARTIARTL-EQ","NSE:SBIN-EQ","NSE:ITC-EQ","NSE:LT-EQ","NSE:AXISBANK-EQ","NSE:KOTAKBANK-EQ","NSE:BAJFINANCE-EQ","NSE:HINDUNILVR-EQ","NSE:MARUTI-EQ","NSE:SUNPHARMA-EQ","NSE:TATAMOTORS-EQ","NSE:M&M-EQ","NSE:NTPC-EQ","NSE:TATASTEEL-EQ","NSE:POWERGRID-EQ","NSE:ONGC-EQ","NSE:JSWSTEEL-EQ","NSE:ADANIENT-EQ","NSE:ADANIPORTS-EQ","NSE:COALINDIA-EQ","NSE:WIPRO-EQ","NSE:ULTRACEMCO-EQ","NSE:NESTLEIND-EQ","NSE:TITAN-EQ","NSE:BAJAJFINSV-EQ","NSE:ASIANPAINT-EQ","NSE:GRASIM-EQ","NSE:TECHM-EQ","NSE:HCLTECH-EQ","NSE:INDUSINDBK-EQ","NSE:DRREDDY-EQ","NSE:CIPLA-EQ","NSE:EICHERMOT-EQ","NSE:TRENT-EQ","NSE:BEL-EQ","NSE:SHRIRAMFIN-EQ","NSE:APOLLOHOSP-EQ","NSE:DIVISLAB-EQ","NSE:BPCL-EQ","NSE:HINDALCO-EQ","NSE:TATACONSUM-EQ","NSE:HEROMOTOCO-EQ","NSE:BRITANNIA-EQ","NSE:SBILIFE-EQ","NSE:LTIM-EQ"];
+
+app.get('/api/market/movers', async (_req, res) => {
+  try {
+    if (!accessToken) return res.status(401).json({ ok: false, error: 'Connect FYERS first to load market movers.' });
+    const url = new URL('https://api-t1.fyers.in/data/quotes');
+    url.searchParams.set('symbols', moversSymbols.join(','));
+    const result = await fyersReadOnlyGet(url);
+    const quotes = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
+    const rows = quotes.map(item => {
+      const value = item && (item.v || item);
+      const symbol = item && (item.n || item.symbol || value.symbol);
+      const price = Number(value.lp ?? value.ltp);
+      const change = Number(value.ch);
+      const changePct = Number(value.chp);
+      if (!symbol || !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct)) return null;
+      return { symbol, price, change: Number.isFinite(change) ? change : null, changePct };
+    }).filter(Boolean);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, fetchedAt: new Date().toISOString(), universe: 'selected-large-cap-NSE', data: rows });
+  } catch (error) {
+    return res.status(error.statusCode || 502).json({
+      ok: false,
+      error: error.statusCode === 401 ? 'Connect FYERS to load market movers.' : 'FYERS market-mover quote request failed.',
+      detail: String(error.message || 'Upstream request failed.').slice(0, 220)
+    });
+  }
+});
+
 app.get('/api/fyers/options-chain', async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
   const allowed = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX'];
