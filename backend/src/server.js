@@ -25,6 +25,9 @@ const allowedOrigins = new Set(
     .filter(Boolean)
 );
 
+// Allow the free GitHub Pages frontend origin as an explicit browser API client.
+allowedOrigins.add('https://dongardivegajananvp-art.github.io');
+
 if (redirectUri) {
   try {
     allowedOrigins.add(new URL(redirectUri).origin);
