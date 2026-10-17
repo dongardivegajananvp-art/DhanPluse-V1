@@ -122,3 +122,17 @@ input:focus,select:focus,textarea:focus{outline:1px solid #61f2d2;box-shadow:0 0
 #nav button[data-tab="NIFTY"]{color:#74e9d3}#nav button[data-tab="BANKNIFTY"]{color:#8eafff}#nav button[data-tab="Option Chain"]{color:#d1a8ff}#nav button[data-tab="AI Signals"]{color:#ffb6d8}#nav button[data-tab="FYERS Settings"]{color:#ffd48a}#nav button[data-tab="Logs"]{color:#a9b8d5}
 @media(max-width:900px){body{display:block}.sidebar{position:relative;inset:auto;width:100%;height:auto;padding:14px 12px;z-index:5;border-right:0;border-bottom:1px solid var(--line)}.brand{padding:0 5px 12px}#nav{display:flex;gap:7px;overflow-x:auto;overscroll-behavior-x:contain;padding:2px 2px 8px;scrollbar-width:thin}#nav button{flex:0 0 auto;white-space:nowrap;padding:9px 12px;font-size:12px}main,.main,.workspace{margin-left:0!important;width:100%;padding:18px 12px!important}}
 @media(max-width:520px){.metric{min-width:0}.panel,.welcome{border-radius:14px}.welcome{padding:18px!important}.welcome h2{font-size:clamp(23px,7vw,34px)}}
+
+/* Navigation and tab workspace visibility fixes */
+.sidebar{overflow-y:auto;overscroll-behavior:contain}
+.sidebar nav{padding-bottom:12px}
+.grid .panel.large .empty{display:block;min-height:0;text-align:left;padding:22px}
+.main-view-heading h2{font-size:clamp(23px,3vw,34px);margin:3px 0 5px;letter-spacing:-.7px}
+.main-view-heading p{max-width:720px;color:var(--muted);margin:0 0 18px}
+.main-chart-wrap{border:1px solid #2b3d57;background:#0b1220;border-radius:13px;padding:14px;margin:10px 0}
+.main-chart-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;color:#aab9d0;font-size:10px;letter-spacing:.8px;margin-bottom:12px}
+.main-view-note{font-size:11px;color:var(--muted);margin:10px 0}
+#mainTabChart{width:100%;min-height:100px}
+#mainTabChart .live-chart{width:100%;height:auto;display:block;min-height:160px}
+@media(max-width:900px){.sidebar{max-height:none;overflow:visible}#nav{display:flex;flex-wrap:wrap;overflow:visible;gap:6px;padding-bottom:10px}#nav button{flex:1 1 auto;min-width:max-content;white-space:nowrap}.grid .panel.large .empty{padding:16px}}
+@media(max-width:520px){#nav button{font-size:11px;padding:8px 10px}.main-chart-wrap{padding:9px}.main-chart-title{font-size:9px}}
