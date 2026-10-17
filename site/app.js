@@ -188,6 +188,25 @@ function signalDataBlockReason(symbol) {
   return '';
 }
 
+function validateOhlcCandles(candles, resolution) {
+  if (!Array.isArray(candles) || candles.length < 12) return 'At least 12 OHLC candles are required.';
+  let previousTime = -Infinity;
+  for (const row of candles) {
+    if (!Array.isArray(row) || row.length < 5) return 'Candle row is incomplete.';
+    const time = Number(row[0]), open = Number(row[1]), high = Number(row[2]), low = Number(row[3]), close = Number(row[4]);
+    if (![time, open, high, low, close].every(Number.isFinite) || time <= 0 || Math.min(open, high, low, close) <= 0) return 'Candle data contains missing or invalid numbers.';
+    if (high < Math.max(open, close, low) || low > Math.min(open, close, high)) return 'OHLC values are inconsistent; signal blocked.';
+    if (time <= previousTime) return 'Candle timestamps are duplicated or out of order.';
+    previousTime = time;
+  }
+  if (isRegularMarketSession()) {
+    const lastTimeMs = Number(candles[candles.length - 1][0]) * 1000;
+    const maxAgeMs = resolution === 'D' ? 36 * 60 * 60 * 1000 : (Number(resolution) || 5) * 60 * 1000 * 3;
+    if (Date.now() - lastTimeMs > maxAgeMs) return 'Latest candle is stale for this interval; signal blocked.';
+  }
+  return '';
+}
+
 function signalFor(symbol) {
   const blocked = signalDataBlockReason(symbol);
   if (blocked) return { label: 'NO TRADE · DATA BLOCKED', detail: blocked, tone: 'negative' };
@@ -396,13 +415,16 @@ async function loadSureshotSetup() {
     const candleResult=await candleResponse.json().catch(()=>({}));
     if(!candleResponse.ok||candleResult.ok!==true||!Array.isArray(candleResult.data))throw new Error(candleResult.error||candleResult.detail||'Verified historical candles unavailable.');
     const candles=candleResult.data;
+    const candleError=validateOhlcCandles(candles,resolution);
+    if(candleError)throw new Error(candleError);
     const zones=deriveSureshotZones(candles);
     if(!zones)throw new Error('At least 12 verified candles are needed before zones can be calculated.');
     const lastCandle=candles[candles.length-1],close=Number(lastCandle[4]),previous=Number(candles[candles.length-2][4]);
     chart.innerHTML=sureshotZoneChart(candles,zones.supply,zones.demand);
     summary.textContent='Calculated from '+candles.length+' verified FYERS candles · Supply '+formatPrice(zones.supply.low)+'–'+formatPrice(zones.supply.high)+' · Buyer/demand '+formatPrice(zones.demand.low)+'–'+formatPrice(zones.demand.high)+'. Zones are heuristic and may change as candles update.';
     let bias='NO TRADE',reason='Price is inside the mapped zones or has not confirmed a breakout.';
-    if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
+    if(!isRegularMarketSession()){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
+    else if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
     else if(close<zones.demand.low&&close<previous){bias='PE WATCH';reason='Latest candle closed below the calculated buyer/demand-zone low.';}
     if(symbol.endsWith('-EQ')) {
       if(bias==='NO TRADE') {
