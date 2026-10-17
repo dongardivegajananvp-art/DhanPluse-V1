@@ -45,6 +45,8 @@ let accessToken = '';
 let authenticatedAt = null;
 const pendingAuthStates = new Map();
 const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const dashboardSessions = new Map();
+const DASHBOARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 let marketSocket = null;
 let streamConnected = false;
 let streamError = '';
@@ -209,6 +211,27 @@ app.get('/api/status', (_req, res) => {
   });
 });
 
+function requireDashboardSession(req, res, next) {
+  const header = String(req.get('authorization') || '');
+  const match = /^Bearer ([a-f0-9]{64})$/.exec(header);
+  const token = match ? match[1] : '';
+  const session = token ? dashboardSessions.get(token) : null;
+  if (!session || Date.now() - session.createdAt > DASHBOARD_SESSION_TTL_MS || !accessToken) {
+    if (token) dashboardSessions.delete(token);
+    return res.status(401).json({ ok: false, error: 'Dashboard session missing or expired. Reconnect FYERS.' });
+  }
+  session.lastSeenAt = Date.now();
+  return next();
+}
+
+// Browser requests must prove they completed the FYERS OAuth flow before
+// receiving quotes, historical candles, option-chain, holdings or positions.
+// CORS is not authentication; this short-lived opaque session token is.
+app.use('/api/market', requireDashboardSession);
+app.use('/api/fyers/options-chain', requireDashboardSession);
+app.use('/api/fyers/holdings', requireDashboardSession);
+app.use('/api/fyers/positions', requireDashboardSession);
+
 app.get('/api/fyers/auth/start', (_req, res) => {
   if (!appId || !redirectUri) {
     return res.status(503).json({ error: 'FYERS environment settings are incomplete.' });
@@ -272,6 +295,9 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
     }
 
     accessToken = data.access_token;
+    dashboardSessions.clear();
+    const dashboardSessionToken = crypto.randomBytes(32).toString('hex');
+    dashboardSessions.set(dashboardSessionToken, { createdAt: Date.now(), lastSeenAt: Date.now() });
     authenticatedAt = new Date().toISOString();
     restQuoteCache = null;
     restQuoteFetchedAt = 0;
@@ -281,6 +307,7 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
       ok: true,
       fyers: 'connected',
       liveData: 'connecting',
+      dashboardSessionToken,
       authenticatedAt
     });
   } catch {
