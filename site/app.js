@@ -696,7 +696,7 @@ function render(tab) {
   featureTitle.textContent = tab === 'Dashboard' ? 'Live console' : tab;
   featureDesc.textContent = descriptions[tab][1];
   nav.querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
-  const mainPanel = document.querySelector('.grid .panel.large .empty');
+  const mainPanel = document.querySelector('#mainWorkspaceContent');
   if (mainPanel) {
     const symbol = tab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
     mainPanel.innerHTML = '<div class="main-view-heading"><span class="eyebrow">DHANPULSE WORKSPACE</span><h2>' + escapeHtml(tab) + '</h2><p>' + escapeHtml(descriptions[tab][1]) + '</p></div><div class="main-chart-wrap"><div class="main-chart-title"><span>' + escapeHtml(tab === 'BANKNIFTY' ? 'BANK NIFTY' : 'NIFTY 50') + ' · RECENT PRICE CHART</span><span class="tag">VERIFIED DATA ONLY</span></div><div id="mainTabChart">' + svgChart(symbol, 230) + '</div></div><p class="main-view-note" id="mainViewNote">Chart draws from verified FYERS data received by this session. Historical candles appear in Charts & Patterns after the API returns them.</p><button class="primary" id="mainPanelAction">' + (tab === 'FYERS Settings' ? 'Connect FYERS' : tab === 'Charts & Patterns' ? 'Load historical candles' : tab === 'Technical Indicators' ? 'Refresh indicators' : 'Refresh live data') + '</button>';
