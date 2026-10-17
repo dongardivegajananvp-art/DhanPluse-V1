@@ -24,6 +24,8 @@ jobs:
         run: |
           node --check site/app.js
           node --check site/journal.js
+          node --check site/risk-calculator.js
+          node --check site/backtest.js
           node --check backend/src/server.js
           node --check site/sw.js
       - name: Validate PWA manifest and required assets
@@ -33,6 +35,10 @@ jobs:
           test -s site/style.css
           test -s site/app.js
           test -s site/journal.js
+          test -s site/risk-calculator.js
+          test -s site/backtest.js
+          grep -q 'risk-calculator.js' site/index.html
+          grep -q 'backtest.js' site/index.html
           test -s site/sw.js
           test -s site/dhanpulse-icon.svg
           grep -q 'publish = "site"' netlify.toml
