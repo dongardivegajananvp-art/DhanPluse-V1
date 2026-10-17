@@ -225,6 +225,27 @@ function validateOhlcCandles(candles, resolution) {
   return '';
 }
 
+function validateOptionChainPayload(payload) {
+  if (!payload || !Array.isArray(payload.optionsChain) || !payload.optionsChain.length) return 'Option-chain rows are missing; no option signal.';
+  const spot = Number(payload.optionsChain.find(row => Number(row.underlying_price) > 0)?.underlying_price ?? payload.underlying_price);
+  if (!Number.isFinite(spot) || spot <= 0) return 'Verified underlying spot is missing from option-chain response.';
+  const normalized = payload.optionsChain.map(row => {
+    if (!row || !Number.isFinite(Number(row.strike_price)) || Number(row.strike_price) <= 0) return null;
+    const type = String(row.option_type || '').toUpperCase();
+    const ltp = Number(row.ltp), bid = Number(row.bid ?? row.bid_price ?? row.bidPrice), ask = Number(row.ask ?? row.ask_price ?? row.askPrice);
+    const oi = Number(row.oi), volume = Number(row.volume);
+    const expiry = row.expiry ?? row.expiry_date ?? row.expiryDate;
+    if (!['CE','PE','CALL','PUT'].includes(type) || !Number.isFinite(ltp) || ltp <= 0 ||
+        !Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask < bid ||
+        !Number.isFinite(oi) || oi < 0 || !Number.isFinite(volume) || volume < 0 || !expiry) return null;
+    const spreadPct = ((ask - bid) / ((ask + bid) / 2)) * 100;
+    return { ...row, option_type: type === 'CALL' ? 'CE' : type === 'PUT' ? 'PE' : type,
+      strike_price: Number(row.strike_price), ltp, bid, ask, oi, volume, expiry: String(expiry), spreadPct };
+  }).filter(Boolean);
+  if (!normalized.length) return 'No option row passed strike, expiry, bid/ask, OI and volume validation.';
+  return { spot, chain: normalized };
+}
+
 function signalFor(symbol) {
   const blocked = signalDataBlockReason(symbol);
   if (blocked) return { label: 'NO TRADE · DATA BLOCKED', detail: blocked, tone: 'negative' };
@@ -463,21 +484,25 @@ async function loadSureshotSetup() {
     const optionResponse=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+new URLSearchParams({symbol,strikecount:'10'}),{headers:{Accept:'application/json'},cache:'no-store'});
     const optionResult=await optionResponse.json().catch(()=>({}));
     if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error(optionResult.error||optionResult.detail||'Verified option-chain data unavailable; no entry plan generated.');
-    const chain=Array.isArray(optionResult.data.optionsChain)?optionResult.data.optionsChain:[];
-    const spot=Number(chain[0]?.underlying_price)||close;
+    const chainCheck=validateOptionChainPayload(optionResult.data);
+    if(typeof chainCheck==='string')throw new Error(chainCheck);
+    const chain=chainCheck.chain;
+    const spot=chainCheck.spot;
+    const fetchedAt=Date.parse(optionResult.fetchedAt||'');
+    if(!Number.isFinite(fetchedAt)||Date.now()-fetchedAt>15000||fetchedAt>Date.now()+5000)throw new Error('Option-chain snapshot timestamp is stale or invalid; no signal.');
     const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
     const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
     const type=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
-    const leg=type&&chain.find(x=>Number(x.strike_price)===atm&&x.option_type===type&&Number(x.ltp)>0);
+    const leg=type&&chain.find(x=>Number(x.strike_price)===atm&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0);
     if(!type||!leg){
       cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(reason)+'</p><p class="hint">No entry/target is issued without a confirmed breakout and a verified matching option premium.</p></article>';
       status.textContent='NO TRADE · '+reason+' Option chain was verified; no actionable setup passed all filters.';
       logEvent('Sureshot filtered setup: '+reason,'info');return;
     }
     const entry=Number(leg.ltp),stop=entry*0.90,target=entry+(entry-stop)*2,rr=(target-entry)/(entry-stop);
-    const oi=Number.isFinite(Number(leg.oi))?displayNumber(leg.oi,0):'Unavailable';
-    const volume=Number.isFinite(Number(leg.volume))?displayNumber(leg.volume,0):'Unavailable';
-    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+atm+' strike</h4><span class="signal-tone positive">'+bias+'</span></div><strong class="console-price">₹'+formatPrice(entry)+'</strong><div class="data-row"><span>Entry (option premium)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (−10%)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (+20%)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : '+rr.toFixed(2)+'</b></div><div class="data-row"><span>OI / Volume</span><b>'+oi+' / '+volume+'</b></div><p class="hint">Underlying confirmation: '+escapeHtml(reason)+' · Entry levels use the verified option premium snapshot. Spread, liquidity, expiry and slippage can change outcomes.</p></article>';
+    const oi=displayNumber(leg.oi,0);
+    const volume=displayNumber(leg.volume,0);
+    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+atm+' strike</h4><span class="signal-tone positive">'+bias+'</span></div><strong class="console-price">₹'+formatPrice(entry)+'</strong><div class="data-row"><span>Entry (option premium)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (−10%)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (+20%)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : '+rr.toFixed(2)+'</b></div><div class="data-row"><span>Bid / Ask</span><b>₹'+formatPrice(leg.bid)+' / ₹'+formatPrice(leg.ask)+'</b></div><div class="data-row"><span>Spread</span><b>'+leg.spreadPct.toFixed(2)+'%</b></div><div class="data-row"><span>Expiry</span><b>'+escapeHtml(leg.expiry)+'</b></div><div class="data-row"><span>OI / Volume</span><b>'+oi+' / '+volume+'</b></div><p class="hint">Underlying confirmation: '+escapeHtml(reason)+' · Entry levels use the verified option premium snapshot. Spread, liquidity, expiry and slippage can change outcomes.</p></article>';
     status.textContent='Candidate only · FYERS candles and option chain verified at '+new Date(optionResult.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+'. Not a guaranteed signal; no order placed.';
     logEvent('Sureshot candidate built from verified OHLC zone and option-chain data.','info');
   }catch(error){
