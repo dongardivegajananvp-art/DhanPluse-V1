@@ -177,7 +177,20 @@ function calculateIndicators(symbol) {
   return { samples: values.length, last: last, sma5: sma(5), sma20: sma(20), rsi14: rsi, changes: changes };
 }
 
+function signalDataBlockReason(symbol) {
+  const quote = quoteFor(symbol);
+  if (!isRegularMarketSession()) return 'Market session is closed or outside NSE regular hours; no actionable signal.';
+  if (!quote || !Number.isFinite(quote.price) || quote.price <= 0) return 'Verified quote is missing; no signal.';
+  if (quoteAgeMs(quote) > 15000) return 'Quote is stale (>15 seconds); no signal.';
+  const other = SYMBOLS.find(item => item.symbol !== symbol);
+  const otherQuote = other ? quoteFor(other.symbol) : null;
+  if (!otherQuote || !Number.isFinite(otherQuote.price) || quoteAgeMs(otherQuote) > 15000) return 'Both index quotes are not fresh; signal blocked.';
+  return '';
+}
+
 function signalFor(symbol) {
+  const blocked = signalDataBlockReason(symbol);
+  if (blocked) return { label: 'NO TRADE · DATA BLOCKED', detail: blocked, tone: 'negative' };
   const data = calculateIndicators(symbol);
   if (data.samples < 5 || data.changes.length < 4) {
     return { label: 'Collecting data', detail: 'Need more live quote samples before summarising momentum.', tone: 'neutral' };
