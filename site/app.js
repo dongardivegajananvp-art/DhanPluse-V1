@@ -31,6 +31,8 @@ let alerts = loadAlerts();
 SYMBOLS.forEach(item => { historyBySymbol[item.symbol] = []; });
 
 const descriptions = {
+  'Stock Explorer': ['Stock explorer', 'Search supported NSE symbols and open research workspaces. Prices are shown only when verified FYERS quotes are returned.'],
+  'Market Activity': ['Market activity', 'A research overview for market breadth, volatility, volume and institutional flow; unsupported data stays clearly unavailable.'],
   'Dashboard': ['Market overview', 'Live FYERS quotes, recent price movement, and console health.'],
   'NIFTY': ['NIFTY 50 workspace', 'Live index quote and recent received-price history.'],
   'BANKNIFTY': ['BANK NIFTY workspace', 'Live index quote and recent received-price history.'],
@@ -229,6 +231,41 @@ function quoteCardsMarkup() {
     const changePct = quote && Number.isFinite(quote.changePct) ? ' (' + (quote.changePct > 0 ? '+' : '') + quote.changePct.toFixed(2) + '%)' : '';
     return '<article class="console-card"><div class="console-card-head"><span>' + item.label + '</span><span class="live-tag">FYERS</span></div><strong class="console-price" data-price-symbol="' + item.symbol + '">' + price + '</strong><small class="quote-change" data-change-symbol="' + item.symbol + '">' + change + changePct + '</small><div class="mini-chart" data-mini-symbol="' + item.symbol + '">' + svgChart(item.symbol, 80) + '</div><small class="quote-time" data-time-symbol="' + item.symbol + '">' + (quote ? new Date(quote.receivedAt).toLocaleTimeString('en-IN') : 'Waiting for quote') + '</small></article>';
   }).join('');
+}
+
+function stockExplorerMarkup() {
+  return '<div class="console-section"><div class="console-section-head"><div><h4>Stock Explorer</h4><p>Search the starter universe and jump to a research tool. Live prices are not invented.</p></div><span class="live-tag">FYERS-READY</span></div>' +
+    '<div class="explorer-controls"><label for="stockSearch">Search symbol or company</label><input id="stockSearch" type="search" placeholder="Try NIFTY, BANKNIFTY, RELIANCE, INFY…" autocomplete="off"><label for="stockCategory">Category</label><select id="stockCategory"><option value="all">All supported symbols</option><option value="index">Indices</option><option value="equity">Equity research</option></select></div>' +
+    '<div id="stockExplorerResults" class="explorer-grid"></div><p class="hint">Starter list is for navigation and research only. Only NIFTY 50 and BANK NIFTY are currently configured for the live quote stream; equity quote support depends on backend subscription and permissions.</p></div>';
+}
+
+function renderStockExplorerResults() {
+  const host=document.querySelector('#stockExplorerResults');
+  if(!host) return;
+  const q=(document.querySelector('#stockSearch')?.value||'').trim().toLowerCase();
+  const category=document.querySelector('#stockCategory')?.value||'all';
+  const universe=[
+    {symbol:'NSE:NIFTY50-INDEX',name:'NIFTY 50',kind:'index',tab:'NIFTY',note:'Benchmark index'},
+    {symbol:'NSE:NIFTYBANK-INDEX',name:'BANK NIFTY',kind:'index',tab:'BANKNIFTY',note:'Banking index'},
+    {symbol:'NSE:RELIANCE-EQ',name:'RELIANCE',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
+    {symbol:'NSE:TCS-EQ',name:'TCS',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
+    {symbol:'NSE:HDFCBANK-EQ',name:'HDFC BANK',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
+    {symbol:'NSE:INFY-EQ',name:'INFOSYS',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
+    {symbol:'NSE:ICICIBANK-EQ',name:'ICICI BANK',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
+    {symbol:'NSE:SBIN-EQ',name:'STATE BANK OF INDIA',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
+    {symbol:'NSE:LT-EQ',name:'LARSEN & TOUBRO',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
+    {symbol:'NSE:ITC-EQ',name:'ITC',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'}
+  ];
+  const rows=universe.filter(x=>(category==='all'||x.kind===category)&&(!q||(x.symbol+' '+x.name).toLowerCase().includes(q)));
+  host.innerHTML=rows.length?rows.map(x=>{
+    const quote=quoteFor(x.symbol);
+    return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+(quote&&quoteAgeMs(quote)<15000?'QUOTE RECEIVED':'DATA PENDING')+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(quote?'₹'+formatPrice(quote.price):'—')+'</strong><p>'+(quote?'Verified quote from this session':escapeHtml(x.note))+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
+  }).join(''):'<div class="chart-empty">No symbols match this search.</div>';
+  host.querySelectorAll('[data-explorer-jump]').forEach(btn=>btn.addEventListener('click',()=>render(btn.dataset.explorerJump)));
+}
+
+function marketActivityMarkup() {
+  return '<div class="console-grid console-grid-2"><article class="console-section"><div class="console-section-head"><h4>Market breadth</h4><span class="live-tag">DATA SOURCE</span></div><div class="chart-empty">Advancers, decliners and unchanged counts will appear when a verified broad-market quote universe is connected.</div></article><article class="console-section"><div class="console-section-head"><h4>Volume & volatility</h4><span class="live-tag">DATA SOURCE</span></div><div class="chart-empty">Volume spikes and volatility rankings need verified volume/OHLC data. No demo values are displayed.</div></article><article class="console-section"><div class="console-section-head"><h4>Indices monitored</h4></div><div class="data-row"><span>NIFTY 50</span><b>'+(quoteFor(SYMBOLS[0].symbol)?'QUOTE RECEIVED':'WAITING')+'</b></div><div class="data-row"><span>BANK NIFTY</span><b>'+(quoteFor(SYMBOLS[1].symbol)?'QUOTE RECEIVED':'WAITING')+'</b></div></article><article class="console-section"><div class="console-section-head"><h4>Institutional flows</h4></div><div class="chart-empty">FII/DII cash-market flow is not available from the currently verified project data source.</div><button class="secondary" data-jump="FII/DII Flow">Open FII/DII workspace</button></article></div><p class="hint">This screen intentionally shows source status instead of simulated market breadth, volume or FII/DII numbers.</p>';
 }
 
 function dashboardMarkup() {
@@ -715,6 +752,8 @@ function render(tab) {
   else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
   else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
   else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
+  else if (tab === 'Stock Explorer') featureContent.innerHTML = stockExplorerMarkup();
+  else if (tab === 'Market Activity') featureContent.innerHTML = marketActivityMarkup();
   else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','FII/DII Flow','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gainers & Losers') featureContent.innerHTML = moversMarkup();
   else if (tab === 'Option Chain') featureContent.innerHTML = optionChainMarkup();
@@ -738,6 +777,11 @@ function render(tab) {
 
 function bindTabActions() {
   featureContent.querySelectorAll('[data-jump]').forEach(button => button.addEventListener('click', () => render(button.dataset.jump)));
+  const stockSearch=document.querySelector('#stockSearch');
+  const stockCategory=document.querySelector('#stockCategory');
+  if(stockSearch) stockSearch.addEventListener('input',renderStockExplorerResults);
+  if(stockCategory) stockCategory.addEventListener('change',renderStockExplorerResults);
+  if(currentTab==='Stock Explorer') renderStockExplorerResults();
   const test = document.querySelector('#testBackendBtn');
   if (test) test.addEventListener('click', testBackend);
   const connect = document.querySelector('#connectFyersBtn');
