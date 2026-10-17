@@ -336,7 +336,7 @@ async function loadMovers() {
 
 function advancedScannerMarkup(tab) {
   if (tab === 'Sureshot CE/PE') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Rule-based CE / PE candidates</h4><p>Trend filter + live option-chain verification</p></div><span class="live-tag">ANALYSIS ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option></select></label><button class="primary" id="refreshSetupBtn">Analyse live setup</button></div><div id="setupStatus" class="hint">Load a fresh option chain and collect sufficient live quote samples. No trade setup is shown without verified data.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">“Sureshot” is the requested module name, not a profit guarantee. Entry/target/stop values are rule-based examples from the live option premium; verify liquidity, spread, expiry and risk before any decision. No orders can be placed here.</p>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY CE/PE · OHLC zones + verified option chain</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50 · Index options</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><button class="primary" id="refreshSetupBtn">Analyse verified setup</button></div><div id="setupStatus" class="hint">A setup is shown only after verified OHLC candles and option-chain data are available. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
   }
   if (tab === 'FII/DII Flow') {
     return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
@@ -349,49 +349,75 @@ function advancedScannerMarkup(tab) {
   return '<div class="movers-toolbar"><div><b>'+title+'</b><p>'+desc+'</p></div><button class="primary" id="refreshAdvancedBtn">Refresh FYERS snapshot</button></div><div id="advancedStatus" class="hint">Fetching no data until you request a verified FYERS snapshot.</div><div id="advancedTable" class="table-wrap"><div class="chart-empty">No snapshot loaded.</div></div><p class="hint">Universe: selected large-cap NSE symbols returned by FYERS Quotes API, not the entire exchange. Snapshot momentum alone does not confirm a breakout or predict future returns.</p>';
 }
 
+function sureshotZoneChart(candles, supply, demand) {
+  if(!Array.isArray(candles)||candles.length<8) return '<div class="chart-empty">At least 8 verified OHLC candles are required to map zones.</div>';
+  const rows=candles.slice(-45), highs=rows.map(x=>Number(x[2])), lows=rows.map(x=>Number(x[3]));
+  const hi=Math.max(...highs),lo=Math.min(...lows),span=hi-lo||1,w=720,h=260,pad=14;
+  const y=v=>h-pad-((v-lo)/span)*(h-pad*2),slot=(w-pad*2)/rows.length;
+  const bands=[{z:supply,fill:'#ff8198',label:'SUPPLY'},{z:demand,fill:'#5de0a2',label:'BUYER / DEMAND'}];
+  const bandSvg=bands.map(({z,fill,label})=>{if(!z)return '';const top=Math.max(0,Math.min(h,y(z.high))),bottom=Math.max(0,Math.min(h,y(z.low)));return '<rect x="'+pad+'" y="'+Math.min(top,bottom)+'" width="'+(w-pad*2)+'" height="'+Math.max(2,Math.abs(bottom-top))+'" fill="'+fill+'" opacity=".16"/><line x1="'+pad+'" y1="'+y(z.high)+'" x2="'+(w-pad)+'" y2="'+y(z.high)+'" stroke="'+fill+'" stroke-dasharray="5 4"/><text x="'+(w-pad-4)+'" y="'+(y(z.high)-4)+'" text-anchor="end" fill="'+fill+'" font-size="10">'+label+' '+formatPrice(z.high)+'–'+formatPrice(z.low)+'</text>';}).join('');
+  const candlesSvg=rows.map((x,i)=>{const o=Number(x[1]),hh=Number(x[2]),ll=Number(x[3]),c=Number(x[4]),cx=pad+i*slot+slot/2,color=c>=o?'#61f2d2':'#ff8198',by=Math.min(y(o),y(c)),bh=Math.max(1,Math.abs(y(o)-y(c)));return '<line x1="'+cx+'" y1="'+y(hh)+'" x2="'+cx+'" y2="'+y(ll)+'" stroke="'+color+'" stroke-width="1.2"/><rect x="'+(cx-slot*.28)+'" y="'+by+'" width="'+Math.max(2,slot*.56)+'" height="'+bh+'" fill="'+color+'" rx="1"/>';}).join('');
+  return '<svg class="live-chart candle-chart" viewBox="0 0 '+w+' '+h+'" role="img" aria-label="Verified FYERS candles with calculated supply and demand zones">'+bandSvg+candlesSvg+'<text x="'+pad+'" y="12" class="chart-label">HIGH '+formatPrice(hi)+'</text><text x="'+pad+'" y="'+(h-2)+'" class="chart-label">LOW '+formatPrice(lo)+'</text></svg>';
+}
+function deriveSureshotZones(candles) {
+  if(!Array.isArray(candles)||candles.length<12) return null;
+  const rows=candles.slice(-32,-1);
+  const supplyHigh=Math.max(...rows.map(x=>Number(x[2])));
+  const supplyRow=rows.find(x=>Number(x[2])===supplyHigh);
+  const supplyLow=Math.max(Number(supplyRow[1]),Number(supplyRow[4]));
+  const demandLow=Math.min(...rows.map(x=>Number(x[3])));
+  const demandRow=rows.find(x=>Number(x[3])===demandLow);
+  const demandHigh=Math.min(Number(demandRow[1]),Number(demandRow[4]));
+  return {supply:{low:Math.min(supplyLow,supplyHigh),high:supplyHigh},demand:{low:demandLow,high:Math.max(demandLow,demandHigh)}};
+}
 async function loadSureshotSetup() {
-  if (currentTab !== 'Sureshot CE/PE') return;
-  const status=document.querySelector('#setupStatus'), cards=document.querySelector('#setupCards'), symbolEl=document.querySelector('#setupSymbol');
-  if(!status||!cards||!symbolEl) return;
-  status.textContent='Checking live trend samples and requesting a verified FYERS option chain…';
-  cards.innerHTML='<div class="chart-empty">Analysing verified data…</div>';
-  const symbol=symbolEl.value;
-  const history=historyBySymbol[symbol]||[];
-  const ind=calculateIndicators(symbol);
-  const last=quoteFor(symbol);
-  let bias='NEUTRAL', reason='Need at least 20 distinct live price samples for the trend filter.';
-  if(last && ind.samples>=20 && ind.sma5!==null && ind.sma20!==null && ind.rsi14!==null) {
-    if(last.price>ind.sma5 && ind.sma5>ind.sma20 && ind.rsi14>=50 && ind.rsi14<=70) {bias='CE WATCH';reason='Upward sample trend: price > SMA5 > SMA20 and RSI in 50–70 band.';}
-    else if(last.price<ind.sma5 && ind.sma5<ind.sma20 && ind.rsi14>=30 && ind.rsi14<=50) {bias='PE WATCH';reason='Downward sample trend: price < SMA5 < SMA20 and RSI in 30–50 band.';}
-    else reason='Trend filters are mixed; no directional setup is selected.';
-  }
-  try {
-    const params=new URLSearchParams({symbol, strikecount:'10'});
-    const response=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+params.toString(),{headers:{Accept:'application/json'},cache:'no-store'});
-    const result=await response.json().catch(()=>({}));
-    if(!response.ok||result.ok!==true||!result.data) throw new Error(result.error||result.detail||'Verified option-chain data unavailable.');
-    const chain=Array.isArray(result.data.optionsChain)?result.data.optionsChain:[];
-    const spot=Number(result.data.optionsChain?.[0]?.underlying_price)||last?.price||null;
+  if(currentTab!=='Sureshot CE/PE')return;
+  const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
+  if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
+  const symbol=symbolEl.value,resolution=resolutionEl.value;
+  status.textContent='Requesting verified FYERS OHLC candles and option-chain data…';
+  cards.innerHTML='<div class="chart-empty">Checking conditions…</div>';
+  chart.innerHTML='<div class="chart-empty">Loading verified candles…</div>';
+  try{
+    const candleResponse=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol,resolution}),{headers:{Accept:'application/json'},cache:'no-store'});
+    const candleResult=await candleResponse.json().catch(()=>({}));
+    if(!candleResponse.ok||candleResult.ok!==true||!Array.isArray(candleResult.data))throw new Error(candleResult.error||candleResult.detail||'Verified historical candles unavailable.');
+    const candles=candleResult.data;
+    const zones=deriveSureshotZones(candles);
+    if(!zones)throw new Error('At least 12 verified candles are needed before zones can be calculated.');
+    const lastCandle=candles[candles.length-1],close=Number(lastCandle[4]),previous=Number(candles[candles.length-2][4]);
+    chart.innerHTML=sureshotZoneChart(candles,zones.supply,zones.demand);
+    summary.textContent='Calculated from '+candles.length+' verified FYERS candles · Supply '+formatPrice(zones.supply.low)+'–'+formatPrice(zones.supply.high)+' · Buyer/demand '+formatPrice(zones.demand.low)+'–'+formatPrice(zones.demand.high)+'. Zones are heuristic and may change as candles update.';
+    let bias='NO TRADE',reason='Price is inside the mapped zones or has not confirmed a breakout.';
+    if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
+    else if(close<zones.demand.low&&close<previous){bias='PE WATCH';reason='Latest candle closed below the calculated buyer/demand-zone low.';}
+    const optionResponse=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+new URLSearchParams({symbol,strikecount:'10'}),{headers:{Accept:'application/json'},cache:'no-store'});
+    const optionResult=await optionResponse.json().catch(()=>({}));
+    if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error(optionResult.error||optionResult.detail||'Verified option-chain data unavailable; no entry plan generated.');
+    const chain=Array.isArray(optionResult.data.optionsChain)?optionResult.data.optionsChain:[];
+    const spot=Number(chain[0]?.underlying_price)||close;
     const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
-    const atm=strikes.length&&spot ? strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]) : null;
-    const legs=chain.filter(x=>Number(x.strike_price)===atm&&['CE','PE'].includes(x.option_type));
-    const legCard=(type)=> {
-      const leg=legs.find(x=>x.option_type===type);
-      if(!leg||!(Number(leg.ltp)>0)) return '<article class="console-section"><h4>'+type+' candidate</h4><div class="chart-empty">No verified premium returned for this leg.</div></article>';
-      const premium=Number(leg.ltp), target=premium*1.15, stop=premium*0.90;
-      const preferred=(bias==='CE WATCH'&&type==='CE')||(bias==='PE WATCH'&&type==='PE');
-      return '<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+atm+'</h4><span class="signal-tone '+(preferred?'positive':'neutral')+'">'+(preferred?'FILTER MATCH':'REFERENCE')+'</span></div><strong class="console-price">₹'+formatPrice(premium)+'</strong><div class="data-row"><span>Indicative +15% target</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Indicative −10% stop</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>OI / Volume</span><b>'+displayNumber(leg.oi,0)+' / '+displayNumber(leg.volume,0)+'</b></div><p class="hint">Illustrative premium levels only; not an order or prediction.</p></article>';
-    };
-    cards.innerHTML=legCard('CE')+legCard('PE');
-    status.textContent='FYERS option chain received '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · underlying '+(last?'₹'+formatPrice(last.price):'price unavailable')+' · '+bias+'. '+reason;
-    logEvent('CE/PE setup analysis refreshed from verified option-chain data.','info');
-  } catch(error) {
-    cards.innerHTML='<div class="chart-empty">No setup generated because verified option-chain data is unavailable. '+escapeHtml(error.message||'Reconnect FYERS and retry.')+'</div>';
-    status.textContent=reason+' No premiums or signals have been invented.';
-    logEvent('CE/PE setup analysis could not verify option-chain data.','warn');
+    const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
+    const type=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
+    const leg=type&&chain.find(x=>Number(x.strike_price)===atm&&x.option_type===type&&Number(x.ltp)>0);
+    if(!type||!leg){
+      cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(reason)+'</p><p class="hint">No entry/target is issued without a confirmed breakout and a verified matching option premium.</p></article>';
+      status.textContent='NO TRADE · '+reason+' Option chain was verified; no actionable setup passed all filters.';
+      logEvent('Sureshot filtered setup: '+reason,'info');return;
+    }
+    const entry=Number(leg.ltp),stop=entry*0.90,target=entry+(entry-stop)*2,rr=(target-entry)/(entry-stop);
+    const oi=Number.isFinite(Number(leg.oi))?displayNumber(leg.oi,0):'Unavailable';
+    const volume=Number.isFinite(Number(leg.volume))?displayNumber(leg.volume,0):'Unavailable';
+    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+atm+' strike</h4><span class="signal-tone positive">'+bias+'</span></div><strong class="console-price">₹'+formatPrice(entry)+'</strong><div class="data-row"><span>Entry (option premium)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (−10%)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (+20%)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : '+rr.toFixed(2)+'</b></div><div class="data-row"><span>OI / Volume</span><b>'+oi+' / '+volume+'</b></div><p class="hint">Underlying confirmation: '+escapeHtml(reason)+' · Entry levels use the verified option premium snapshot. Spread, liquidity, expiry and slippage can change outcomes.</p></article>';
+    status.textContent='Candidate only · FYERS candles and option chain verified at '+new Date(optionResult.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+'. Not a guaranteed signal; no order placed.';
+    logEvent('Sureshot candidate built from verified OHLC zone and option-chain data.','info');
+  }catch(error){
+    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">DATA / FILTER</span></div><p>'+escapeHtml(error.message||'Required verified data unavailable.')+'</p><p class="hint">No prices or signals were invented. Retry after confirming FYERS historical-data and option-chain access.</p></article>';
+    status.textContent='No setup generated · '+(error.message||'Verified data unavailable.');
+    chart.innerHTML='<div class="chart-empty">Supply/demand chart unavailable until verified candles are returned.</div>';
+    logEvent('Sureshot withheld signal because verified data or setup conditions were unavailable.','warn');
   }
 }
-
 async function loadAdvancedScanner() {
   if(!['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(currentTab)) return;
   const status=document.querySelector('#advancedStatus'), table=document.querySelector('#advancedTable'), button=document.querySelector('#refreshAdvancedBtn');
