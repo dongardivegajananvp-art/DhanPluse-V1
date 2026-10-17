@@ -154,3 +154,6 @@ input:focus,select:focus,textarea:focus{outline:1px solid #61f2d2;box-shadow:0 0
 
 /* Sureshot supply/demand and risk plan */
 .zone-legend{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin:12px 0;color:var(--muted);font-size:11px}.zone-legend span{display:inline-flex;align-items:center;gap:7px}.zone-swatch{display:inline-block;width:10px;height:10px;border-radius:3px}.zone-swatch.supply{background:#ff8198}.zone-swatch.demand{background:#5de0a2}#setupZoneChart{border:1px solid var(--line);background:#0b1220;border-radius:12px;padding:12px;overflow:hidden}#setupZoneChart .candle-chart{max-height:320px}.zone-legend b{color:var(--cyan)}
+
+/* Trade journal safety controls */
+.journal-checks{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#0c1420}.journal-checks label{display:flex;align-items:center;gap:8px;font-size:11px;color:#c4d0e2}.journal-checks input{accent-color:#63e6d0;width:15px;height:15px}.alert-form label input[type=checkbox]{display:inline-block;width:auto;margin:0}@media(max-width:650px){.journal-checks{grid-template-columns:1fr}.alert-form{grid-template-columns:1fr}}
