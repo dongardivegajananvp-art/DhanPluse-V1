@@ -967,7 +967,7 @@ function bindTabActions() {
   }));
 }
 
-function updateQuoteCards(quotes, fetchedAt) {
+function updateQuoteCards(quotes, fetchedAt, source) {
   if (!Array.isArray(quotes)) return false;
   const map = {};
   quotes.forEach(item => {
@@ -978,8 +978,12 @@ function updateQuoteCards(quotes, fetchedAt) {
           price: price,
           change: Number.isFinite(Number(item.v.ch)) ? Number(item.v.ch) : null,
           changePct: Number.isFinite(Number(item.v.chp)) ? Number(item.v.chp) : null,
-          receivedAt: Number.isFinite(Date.parse(fetchedAt)) ? Date.parse(fetchedAt) : Date.now(),
-          sourceTime: fetchedAt || null
+          receivedAt: Number.isFinite(Number(item.v.tt)) && Number(item.v.tt) > 0
+            ? (Number(item.v.tt) > 1e12 ? Number(item.v.tt) : Number(item.v.tt) * 1000)
+            : (source === 'websocket' && Number.isFinite(Date.parse(fetchedAt)) ? Date.parse(fetchedAt) : 0),
+          sourceTime: Number.isFinite(Number(item.v.tt)) && Number(item.v.tt) > 0
+            ? new Date(Number(item.v.tt) > 1e12 ? Number(item.v.tt) : Number(item.v.tt) * 1000).toISOString()
+            : (source === 'websocket' ? fetchedAt || null : null)
         };
       }
     }
@@ -1229,7 +1233,7 @@ async function fetchLiveQuotes() {
       return;
     }
     quotePollDelay = QUOTE_POLL_MS;
-    if (!updateQuoteCards(data.data, data.fetchedAt)) {
+    if (!updateQuoteCards(data.data, data.fetchedAt, data.source)) {
       setStatus('INCOMPLETE QUOTE RESPONSE');
       showMessage('Both expected index quotes were not present. No new values were applied.', true);
       logEvent('Quote response was incomplete.', 'warn');
