@@ -1,4 +1,22 @@
+
 const BACKEND_URL = 'https://dhanpluse-v1.onrender.com';
+// The FYERS access token stays on the backend. This opaque session token only
+// authorizes this browser session to read protected dashboard APIs.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = function(input, init = {}) {
+  let url = '';
+  try { url = new URL(typeof input === 'string' ? input : input.url, window.location.href).href; } catch {}
+  const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+  const isBackend = url.startsWith(BACKEND_URL + '/');
+  const publicPaths = ['/health', '/api/status', '/api/fyers/auth/start', '/api/fyers/auth/exchange'];
+  const pathname = isBackend ? new URL(url).pathname : '';
+  if (isBackend && !publicPaths.includes(pathname)) {
+    const session = sessionStorage.getItem('dhanpulse-dashboard-session-v1');
+    if (session) headers.set('Authorization', 'Bearer ' + session);
+  }
+  return nativeFetch(input, { ...init, headers });
+};
+
 const QUOTE_POLL_MS = 1500;
 const QUOTE_POLL_MAX_MS = 10000;
 const SYMBOLS = [
@@ -177,7 +195,60 @@ function calculateIndicators(symbol) {
   return { samples: values.length, last: last, sma5: sma(5), sma20: sma(20), rsi14: rsi, changes: changes };
 }
 
+function signalDataBlockReason(symbol) {
+  const quote = quoteFor(symbol);
+  if (!isRegularMarketSession()) return 'Market session is closed or outside NSE regular hours; no actionable signal.';
+  if (!quote || !Number.isFinite(quote.price) || quote.price <= 0) return 'Verified quote is missing; no signal.';
+  if (quoteAgeMs(quote) > 15000) return 'Quote is stale (>15 seconds); no signal.';
+  const other = SYMBOLS.find(item => item.symbol !== symbol);
+  const otherQuote = other ? quoteFor(other.symbol) : null;
+  if (!otherQuote || !Number.isFinite(otherQuote.price) || quoteAgeMs(otherQuote) > 15000) return 'Both index quotes are not fresh; signal blocked.';
+  return '';
+}
+
+function validateOhlcCandles(candles, resolution) {
+  if (!Array.isArray(candles) || candles.length < 12) return 'At least 12 OHLC candles are required.';
+  let previousTime = -Infinity;
+  for (const row of candles) {
+    if (!Array.isArray(row) || row.length < 5) return 'Candle row is incomplete.';
+    const time = Number(row[0]), open = Number(row[1]), high = Number(row[2]), low = Number(row[3]), close = Number(row[4]);
+    if (![time, open, high, low, close].every(Number.isFinite) || time <= 0 || Math.min(open, high, low, close) <= 0) return 'Candle data contains missing or invalid numbers.';
+    if (high < Math.max(open, close, low) || low > Math.min(open, close, high)) return 'OHLC values are inconsistent; signal blocked.';
+    if (time <= previousTime) return 'Candle timestamps are duplicated or out of order.';
+    previousTime = time;
+  }
+  if (isRegularMarketSession()) {
+    const lastTimeMs = Number(candles[candles.length - 1][0]) * 1000;
+    const maxAgeMs = resolution === 'D' ? 36 * 60 * 60 * 1000 : (Number(resolution) || 5) * 60 * 1000 * 3;
+    if (Date.now() - lastTimeMs > maxAgeMs) return 'Latest candle is stale for this interval; signal blocked.';
+  }
+  return '';
+}
+
+function validateOptionChainPayload(payload) {
+  if (!payload || !Array.isArray(payload.optionsChain) || !payload.optionsChain.length) return 'Option-chain rows are missing; no option signal.';
+  const spot = Number(payload.optionsChain.find(row => Number(row.underlying_price) > 0)?.underlying_price ?? payload.underlying_price);
+  if (!Number.isFinite(spot) || spot <= 0) return 'Verified underlying spot is missing from option-chain response.';
+  const normalized = payload.optionsChain.map(row => {
+    if (!row || !Number.isFinite(Number(row.strike_price)) || Number(row.strike_price) <= 0) return null;
+    const type = String(row.option_type || '').toUpperCase();
+    const ltp = Number(row.ltp), bid = Number(row.bid ?? row.bid_price ?? row.bidPrice), ask = Number(row.ask ?? row.ask_price ?? row.askPrice);
+    const oi = Number(row.oi), volume = Number(row.volume);
+    const expiry = row.expiry ?? row.expiry_date ?? row.expiryDate;
+    if (!['CE','PE','CALL','PUT'].includes(type) || !Number.isFinite(ltp) || ltp <= 0 ||
+        !Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask < bid ||
+        !Number.isFinite(oi) || oi < 0 || !Number.isFinite(volume) || volume < 0 || !expiry) return null;
+    const spreadPct = ((ask - bid) / ((ask + bid) / 2)) * 100;
+    return { ...row, option_type: type === 'CALL' ? 'CE' : type === 'PUT' ? 'PE' : type,
+      strike_price: Number(row.strike_price), ltp, bid, ask, oi, volume, expiry: String(expiry), spreadPct };
+  }).filter(Boolean);
+  if (!normalized.length) return 'No option row passed strike, expiry, bid/ask, OI and volume validation.';
+  return { spot, chain: normalized };
+}
+
 function signalFor(symbol) {
+  const blocked = signalDataBlockReason(symbol);
+  if (blocked) return { label: 'NO TRADE · DATA BLOCKED', detail: blocked, tone: 'negative' };
   const data = calculateIndicators(symbol);
   if (data.samples < 5 || data.changes.length < 4) {
     return { label: 'Collecting data', detail: 'Need more live quote samples before summarising momentum.', tone: 'neutral' };
@@ -383,13 +454,16 @@ async function loadSureshotSetup() {
     const candleResult=await candleResponse.json().catch(()=>({}));
     if(!candleResponse.ok||candleResult.ok!==true||!Array.isArray(candleResult.data))throw new Error(candleResult.error||candleResult.detail||'Verified historical candles unavailable.');
     const candles=candleResult.data;
+    const candleError=validateOhlcCandles(candles,resolution);
+    if(candleError)throw new Error(candleError);
     const zones=deriveSureshotZones(candles);
     if(!zones)throw new Error('At least 12 verified candles are needed before zones can be calculated.');
     const lastCandle=candles[candles.length-1],close=Number(lastCandle[4]),previous=Number(candles[candles.length-2][4]);
     chart.innerHTML=sureshotZoneChart(candles,zones.supply,zones.demand);
     summary.textContent='Calculated from '+candles.length+' verified FYERS candles · Supply '+formatPrice(zones.supply.low)+'–'+formatPrice(zones.supply.high)+' · Buyer/demand '+formatPrice(zones.demand.low)+'–'+formatPrice(zones.demand.high)+'. Zones are heuristic and may change as candles update.';
     let bias='NO TRADE',reason='Price is inside the mapped zones or has not confirmed a breakout.';
-    if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
+    if(!isRegularMarketSession()){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
+    else if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
     else if(close<zones.demand.low&&close<previous){bias='PE WATCH';reason='Latest candle closed below the calculated buyer/demand-zone low.';}
     if(symbol.endsWith('-EQ')) {
       if(bias==='NO TRADE') {
@@ -410,21 +484,25 @@ async function loadSureshotSetup() {
     const optionResponse=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+new URLSearchParams({symbol,strikecount:'10'}),{headers:{Accept:'application/json'},cache:'no-store'});
     const optionResult=await optionResponse.json().catch(()=>({}));
     if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error(optionResult.error||optionResult.detail||'Verified option-chain data unavailable; no entry plan generated.');
-    const chain=Array.isArray(optionResult.data.optionsChain)?optionResult.data.optionsChain:[];
-    const spot=Number(chain[0]?.underlying_price)||close;
+    const chainCheck=validateOptionChainPayload(optionResult.data);
+    if(typeof chainCheck==='string')throw new Error(chainCheck);
+    const chain=chainCheck.chain;
+    const spot=chainCheck.spot;
+    const fetchedAt=Date.parse(optionResult.fetchedAt||'');
+    if(!Number.isFinite(fetchedAt)||Date.now()-fetchedAt>15000||fetchedAt>Date.now()+5000)throw new Error('Option-chain snapshot timestamp is stale or invalid; no signal.');
     const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
     const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
     const type=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
-    const leg=type&&chain.find(x=>Number(x.strike_price)===atm&&x.option_type===type&&Number(x.ltp)>0);
+    const leg=type&&chain.find(x=>Number(x.strike_price)===atm&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0);
     if(!type||!leg){
       cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(reason)+'</p><p class="hint">No entry/target is issued without a confirmed breakout and a verified matching option premium.</p></article>';
       status.textContent='NO TRADE · '+reason+' Option chain was verified; no actionable setup passed all filters.';
       logEvent('Sureshot filtered setup: '+reason,'info');return;
     }
     const entry=Number(leg.ltp),stop=entry*0.90,target=entry+(entry-stop)*2,rr=(target-entry)/(entry-stop);
-    const oi=Number.isFinite(Number(leg.oi))?displayNumber(leg.oi,0):'Unavailable';
-    const volume=Number.isFinite(Number(leg.volume))?displayNumber(leg.volume,0):'Unavailable';
-    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+atm+' strike</h4><span class="signal-tone positive">'+bias+'</span></div><strong class="console-price">₹'+formatPrice(entry)+'</strong><div class="data-row"><span>Entry (option premium)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (−10%)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (+20%)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : '+rr.toFixed(2)+'</b></div><div class="data-row"><span>OI / Volume</span><b>'+oi+' / '+volume+'</b></div><p class="hint">Underlying confirmation: '+escapeHtml(reason)+' · Entry levels use the verified option premium snapshot. Spread, liquidity, expiry and slippage can change outcomes.</p></article>';
+    const oi=displayNumber(leg.oi,0);
+    const volume=displayNumber(leg.volume,0);
+    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+atm+' strike</h4><span class="signal-tone positive">'+bias+'</span></div><strong class="console-price">₹'+formatPrice(entry)+'</strong><div class="data-row"><span>Entry (option premium)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (−10%)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (+20%)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : '+rr.toFixed(2)+'</b></div><div class="data-row"><span>Bid / Ask</span><b>₹'+formatPrice(leg.bid)+' / ₹'+formatPrice(leg.ask)+'</b></div><div class="data-row"><span>Spread</span><b>'+leg.spreadPct.toFixed(2)+'%</b></div><div class="data-row"><span>Expiry</span><b>'+escapeHtml(leg.expiry)+'</b></div><div class="data-row"><span>OI / Volume</span><b>'+oi+' / '+volume+'</b></div><p class="hint">Underlying confirmation: '+escapeHtml(reason)+' · Entry levels use the verified option premium snapshot. Spread, liquidity, expiry and slippage can change outcomes.</p></article>';
     status.textContent='Candidate only · FYERS candles and option chain verified at '+new Date(optionResult.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+'. Not a guaranteed signal; no order placed.';
     logEvent('Sureshot candidate built from verified OHLC zone and option-chain data.','info');
   }catch(error){
@@ -889,7 +967,7 @@ function bindTabActions() {
   }));
 }
 
-function updateQuoteCards(quotes, fetchedAt) {
+function updateQuoteCards(quotes, fetchedAt, source) {
   if (!Array.isArray(quotes)) return false;
   const map = {};
   quotes.forEach(item => {
@@ -900,8 +978,12 @@ function updateQuoteCards(quotes, fetchedAt) {
           price: price,
           change: Number.isFinite(Number(item.v.ch)) ? Number(item.v.ch) : null,
           changePct: Number.isFinite(Number(item.v.chp)) ? Number(item.v.chp) : null,
-          receivedAt: Number.isFinite(Date.parse(fetchedAt)) ? Date.parse(fetchedAt) : Date.now(),
-          sourceTime: fetchedAt || null
+          receivedAt: Number.isFinite(Number(item.v.tt)) && Number(item.v.tt) > 0
+            ? (Number(item.v.tt) > 1e12 ? Number(item.v.tt) : Number(item.v.tt) * 1000)
+            : (source === 'websocket' && Number.isFinite(Date.parse(fetchedAt)) ? Date.parse(fetchedAt) : 0),
+          sourceTime: Number.isFinite(Number(item.v.tt)) && Number(item.v.tt) > 0
+            ? new Date(Number(item.v.tt) > 1e12 ? Number(item.v.tt) : Number(item.v.tt) * 1000).toISOString()
+            : (source === 'websocket' ? fetchedAt || null : null)
         };
       }
     }
@@ -1151,7 +1233,7 @@ async function fetchLiveQuotes() {
       return;
     }
     quotePollDelay = QUOTE_POLL_MS;
-    if (!updateQuoteCards(data.data, data.fetchedAt)) {
+    if (!updateQuoteCards(data.data, data.fetchedAt, data.source)) {
       setStatus('INCOMPLETE QUOTE RESPONSE');
       showMessage('Both expected index quotes were not present. No new values were applied.', true);
       logEvent('Quote response was incomplete.', 'warn');
@@ -1195,7 +1277,8 @@ async function exchangeAuthCode() {
       body: JSON.stringify({ code: code, state: state })
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.ok !== true) throw new Error(data.error || data.detail || 'Authentication failed.');
+    if (!response.ok || data.ok !== true || !data.dashboardSessionToken) throw new Error(data.error || data.detail || 'Authentication failed or session was not issued.');
+    sessionStorage.setItem('dhanpulse-dashboard-session-v1', data.dashboardSessionToken);
     logEvent('FYERS authentication succeeded; checking live quotes.', 'info');
     showMessage('FYERS authentication succeeded. Verifying live quotes…');
     await fetchLiveQuotes();

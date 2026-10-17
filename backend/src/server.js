@@ -45,6 +45,8 @@ let accessToken = '';
 let authenticatedAt = null;
 const pendingAuthStates = new Map();
 const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const dashboardSessions = new Map();
+const DASHBOARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 let marketSocket = null;
 let streamConnected = false;
 let streamError = '';
@@ -144,6 +146,23 @@ function startMarketDataStream(token) {
   }
 }
 
+function nseRegularSessionNow() {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
+  const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const minute = Number(fields.hour) * 60 + Number(fields.minute);
+  return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(fields.weekday) && minute >= 555 && minute < 930;
+}
+
+function epochSeconds(value) {
+  if (typeof value === 'number' || (typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value))) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.floor(n > 1e12 ? n / 1000 : n);
+  }
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed / 1000) : null;
+}
+
 function liveSnapshot() {
   const ticks = allowedSymbols.map(symbol => latestTicks.get(symbol));
   if (ticks.some(tick => !tick)) return null;
@@ -157,6 +176,7 @@ function liveSnapshot() {
       n: tick.symbol,
       v: {
         lp: tick.ltp,
+        tt: epochSeconds(tick.updatedAt),
         ...(tick.ch === null ? {} : { ch: tick.ch }),
         ...(tick.chp === null ? {} : { chp: tick.chp })
       }
@@ -208,6 +228,27 @@ app.get('/api/status', (_req, res) => {
     orderPlacement: 'disabled'
   });
 });
+
+function requireDashboardSession(req, res, next) {
+  const header = String(req.get('authorization') || '');
+  const match = /^Bearer ([a-f0-9]{64})$/.exec(header);
+  const token = match ? match[1] : '';
+  const session = token ? dashboardSessions.get(token) : null;
+  if (!session || Date.now() - session.createdAt > DASHBOARD_SESSION_TTL_MS || !accessToken) {
+    if (token) dashboardSessions.delete(token);
+    return res.status(401).json({ ok: false, error: 'Dashboard session missing or expired. Reconnect FYERS.' });
+  }
+  session.lastSeenAt = Date.now();
+  return next();
+}
+
+// Browser requests must prove they completed the FYERS OAuth flow before
+// receiving quotes, historical candles, option-chain, holdings or positions.
+// CORS is not authentication; this short-lived opaque session token is.
+app.use('/api/market', requireDashboardSession);
+app.use('/api/fyers/options-chain', requireDashboardSession);
+app.use('/api/fyers/holdings', requireDashboardSession);
+app.use('/api/fyers/positions', requireDashboardSession);
 
 app.get('/api/fyers/auth/start', (_req, res) => {
   if (!appId || !redirectUri) {
@@ -272,6 +313,9 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
     }
 
     accessToken = data.access_token;
+    dashboardSessions.clear();
+    const dashboardSessionToken = crypto.randomBytes(32).toString('hex');
+    dashboardSessions.set(dashboardSessionToken, { createdAt: Date.now(), lastSeenAt: Date.now() });
     authenticatedAt = new Date().toISOString();
     restQuoteCache = null;
     restQuoteFetchedAt = 0;
@@ -281,6 +325,7 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
       ok: true,
       fyers: 'connected',
       liveData: 'connecting',
+      dashboardSessionToken,
       authenticatedAt
     });
   } catch {
@@ -323,10 +368,12 @@ app.get('/api/market/quotes', async (_req, res) => {
           if (!allowedSymbols.includes(symbol) || !Number.isFinite(lp) || lp <= 0) return null;
           const ch = Number(value.ch);
           const chp = Number(value.chp);
+          const tt = epochSeconds(value.tt ?? value.ltt ?? value.last_trade_time);
           return {
             n: symbol,
             v: {
               lp,
+              ...(tt ? { tt } : {}),
               ...(Number.isFinite(ch) ? { ch } : {}),
               ...(Number.isFinite(chp) ? { chp } : {})
             }
@@ -336,6 +383,10 @@ app.get('/api/market/quotes', async (_req, res) => {
         if (allowedSymbols.some(symbol => !rows.some(item => (item?.n || item?.symbol || item?.v?.symbol) === symbol)) ||
             allowedSymbols.some(symbol => !normalized.some(item => item.n === symbol))) {
           throw new Error('FYERS Quotes API did not return both configured index symbols.');
+        }
+
+        if (nseRegularSessionNow() && normalized.some(item => !item.v.tt || Date.now() - item.v.tt * 1000 > 120000 || item.v.tt * 1000 > Date.now() + 5000)) {
+          throw new Error('FYERS Quotes API did not provide a recent exchange trade timestamp for every index. Live signal blocked.');
         }
 
         const payload = {
