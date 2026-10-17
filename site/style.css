@@ -136,3 +136,7 @@ input:focus,select:focus,textarea:focus{outline:1px solid #61f2d2;box-shadow:0 0
 #mainTabChart .live-chart{width:100%;height:auto;display:block;min-height:160px}
 @media(max-width:900px){.sidebar{max-height:none;overflow:visible}#nav{display:flex;flex-wrap:wrap;overflow:visible;gap:6px;padding-bottom:10px}#nav button{flex:1 1 auto;min-width:max-content;white-space:nowrap}.grid .panel.large .empty{padding:16px}}
 @media(max-width:520px){#nav button{font-size:11px;padding:8px 10px}.main-chart-wrap{padding:9px}.main-chart-title{font-size:9px}}
+
+
+/* Mobile: show every workspace tab without horizontal scrolling */
+@media(max-width:520px){#nav{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;overflow:visible!important;padding:2px 0 12px}#nav button{width:100%;min-width:0;white-space:normal;text-align:left;line-height:1.25;padding:10px 9px;font-size:11px;min-height:40px;transform:none!important}.sidebar{height:auto;max-height:none;overflow:visible}}
