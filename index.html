@@ -3,12 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="0; url=site/">
-<link rel="canonical" href="site/">
+<meta name="description" content="DhanPulse Ultimate — verified FYERS market dashboard">
 <title>DhanPulse Ultimate — FYERS</title>
-<script>window.location.replace(new URL('site/', window.location.href).href);</script>
+<link rel="canonical" href="site/">
+<script>
+(function () {
+  // Preserve FYERS OAuth callback parameters while forwarding to the app.
+  var target = new URL('site/', window.location.href);
+  target.search = window.location.search;
+  target.hash = window.location.hash;
+  window.location.replace(target.href);
+})();
+</script>
+<noscript><meta http-equiv="refresh" content="0; url=site/"></noscript>
 </head>
 <body>
-<p>Opening DhanPulse dashboard… <a href="site/">Tap here if it does not open automatically.</a></p>
+<p>Opening DhanPulse dashboard… <a id="continue" href="site/">Tap here if it does not open automatically.</a></p>
+<script>
+var link = document.getElementById('continue');
+if (link) link.href = new URL('site/', window.location.href).pathname + window.location.search + window.location.hash;
+</script>
 </body>
 </html>
