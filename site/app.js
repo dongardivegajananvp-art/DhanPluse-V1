@@ -728,6 +728,11 @@ function renderLogs() {
 function render(tab) {
   if (!descriptions[tab]) return;
   currentTab = tab;
+  const dashboardMode = tab === 'Dashboard';
+  ['.welcome', '.metrics', '.grid'].forEach(selector => {
+    const section = document.querySelector(selector);
+    if (section) section.style.display = dashboardMode ? '' : 'none';
+  });
   title.textContent = tab;
   panelTitle.textContent = descriptions[tab][0];
   featureTitle.textContent = tab === 'Dashboard' ? 'Live console' : tab;
