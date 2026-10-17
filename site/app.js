@@ -1,4 +1,22 @@
+
 const BACKEND_URL = 'https://dhanpluse-v1.onrender.com';
+// The FYERS access token stays on the backend. This opaque session token only
+// authorizes this browser session to read protected dashboard APIs.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = function(input, init = {}) {
+  let url = '';
+  try { url = new URL(typeof input === 'string' ? input : input.url, window.location.href).href; } catch {}
+  const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+  const isBackend = url.startsWith(BACKEND_URL + '/');
+  const publicPaths = ['/health', '/api/status', '/api/fyers/auth/start', '/api/fyers/auth/exchange'];
+  const pathname = isBackend ? new URL(url).pathname : '';
+  if (isBackend && !publicPaths.includes(pathname)) {
+    const session = sessionStorage.getItem('dhanpulse-dashboard-session-v1');
+    if (session) headers.set('Authorization', 'Bearer ' + session);
+  }
+  return nativeFetch(input, { ...init, headers });
+};
+
 const QUOTE_POLL_MS = 1500;
 const QUOTE_POLL_MAX_MS = 10000;
 const SYMBOLS = [
@@ -1230,7 +1248,8 @@ async function exchangeAuthCode() {
       body: JSON.stringify({ code: code, state: state })
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.ok !== true) throw new Error(data.error || data.detail || 'Authentication failed.');
+    if (!response.ok || data.ok !== true || !data.dashboardSessionToken) throw new Error(data.error || data.detail || 'Authentication failed or session was not issued.');
+    sessionStorage.setItem('dhanpulse-dashboard-session-v1', data.dashboardSessionToken);
     logEvent('FYERS authentication succeeded; checking live quotes.', 'info');
     showMessage('FYERS authentication succeeded. Verifying live quotes…');
     await fetchLiveQuotes();
