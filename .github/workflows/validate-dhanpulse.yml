@@ -23,6 +23,7 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check site/app.js
+          node --check site/journal.js
           node --check backend/src/server.js
           node --check site/sw.js
       - name: Validate PWA manifest and required assets
@@ -31,6 +32,7 @@ jobs:
           test -s site/index.html
           test -s site/style.css
           test -s site/app.js
+          test -s site/journal.js
           test -s site/sw.js
           test -s site/dhanpulse-icon.svg
           grep -q 'publish = "site"' netlify.toml
