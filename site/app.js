@@ -696,6 +696,21 @@ function render(tab) {
   featureTitle.textContent = tab === 'Dashboard' ? 'Live console' : tab;
   featureDesc.textContent = descriptions[tab][1];
   nav.querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
+  const mainPanel = document.querySelector('.grid .panel.large .empty');
+  if (mainPanel) {
+    const symbol = tab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
+    mainPanel.innerHTML = '<div class="main-view-heading"><span class="eyebrow">DHANPULSE WORKSPACE</span><h2>' + escapeHtml(tab) + '</h2><p>' + escapeHtml(descriptions[tab][1]) + '</p></div><div class="main-chart-wrap"><div class="main-chart-title"><span>' + escapeHtml(tab === 'BANKNIFTY' ? 'BANK NIFTY' : 'NIFTY 50') + ' · RECENT PRICE CHART</span><span class="tag">VERIFIED DATA ONLY</span></div><div id="mainTabChart">' + svgChart(symbol, 230) + '</div></div><p class="main-view-note" id="mainViewNote">Chart draws from verified FYERS data received by this session. Historical candles appear in Charts & Patterns after the API returns them.</p><button class="primary" id="mainPanelAction">' + (tab === 'FYERS Settings' ? 'Connect FYERS' : tab === 'Charts & Patterns' ? 'Load historical candles' : tab === 'Technical Indicators' ? 'Refresh indicators' : 'Refresh live data') + '</button>';
+    const action = document.querySelector('#mainPanelAction');
+    if (action) action.addEventListener('click', () => {
+      if (currentTab === 'FYERS Settings') startFyersLogin();
+      else if (currentTab === 'Charts & Patterns') loadCandles();
+      else if (currentTab === 'Technical Indicators') loadTechnicalIndicators();
+      else if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(currentTab)) loadAdvancedScanner();
+      else if (currentTab === 'Gainers & Losers') loadMovers();
+      else if (currentTab === 'Option Chain') loadOptionChain();
+      else fetchLiveQuotes();
+    });
+  }
   if (tab === 'Dashboard') featureContent.innerHTML = dashboardMarkup();
   else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
   else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
@@ -860,7 +875,7 @@ function summarizeCandles(candles) {
   else if(Number(last[2])<Number(prev[2])&&Number(last[3])<Number(prev[3])&&Number(prev[2])<Number(prior[2])) note='Recent candles show lower highs and lower lows — downward structure candidate.';
   return note+' Latest OHLC: O '+formatPrice(last[1])+' · H '+formatPrice(last[2])+' · L '+formatPrice(last[3])+' · C '+formatPrice(close)+'.';
 }
-async function loadCandles() {
+async async function loadCandles() {
   const se=document.querySelector('#patternSymbol'),re=document.querySelector('#patternResolution'),status=document.querySelector('#patternStatus'),chart=document.querySelector('#patternChart'),summary=document.querySelector('#patternSummary'),table=document.querySelector('#candleTable');
   if(!se||!re||!status||!chart||!summary||!table)return;
   status.textContent='Requesting verified historical OHLC candles from FYERS…';chart.innerHTML='<div class="chart-empty">Loading candles…</div>';table.innerHTML='';
@@ -869,11 +884,11 @@ async function loadCandles() {
     const response=await fetch(BACKEND_URL+'/api/market/candles?'+params.toString(),{headers:{Accept:'application/json'},cache:'no-store'});
     const result=await response.json().catch(()=>({}));
     if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||result.detail||'Historical candles unavailable.');
-    const rows=result.data;chart.innerHTML=candleSvg(rows);summary.textContent=summarizeCandles(rows);
+    const rows=result.data;chart.innerHTML=candleSvg(rows);summary.textContent=summarizeCandles(rows);const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML=candleSvg(rows);const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='Historical OHLC candles returned by FYERS. '+rows.length+' candles loaded; chart is based on those candles.';
     table.innerHTML=rows.length?'<table class="console-table"><thead><tr><th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody>'+rows.slice(-12).reverse().map(row=>'<tr><td>'+escapeHtml(new Date(Number(row[0])*1000).toLocaleString('en-IN'))+'</td>'+row.slice(1,6).map((v,i)=>'<td>'+displayNumber(v,i===4?0:2)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="chart-empty">FYERS returned no candles for this range.</div>';
     status.textContent='Verified FYERS history response · '+rows.length+' candles · '+re.value+' interval · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
     logEvent('Historical candles loaded for '+se.value+' ('+rows.length+').','info');
-  }catch(error){status.textContent=(error.message||'Historical candles unavailable.')+' No chart values were fabricated.';chart.innerHTML='<div class="chart-empty">Verified candles unavailable.</div>';summary.textContent='Pattern analysis withheld until verified OHLC data is available.';table.innerHTML='';logEvent('Historical candle request failed.','warn');}
+  }catch(error){status.textContent=(error.message||'Historical candles unavailable.')+' No chart values were fabricated.';chart.innerHTML='<div class="chart-empty">Verified candles unavailable.</div>';summary.textContent='Pattern analysis withheld until verified OHLC data is available.';const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML='<div class="chart-empty">Historical chart unavailable until FYERS returns verified candles.</div>';const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='No candle values were fabricated. Check FYERS connection and historical-data access.';table.innerHTML='';logEvent('Historical candle request failed.','warn');}
 }
 
 function updateDynamicPanel() {
@@ -891,6 +906,11 @@ function updateDynamicPanel() {
     const mini = featureContent.querySelector('[data-mini-symbol="' + item.symbol + '"]');
     if (mini) mini.innerHTML = svgChart(item.symbol, 80);
   });
+  const mainTabChart = document.querySelector('#mainTabChart');
+  if (mainTabChart && currentTab !== 'Charts & Patterns') {
+    const activeSymbol = currentTab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
+    mainTabChart.innerHTML = svgChart(activeSymbol, 230);
+  }
   const dashboardChart = document.querySelector('#dashboardChart');
   if (dashboardChart) dashboardChart.innerHTML = svgChart(SYMBOLS[0].symbol, 210);
   const focusChart = document.querySelector('#focusChart');
