@@ -875,7 +875,7 @@ function summarizeCandles(candles) {
   else if(Number(last[2])<Number(prev[2])&&Number(last[3])<Number(prev[3])&&Number(prev[2])<Number(prior[2])) note='Recent candles show lower highs and lower lows — downward structure candidate.';
   return note+' Latest OHLC: O '+formatPrice(last[1])+' · H '+formatPrice(last[2])+' · L '+formatPrice(last[3])+' · C '+formatPrice(close)+'.';
 }
-async async function loadCandles() {
+async function loadCandles() {
   const se=document.querySelector('#patternSymbol'),re=document.querySelector('#patternResolution'),status=document.querySelector('#patternStatus'),chart=document.querySelector('#patternChart'),summary=document.querySelector('#patternSummary'),table=document.querySelector('#candleTable');
   if(!se||!re||!status||!chart||!summary||!table)return;
   status.textContent='Requesting verified historical OHLC candles from FYERS…';chart.innerHTML='<div class="chart-empty">Loading candles…</div>';table.innerHTML='';
