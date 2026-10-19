@@ -68,12 +68,25 @@ function parseTick(raw) {
     const ltp = Number(item.ltp ?? item.lp ?? item.v?.lp);
     if (!allowedSymbols.includes(symbol) || !Number.isFinite(ltp) || ltp <= 0) continue;
 
+    // Use the exchange feed timestamp, not the time this server received the
+    // message. FYERS can send the last known index snapshot after reconnecting
+    // when the market is closed; stamping that replay with "now" falsely makes
+    // an old quote look live.
+    const exchangeTime = epochSeconds(
+      item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt
+    );
+    if (!exchangeTime) {
+      console.warn('FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
+      continue;
+    }
+
     latestTicks.set(symbol, {
       symbol,
       ltp,
       ch: Number.isFinite(Number(item.ch)) ? Number(item.ch) : null,
       chp: Number.isFinite(Number(item.chp)) ? Number(item.chp) : null,
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date(exchangeTime * 1000).toISOString(),
+      receivedAt: new Date().toISOString()
     });
   }
 }
@@ -99,7 +112,8 @@ function startMarketDataStream(token) {
       console.log('FYERS market socket connected; subscribing to configured index symbols.');
       try {
         socket.subscribe(allowedSymbols);
-        socket.mode(socket.LiteMode);
+        // Full mode preserves exch_feed_time so replayed after-hours snapshots cannot masquerade as live ticks.
+        socket.mode(socket.FullMode);
         console.log('FYERS market socket subscription request sent.');
       } catch (error) {
         streamError = 'Could not subscribe to FYERS index symbols.';
