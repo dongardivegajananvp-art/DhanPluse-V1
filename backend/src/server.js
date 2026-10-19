@@ -411,7 +411,7 @@ async function fyersReadOnlyGet(url) {
   try { data = responseText ? JSON.parse(responseText) : {}; } catch {}
   const retryAfterHeader = response.headers.get('retry-after');
   if (response.status === 429) {
-    const retryAfterSeconds = retryAfterHeader && /^\\d+(?:\\.\\d+)?$/.test(retryAfterHeader)
+    const retryAfterSeconds = retryAfterHeader && /^\d+(?:\.\d+)?$/.test(retryAfterHeader)
       ? Math.ceil(Number(retryAfterHeader))
       : 0;
     const backoffMs = retryAfterSeconds > 0
@@ -430,7 +430,7 @@ async function fyersReadOnlyGet(url) {
     const upstreamCode = data.code == null ? 'n/a' : String(data.code);
     const message = upstreamMessage
       ? String(upstreamMessage).slice(0, 150)
-      : (responseText ? responseText.replace(/\\s+/g, ' ').slice(0, 150) : 'FYERS API returned no error message.');
+      : (responseText ? responseText.replace(/\s+/g, ' ').slice(0, 150) : 'FYERS API returned no error message.');
     const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}${retryAfterHeader ? `, Retry-After ${retryAfterHeader}` : ''}): ${message}`.slice(0, 220));
     error.statusCode = response.status === 429 ? 429 : (response.status === 401 || data.code === -16 ? 401 : 502);
     console.warn('FYERS read-only request failed:', JSON.stringify({
