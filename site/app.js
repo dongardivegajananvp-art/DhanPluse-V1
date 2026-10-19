@@ -331,9 +331,50 @@ function quoteCardsMarkup() {
 }
 
 function stockExplorerMarkup() {
-  return '<div class="console-section"><div class="console-section-head"><div><h4>Stock Explorer</h4><p>Search the starter universe and jump to a research tool. Live prices are not invented.</p></div><span class="live-tag">FYERS-READY</span></div>' +
-    '<div class="explorer-controls"><label for="stockSearch">Search symbol or company</label><input id="stockSearch" type="search" placeholder="Try NIFTY, BANKNIFTY, RELIANCE, INFY…" autocomplete="off"><label for="stockCategory">Category</label><select id="stockCategory"><option value="all">All supported symbols</option><option value="index">Indices</option><option value="equity">Equity research</option></select></div>' +
-    '<div id="stockExplorerResults" class="explorer-grid"></div><p class="hint">Starter list is for navigation and research only. Only NIFTY 50 and BANK NIFTY are currently configured for the live quote stream; equity quote support depends on backend subscription and permissions.</p></div>';
+  return '<div class="console-section"><div class="console-section-head"><div><h4>Stock Explorer</h4><p>Equity prices are fetched as verified FYERS quote snapshots. No prices are invented.</p></div><span class="live-tag">FYERS-READY</span></div>' +
+    '<div class="explorer-controls"><label for="stockSearch">Search symbol or company</label><input id="stockSearch" type="search" placeholder="Try NIFTY, BANKNIFTY, RELIANCE, INFY…" autocomplete="off"><label for="stockCategory">Category</label><select id="stockCategory"><option value="all">All supported symbols</option><option value="index">Indices</option><option value="equity">Equity research</option></select><button class="secondary" id="refreshStockQuotesBtn">Refresh equity quotes</button></div>' +
+    '<div id="stockExplorerStatus" class="hint">Requesting a verified FYERS equity snapshot…</div><div id="stockExplorerResults" class="explorer-grid"></div><p class="hint">Index cards use the live stream; equity cards use the authenticated FYERS Quotes API snapshot. Quote availability depends on the symbols returned by FYERS and your API permissions.</p></div>';
+}
+
+let stockExplorerRequestRunning = false;
+
+async function loadStockExplorerQuotes() {
+  if (stockExplorerRequestRunning || currentTab !== 'Stock Explorer') return;
+  const status = document.querySelector('#stockExplorerStatus');
+  const button = document.querySelector('#refreshStockQuotesBtn');
+  if (!status) return;
+  stockExplorerRequestRunning = true;
+  if (button) button.disabled = true;
+  status.textContent = 'Requesting verified equity quotes from FYERS…';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/movers', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
+      throw new Error(result.detail || result.error || 'FYERS equity snapshot unavailable.');
+    }
+    stockExplorerMoverRows = result.data.filter(row =>
+      row && typeof row.symbol === 'string' &&
+      Number.isFinite(Number(row.price)) && Number(row.price) > 0 &&
+      Number.isFinite(Number(row.changePct))
+    );
+    renderStockExplorerResults();
+    const count = Number(result.receivedSymbols ?? stockExplorerMoverRows.length);
+    const requested = Number(result.requestedSymbols ?? count);
+    status.textContent = 'Verified FYERS snapshot received at ' +
+      new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') +
+      ' · ' + count + ' of ' + requested + ' configured symbols returned.' +
+      (result.partial ? ' Some batches failed; see Logs / retry.' : '');
+    logEvent('Stock Explorer FYERS snapshot received (' + count + '/' + requested + ' symbols).', result.partial ? 'warn' : 'info');
+  } catch (error) {
+    status.textContent = 'Equity quote request failed: ' + (error.message || 'FYERS snapshot unavailable.') +
+      ' Tap Refresh equity quotes to retry. No prices were fabricated.';
+    logEvent('Stock Explorer equity snapshot failed: ' + (error.message || 'unknown error'), 'warn');
+  } finally {
+    stockExplorerRequestRunning = false;
+    if (button) button.disabled = false;
+  }
 }
 
 function renderStockExplorerResults() {
@@ -969,18 +1010,10 @@ function bindTabActions() {
   if(stockCategory) stockCategory.addEventListener('change',renderStockExplorerResults);
   if(currentTab==='Stock Explorer') {
     renderStockExplorerResults();
-    if(!stockExplorerFetchStarted) {
-      stockExplorerFetchStarted=true;
-      fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'})
-        .then(response=>response.json().then(result=>({response,result})))
-        .then(({response,result})=>{
-          if(response.ok&&result.ok===true&&Array.isArray(result.data)){
-            stockExplorerMoverRows=result.data.filter(x=>x&&typeof x.symbol==='string'&&Number(x.price)>0&&Number.isFinite(Number(x.changePct)));
-            if(currentTab==='Stock Explorer')renderStockExplorerResults();
-          }
-        }).catch(()=>{});
-    }
+    loadStockExplorerQuotes();
   }
+  const refreshStockQuotesBtn=document.querySelector('#refreshStockQuotesBtn');
+  if(refreshStockQuotesBtn)refreshStockQuotesBtn.addEventListener('click',loadStockExplorerQuotes);
   const dashCandles=document.querySelector('#dashboardCandlesBtn');
   if(dashCandles) dashCandles.addEventListener('click',loadDashboardCandles);
   const dashSymbol=document.querySelector('#dashboardCandleSymbol');
