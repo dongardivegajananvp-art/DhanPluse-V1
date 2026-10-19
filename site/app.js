@@ -226,7 +226,8 @@ function validateOhlcCandles(candles, resolution) {
   }
   if (isRegularMarketSession()) {
     const lastTimeMs = Number(candles[candles.length - 1][0]) * 1000;
-    const maxAgeMs = resolution === 'D' ? 36 * 60 * 60 * 1000 : (Number(resolution) || 5) * 60 * 1000 * 3;
+    // Daily candles can legitimately be older than 36 hours after weekends or exchange holidays.
+    const maxAgeMs = resolution === 'D' ? 5 * 24 * 60 * 60 * 1000 : (Number(resolution) || 5) * 60 * 1000 * 3;
     if (Date.now() - lastTimeMs > maxAgeMs) return 'Latest candle is stale for this interval; signal blocked.';
   }
   return '';
@@ -320,6 +321,8 @@ async function loadDashboardCandles() {
     const result=await response.json().catch(()=>({}));
     if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.detail||result.error||'Historical candles unavailable.');
     if(!result.data.length)throw new Error('FYERS returned no historical candles for this symbol and timeframe.');
+    const candleError=validateOhlcCandles(result.data,resolution.value);
+    if(candleError)throw new Error(candleError);
     chart.innerHTML=candleSvg(result.data);
     if(count)count.textContent=result.data.length+' verified candles';
     status.textContent=result.data.length+' verified candles · '+symbol.value+' · '+resolution.value+' timeframe · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
@@ -759,9 +762,9 @@ async function loadAdvancedScanner() {
         try{
           const cr=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:x.symbol,resolution:'5'}),{headers:{Accept:'application/json'},cache:'no-store'});
           const cj=await cr.json().catch(()=>({}));
-          if(!cr.ok||cj.ok!==true||!Array.isArray(cj.data)||cj.data.length<8)return {...x,pattern:'Insufficient verified candles; pattern not assessed.'};
-          const age=Date.parse(cj.fetchedAt||'');
-          if(!Number.isFinite(age)||Date.now()-age>60000||age>Date.now()+5000)return {...x,pattern:'Candle snapshot stale; pattern not assessed.'};
+          if(!cr.ok||cj.ok!==true||!Array.isArray(cj.data))return {...x,pattern:'Verified candles unavailable; pattern not assessed.'};
+          const candleError=validateOhlcCandles(cj.data,'5');
+          if(candleError)return {...x,pattern:candleError+' Pattern not assessed.'};
           return {...x,pattern:summarizeCandles(cj.data)};
         }catch{return {...x,pattern:'Candle request failed; pattern not assessed.'};}
       }));
@@ -849,6 +852,8 @@ async function loadTechnicalIndicators() {
       const response = await fetch(BACKEND_URL + '/api/market/candles?' + params.toString(), { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.ok !== true || !Array.isArray(result.data)) throw new Error(result.error || result.detail || 'Verified candles unavailable.');
+      const candleError = validateOhlcCandles(result.data, '5');
+      if (candleError) throw new Error(candleError);
       return { ...target, result, indicators: calculateCandleIndicators(result.data) };
     }));
     results.forEach(({ index, result, indicators }) => {
@@ -1356,7 +1361,10 @@ async function loadCandles() {
     const response=await fetch(BACKEND_URL+'/api/market/candles?'+params.toString(),{headers:{Accept:'application/json'},cache:'no-store'});
     const result=await response.json().catch(()=>({}));
     if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||result.detail||'Historical candles unavailable.');
-    const rows=result.data;chart.innerHTML=candleSvg(rows);summary.textContent=summarizeCandles(rows);const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML=candleSvg(rows);const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='Historical OHLC candles returned by FYERS. '+rows.length+' candles loaded; chart is based on those candles.';
+    const rows=result.data;
+    const candleError=validateOhlcCandles(rows,re.value);
+    if(candleError)throw new Error(candleError);
+    chart.innerHTML=candleSvg(rows);summary.textContent=summarizeCandles(rows);const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML=candleSvg(rows);const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='Historical OHLC candles returned by FYERS. '+rows.length+' candles loaded; chart is based on those candles.';
     table.innerHTML=rows.length?'<table class="console-table"><thead><tr><th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody>'+rows.slice(-12).reverse().map(row=>'<tr><td>'+escapeHtml(new Date(Number(row[0])*1000).toLocaleString('en-IN'))+'</td>'+row.slice(1,6).map((v,i)=>'<td>'+displayNumber(v,i===4?0:2)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="chart-empty">FYERS returned no candles for this range.</div>';
     status.textContent='Verified FYERS history response · '+rows.length+' candles · '+re.value+' interval · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
     logEvent('Historical candles loaded for '+se.value+' ('+rows.length+').','info');
