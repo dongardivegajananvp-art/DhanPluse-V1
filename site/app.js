@@ -17,8 +17,8 @@ window.fetch = function(input, init = {}) {
   return nativeFetch(input, { ...init, headers });
 };
 
-const QUOTE_POLL_MS = 1500;
-const QUOTE_POLL_MAX_MS = 10000;
+const QUOTE_POLL_MS = 2000;
+const QUOTE_POLL_MAX_MS = 30000;
 const SYMBOLS = [
   { symbol: 'NSE:NIFTY50-INDEX', label: 'NIFTY 50', tab: 'NIFTY' },
   { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'BANKNIFTY' }
@@ -1341,10 +1341,10 @@ async function fetchLiveQuotes() {
     const response = await fetch(BACKEND_URL + '/api/market/quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
     if (response.status === 429) {
-      const retrySeconds = Number(data.retryAfterSeconds) || 10;
-      quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, QUOTE_POLL_MS), QUOTE_POLL_MAX_MS);
+      const retrySeconds = Number(data.retryAfterSeconds) || 30;
+      quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, 15000), QUOTE_POLL_MAX_MS);
       setStatus('FYERS RATE LIMIT — WAITING');
-      showMessage('The quote service asked us to slow down. Retrying shortly.', true);
+      showMessage('FYERS rate limit is active. The dashboard is backing off and will not force REST quote polling.', true);
       return;
     }
     if (!response.ok || data.ok !== true || !Array.isArray(data.data)) {
@@ -1366,9 +1366,10 @@ async function fetchLiveQuotes() {
         updateDynamicPanel();
         showMessage('FYERS is not authenticated. Open FYERS Settings to connect.', true);
       } else if (response.status === 503) {
+        quotePollDelay = 5000;
         if (Object.keys(latestQuotes).length) setStatus('LIVE DATA STALE');
         else setStatus('WAITING FOR LIVE TICKS');
-        showMessage(data.detail || data.error || 'Waiting for fresh FYERS WebSocket ticks.');
+        showMessage(data.detail || data.error || 'Waiting for fresh FYERS WebSocket ticks. REST fallback is disabled to protect rate limits.');
       } else {
         setStatus('LIVE DATA UNAVAILABLE');
         showMessage(data.error || 'The backend did not return verified quotes.', true);

@@ -333,19 +333,17 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
   }
 });
 
-// The dashboard reads the latest WebSocket ticks. This endpoint does not poll
-// the FYERS REST Quotes API, avoiding repeated requests and REST rate limits.
+// Index quotes are served from the authenticated FYERS WebSocket only.
+// Never fall back to REST polling here: the dashboard polls this route frequently,
+// and REST fallback caused repeated HTTP 429s while the socket was reconnecting.
 app.get('/api/market/quotes', async (_req, res) => {
   if (!accessToken) {
-    return res.status(401).json({ error: 'Connect FYERS first.' });
+    return res.status(401).json({ ok: false, error: 'Connect FYERS first.' });
   }
 
+  res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
-  // Keep displaying the most recent verified ticks during a brief socket
-  // reconnect. The response explicitly marks them as non-live so the UI can
-  // show prices without pretending the stream is currently connected.
   if (snapshot) {
-    res.set('Cache-Control', 'no-store');
     return res.json({
       ...snapshot,
       source: streamConnected ? 'websocket' : 'websocket-recent',
@@ -353,76 +351,16 @@ app.get('/api/market/quotes', async (_req, res) => {
     });
   }
 
-  // WebSocket errors should not blank the dashboard when the same FYERS
-  // access token can still read the official Quotes API. Cache for 5 seconds
-  // because the frontend polls this endpoint frequently.
-  try {
-    const now = Date.now();
-    if (restQuoteCache && now - restQuoteFetchedAt < 5000) {
-      res.set('Cache-Control', 'no-store');
-      return res.json(restQuoteCache);
-    }
-
-    if (!restQuoteInFlight) {
-      const url = new URL('https://api-t1.fyers.in/data/quotes');
-      url.searchParams.set('symbols', allowedSymbols.join(','));
-      restQuoteInFlight = fyersReadOnlyGet(url).then(result => {
-        const rows = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
-        const normalized = rows.map(item => {
-          const value = item && (item.v || item);
-          const symbol = item && (item.n || item.symbol || value.symbol);
-          const lp = Number(value && (value.lp ?? value.ltp));
-          if (!allowedSymbols.includes(symbol) || !Number.isFinite(lp) || lp <= 0) return null;
-          const ch = Number(value.ch);
-          const chp = Number(value.chp);
-          const tt = epochSeconds(value.tt ?? value.ltt ?? value.last_trade_time);
-          return {
-            n: symbol,
-            v: {
-              lp,
-              ...(tt ? { tt } : {}),
-              ...(Number.isFinite(ch) ? { ch } : {}),
-              ...(Number.isFinite(chp) ? { chp } : {})
-            }
-          };
-        }).filter(Boolean);
-
-        if (allowedSymbols.some(symbol => !rows.some(item => (item?.n || item?.symbol || item?.v?.symbol) === symbol)) ||
-            allowedSymbols.some(symbol => !normalized.some(item => item.n === symbol))) {
-          throw new Error('FYERS Quotes API did not return both configured index symbols.');
-        }
-
-        if (nseRegularSessionNow() && normalized.some(item => !item.v.tt || Date.now() - item.v.tt * 1000 > 120000 || item.v.tt * 1000 > Date.now() + 5000)) {
-          throw new Error('FYERS Quotes API did not provide a recent exchange trade timestamp for every index. Live signal blocked.');
-        }
-
-        const payload = {
-          ok: true,
-          fetchedAt: new Date().toISOString(),
-          source: 'rest-quotes-fallback',
-          data: normalized
-        };
-        restQuoteCache = payload;
-        restQuoteFetchedAt = Date.now();
-        return payload;
-      }).finally(() => {
-        restQuoteInFlight = null;
-      });
-    }
-
-    const fallback = await restQuoteInFlight;
-    res.set('Cache-Control', 'no-store');
-    return res.json(fallback);
-  } catch (error) {
-    return res.status(error.statusCode || 503).json({
-      error: error.statusCode === 401
-        ? 'FYERS rejected the access token. Reconnect FYERS.'
-        : 'FYERS WebSocket and Quotes API are not currently returning live data.',
-      detail: String(error.message || streamError || 'Waiting for fresh index quotes.').slice(0, 220)
-    });
-  }
+  return res.status(503).json({
+    ok: false,
+    error: 'Waiting for verified FYERS WebSocket ticks. REST fallback is disabled to protect rate limits.',
+    detail: streamConnected
+      ? 'The socket is connected, but fresh ticks for both index symbols have not arrived yet.'
+      : (streamError || 'The FYERS market socket is reconnecting.'),
+    retryAfterSeconds: 5,
+    marketSocketConnected: streamConnected
+  });
 });
-
 
 let fyersRateLimitUntil = 0;
 let fyers429BackoffMs = 60_000;
