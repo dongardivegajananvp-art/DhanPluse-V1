@@ -54,6 +54,7 @@ SYMBOLS.forEach(item => { historyBySymbol[item.symbol] = []; });
 const descriptions = {
   'Stock Explorer': ['Stock explorer', 'Search supported NSE symbols and open research workspaces. Prices are shown only when verified FYERS quotes are returned.'],
   'Market Activity': ['Market activity', 'A research overview for market breadth, volatility, volume and institutional flow; unsupported data stays clearly unavailable.'],
+  'Capital Protection': ['Capital protection calculator', 'Calculate position size, capital at risk and reward-to-risk from your own inputs. This tool does not place orders.'],
   'Dashboard': ['Market overview', 'Live FYERS quotes, recent price movement, and console health.'],
   'NIFTY': ['NIFTY 50 workspace', 'Live index quote and recent received-price history.'],
   'BANKNIFTY': ['BANK NIFTY workspace', 'Live index quote and recent received-price history.'],
@@ -417,6 +418,61 @@ function renderStockExplorerResults() {
     return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+(fresh||mover?'FYERS SNAPSHOT':'DATA PENDING')+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(price!==null?'₹'+formatPrice(price):'—')+'</strong><p>'+(changePct!==null?'<span class="'+(changePct>=0?'positive-text':'negative-text')+'">'+(changePct>0?'+':'')+changePct.toFixed(2)+'%</span> · ':'')+escapeHtml(quote?'Verified live quote':mover?'Verified FYERS quote snapshot':x.note)+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
   }).join(''):'<div class="chart-empty">No symbols match this search.</div>';
   host.querySelectorAll('[data-explorer-jump]').forEach(btn=>btn.addEventListener('click',()=>render(btn.dataset.explorerJump)));
+}
+
+function capitalProtectionMarkup() {
+  return '<div class="console-section"><div class="console-section-head"><div><h4>Position sizing & risk/reward</h4><p>Local calculator only · no order placement</p></div><span class="live-tag">RISK TOOL</span></div>' +
+    '<div class="option-controls">' +
+    '<label>Trading capital (₹)<input id="riskCapital" type="number" min="1" step="100" value="100000"></label>' +
+    '<label>Risk per trade (%)<input id="riskPercent" type="number" min="0.1" max="10" step="0.1" value="1"></label>' +
+    '<label>Entry price (₹)<input id="riskEntry" type="number" min="0.01" step="0.05" placeholder="e.g. 250"></label>' +
+    '<label>Stop-loss price (₹)<input id="riskStop" type="number" min="0.01" step="0.05" placeholder="e.g. 245"></label>' +
+    '<label>Target price (₹)<input id="riskTarget" type="number" min="0.01" step="0.05" placeholder="e.g. 260"></label>' +
+    '</div><button class="primary" id="calculateRiskBtn">Calculate safe position size</button>' +
+    '<div id="riskCalcStatus" class="hint">Enter entry, stop-loss and target. Default risk is 1% of capital.</div>' +
+    '<div class="console-grid console-grid-2"><article class="console-section"><small>Maximum planned loss</small><strong id="riskAmount">—</strong></article>' +
+    '<article class="console-section"><small>Suggested quantity (whole units)</small><strong id="riskQuantity">—</strong></article>' +
+    '<article class="console-section"><small>Estimated position value</small><strong id="riskExposure">—</strong></article>' +
+    '<article class="console-section"><small>Reward : risk</small><strong id="riskRatio">—</strong></article>' +
+    '<article class="console-section"><small>Potential target gain (before costs)</small><strong id="riskReward">—</strong></article>' +
+    '<article class="console-section"><small>Capital remaining after entry</small><strong id="riskRemaining">—</strong></article></div>' +
+    '<p class="hint">Calculation excludes brokerage, taxes, slippage, lot-size rules, leverage and gap risk. For options, use the actual premium and contract lot size; this generic calculator does not validate F&O lot sizes. Risk limits do not guarantee a maximum loss.</p></div>';
+}
+
+function calculateRiskPlan() {
+  const read = id => Number(document.getElementById(id)?.value);
+  const capital=read('riskCapital'), riskPct=read('riskPercent'), entry=read('riskEntry'), stop=read('riskStop'), target=read('riskTarget');
+  const status=document.getElementById('riskCalcStatus');
+  const put=(id,value)=>{const el=document.getElementById(id);if(el)el.textContent=value;};
+  ['riskAmount','riskQuantity','riskExposure','riskRatio','riskReward','riskRemaining'].forEach(id=>put(id,'—'));
+  if(!Number.isFinite(capital)||capital<=0||!Number.isFinite(riskPct)||riskPct<=0||riskPct>10||
+     !Number.isFinite(entry)||entry<=0||!Number.isFinite(stop)||stop<=0||!Number.isFinite(target)||target<=0) {
+    if(status)status.textContent='Please enter positive values. Risk per trade must be above 0% and no more than 10%.';
+    return;
+  }
+  const stopDistance=Math.abs(entry-stop);
+  const rewardDistance=Math.abs(target-entry);
+  if(stopDistance<=0||rewardDistance<=0||((target-entry)*(entry-stop)<=0)) {
+    if(status)status.textContent='For this long-only calculator, set stop-loss below entry and target above entry. Entry, stop and target must be different.';
+    return;
+  }
+  const riskBudget=capital*riskPct/100;
+  const quantity=Math.floor(riskBudget/stopDistance);
+  if(quantity<1) {
+    if(status)status.textContent='Risk budget is smaller than the loss on one unit. Reduce stop distance or increase capital only if appropriate; do not force a trade.';
+    return;
+  }
+  const exposure=quantity*entry;
+  const plannedLoss=quantity*stopDistance;
+  const potentialGain=quantity*rewardDistance;
+  const remaining=capital-exposure;
+  put('riskAmount','₹'+formatPrice(plannedLoss));
+  put('riskQuantity',String(quantity));
+  put('riskExposure','₹'+formatPrice(exposure));
+  put('riskRatio',(rewardDistance/stopDistance).toFixed(2)+' : 1');
+  put('riskReward','₹'+formatPrice(potentialGain));
+  put('riskRemaining','₹'+formatPrice(remaining));
+  if(status)status.textContent='Calculated from your inputs. Position is limited by both planned risk and whole-unit sizing; estimated exposure '+(remaining<0?'exceeds available capital without leverage.':'fits within capital before costs.')+' No trade has been placed.';
 }
 
 function marketActivityMarkup() {
@@ -1059,6 +1115,7 @@ function render(tab) {
   else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
   else if (tab === 'Stock Explorer') featureContent.innerHTML = stockExplorerMarkup();
   else if (tab === 'Market Activity') featureContent.innerHTML = marketActivityMarkup();
+  else if (tab === 'Capital Protection') featureContent.innerHTML = capitalProtectionMarkup();
   else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','FII/DII Flow','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gainers & Losers') featureContent.innerHTML = moversMarkup();
   else if (tab === 'Option Chain') featureContent.innerHTML = optionChainMarkup();
@@ -1125,6 +1182,12 @@ function bindTabActions() {
   if(advancedRefresh) advancedRefresh.addEventListener('click',loadAdvancedScanner);
   const loadCandlesBtn=document.querySelector('#loadCandlesBtn');
   if(loadCandlesBtn) loadCandlesBtn.addEventListener('click',loadCandles);
+  const calculateRiskBtn = document.querySelector('#calculateRiskBtn');
+  if (calculateRiskBtn) calculateRiskBtn.addEventListener('click', calculateRiskPlan);
+  ['riskCapital','riskPercent','riskEntry','riskStop','riskTarget'].forEach(id => {
+    const input=document.getElementById(id);
+    if(input) input.addEventListener('input', calculateRiskPlan);
+  });
   const refreshMarketActivity = document.querySelector('#refreshMarketActivityBtn');
   if (refreshMarketActivity) refreshMarketActivity.addEventListener('click', loadMarketActivity);
   const refreshIndicators = document.querySelector('#refreshIndicatorsBtn');
