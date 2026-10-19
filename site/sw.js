@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dhanpulse-shell-v15';
+const CACHE_NAME = 'dhanpulse-shell-v16';
 const SHELL = ['./', './index.html', './style.css?v=20261019-streamfix1', './app.js?v=20261019-chartfix1', './journal.js?v=20261019-streamfix1', './risk-calculator.js?v=20261019-streamfix1', './backtest.js?v=20261019-streamfix1', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
@@ -20,7 +20,7 @@ self.addEventListener('fetch', event => {
   }).catch(async () => {
     const cached = await caches.match(request);
     if (cached) return cached;
-    if (request.mode === 'navigate') return (await caches.match('/')) || (await caches.match('/index.html'));
+    if (request.mode === 'navigate') return (await caches.match('./')) || (await caches.match('./index.html'));
     return Response.error();
   }));
 });
