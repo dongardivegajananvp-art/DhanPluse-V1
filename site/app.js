@@ -557,11 +557,24 @@ async function loadAdvancedScanner() {
     if(!response.ok||result.ok!==true||!Array.isArray(result.data)) throw new Error(result.error||result.detail||'Verified snapshot unavailable.');
     const rows=result.data.filter(x=>x&&Number.isFinite(Number(x.changePct))&&Number.isFinite(Number(x.price))&&Number(x.price)>0);
     let sorted=rows.slice().sort((x,y)=>Number(y.changePct)-Number(x.changePct));
-    if(currentTab==='Breakout Scanner') sorted=sorted.filter(x=>Number(x.changePct)>0).slice(0,15);
+    if(currentTab==='Breakout Scanner') sorted=sorted.filter(x=>Number(x.changePct)>0).slice(0,8);
     else if(currentTab==='Momentum Scanner') sorted=sorted.sort((x,y)=>Math.abs(Number(y.changePct))-Math.abs(Number(x.changePct))).slice(0,20);
     else sorted=sorted.sort((x,y)=>Math.abs(Number(y.changePct))-Math.abs(Number(x.changePct))).slice(0,15);
-    table.innerHTML=sorted.length?'<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>Research note</th></tr></thead><tbody>'+sorted.map(x=>'<tr><td><b>'+escapeHtml(x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+'</b></td><td>₹'+formatPrice(x.price)+'</td><td class="'+(x.changePct>=0?'positive-text':'negative-text')+'">'+(x.changePct>0?'+':'')+Number(x.changePct).toFixed(2)+'%</td><td>'+ (currentTab==='Breakout Scanner'?'Review chart resistance/volume':currentTab==='Momentum Scanner'?'Snapshot momentum':'Check option-chain liquidity/risk')+'</td></tr>').join('')+'</tbody></table>':'<div class="chart-empty">No qualifying rows in this verified snapshot.</div>';
-    status.textContent='Verified FYERS snapshot '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · '+rows.length+' valid symbols. '+(currentTab==='Breakout Scanner'?'Positive movers are candidates only, not confirmed breakouts.':'');
+    if(currentTab==='Breakout Scanner'&&sorted.length){
+      status.textContent='Checking verified historical candles for the strongest positive movers…';
+      sorted=await Promise.all(sorted.map(async x=>{
+        try{
+          const cr=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:x.symbol,resolution:'5'}),{headers:{Accept:'application/json'},cache:'no-store'});
+          const cj=await cr.json().catch(()=>({}));
+          if(!cr.ok||cj.ok!==true||!Array.isArray(cj.data)||cj.data.length<8)return {...x,pattern:'Insufficient verified candles; pattern not assessed.'};
+          const age=Date.parse(cj.fetchedAt||'');
+          if(!Number.isFinite(age)||Date.now()-age>60000||age>Date.now()+5000)return {...x,pattern:'Candle snapshot stale; pattern not assessed.'};
+          return {...x,pattern:summarizeCandles(cj.data)};
+        }catch{return {...x,pattern:'Candle request failed; pattern not assessed.'};}
+      }));
+    }
+    table.innerHTML=sorted.length?'<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>Research note</th></tr></thead><tbody>'+sorted.map(x=>'<tr><td><b>'+escapeHtml(x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+'</b></td><td>₹'+formatPrice(x.price)+'</td><td class="'+(x.changePct>=0?'positive-text':'negative-text')+'">'+(x.changePct>0?'+':'')+Number(x.changePct).toFixed(2)+'%</td><td>'+escapeHtml(currentTab==='Breakout Scanner'?(x.pattern||'No candle pattern assessed.'):currentTab==='Momentum Scanner'?'Ranked by absolute verified percentage change; volume/traded value unavailable in this quote response.':'High percentage movement only; option-chain liquidity and risk are not yet verified.')+'</td></tr>').join('')+'</tbody></table>':'<div class="chart-empty">No qualifying rows in this verified snapshot.</div>';
+    status.textContent='Verified FYERS snapshot '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · '+rows.length+' valid symbols. '+(currentTab==='Breakout Scanner'?'Top positive movers checked against verified 5-minute OHLC candles; pattern labels are heuristic candidates, not trade confirmations.':currentTab==='Momentum Scanner'?'Ranked by percentage change only; volume/traded value is not verified here.':'Ranked by percentage change only; option liquidity and strike selection are not yet verified.');
     logEvent(currentTab+' refreshed from verified FYERS quotes.','info');
   } catch(error) {
     status.textContent=(error.message||'Snapshot unavailable.')+' No demo prices shown.';
