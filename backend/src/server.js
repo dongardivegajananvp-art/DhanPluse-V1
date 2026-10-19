@@ -404,11 +404,22 @@ async function fyersReadOnlyGet(url) {
     cache: 'no-store',
     signal: AbortSignal.timeout(12000)
   });
-  const data = await response.json().catch(() => ({}));
+  // Preserve non-JSON upstream error bodies too; some 429 gateways return an
+  // empty body, which was hiding whether FYERS sent a retry hint or diagnostic.
+  const responseText = await response.text();
+  let data = {};
+  try { data = responseText ? JSON.parse(responseText) : {}; } catch {}
+  const retryAfterHeader = response.headers.get('retry-after');
   if (response.status === 429) {
+    const retryAfterSeconds = retryAfterHeader && /^\d+(?:\.\d+)?$/.test(retryAfterHeader)
+      ? Math.ceil(Number(retryAfterHeader))
+      : 0;
+    const backoffMs = retryAfterSeconds > 0
+      ? Math.max(rateLimit.backoffMs, retryAfterSeconds * 1000)
+      : rateLimit.backoffMs;
     fyersRateLimits.set(rateLimitKey, {
-      until: Date.now() + rateLimit.backoffMs,
-      backoffMs: Math.min(rateLimit.backoffMs * 2, FYERS_429_MAX_BACKOFF_MS)
+      until: Date.now() + backoffMs,
+      backoffMs: Math.min(Math.max(rateLimit.backoffMs * 2, backoffMs), FYERS_429_MAX_BACKOFF_MS)
     });
   }
   if (!response.ok || data.s !== 'ok') {
@@ -419,14 +430,15 @@ async function fyersReadOnlyGet(url) {
     const upstreamCode = data.code == null ? 'n/a' : String(data.code);
     const message = upstreamMessage
       ? String(upstreamMessage).slice(0, 150)
-      : 'FYERS API returned no error message.';
-    const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}): ${message}`.slice(0, 220));
+      : (responseText ? responseText.replace(/\s+/g, ' ').slice(0, 150) : 'FYERS API returned no error message.');
+    const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}${retryAfterHeader ? `, Retry-After ${retryAfterHeader}` : ''}): ${message}`.slice(0, 220));
     error.statusCode = response.status === 429 ? 429 : (response.status === 401 || data.code === -16 ? 401 : 502);
     console.warn('FYERS read-only request failed:', JSON.stringify({
       path: url.pathname,
       httpStatus: response.status,
       apiStatus: upstreamStatus,
       apiCode: upstreamCode,
+      retryAfter: retryAfterHeader || null,
       message
     }));
     throw error;
