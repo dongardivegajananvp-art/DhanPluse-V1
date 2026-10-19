@@ -424,10 +424,20 @@ app.get('/api/market/quotes', async (_req, res) => {
 });
 
 
+let fyersRateLimitUntil = 0;
+let fyers429BackoffMs = 60_000;
+const FYERS_429_MAX_BACKOFF_MS = 15 * 60_000;
+
 async function fyersReadOnlyGet(url) {
   if (!accessToken) {
     const error = new Error('Connect FYERS first.');
     error.statusCode = 401;
+    throw error;
+  }
+  if (Date.now() < fyersRateLimitUntil) {
+    const waitSeconds = Math.ceil((fyersRateLimitUntil - Date.now()) / 1000);
+    const error = new Error(`FYERS rate-limit cooldown active. Retry in about ${waitSeconds} seconds.`);
+    error.statusCode = 429;
     throw error;
   }
   const response = await fetch(url, {
@@ -437,6 +447,10 @@ async function fyersReadOnlyGet(url) {
     signal: AbortSignal.timeout(12000)
   });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 429) {
+    fyersRateLimitUntil = Date.now() + fyers429BackoffMs;
+    fyers429BackoffMs = Math.min(fyers429BackoffMs * 2, FYERS_429_MAX_BACKOFF_MS);
+  }
   if (!response.ok || data.s !== 'ok') {
     // Include safe upstream diagnostics (never credentials) so quote failures
     // can be fixed from evidence instead of guessing at permissions or symbols.
@@ -457,6 +471,8 @@ async function fyersReadOnlyGet(url) {
     }));
     throw error;
   }
+  fyersRateLimitUntil = 0;
+  fyers429BackoffMs = 60_000;
   return data;
 }
 
