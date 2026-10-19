@@ -453,11 +453,11 @@ function calculateRiskPlan() {
   const stopDistance=Math.abs(entry-stop);
   const rewardDistance=Math.abs(target-entry);
   if(stopDistance<=0||rewardDistance<=0||((target-entry)*(entry-stop)<=0)) {
-    if(status)status.textContent='For this long-only calculator, set stop-loss below entry and target above entry. Entry, stop and target must be different.';
+    if(status)status.textContent='For a long setup, set stop below entry and target above; for a short setup, set stop above entry and target below. Entry, stop and target must be different.';
     return;
   }
   const riskBudget=capital*riskPct/100;
-  const quantity=Math.floor(riskBudget/stopDistance);
+  const quantity=Math.min(Math.floor(riskBudget/stopDistance),Math.floor(capital/entry));
   if(quantity<1) {
     if(status)status.textContent='Risk budget is smaller than the loss on one unit. Reduce stop distance or increase capital only if appropriate; do not force a trade.';
     return;
