@@ -43,6 +43,8 @@ let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
 let latestQuotes = {};
 let historyBySymbol = {};
+let stockExplorerMoverRows = [];
+let stockExplorerFetchStarted = false;
 let appLogs = [];
 let alerts = loadAlerts();
 
@@ -227,7 +229,9 @@ function validateOhlcCandles(candles, resolution) {
 
 function validateOptionChainPayload(payload) {
   if (!payload || !Array.isArray(payload.optionsChain) || !payload.optionsChain.length) return 'Option-chain rows are missing; no option signal.';
-  const spot = Number(payload.optionsChain.find(row => Number(row.underlying_price) > 0)?.underlying_price ?? payload.underlying_price);
+  // FYERS may include the underlying index as a special strike=-1 row; its LTP is spot, not an option premium.
+  const underlyingRow = payload.optionsChain.find(row => Number(row?.strike_price) === -1 && !String(row?.option_type || '').trim() && /-(INDEX|EQ)$/.test(String(row?.symbol || '')) && Number(row?.ltp) > 0);
+  const spot = Number(payload.optionsChain.find(row => Number(row?.underlying_price) > 0)?.underlying_price ?? payload.underlying_price ?? underlyingRow?.ltp);
   if (!Number.isFinite(spot) || spot <= 0) return 'Verified underlying spot is missing from option-chain response.';
   const normalized = payload.optionsChain.map(row => {
     if (!row || !Number.isFinite(Number(row.strike_price)) || Number(row.strike_price) <= 0) return null;
@@ -294,6 +298,28 @@ function svgChart(symbol, height) {
     '<text x="12" y="' + (h - 3) + '" class="chart-label">LOW ' + formatPrice(min) + '</text></svg>';
 }
 
+async function loadDashboardCandles() {
+  const symbol=document.querySelector('#dashboardCandleSymbol');
+  const resolution=document.querySelector('#dashboardCandleResolution');
+  const chart=document.querySelector('#dashboardChart');
+  const status=document.querySelector('#dashboardCandleStatus');
+  const count=document.querySelector('#chartSampleCount');
+  if(!symbol||!resolution||!chart||!status)return;
+  status.textContent='Requesting verified FYERS historical candles…';
+  chart.innerHTML='<div class="chart-empty">Loading verified OHLC candles…</div>';
+  try {
+    const response=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:symbol.value,resolution:resolution.value}),{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||result.detail||'Historical candles unavailable.');
+    chart.innerHTML=candleSvg(result.data);
+    if(count)count.textContent=result.data.length+' verified candles';
+    status.textContent=result.data.length+' verified candles · '+symbol.value+' · '+resolution.value+' timeframe · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
+  } catch(error) {
+    chart.innerHTML='<div class="chart-empty">'+escapeHtml(error.message||'Historical candles unavailable.')+'</div>';
+    status.textContent='No chart generated because verified OHLC data was unavailable.';
+  }
+}
+
 function quoteCardsMarkup() {
   return SYMBOLS.map(item => {
     const quote = quoteFor(item.symbol);
@@ -327,10 +353,16 @@ function renderStockExplorerResults() {
     {symbol:'NSE:LT-EQ',name:'LARSEN & TOUBRO',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
     {symbol:'NSE:ITC-EQ',name:'ITC',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'}
   ];
-  const rows=universe.filter(x=>(category==='all'||x.kind===category)&&(!q||(x.symbol+' '+x.name).toLowerCase().includes(q)));
+  const dynamicRows=stockExplorerMoverRows.map(x=>({symbol:x.symbol,name:x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''),kind:'equity',tab:'Gainers & Losers',note:'Verified FYERS quote snapshot',price:Number(x.price),changePct:Number(x.changePct)}));
+  const combined=[...universe,...dynamicRows.filter(x=>!universe.some(y=>y.symbol===x.symbol))];
+  const rows=combined.filter(x=>(category==='all'||x.kind===category)&&(!q||(x.symbol+' '+x.name).toLowerCase().includes(q)));
   host.innerHTML=rows.length?rows.map(x=>{
     const quote=quoteFor(x.symbol);
-    return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+(quote&&quoteAgeMs(quote)<15000?'QUOTE RECEIVED':'DATA PENDING')+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(quote?'₹'+formatPrice(quote.price):'—')+'</strong><p>'+(quote?'Verified quote from this session':escapeHtml(x.note))+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
+    const mover=stockExplorerMoverRows.find(row=>row.symbol===x.symbol);
+    const price=quote?quote.price:(mover?Number(mover.price):null);
+    const changePct=mover&&Number.isFinite(Number(mover.changePct))?Number(mover.changePct):null;
+    const fresh=quote&&quoteAgeMs(quote)<15000;
+    return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+(fresh||mover?'FYERS SNAPSHOT':'DATA PENDING')+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(price!==null?'₹'+formatPrice(price):'—')+'</strong><p>'+(changePct!==null?'<span class="'+(changePct>=0?'positive-text':'negative-text')+'">'+(changePct>0?'+':'')+changePct.toFixed(2)+'%</span> · ':'')+escapeHtml(quote?'Verified live quote':mover?'Verified FYERS quote snapshot':x.note)+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
   }).join(''):'<div class="chart-empty">No symbols match this search.</div>';
   host.querySelectorAll('[data-explorer-jump]').forEach(btn=>btn.addEventListener('click',()=>render(btn.dataset.explorerJump)));
 }
@@ -341,9 +373,10 @@ function marketActivityMarkup() {
 
 function dashboardMarkup() {
   return '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
-    '<article class="console-section"><div class="console-section-head"><div><h4>Live quote trace</h4><p>Recent received prices · sampled by this browser</p></div><span class="live-tag">READ ONLY</span></div>' +
-    '<div id="dashboardChart">' + svgChart(SYMBOLS[0].symbol, 210) + '</div>' +
-    '<div class="chart-foot"><span id="chartSampleCount">Samples: ' + (historyBySymbol[SYMBOLS[0].symbol] || []).length + '</span><span>Not a candlestick chart</span></div></article>' +
+    '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
+    '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option><option value="NSE:RELIANCE-EQ">RELIANCE</option><option value="NSE:HDFCBANK-EQ">HDFC BANK</option><option value="NSE:ICICIBANK-EQ">ICICI BANK</option><option value="NSE:SBIN-EQ">SBI</option><option value="NSE:INFY-EQ">INFOSYS</option><option value="NSE:TCS-EQ">TCS</option></select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
+    '<div id="dashboardCandleStatus" class="hint">Choose a symbol and load verified historical candles.</div><div id="dashboardChart"><div class="chart-empty">Candlesticks have not been loaded yet.</div></div>' +
+    '<div class="chart-foot"><span id="chartSampleCount">Historical FYERS candles</span><span>OHLC · READ ONLY</span></div></article>' +
     '<div class="console-grid console-grid-2"><article class="console-section"><h4>Connection monitor</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend</span><b id="dashBackend">CHECKING</b></div><div class="data-row"><span>FYERS quote stream</span><b id="dashFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div></article><article class="console-section"><h4>Console modules</h4><div class="module-links"><button data-jump="Technical Indicators">Technical indicators</button><button data-jump="Option Chain">Option chain &amp; OI</button><button data-jump="Alerts">Price alerts</button><button data-jump="Holdings">Holdings &amp; positions</button></div></article></div>';
 }
 
@@ -441,6 +474,37 @@ function deriveSureshotZones(candles) {
   const demandHigh=Math.min(Number(demandRow[1]),Number(demandRow[4]));
   return {supply:{low:Math.min(supplyLow,supplyHigh),high:supplyHigh},demand:{low:demandLow,high:Math.max(demandLow,demandHigh)}};
 }
+async function loadSureshotStockUniverse() {
+  const select=document.querySelector('#setupSymbol');
+  if(!select||select.dataset.universeLoaded==='true')return;
+  select.dataset.universeLoaded='loading';
+  try {
+    const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||'Verified stock universe unavailable.');
+    const previous=select.value;
+    const indexOptions=Array.from(select.options).filter(option=>!option.value.endsWith('-EQ'));
+    const stockRows=result.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
+    const stockOptions=stockRows.map(row=>{
+      const symbol=row.symbol;
+      const name=symbol.replace(/^NSE:/,'').replace(/-EQ$/,'');
+      const option=document.createElement('option');
+      option.value=symbol;
+      option.textContent=name+' · Stock options';
+      return option;
+    });
+    select.replaceChildren(...indexOptions,...stockOptions);
+    if(Array.from(select.options).some(option=>option.value===previous))select.value=previous;
+    select.dataset.universeLoaded='true';
+    const status=document.querySelector('#setupStatus');
+    if(status)status.textContent='Verified quote universe loaded: '+stockRows.length+' configured stock symbols plus indices. This is the backend selected-stock list, not the complete NSE F&O universe.';
+  } catch(error) {
+    select.dataset.universeLoaded='false';
+    const status=document.querySelector('#setupStatus');
+    if(status)status.textContent='Could not refresh stock choices from FYERS: '+(error.message||'verified quote universe unavailable')+'. Existing index/stock choices remain; no prices invented.';
+  }
+}
+
 async function loadSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
@@ -465,22 +529,6 @@ async function loadSureshotSetup() {
     if(!isRegularMarketSession()){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
     else if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
     else if(close<zones.demand.low&&close<previous){bias='PE WATCH';reason='Latest candle closed below the calculated buyer/demand-zone low.';}
-    if(symbol.endsWith('-EQ')) {
-      if(bias==='NO TRADE') {
-        cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE · STOCK</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(reason)+'</p><p class="hint">Stock entry waits for a confirmed close beyond the mapped zone. No levels are invented.</p></article>';
-        status.textContent='NO TRADE · '+reason;
-        logEvent('Sureshot stock setup filtered: '+reason,'info');return;
-      }
-      const side=bias==='CE WATCH'?'BUY':'SHORT';
-      const entry=close;
-      const stop=side==='BUY'?zones.demand.low:zones.supply.high;
-      const risk=side==='BUY'?entry-stop:stop-entry;
-      const target=side==='BUY'?entry+2*risk:entry-2*risk;
-      if(!(risk>0&&target>0)) throw new Error('Zone-based stock risk levels are invalid; no trade generated.');
-      cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>'+escapeHtml(symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+' · '+side+'</h4><span class="signal-tone positive">'+bias+'</span></div><div class="data-row"><span>Entry (verified candle close)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (zone invalidation)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (2R)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : 2.00</b></div><p class="hint">'+escapeHtml(reason)+' · Stock levels are based on verified OHLC and calculated zones; intraday gaps/slippage may change risk. No order placed.</p></article>';
-      status.textContent='Stock candidate only · '+candles.length+' verified candles · '+new Date(candleResult.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+'. Not a guaranteed signal.';
-      logEvent('Sureshot stock plan built from verified OHLC supply/demand zones.','info');return;
-    }
     const optionResponse=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+new URLSearchParams({symbol,strikecount:'10'}),{headers:{Accept:'application/json'},cache:'no-store'});
     const optionResult=await optionResponse.json().catch(()=>({}));
     if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error(optionResult.error||optionResult.detail||'Verified option-chain data unavailable; no entry plan generated.');
@@ -524,11 +572,24 @@ async function loadAdvancedScanner() {
     if(!response.ok||result.ok!==true||!Array.isArray(result.data)) throw new Error(result.error||result.detail||'Verified snapshot unavailable.');
     const rows=result.data.filter(x=>x&&Number.isFinite(Number(x.changePct))&&Number.isFinite(Number(x.price))&&Number(x.price)>0);
     let sorted=rows.slice().sort((x,y)=>Number(y.changePct)-Number(x.changePct));
-    if(currentTab==='Breakout Scanner') sorted=sorted.filter(x=>Number(x.changePct)>0).slice(0,15);
+    if(currentTab==='Breakout Scanner') sorted=sorted.filter(x=>Number(x.changePct)>0).slice(0,8);
     else if(currentTab==='Momentum Scanner') sorted=sorted.sort((x,y)=>Math.abs(Number(y.changePct))-Math.abs(Number(x.changePct))).slice(0,20);
     else sorted=sorted.sort((x,y)=>Math.abs(Number(y.changePct))-Math.abs(Number(x.changePct))).slice(0,15);
-    table.innerHTML=sorted.length?'<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>Research note</th></tr></thead><tbody>'+sorted.map(x=>'<tr><td><b>'+escapeHtml(x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+'</b></td><td>₹'+formatPrice(x.price)+'</td><td class="'+(x.changePct>=0?'positive-text':'negative-text')+'">'+(x.changePct>0?'+':'')+Number(x.changePct).toFixed(2)+'%</td><td>'+ (currentTab==='Breakout Scanner'?'Review chart resistance/volume':currentTab==='Momentum Scanner'?'Snapshot momentum':'Check option-chain liquidity/risk')+'</td></tr>').join('')+'</tbody></table>':'<div class="chart-empty">No qualifying rows in this verified snapshot.</div>';
-    status.textContent='Verified FYERS snapshot '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · '+rows.length+' valid symbols. '+(currentTab==='Breakout Scanner'?'Positive movers are candidates only, not confirmed breakouts.':'');
+    if(currentTab==='Breakout Scanner'&&sorted.length){
+      status.textContent='Checking verified historical candles for the strongest positive movers…';
+      sorted=await Promise.all(sorted.map(async x=>{
+        try{
+          const cr=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:x.symbol,resolution:'5'}),{headers:{Accept:'application/json'},cache:'no-store'});
+          const cj=await cr.json().catch(()=>({}));
+          if(!cr.ok||cj.ok!==true||!Array.isArray(cj.data)||cj.data.length<8)return {...x,pattern:'Insufficient verified candles; pattern not assessed.'};
+          const age=Date.parse(cj.fetchedAt||'');
+          if(!Number.isFinite(age)||Date.now()-age>60000||age>Date.now()+5000)return {...x,pattern:'Candle snapshot stale; pattern not assessed.'};
+          return {...x,pattern:summarizeCandles(cj.data)};
+        }catch{return {...x,pattern:'Candle request failed; pattern not assessed.'};}
+      }));
+    }
+    table.innerHTML=sorted.length?'<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>Research note</th></tr></thead><tbody>'+sorted.map(x=>'<tr><td><b>'+escapeHtml(x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+'</b></td><td>₹'+formatPrice(x.price)+'</td><td class="'+(x.changePct>=0?'positive-text':'negative-text')+'">'+(x.changePct>0?'+':'')+Number(x.changePct).toFixed(2)+'%</td><td>'+escapeHtml(currentTab==='Breakout Scanner'?(x.pattern||'No candle pattern assessed.'):currentTab==='Momentum Scanner'?'Ranked by absolute verified percentage change; volume/traded value unavailable in this quote response.':'High percentage movement only; option-chain liquidity and risk are not yet verified.')+'</td></tr>').join('')+'</tbody></table>':'<div class="chart-empty">No qualifying rows in this verified snapshot.</div>';
+    status.textContent='Verified FYERS snapshot '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · '+rows.length+' valid symbols. '+(currentTab==='Breakout Scanner'?'Top positive movers checked against verified 5-minute OHLC candles; pattern labels are heuristic candidates, not trade confirmations.':currentTab==='Momentum Scanner'?'Ranked by percentage change only; volume/traded value is not verified here.':'Ranked by percentage change only; option liquidity and strike selection are not yet verified.');
     logEvent(currentTab+' refreshed from verified FYERS quotes.','info');
   } catch(error) {
     status.textContent=(error.message||'Snapshot unavailable.')+' No demo prices shown.';
@@ -906,7 +967,26 @@ function bindTabActions() {
   const stockCategory=document.querySelector('#stockCategory');
   if(stockSearch) stockSearch.addEventListener('input',renderStockExplorerResults);
   if(stockCategory) stockCategory.addEventListener('change',renderStockExplorerResults);
-  if(currentTab==='Stock Explorer') renderStockExplorerResults();
+  if(currentTab==='Stock Explorer') {
+    renderStockExplorerResults();
+    if(!stockExplorerFetchStarted) {
+      stockExplorerFetchStarted=true;
+      fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'})
+        .then(response=>response.json().then(result=>({response,result})))
+        .then(({response,result})=>{
+          if(response.ok&&result.ok===true&&Array.isArray(result.data)){
+            stockExplorerMoverRows=result.data.filter(x=>x&&typeof x.symbol==='string'&&Number(x.price)>0&&Number.isFinite(Number(x.changePct)));
+            if(currentTab==='Stock Explorer')renderStockExplorerResults();
+          }
+        }).catch(()=>{});
+    }
+  }
+  const dashCandles=document.querySelector('#dashboardCandlesBtn');
+  if(dashCandles) dashCandles.addEventListener('click',loadDashboardCandles);
+  const dashSymbol=document.querySelector('#dashboardCandleSymbol');
+  const dashResolution=document.querySelector('#dashboardCandleResolution');
+  if(dashSymbol) dashSymbol.addEventListener('change',()=>{const st=document.querySelector('#dashboardCandleStatus');if(st)st.textContent='Selection changed. Load candles to refresh the chart.';});
+  if(currentTab==='Dashboard') loadDashboardCandles();
   const test = document.querySelector('#testBackendBtn');
   if (test) test.addEventListener('click', testBackend);
   const connect = document.querySelector('#connectFyersBtn');
@@ -925,6 +1005,7 @@ function bindTabActions() {
     showMessage('If installation was accepted, DhanPulse is available from your device app launcher.');
   });
   const setupRefresh=document.querySelector('#refreshSetupBtn');
+  if(currentTab==='Sureshot CE/PE') loadSureshotStockUniverse();
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
   const setupSymbol=document.querySelector('#setupSymbol');
   if(setupSymbol) setupSymbol.addEventListener('change',loadSureshotSetup);
@@ -1044,14 +1125,38 @@ function candleSvg(candles) {
   return '<svg class="live-chart candle-chart" viewBox="0 0 '+width+' '+height+'" role="img" aria-label="Verified FYERS historical OHLC candles">'+rows.map((x,i)=>{const open=Number(x[1]),high=Number(x[2]),low=Number(x[3]),close=Number(x[4]),cx=pad+i*slot+slot/2,up=close>=open,color=up?'#63e6d0':'#ff8d9a',bodyY=Math.min(y(open),y(close)),bodyH=Math.max(1,Math.abs(y(open)-y(close)));return '<line x1="'+cx.toFixed(2)+'" y1="'+y(high).toFixed(2)+'" x2="'+cx.toFixed(2)+'" y2="'+y(low).toFixed(2)+'" stroke="'+color+'" stroke-width="1.2"/><rect x="'+(cx-slot*0.28).toFixed(2)+'" y="'+bodyY.toFixed(2)+'" width="'+Math.max(2,slot*0.56).toFixed(2)+'" height="'+bodyH.toFixed(2)+'" fill="'+color+'" rx="1"/>';}).join('')+'<text x="12" y="13" class="chart-label">HIGH '+formatPrice(hi)+'</text><text x="12" y="'+(height-3)+'" class="chart-label">LOW '+formatPrice(lo)+'</text></svg>';
 }
 function summarizeCandles(candles) {
-  if(!Array.isArray(candles)||candles.length<3) return 'Not enough verified OHLC candles to analyse.';
-  const last=candles[candles.length-1],prev=candles[candles.length-2],prior=candles[candles.length-3],close=Number(last[4]);
-  let note='No simple range break confirmed by the latest candle.';
-  if(close>Number(prev[2])) note='Latest close is above the previous candle high — bullish range-break candidate.';
-  else if(close<Number(prev[3])) note='Latest close is below the previous candle low — bearish range-break candidate.';
-  else if(Number(last[2])>Number(prev[2])&&Number(last[3])>Number(prev[3])&&Number(prev[2])>Number(prior[2])) note='Recent candles show higher highs and higher lows — upward structure candidate.';
-  else if(Number(last[2])<Number(prev[2])&&Number(last[3])<Number(prev[3])&&Number(prev[2])<Number(prior[2])) note='Recent candles show lower highs and lower lows — downward structure candidate.';
-  return note+' Latest OHLC: O '+formatPrice(last[1])+' · H '+formatPrice(last[2])+' · L '+formatPrice(last[3])+' · C '+formatPrice(close)+'.';
+  if(!Array.isArray(candles)||candles.length<8) return 'At least 8 verified OHLC candles are needed for a cautious pattern scan.';
+  const rows=candles.slice(-40);
+  const n=rows.length;
+  const last=rows[n-1],prev=rows[n-2],close=Number(last[4]);
+  const highs=rows.map(x=>Number(x[2])),lows=rows.map(x=>Number(x[3]));
+  const tolerance=(Math.max(...highs)-Math.min(...lows))*0.025;
+  const pivots=[];
+  for(let i=2;i<n-2;i++){
+    const high=highs[i],low=lows[i];
+    if(high>highs[i-1]&&high>=highs[i-2]&&high>highs[i+1]&&high>=highs[i+2])pivots.push({i,type:'H',value:high});
+    if(low<lows[i-1]&&low<=lows[i-2]&&low<lows[i+1]&&low<=lows[i+2])pivots.push({i,type:'L',value:low});
+  }
+  const tops=pivots.filter(x=>x.type==='H'), bottoms=pivots.filter(x=>x.type==='L');
+  let pattern='No clear common pattern detected in the recent verified candles.';
+  const t1=tops.at(-1),t2=tops.at(-2),b1=bottoms.at(-1),b2=bottoms.at(-2);
+  if(t1&&t2&&t1.i-t2.i>=3&&Math.abs(t1.value-t2.value)<=tolerance&&close<Math.min(...rows.slice(t2.i,t1.i+1).map(x=>Number(x[3])))){
+    pattern='Possible double-top with neckline break candidate; wait for retest/volume confirmation.';
+  } else if(b1&&b2&&b1.i-b2.i>=3&&Math.abs(b1.value-b2.value)<=tolerance&&close>Math.max(...rows.slice(b2.i,b1.i+1).map(x=>Number(x[2])))){
+    pattern='Possible double-bottom with neckline break candidate; wait for retest/volume confirmation.';
+  } else {
+    const recent=rows.slice(-6),rh=recent.map(x=>Number(x[2])),rl=recent.map(x=>Number(x[3]));
+    const higherHighs=rh.slice(1).every((v,i)=>v>=rh[i]),higherLows=rl.slice(1).every((v,i)=>v>=rl[i]);
+    const lowerHighs=rh.slice(1).every((v,i)=>v<=rh[i]),lowerLows=rl.slice(1).every((v,i)=>v<=rl[i]);
+    const highRange=Math.max(...rh)-Math.min(...rh),lowRange=Math.max(...rl)-Math.min(...rl);
+    if(close>Number(prev[2]))pattern='Bullish range breakout candidate: latest close above previous candle high.';
+    else if(close<Number(prev[3]))pattern='Bearish range breakdown candidate: latest close below previous candle low.';
+    else if(higherHighs&&higherLows)pattern='Uptrend continuation candidate: recent highs and lows are rising.';
+    else if(lowerHighs&&lowerLows)pattern='Downtrend continuation candidate: recent highs and lows are falling.';
+    else if(highRange>0&&lowRange>0&&highRange<lowRange*0.75)pattern='Possible contracting triangle / volatility squeeze; breakout not confirmed.';
+    else if(highRange>0&&lowRange>0&&lowRange<highRange*0.75)pattern='Possible rising-range compression; direction requires a confirmed break.';
+  }
+  return pattern+' Latest verified OHLC: O '+formatPrice(last[1])+' · H '+formatPrice(last[2])+' · L '+formatPrice(last[3])+' · C '+formatPrice(close)+'. Patterns are heuristic candidates, not trading guarantees.';
 }
 async function loadCandles() {
   const se=document.querySelector('#patternSymbol'),re=document.querySelector('#patternResolution'),status=document.querySelector('#patternStatus'),chart=document.querySelector('#patternChart'),summary=document.querySelector('#patternSummary'),table=document.querySelector('#candleTable');
@@ -1090,7 +1195,7 @@ function updateDynamicPanel() {
     mainTabChart.innerHTML = svgChart(activeSymbol, 230);
   }
   const dashboardChart = document.querySelector('#dashboardChart');
-  if (dashboardChart) dashboardChart.innerHTML = svgChart(SYMBOLS[0].symbol, 210);
+  if (dashboardChart && !dashboardChart.querySelector('.candle-chart')) dashboardChart.innerHTML = '<div class="chart-empty">Load verified historical candles to display the candlestick chart.</div>';
   const focusChart = document.querySelector('#focusChart');
   if (focusChart) {
     const active = currentTab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
