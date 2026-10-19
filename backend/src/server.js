@@ -482,30 +482,62 @@ app.get('/api/market/candles', async (req, res) => {
 const moversSymbols = ["NSE:RELIANCE-EQ","NSE:HDFCBANK-EQ","NSE:ICICIBANK-EQ","NSE:INFY-EQ","NSE:TCS-EQ","NSE:BHARTIARTL-EQ","NSE:SBIN-EQ","NSE:ITC-EQ","NSE:LT-EQ","NSE:AXISBANK-EQ","NSE:KOTAKBANK-EQ","NSE:BAJFINANCE-EQ","NSE:HINDUNILVR-EQ","NSE:MARUTI-EQ","NSE:SUNPHARMA-EQ","NSE:TATAMOTORS-EQ","NSE:M&M-EQ","NSE:NTPC-EQ","NSE:TATASTEEL-EQ","NSE:POWERGRID-EQ","NSE:ONGC-EQ","NSE:JSWSTEEL-EQ","NSE:ADANIENT-EQ","NSE:ADANIPORTS-EQ","NSE:COALINDIA-EQ","NSE:WIPRO-EQ","NSE:ULTRACEMCO-EQ","NSE:NESTLEIND-EQ","NSE:TITAN-EQ","NSE:BAJAJFINSV-EQ","NSE:ASIANPAINT-EQ","NSE:GRASIM-EQ","NSE:TECHM-EQ","NSE:HCLTECH-EQ","NSE:INDUSINDBK-EQ","NSE:DRREDDY-EQ","NSE:CIPLA-EQ","NSE:EICHERMOT-EQ","NSE:TRENT-EQ","NSE:BEL-EQ","NSE:SHRIRAMFIN-EQ","NSE:APOLLOHOSP-EQ","NSE:DIVISLAB-EQ","NSE:BPCL-EQ","NSE:HINDALCO-EQ","NSE:TATACONSUM-EQ","NSE:HEROMOTOCO-EQ","NSE:BRITANNIA-EQ","NSE:SBILIFE-EQ","NSE:LTIM-EQ"];
 
 app.get('/api/market/movers', async (_req, res) => {
-  try {
-    if (!accessToken) return res.status(401).json({ ok: false, error: 'Connect FYERS first to load market movers.' });
+  if (!accessToken) return res.status(401).json({ ok: false, error: 'Connect FYERS first to load market movers.' });
+
+  // Keep requests small so one invalid/unavailable instrument does not make
+  // the entire selected-stock snapshot fail. All values still come from FYERS.
+  const batches = [];
+  for (let i = 0; i < moversSymbols.length; i += 10) batches.push(moversSymbols.slice(i, i + 10));
+
+  const settled = await Promise.allSettled(batches.map(async (symbols) => {
     const url = new URL('https://api-t1.fyers.in/data/quotes');
-    url.searchParams.set('symbols', moversSymbols.join(','));
+    url.searchParams.set('symbols', symbols.join(','));
     const result = await fyersReadOnlyGet(url);
     const quotes = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
-    const rows = quotes.map(item => {
+    return quotes.map(item => {
       const value = item && (item.v || item);
       const symbol = item && (item.n || item.symbol || value.symbol);
       const price = Number(value.lp ?? value.ltp);
       const change = Number(value.ch);
       const changePct = Number(value.chp);
-      if (!symbol || !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct)) return null;
+      if (!symbols.includes(symbol) || !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct)) return null;
       return { symbol, price, change: Number.isFinite(change) ? change : null, changePct };
     }).filter(Boolean);
-    res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, fetchedAt: new Date().toISOString(), universe: 'selected-large-cap-NSE', data: rows });
-  } catch (error) {
-    return res.status(error.statusCode || 502).json({
+  }));
+
+  const rows = [];
+  const failedBatches = [];
+  settled.forEach((item, index) => {
+    if (item.status === 'fulfilled') rows.push(...item.value);
+    else {
+      const reason = String(item.reason?.message || 'FYERS quote request failed.').slice(0, 160);
+      failedBatches.push({ batch: index + 1, error: reason });
+      console.warn('FYERS market-mover batch failed:', index + 1, reason);
+    }
+  });
+
+  if (!rows.length) {
+    const firstError = failedBatches[0]?.error || 'FYERS returned no valid equity quote rows.';
+    return res.status(502).json({
       ok: false,
-      error: error.statusCode === 401 ? 'Connect FYERS to load market movers.' : 'FYERS market-mover quote request failed.',
-      detail: String(error.message || 'Upstream request failed.').slice(0, 220)
+      error: 'FYERS did not return a verified stock-quote snapshot.',
+      detail: firstError,
+      failedBatches: failedBatches.length,
+      requestedSymbols: moversSymbols.length
     });
   }
+
+  res.set('Cache-Control', 'no-store');
+  return res.json({
+    ok: true,
+    fetchedAt: new Date().toISOString(),
+    universe: 'selected-large-cap-NSE',
+    requestedSymbols: moversSymbols.length,
+    receivedSymbols: rows.length,
+    partial: failedBatches.length > 0 || rows.length < moversSymbols.length,
+    failedBatches,
+    data: rows
+  });
 });
 
 app.get('/api/fyers/options-chain', async (req, res) => {
