@@ -43,6 +43,8 @@ let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
 let latestQuotes = {};
 let historyBySymbol = {};
+let stockExplorerMoverRows = [];
+let stockExplorerFetchStarted = false;
 let appLogs = [];
 let alerts = loadAlerts();
 
@@ -349,10 +351,16 @@ function renderStockExplorerResults() {
     {symbol:'NSE:LT-EQ',name:'LARSEN & TOUBRO',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
     {symbol:'NSE:ITC-EQ',name:'ITC',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'}
   ];
-  const rows=universe.filter(x=>(category==='all'||x.kind===category)&&(!q||(x.symbol+' '+x.name).toLowerCase().includes(q)));
+  const dynamicRows=stockExplorerMoverRows.map(x=>({symbol:x.symbol,name:x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''),kind:'equity',tab:'Gainers & Losers',note:'Verified FYERS quote snapshot',price:Number(x.price),changePct:Number(x.changePct)}));
+  const combined=[...universe,...dynamicRows.filter(x=>!universe.some(y=>y.symbol===x.symbol))];
+  const rows=combined.filter(x=>(category==='all'||x.kind===category)&&(!q||(x.symbol+' '+x.name).toLowerCase().includes(q)));
   host.innerHTML=rows.length?rows.map(x=>{
     const quote=quoteFor(x.symbol);
-    return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+(quote&&quoteAgeMs(quote)<15000?'QUOTE RECEIVED':'DATA PENDING')+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(quote?'₹'+formatPrice(quote.price):'—')+'</strong><p>'+(quote?'Verified quote from this session':escapeHtml(x.note))+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
+    const mover=stockExplorerMoverRows.find(row=>row.symbol===x.symbol);
+    const price=quote?quote.price:(mover?Number(mover.price):null);
+    const changePct=mover&&Number.isFinite(Number(mover.changePct))?Number(mover.changePct):null;
+    const fresh=quote&&quoteAgeMs(quote)<15000;
+    return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+(fresh||mover?'FYERS SNAPSHOT':'DATA PENDING')+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(price!==null?'₹'+formatPrice(price):'—')+'</strong><p>'+(changePct!==null?'<span class="'+(changePct>=0?'positive-text':'negative-text')+'">'+(changePct>0?'+':'')+changePct.toFixed(2)+'%</span> · ':'')+escapeHtml(quote?'Verified live quote':mover?'Verified FYERS quote snapshot':x.note)+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
   }).join(''):'<div class="chart-empty">No symbols match this search.</div>';
   host.querySelectorAll('[data-explorer-jump]').forEach(btn=>btn.addEventListener('click',()=>render(btn.dataset.explorerJump)));
 }
@@ -929,7 +937,20 @@ function bindTabActions() {
   const stockCategory=document.querySelector('#stockCategory');
   if(stockSearch) stockSearch.addEventListener('input',renderStockExplorerResults);
   if(stockCategory) stockCategory.addEventListener('change',renderStockExplorerResults);
-  if(currentTab==='Stock Explorer') renderStockExplorerResults();
+  if(currentTab==='Stock Explorer') {
+    renderStockExplorerResults();
+    if(!stockExplorerFetchStarted) {
+      stockExplorerFetchStarted=true;
+      fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'})
+        .then(response=>response.json().then(result=>({response,result})))
+        .then(({response,result})=>{
+          if(response.ok&&result.ok===true&&Array.isArray(result.data)){
+            stockExplorerMoverRows=result.data.filter(x=>x&&typeof x.symbol==='string'&&Number(x.price)>0&&Number.isFinite(Number(x.changePct)));
+            if(currentTab==='Stock Explorer')renderStockExplorerResults();
+          }
+        }).catch(()=>{});
+    }
+  }
   const dashCandles=document.querySelector('#dashboardCandlesBtn');
   if(dashCandles) dashCandles.addEventListener('click',loadDashboardCandles);
   const dashSymbol=document.querySelector('#dashboardCandleSymbol');
