@@ -498,22 +498,6 @@ async function loadSureshotSetup() {
     if(!isRegularMarketSession()){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
     else if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
     else if(close<zones.demand.low&&close<previous){bias='PE WATCH';reason='Latest candle closed below the calculated buyer/demand-zone low.';}
-    if(false && symbol.endsWith('-EQ')) {
-      if(bias==='NO TRADE') {
-        cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE · STOCK</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(reason)+'</p><p class="hint">Stock entry waits for a confirmed close beyond the mapped zone. No levels are invented.</p></article>';
-        status.textContent='NO TRADE · '+reason;
-        logEvent('Sureshot stock setup filtered: '+reason,'info');return;
-      }
-      const side=bias==='CE WATCH'?'BUY':'SHORT';
-      const entry=close;
-      const stop=side==='BUY'?zones.demand.low:zones.supply.high;
-      const risk=side==='BUY'?entry-stop:stop-entry;
-      const target=side==='BUY'?entry+2*risk:entry-2*risk;
-      if(!(risk>0&&target>0)) throw new Error('Zone-based stock risk levels are invalid; no trade generated.');
-      cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>'+escapeHtml(symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+' · '+side+'</h4><span class="signal-tone positive">'+bias+'</span></div><div class="data-row"><span>Entry (verified candle close)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (zone invalidation)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (2R)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : 2.00</b></div><p class="hint">'+escapeHtml(reason)+' · Stock levels are based on verified OHLC and calculated zones; intraday gaps/slippage may change risk. No order placed.</p></article>';
-      status.textContent='Stock candidate only · '+candles.length+' verified candles · '+new Date(candleResult.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+'. Not a guaranteed signal.';
-      logEvent('Sureshot stock plan built from verified OHLC supply/demand zones.','info');return;
-    }
     const optionResponse=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+new URLSearchParams({symbol,strikecount:'10'}),{headers:{Accept:'application/json'},cache:'no-store'});
     const optionResult=await optionResponse.json().catch(()=>({}));
     if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error(optionResult.error||optionResult.detail||'Verified option-chain data unavailable; no entry plan generated.');
