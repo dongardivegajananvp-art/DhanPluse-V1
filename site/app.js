@@ -1094,14 +1094,38 @@ function candleSvg(candles) {
   return '<svg class="live-chart candle-chart" viewBox="0 0 '+width+' '+height+'" role="img" aria-label="Verified FYERS historical OHLC candles">'+rows.map((x,i)=>{const open=Number(x[1]),high=Number(x[2]),low=Number(x[3]),close=Number(x[4]),cx=pad+i*slot+slot/2,up=close>=open,color=up?'#63e6d0':'#ff8d9a',bodyY=Math.min(y(open),y(close)),bodyH=Math.max(1,Math.abs(y(open)-y(close)));return '<line x1="'+cx.toFixed(2)+'" y1="'+y(high).toFixed(2)+'" x2="'+cx.toFixed(2)+'" y2="'+y(low).toFixed(2)+'" stroke="'+color+'" stroke-width="1.2"/><rect x="'+(cx-slot*0.28).toFixed(2)+'" y="'+bodyY.toFixed(2)+'" width="'+Math.max(2,slot*0.56).toFixed(2)+'" height="'+bodyH.toFixed(2)+'" fill="'+color+'" rx="1"/>';}).join('')+'<text x="12" y="13" class="chart-label">HIGH '+formatPrice(hi)+'</text><text x="12" y="'+(height-3)+'" class="chart-label">LOW '+formatPrice(lo)+'</text></svg>';
 }
 function summarizeCandles(candles) {
-  if(!Array.isArray(candles)||candles.length<3) return 'Not enough verified OHLC candles to analyse.';
-  const last=candles[candles.length-1],prev=candles[candles.length-2],prior=candles[candles.length-3],close=Number(last[4]);
-  let note='No simple range break confirmed by the latest candle.';
-  if(close>Number(prev[2])) note='Latest close is above the previous candle high — bullish range-break candidate.';
-  else if(close<Number(prev[3])) note='Latest close is below the previous candle low — bearish range-break candidate.';
-  else if(Number(last[2])>Number(prev[2])&&Number(last[3])>Number(prev[3])&&Number(prev[2])>Number(prior[2])) note='Recent candles show higher highs and higher lows — upward structure candidate.';
-  else if(Number(last[2])<Number(prev[2])&&Number(last[3])<Number(prev[3])&&Number(prev[2])<Number(prior[2])) note='Recent candles show lower highs and lower lows — downward structure candidate.';
-  return note+' Latest OHLC: O '+formatPrice(last[1])+' · H '+formatPrice(last[2])+' · L '+formatPrice(last[3])+' · C '+formatPrice(close)+'.';
+  if(!Array.isArray(candles)||candles.length<8) return 'At least 8 verified OHLC candles are needed for a cautious pattern scan.';
+  const rows=candles.slice(-40);
+  const n=rows.length;
+  const last=rows[n-1],prev=rows[n-2],close=Number(last[4]);
+  const highs=rows.map(x=>Number(x[2])),lows=rows.map(x=>Number(x[3]));
+  const tolerance=(Math.max(...highs)-Math.min(...lows))*0.025;
+  const pivots=[];
+  for(let i=2;i<n-2;i++){
+    const high=highs[i],low=lows[i];
+    if(high>highs[i-1]&&high>=highs[i-2]&&high>highs[i+1]&&high>=highs[i+2])pivots.push({i,type:'H',value:high});
+    if(low<lows[i-1]&&low<=lows[i-2]&&low<lows[i+1]&&low<=lows[i+2])pivots.push({i,type:'L',value:low});
+  }
+  const tops=pivots.filter(x=>x.type==='H'), bottoms=pivots.filter(x=>x.type==='L');
+  let pattern='No clear common pattern detected in the recent verified candles.';
+  const t1=tops.at(-1),t2=tops.at(-2),b1=bottoms.at(-1),b2=bottoms.at(-2);
+  if(t1&&t2&&t1.i-t2.i>=3&&Math.abs(t1.value-t2.value)<=tolerance&&close<Math.min(...rows.slice(t2.i,t1.i+1).map(x=>Number(x[3])))){
+    pattern='Possible double-top with neckline break candidate; wait for retest/volume confirmation.';
+  } else if(b1&&b2&&b1.i-b2.i>=3&&Math.abs(b1.value-b2.value)<=tolerance&&close>Math.max(...rows.slice(b2.i,b1.i+1).map(x=>Number(x[2])))){
+    pattern='Possible double-bottom with neckline break candidate; wait for retest/volume confirmation.';
+  } else {
+    const recent=rows.slice(-6),rh=recent.map(x=>Number(x[2])),rl=recent.map(x=>Number(x[3]));
+    const higherHighs=rh.slice(1).every((v,i)=>v>=rh[i]),higherLows=rl.slice(1).every((v,i)=>v>=rl[i]);
+    const lowerHighs=rh.slice(1).every((v,i)=>v<=rh[i]),lowerLows=rl.slice(1).every((v,i)=>v<=rl[i]);
+    const highRange=Math.max(...rh)-Math.min(...rh),lowRange=Math.max(...rl)-Math.min(...rl);
+    if(close>Number(prev[2]))pattern='Bullish range breakout candidate: latest close above previous candle high.';
+    else if(close<Number(prev[3]))pattern='Bearish range breakdown candidate: latest close below previous candle low.';
+    else if(higherHighs&&higherLows)pattern='Uptrend continuation candidate: recent highs and lows are rising.';
+    else if(lowerHighs&&lowerLows)pattern='Downtrend continuation candidate: recent highs and lows are falling.';
+    else if(highRange>0&&lowRange>0&&highRange<lowRange*0.75)pattern='Possible contracting triangle / volatility squeeze; breakout not confirmed.';
+    else if(highRange>0&&lowRange>0&&lowRange<highRange*0.75)pattern='Possible rising-range compression; direction requires a confirmed break.';
+  }
+  return pattern+' Latest verified OHLC: O '+formatPrice(last[1])+' · H '+formatPrice(last[2])+' · L '+formatPrice(last[3])+' · C '+formatPrice(close)+'. Patterns are heuristic candidates, not trading guarantees.';
 }
 async function loadCandles() {
   const se=document.querySelector('#patternSymbol'),re=document.querySelector('#patternResolution'),status=document.querySelector('#patternStatus'),chart=document.querySelector('#patternChart'),summary=document.querySelector('#patternSummary'),table=document.querySelector('#candleTable');
