@@ -438,8 +438,23 @@ async function fyersReadOnlyGet(url) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.s !== 'ok') {
-    const error = new Error(String(data.message || data.error || 'FYERS read-only API request failed.').slice(0, 220));
-    error.statusCode = response.status === 401 ? 401 : 502;
+    // Include safe upstream diagnostics (never credentials) so quote failures
+    // can be fixed from evidence instead of guessing at permissions or symbols.
+    const upstreamMessage = data.message || data.error || data.details;
+    const upstreamStatus = String(data.s || 'missing');
+    const upstreamCode = data.code == null ? 'n/a' : String(data.code);
+    const message = upstreamMessage
+      ? String(upstreamMessage).slice(0, 150)
+      : 'FYERS API returned no error message.';
+    const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}): ${message}`.slice(0, 220));
+    error.statusCode = response.status === 401 || data.code === -16 ? 401 : 502;
+    console.warn('FYERS read-only request failed:', JSON.stringify({
+      path: url.pathname,
+      httpStatus: response.status,
+      apiStatus: upstreamStatus,
+      apiCode: upstreamCode,
+      message
+    }));
     throw error;
   }
   return data;
