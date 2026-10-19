@@ -229,7 +229,9 @@ function validateOhlcCandles(candles, resolution) {
 
 function validateOptionChainPayload(payload) {
   if (!payload || !Array.isArray(payload.optionsChain) || !payload.optionsChain.length) return 'Option-chain rows are missing; no option signal.';
-  const spot = Number(payload.optionsChain.find(row => Number(row.underlying_price) > 0)?.underlying_price ?? payload.underlying_price);
+  // FYERS may include the underlying index as a special strike=-1 row; its LTP is spot, not an option premium.
+  const underlyingRow = payload.optionsChain.find(row => Number(row?.strike_price) === -1 && !String(row?.option_type || '').trim() && /-INDEX$/.test(String(row?.symbol || '')) && Number(row?.ltp) > 0);
+  const spot = Number(payload.optionsChain.find(row => Number(row?.underlying_price) > 0)?.underlying_price ?? payload.underlying_price ?? underlyingRow?.ltp);
   if (!Number.isFinite(spot) || spot <= 0) return 'Verified underlying spot is missing from option-chain response.';
   const normalized = payload.optionsChain.map(row => {
     if (!row || !Number.isFinite(Number(row.strike_price)) || Number(row.strike_price) <= 0) return null;
