@@ -510,7 +510,7 @@ app.get('/api/market/movers', async (_req, res) => {
 
 app.get('/api/fyers/options-chain', async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
-  const allowed = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX'];
+  const allowed = [...allowedSymbols, ...moversSymbols];
   const strikeCount = Number.parseInt(String(req.query.strikecount || '10'), 10);
   const timestamp = req.query.timestamp == null ? '' : String(req.query.timestamp);
   if (!allowed.includes(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported underlying symbol.' });
