@@ -34,6 +34,7 @@ const featureContent = document.querySelector('#featureContent');
 let quoteTimer = null;
 let quotePollDelay = QUOTE_POLL_MS;
 let quoteRequestRunning = false;
+let dashboardCandleRequestRunning = false;
 let backendHealthState = 'CHECKING';
 let fyersAuthState = 'NOT CONNECTED';
 let authInProgress = false;
@@ -304,19 +305,29 @@ async function loadDashboardCandles() {
   const chart=document.querySelector('#dashboardChart');
   const status=document.querySelector('#dashboardCandleStatus');
   const count=document.querySelector('#chartSampleCount');
-  if(!symbol||!resolution||!chart||!status)return;
+  const button=document.querySelector('#dashboardCandlesBtn');
+  if(!symbol||!resolution||!chart||!status||dashboardCandleRequestRunning)return;
+  dashboardCandleRequestRunning=true;
+  if(button)button.disabled=true;
   status.textContent='Requesting verified FYERS historical candles…';
   chart.innerHTML='<div class="chart-empty">Loading verified OHLC candles…</div>';
   try {
     const response=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:symbol.value,resolution:resolution.value}),{headers:{Accept:'application/json'},cache:'no-store'});
     const result=await response.json().catch(()=>({}));
-    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||result.detail||'Historical candles unavailable.');
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.detail||result.error||'Historical candles unavailable.');
+    if(!result.data.length)throw new Error('FYERS returned no historical candles for this symbol and timeframe.');
     chart.innerHTML=candleSvg(result.data);
     if(count)count.textContent=result.data.length+' verified candles';
     status.textContent=result.data.length+' verified candles · '+symbol.value+' · '+resolution.value+' timeframe · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
+    logEvent('Dashboard candlestick chart loaded ('+result.data.length+' verified candles for '+symbol.value+').','info');
   } catch(error) {
-    chart.innerHTML='<div class="chart-empty">'+escapeHtml(error.message||'Historical candles unavailable.')+'</div>';
-    status.textContent='No chart generated because verified OHLC data was unavailable.';
+    const message=error.message||'Historical candles unavailable.';
+    chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
+    status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
+    logEvent('Dashboard candlestick chart failed: '+message,'warn');
+  } finally {
+    dashboardCandleRequestRunning=false;
+    if(button)button.disabled=false;
   }
 }
 

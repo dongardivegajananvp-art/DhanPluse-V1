@@ -362,8 +362,12 @@ app.get('/api/market/quotes', async (_req, res) => {
   });
 });
 
-let fyersRateLimitUntil = 0;
-let fyers429BackoffMs = 60_000;
+// Rate-limit each FYERS REST endpoint independently. A 429 from the equity
+// Quotes API must not silently block an unrelated historical-candles request.
+// Each endpoint still backs off exponentially, so a throttled route is not
+// repeatedly hammered while other read-only routes can be diagnosed normally.
+const fyersRateLimits = new Map();
+const FYERS_429_INITIAL_BACKOFF_MS = 60_000;
 const FYERS_429_MAX_BACKOFF_MS = 15 * 60_000;
 
 async function fyersReadOnlyGet(url) {
@@ -372,9 +376,11 @@ async function fyersReadOnlyGet(url) {
     error.statusCode = 401;
     throw error;
   }
-  if (Date.now() < fyersRateLimitUntil) {
-    const waitSeconds = Math.ceil((fyersRateLimitUntil - Date.now()) / 1000);
-    const error = new Error(`FYERS rate-limit cooldown active. Retry in about ${waitSeconds} seconds.`);
+  const rateLimitKey = url instanceof URL ? url.pathname : new URL(String(url)).pathname;
+  const rateLimit = fyersRateLimits.get(rateLimitKey) || { until: 0, backoffMs: FYERS_429_INITIAL_BACKOFF_MS };
+  if (Date.now() < rateLimit.until) {
+    const waitSeconds = Math.ceil((rateLimit.until - Date.now()) / 1000);
+    const error = new Error(`FYERS rate-limit cooldown active for ${rateLimitKey}. Retry in about ${waitSeconds} seconds.`);
     error.statusCode = 429;
     throw error;
   }
@@ -386,8 +392,10 @@ async function fyersReadOnlyGet(url) {
   });
   const data = await response.json().catch(() => ({}));
   if (response.status === 429) {
-    fyersRateLimitUntil = Date.now() + fyers429BackoffMs;
-    fyers429BackoffMs = Math.min(fyers429BackoffMs * 2, FYERS_429_MAX_BACKOFF_MS);
+    fyersRateLimits.set(rateLimitKey, {
+      until: Date.now() + rateLimit.backoffMs,
+      backoffMs: Math.min(rateLimit.backoffMs * 2, FYERS_429_MAX_BACKOFF_MS)
+    });
   }
   if (!response.ok || data.s !== 'ok') {
     // Include safe upstream diagnostics (never credentials) so quote failures
@@ -409,8 +417,7 @@ async function fyersReadOnlyGet(url) {
     }));
     throw error;
   }
-  fyersRateLimitUntil = 0;
-  fyers429BackoffMs = 60_000;
+  fyersRateLimits.delete(rateLimitKey);
   return data;
 }
 
