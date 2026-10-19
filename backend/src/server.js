@@ -447,7 +447,7 @@ async function fyersReadOnlyGet(url) {
       ? String(upstreamMessage).slice(0, 150)
       : 'FYERS API returned no error message.';
     const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}): ${message}`.slice(0, 220));
-    error.statusCode = response.status === 401 || data.code === -16 ? 401 : 502;
+    error.statusCode = response.status === 429 ? 429 : (response.status === 401 || data.code === -16 ? 401 : 502);
     console.warn('FYERS read-only request failed:', JSON.stringify({
       path: url.pathname,
       httpStatus: response.status,
@@ -494,65 +494,64 @@ app.get('/api/market/candles', async (req, res) => {
   }
 });
 
+const MOVERS_CACHE_TTL_MS = 15000;
+let moversSnapshotCache = null;
+let moversSnapshotInFlight = null;
+
 const moversSymbols = ["NSE:RELIANCE-EQ","NSE:HDFCBANK-EQ","NSE:ICICIBANK-EQ","NSE:INFY-EQ","NSE:TCS-EQ","NSE:BHARTIARTL-EQ","NSE:SBIN-EQ","NSE:ITC-EQ","NSE:LT-EQ","NSE:AXISBANK-EQ","NSE:KOTAKBANK-EQ","NSE:BAJFINANCE-EQ","NSE:HINDUNILVR-EQ","NSE:MARUTI-EQ","NSE:SUNPHARMA-EQ","NSE:TATAMOTORS-EQ","NSE:M&M-EQ","NSE:NTPC-EQ","NSE:TATASTEEL-EQ","NSE:POWERGRID-EQ","NSE:ONGC-EQ","NSE:JSWSTEEL-EQ","NSE:ADANIENT-EQ","NSE:ADANIPORTS-EQ","NSE:COALINDIA-EQ","NSE:WIPRO-EQ","NSE:ULTRACEMCO-EQ","NSE:NESTLEIND-EQ","NSE:TITAN-EQ","NSE:BAJAJFINSV-EQ","NSE:ASIANPAINT-EQ","NSE:GRASIM-EQ","NSE:TECHM-EQ","NSE:HCLTECH-EQ","NSE:INDUSINDBK-EQ","NSE:DRREDDY-EQ","NSE:CIPLA-EQ","NSE:EICHERMOT-EQ","NSE:TRENT-EQ","NSE:BEL-EQ","NSE:SHRIRAMFIN-EQ","NSE:APOLLOHOSP-EQ","NSE:DIVISLAB-EQ","NSE:BPCL-EQ","NSE:HINDALCO-EQ","NSE:TATACONSUM-EQ","NSE:HEROMOTOCO-EQ","NSE:BRITANNIA-EQ","NSE:SBILIFE-EQ","NSE:LTIM-EQ"];
 
 app.get('/api/market/movers', async (_req, res) => {
   if (!accessToken) return res.status(401).json({ ok: false, error: 'Connect FYERS first to load market movers.' });
 
-  // Keep requests small so one invalid/unavailable instrument does not make
-  // the entire selected-stock snapshot fail. All values still come from FYERS.
-  const batches = [];
-  for (let i = 0; i < moversSymbols.length; i += 10) batches.push(moversSymbols.slice(i, i + 10));
-
-  const settled = await Promise.allSettled(batches.map(async (symbols) => {
-    const url = new URL('https://api-t1.fyers.in/data/quotes');
-    url.searchParams.set('symbols', symbols.join(','));
-    const result = await fyersReadOnlyGet(url);
-    const quotes = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
-    return quotes.map(item => {
-      const value = item && (item.v || item);
-      const symbol = item && (item.n || item.symbol || value.symbol);
-      const price = Number(value.lp ?? value.ltp);
-      const change = Number(value.ch);
-      const changePct = Number(value.chp);
-      if (!symbols.includes(symbol) || !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct)) return null;
-      return { symbol, price, change: Number.isFinite(change) ? change : null, changePct };
-    }).filter(Boolean);
-  }));
-
-  const rows = [];
-  const failedBatches = [];
-  settled.forEach((item, index) => {
-    if (item.status === 'fulfilled') rows.push(...item.value);
-    else {
-      const reason = String(item.reason?.message || 'FYERS quote request failed.').slice(0, 160);
-      failedBatches.push({ batch: index + 1, error: reason });
-      console.warn('FYERS market-mover batch failed:', index + 1, reason);
+  // One Quotes API request supports this 50-symbol universe. Cache snapshots
+  // briefly and coalesce concurrent refreshes to avoid FYERS HTTP 429 responses.
+  if (moversSnapshotCache && Date.now() - moversSnapshotCache.cachedAt < MOVERS_CACHE_TTL_MS) {
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ...moversSnapshotCache.payload, cached: true });
+  }
+  try {
+    if (!moversSnapshotInFlight) {
+      moversSnapshotInFlight = (async () => {
+        const url = new URL('https://api-t1.fyers.in/data/quotes');
+        url.searchParams.set('symbols', moversSymbols.join(','));
+        const result = await fyersReadOnlyGet(url);
+        const quotes = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
+        const received = new Set();
+        const rows = quotes.map(item => {
+          const value = item && (item.v || item);
+          const symbol = item && (item.n || item.symbol || value.symbol);
+          const price = Number(value && (value.lp ?? value.ltp));
+          const change = Number(value && value.ch);
+          const changePct = Number(value && value.chp);
+          if (!moversSymbols.includes(symbol) || (item.s && item.s !== 'ok') ||
+              !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct)) return null;
+          received.add(symbol);
+          return { symbol, price, change: Number.isFinite(change) ? change : null, changePct };
+        }).filter(Boolean);
+        if (!rows.length) throw new Error('FYERS returned no valid verified equity quote rows.');
+        return {
+          ok: true, fetchedAt: new Date().toISOString(), universe: 'selected-large-cap-NSE',
+          requestedSymbols: moversSymbols.length, receivedSymbols: rows.length,
+          partial: rows.length < moversSymbols.length,
+          failedSymbols: moversSymbols.filter(symbol => !received.has(symbol)), data: rows
+        };
+      })();
     }
-  });
-
-  if (!rows.length) {
-    const firstError = failedBatches[0]?.error || 'FYERS returned no valid equity quote rows.';
-    return res.status(502).json({
+    const payload = await moversSnapshotInFlight;
+    moversSnapshotCache = { cachedAt: Date.now(), payload };
+    res.set('Cache-Control', 'no-store');
+    return res.json(payload);
+  } catch (error) {
+    const statusCode = Number(error.statusCode) || 502;
+    return res.status(statusCode).json({
       ok: false,
-      error: 'FYERS did not return a verified stock-quote snapshot.',
-      detail: firstError,
-      failedBatches: failedBatches.length,
+      error: statusCode === 429 ? 'FYERS quote rate limit reached. Wait briefly before refreshing.' : 'FYERS did not return a verified stock-quote snapshot.',
+      detail: String(error.message || 'FYERS quote request failed.').slice(0, 220),
       requestedSymbols: moversSymbols.length
     });
+  } finally {
+    moversSnapshotInFlight = null;
   }
-
-  res.set('Cache-Control', 'no-store');
-  return res.json({
-    ok: true,
-    fetchedAt: new Date().toISOString(),
-    universe: 'selected-large-cap-NSE',
-    requestedSymbols: moversSymbols.length,
-    receivedSymbols: rows.length,
-    partial: failedBatches.length > 0 || rows.length < moversSymbols.length,
-    failedBatches,
-    data: rows
-  });
 });
 
 app.get('/api/fyers/options-chain', async (req, res) => {
