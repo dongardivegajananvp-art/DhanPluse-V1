@@ -420,7 +420,74 @@ function renderStockExplorerResults() {
 }
 
 function marketActivityMarkup() {
-  return '<div class="console-grid console-grid-2"><article class="console-section"><div class="console-section-head"><h4>Market breadth</h4><span class="live-tag">DATA SOURCE</span></div><div class="chart-empty">Advancers, decliners and unchanged counts will appear when a verified broad-market quote universe is connected.</div></article><article class="console-section"><div class="console-section-head"><h4>Volume & volatility</h4><span class="live-tag">DATA SOURCE</span></div><div class="chart-empty">Volume spikes and volatility rankings need verified volume/OHLC data. No demo values are displayed.</div></article><article class="console-section"><div class="console-section-head"><h4>Indices monitored</h4></div><div class="data-row"><span>NIFTY 50</span><b>'+(quoteFor(SYMBOLS[0].symbol)?'QUOTE RECEIVED':'WAITING')+'</b></div><div class="data-row"><span>BANK NIFTY</span><b>'+(quoteFor(SYMBOLS[1].symbol)?'QUOTE RECEIVED':'WAITING')+'</b></div></article><article class="console-section"><div class="console-section-head"><h4>Institutional flows</h4></div><div class="chart-empty">FII/DII cash-market flow is not available from the currently verified project data source.</div><button class="secondary" data-jump="FII/DII Flow">Open FII/DII workspace</button></article></div><p class="hint">This screen intentionally shows source status instead of simulated market breadth, volume or FII/DII numbers.</p>';
+  return '<div class="console-grid console-grid-2">' +
+    '<article class="console-section"><div class="console-section-head"><h4>Selected-universe breadth</h4><span class="live-tag">FYERS SNAPSHOT</span></div>' +
+    '<div class="data-row"><span>Symbols returned</span><b id="activityTotal">—</b></div>' +
+    '<div class="data-row"><span>Advancers</span><b id="activityAdvancers">—</b></div>' +
+    '<div class="data-row"><span>Decliners</span><b id="activityDecliners">—</b></div>' +
+    '<div class="data-row"><span>Unchanged / unavailable change</span><b id="activityUnchanged">—</b></div>' +
+    '<div id="activityBreadthStatus" class="hint">Connect FYERS and refresh to calculate breadth from verified quote responses.</div></article>' +
+    '<article class="console-section"><div class="console-section-head"><h4>Strongest movers</h4><span class="live-tag">QUOTE DATA</span></div>' +
+    '<div id="activityMovers" class="table-wrap"><div class="chart-empty">No verified snapshot loaded.</div></div>' +
+    '<button class="primary" id="refreshMarketActivityBtn">Refresh verified snapshot</button></article>' +
+    '<article class="console-section"><div class="console-section-head"><h4>Volume & volatility</h4><span class="live-tag">OHLC REQUIRED</span></div>' +
+    '<div class="chart-empty">Volume spikes and volatility rankings are withheld until verified historical OHLC/volume data is calculated for the selected symbols.</div></article>' +
+    '<article class="console-section"><div class="console-section-head"><h4>Institutional flows</h4><span class="live-tag">SOURCE CHECK</span></div>' +
+    '<div class="chart-empty">FII/DII figures are not connected to a verified source in this dashboard, so no numbers are shown.</div>' +
+    '<button class="secondary" data-jump="FII/DII Flow">Open FII/DII workspace</button></article></div>' +
+    '<p class="hint">Breadth covers only the selected large-cap NSE symbols returned by the FYERS Quotes API, not the entire exchange. Snapshot change is not a confirmed breakout or a trading recommendation.</p>';
+}
+
+async function loadMarketActivity() {
+  if (currentTab !== 'Market Activity') return;
+  const status = document.querySelector('#activityBreadthStatus');
+  const table = document.querySelector('#activityMovers');
+  const button = document.querySelector('#refreshMarketActivityBtn');
+  if (!status || !table || (button && button.disabled)) return;
+  if (button) button.disabled = true;
+  status.textContent = 'Requesting a verified FYERS quote snapshot…';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/movers', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
+      throw new Error(result.detail || result.error || 'Verified FYERS snapshot unavailable.');
+    }
+    const rows = result.data.filter(row => row && typeof row.symbol === 'string' &&
+      Number.isFinite(Number(row.price)) && Number(row.price) > 0);
+    if (!rows.length) throw new Error('FYERS returned no valid quote rows.');
+    const changes = rows.map(row => Number(row.changePct)).filter(Number.isFinite);
+    const advancers = changes.filter(value => value > 0).length;
+    const decliners = changes.filter(value => value < 0).length;
+    const unchanged = rows.length - advancers - decliners;
+    const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = String(value); };
+    set('activityTotal', rows.length);
+    set('activityAdvancers', advancers);
+    set('activityDecliners', decliners);
+    set('activityUnchanged', unchanged);
+    const sorted = rows.filter(row => Number.isFinite(Number(row.changePct)))
+      .sort((a, b) => Number(b.changePct) - Number(a.changePct));
+    const movers = [...sorted.slice(0, 5), ...sorted.slice(-5).reverse()];
+    table.innerHTML = movers.length
+      ? '<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th></tr></thead><tbody>' +
+        movers.map(row => '<tr><td>' + escapeHtml(row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')) +
+          '</td><td>' + formatPrice(Number(row.price)) + '</td><td class="' +
+          (Number(row.changePct) > 0 ? 'positive-text' : Number(row.changePct) < 0 ? 'negative-text' : '') + '">' +
+          (Number(row.changePct) > 0 ? '+' : '') + Number(row.changePct).toFixed(2) + '%</td></tr>').join('') +
+        '</tbody></table>'
+      : '<div class="chart-empty">Change percentage was not returned.</div>';
+    status.textContent = 'Verified FYERS snapshot at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') +
+      ' · ' + rows.length + ' of ' + Number(result.requestedSymbols ?? rows.length) + ' selected symbols returned.' +
+      (result.partial ? ' Partial snapshot: some symbols were unavailable.' : '');
+    logEvent('Market Activity snapshot received (' + rows.length + ' verified quote rows).', result.partial ? 'warn' : 'info');
+  } catch (error) {
+    status.textContent = (error.message || 'Market snapshot unavailable.') + ' Connect FYERS or retry. No figures were fabricated.';
+    table.innerHTML = '<div class="chart-empty">Verified market breadth is unavailable.</div>';
+    logEvent('Market Activity snapshot failed: ' + (error.message || 'unknown error'), 'warn');
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function dashboardMarkup() {
@@ -1003,6 +1070,7 @@ function render(tab) {
   else featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
   bindTabActions();
   updateDynamicPanel();
+  if (tab === 'Market Activity') loadMarketActivity();
   if (tab === 'Technical Indicators') loadTechnicalIndicators();
   if (tab === 'Gainers & Losers') loadMovers();
   if (tab === 'Sureshot CE/PE') loadSureshotSetup();
@@ -1057,6 +1125,8 @@ function bindTabActions() {
   if(advancedRefresh) advancedRefresh.addEventListener('click',loadAdvancedScanner);
   const loadCandlesBtn=document.querySelector('#loadCandlesBtn');
   if(loadCandlesBtn) loadCandlesBtn.addEventListener('click',loadCandles);
+  const refreshMarketActivity = document.querySelector('#refreshMarketActivityBtn');
+  if (refreshMarketActivity) refreshMarketActivity.addEventListener('click', loadMarketActivity);
   const refreshIndicators = document.querySelector('#refreshIndicatorsBtn');
   if (refreshIndicators) refreshIndicators.addEventListener('click', loadTechnicalIndicators);
   const refreshMovers = document.querySelector('#refreshMoversBtn');
