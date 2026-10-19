@@ -55,9 +55,6 @@ SYMBOLS.forEach(item => { historyBySymbol[item.symbol] = []; });
 const descriptions = {
   'Stock Explorer': ['Stock explorer', 'Search supported NSE symbols and open research workspaces. Prices are shown only when verified FYERS quotes are returned.'],
   'Market Activity': ['Market activity', 'A research overview for market breadth, volatility, volume and institutional flow; unsupported data stays clearly unavailable.'],
-  'Capital Protection': ['Capital protection calculator', 'Calculate position size, capital at risk and reward-to-risk from your own inputs. This tool does not place orders.'],
-  'Paper Trading': ['Paper trading journal', 'Record simulated entries and exits locally; no broker orders are sent.'],
-  'Backtesting': ['Historical strategy backtest', 'Test a simple moving-average crossover on verified FYERS candles; results exclude costs and do not predict future returns.'],
   'Dashboard': ['Market overview', 'Live FYERS quotes, recent price movement, and console health.'],
   'NIFTY': ['NIFTY 50 workspace', 'Live index quote and recent received-price history.'],
   'BANKNIFTY': ['BANK NIFTY workspace', 'Live index quote and recent received-price history.'],
@@ -421,140 +418,6 @@ function renderStockExplorerResults() {
     return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+(fresh||mover?'FYERS SNAPSHOT':'DATA PENDING')+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(price!==null?'₹'+formatPrice(price):'—')+'</strong><p>'+(changePct!==null?'<span class="'+(changePct>=0?'positive-text':'negative-text')+'">'+(changePct>0?'+':'')+changePct.toFixed(2)+'%</span> · ':'')+escapeHtml(quote?'Verified live quote':mover?'Verified FYERS quote snapshot':x.note)+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
   }).join(''):'<div class="chart-empty">No symbols match this search.</div>';
   host.querySelectorAll('[data-explorer-jump]').forEach(btn=>btn.addEventListener('click',()=>render(btn.dataset.explorerJump)));
-}
-
-function loadPaperTrades() {
-  try {
-    const parsed=JSON.parse(localStorage.getItem('dhanpulse-paper-trades-v1')||'[]');
-    return Array.isArray(parsed)?parsed.filter(item=>item&&typeof item.id==='string'&&Number.isFinite(Number(item.entry))&&Number.isFinite(Number(item.quantity))):[];
-  } catch { return []; }
-}
-function savePaperTrades() {
-  try { localStorage.setItem('dhanpulse-paper-trades-v1',JSON.stringify(paperTrades)); }
-  catch { const status=document.querySelector('#paperStatus'); if(status)status.textContent='Browser storage is unavailable; journal may not persist after refresh.'; }
-}
-function paperTradingMarkup() {
-  return '<div class="console-section"><div class="console-section-head"><div><h4>Simulated trade journal</h4><p>Stored only in this browser · no broker orders</p></div><span class="live-tag">PAPER ONLY</span></div>' +
-    '<form id="paperTradeForm" class="option-controls"><label>Symbol<select id="paperSymbol"><option>NSE:NIFTY50-INDEX</option><option>NSE:NIFTYBANK-INDEX</option><option>NSE:RELIANCE-EQ</option><option>NSE:HDFCBANK-EQ</option><option>NSE:INFY-EQ</option><option>NSE:TCS-EQ</option></select></label>' +
-    '<label>Side<select id="paperSide"><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></label>' +
-    '<label>Entry price<input id="paperEntry" type="number" min="0.01" step="0.05" required></label>' +
-    '<label>Quantity<input id="paperQuantity" type="number" min="1" step="1" value="1" required></label>' +
-    '<label>Notes<input id="paperNotes" maxlength="240" placeholder="Setup / reason (optional)"></label>' +
-    '<button class="primary" type="submit">Record paper entry</button></form>' +
-    '<div id="paperStatus" class="hint">Entries are simulated and stored locally. Enter an exit price to close a position.</div>' +
-    '<div class="console-grid console-grid-3"><article class="console-section"><small>Closed trades</small><strong id="paperClosedCount">0</strong></article><article class="console-section"><small>Win rate</small><strong id="paperWinRate">—</strong></article><article class="console-section"><small>Closed P&amp;L (before costs)</small><strong id="paperPnl">₹0.00</strong></article></div>' +
-    '<div id="paperTradeList" class="table-wrap"></div><button class="secondary" id="clearPaperTradesBtn">Clear local journal</button>' +
-    '<p class="hint">P&amp;L ignores brokerage, taxes, slippage and contract lot sizes. Clearing removes this browser-local journal only.</p></div>';
-}
-function renderPaperTrades() {
-  const host=document.querySelector('#paperTradeList'); if(!host)return;
-  const closed=paperTrades.filter(item=>Number.isFinite(Number(item.exit))&&Number(item.exit)>0);
-  const pnl=trade=>((trade.side==='SHORT'?-1:1)*(Number(trade.exit)-Number(trade.entry))*Number(trade.quantity));
-  const total=closed.reduce((sum,item)=>sum+pnl(item),0),wins=closed.filter(item=>pnl(item)>0).length;
-  const put=(id,value)=>{const el=document.getElementById(id);if(el)el.textContent=value;};
-  put('paperClosedCount',closed.length);put('paperWinRate',closed.length?(wins/closed.length*100).toFixed(1)+'%':'—');put('paperPnl','₹'+formatPrice(total));
-  host.innerHTML=paperTrades.length?'<table class="console-table"><thead><tr><th>Trade</th><th>Entry</th><th>Qty</th><th>Exit / P&amp;L</th><th>Action</th></tr></thead><tbody>'+
-    paperTrades.map(item=>{const closedTrade=Number.isFinite(Number(item.exit))&&Number(item.exit)>0;const profit=closedTrade?pnl(item):null;
-      return '<tr><td><b>'+escapeHtml(item.symbol.replace(/^NSE:/,''))+'</b><small>'+escapeHtml(item.side)+' · '+escapeHtml(new Date(item.createdAt).toLocaleString('en-IN'))+'</small><small>'+escapeHtml(item.notes||'No notes')+'</small></td>'+
-      '<td>'+formatPrice(Number(item.entry))+'</td><td>'+Number(item.quantity)+'</td><td>'+(closedTrade?formatPrice(Number(item.exit))+'<small class="'+(profit>=0?'positive-text':'negative-text')+'">'+(profit>0?'+':'')+'₹'+formatPrice(profit)+'</small>':'<input aria-label="Exit price" type="number" min="0.01" step="0.05" data-paper-exit="'+item.id+'" placeholder="Exit price">')+'</td>'+
-      '<td>'+(closedTrade?'<span class="live-tag">CLOSED</span>':'<button class="secondary" data-paper-close="'+item.id+'">Close</button>')+' <button class="secondary" data-paper-delete="'+item.id+'">Delete</button></td></tr>';
-    }).join('')+'</tbody></table>':'<div class="chart-empty">No paper trades recorded yet.</div>';
-}
-function backtestingMarkup() {
-  return '<div class="console-section"><div class="console-section-head"><div><h4>SMA crossover backtest</h4><p>Long-only baseline on historical candles returned by FYERS</p></div><span class="live-tag">HISTORICAL DATA</span></div>' +
-    '<div class="option-controls"><label>Symbol<select id="backtestSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option><option value="NSE:RELIANCE-EQ">RELIANCE</option><option value="NSE:HDFCBANK-EQ">HDFC BANK</option><option value="NSE:INFY-EQ">INFOSYS</option><option value="NSE:TCS-EQ">TCS</option></select></label>' +
-    '<label>Interval<select id="backtestResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><button class="primary" id="runBacktestBtn">Run backtest</button></div>' +
-    '<div id="backtestStatus" class="hint">Connect FYERS, choose a symbol and run the test on returned historical candles.</div>' +
-    '<div class="console-grid console-grid-2"><article class="console-section"><small>Closed trades</small><strong id="backtestTrades">—</strong></article><article class="console-section"><small>Win rate</small><strong id="backtestWinRate">—</strong></article><article class="console-section"><small>Net return on first close</small><strong id="backtestReturn">—</strong></article><article class="console-section"><small>Max drawdown (trade equity)</small><strong id="backtestDrawdown">—</strong></article></div>' +
-    '<div id="backtestResults" class="table-wrap"></div><p class="hint">Rule: enter at next candle close after short SMA crosses above long SMA; exit at next candle close after it crosses below. Uses close prices, ignores fees, slippage, dividends, spreads and taxes. Results depend on the available history window and are not a forecast.</p></div>';
-}
-async function runBacktest() {
-  if(currentTab!=='Backtesting')return;
-  const status=document.querySelector('#backtestStatus'),host=document.querySelector('#backtestResults'),button=document.querySelector('#runBacktestBtn');
-  const symbol=document.querySelector('#backtestSymbol')?.value,resolution=document.querySelector('#backtestResolution')?.value;
-  if(!status||!host||!symbol||!resolution)return;
-  if(button)button.disabled=true;
-  status.textContent='Requesting verified historical candles from FYERS…';host.innerHTML='';
-  try {
-    const response=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol,resolution}),{headers:{Accept:'application/json'},cache:'no-store'});
-    const result=await response.json().catch(()=>({}));
-    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.detail||result.error||'Historical candles unavailable.');
-    const candles=result.data.filter(row=>Array.isArray(row)&&row.length>=6&&row.slice(0,5).every(value=>Number.isFinite(Number(value)))&&Number(row[4])>0);
-    if(candles.length<30)throw new Error('At least 30 verified candles are needed for this crossover test.');
-    const closes=candles.map(row=>Number(row[4]));
-    const sma=(i,n)=>i+1<n?null:closes.slice(i-n+1,i+1).reduce((a,b)=>a+b,0)/n;
-    let inTrade=false,entry=0,entryTime=0,equity=1,peak=1,maxDrawdown=0;const trades=[];
-    for(let i=20;i<candles.length-1;i++){
-      const shortPrev=sma(i-1,5),longPrev=sma(i-1,20),shortNow=sma(i,5),longNow=sma(i,20);
-      const crossUp=shortPrev<=longPrev&&shortNow>longNow,crossDown=shortPrev>=longPrev&&shortNow<longNow;
-      if(!inTrade&&crossUp){entry=closes[i+1];entryTime=Number(candles[i+1][0]);inTrade=true;continue;}
-      if(inTrade&&crossDown){const exit=closes[i+1],exitTime=Number(candles[i+1][0]),ret=exit/entry-1;equity*=1+ret;peak=Math.max(peak,equity);maxDrawdown=Math.max(maxDrawdown,(peak-equity)/peak);trades.push({entry,exit,ret,entryTime,exitTime});inTrade=false;}
-    }
-    if(inTrade){const last=candles[candles.length-1],exit=closes[closes.length-1],ret=exit/entry-1;equity*=1+ret;peak=Math.max(peak,equity);maxDrawdown=Math.max(maxDrawdown,(peak-equity)/peak);trades.push({entry,exit,ret,entryTime,exitTime:Number(last[0]),openAtEnd:true});}
-    const wins=trades.filter(t=>t.ret>0).length;
-    const put=(id,value)=>{const el=document.getElementById(id);if(el)el.textContent=value;};
-    put('backtestTrades',trades.length);put('backtestWinRate',trades.length?(wins/trades.length*100).toFixed(1)+'%':'—');put('backtestReturn',((equity-1)*100).toFixed(2)+'%');put('backtestDrawdown',(maxDrawdown*100).toFixed(2)+'%');
-    host.innerHTML=trades.length?'<table class="console-table"><thead><tr><th>Entry time</th><th>Entry</th><th>Exit</th><th>Return</th></tr></thead><tbody>'+trades.slice(-20).reverse().map(t=>'<tr><td>'+escapeHtml(new Date(t.entryTime*1000).toLocaleString('en-IN'))+'</td><td>'+formatPrice(t.entry)+'</td><td>'+formatPrice(t.exit)+'</td><td class="'+(t.ret>=0?'positive-text':'negative-text')+'">'+(t.ret>0?'+':'')+(t.ret*100).toFixed(2)+'%</td></tr>').join('')+'</tbody></table>':'<div class="chart-empty">No crossover trades occurred in this history window.</div>';
-    status.textContent='Backtest completed on '+candles.length+' verified candles for '+symbol+' · '+resolution+' interval · fetched '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+'. Costs and slippage excluded.';
-  } catch(error) {
-    status.textContent=(error.message||'Backtest failed.')+' No synthetic candles or results were used.';
-    host.innerHTML='<div class="chart-empty">Backtest results unavailable.</div>';
-  } finally {if(button)button.disabled=false;}
-}
-
-function capitalProtectionMarkup() {
-  return '<div class="console-section"><div class="console-section-head"><div><h4>Position sizing & risk/reward</h4><p>Local calculator only · no order placement</p></div><span class="live-tag">RISK TOOL</span></div>' +
-    '<div class="option-controls">' +
-    '<label>Trading capital (₹)<input id="riskCapital" type="number" min="1" step="100" value="100000"></label>' +
-    '<label>Risk per trade (%)<input id="riskPercent" type="number" min="0.1" max="10" step="0.1" value="1"></label>' +
-    '<label>Entry price (₹)<input id="riskEntry" type="number" min="0.01" step="0.05" placeholder="e.g. 250"></label>' +
-    '<label>Stop-loss price (₹)<input id="riskStop" type="number" min="0.01" step="0.05" placeholder="e.g. 245"></label>' +
-    '<label>Target price (₹)<input id="riskTarget" type="number" min="0.01" step="0.05" placeholder="e.g. 260"></label>' +
-    '</div><button class="primary" id="calculateRiskBtn">Calculate safe position size</button>' +
-    '<div id="riskCalcStatus" class="hint">Enter entry, stop-loss and target. Default risk is 1% of capital.</div>' +
-    '<div class="console-grid console-grid-2"><article class="console-section"><small>Maximum planned loss</small><strong id="riskAmount">—</strong></article>' +
-    '<article class="console-section"><small>Suggested quantity (whole units)</small><strong id="riskQuantity">—</strong></article>' +
-    '<article class="console-section"><small>Estimated position value</small><strong id="riskExposure">—</strong></article>' +
-    '<article class="console-section"><small>Reward : risk</small><strong id="riskRatio">—</strong></article>' +
-    '<article class="console-section"><small>Potential target gain (before costs)</small><strong id="riskReward">—</strong></article>' +
-    '<article class="console-section"><small>Capital remaining after entry</small><strong id="riskRemaining">—</strong></article></div>' +
-    '<p class="hint">Calculation excludes brokerage, taxes, slippage, lot-size rules, leverage and gap risk. For options, use the actual premium and contract lot size; this generic calculator does not validate F&O lot sizes. Risk limits do not guarantee a maximum loss.</p></div>';
-}
-
-function calculateRiskPlan() {
-  const read = id => Number(document.getElementById(id)?.value);
-  const capital=read('riskCapital'), riskPct=read('riskPercent'), entry=read('riskEntry'), stop=read('riskStop'), target=read('riskTarget');
-  const status=document.getElementById('riskCalcStatus');
-  const put=(id,value)=>{const el=document.getElementById(id);if(el)el.textContent=value;};
-  ['riskAmount','riskQuantity','riskExposure','riskRatio','riskReward','riskRemaining'].forEach(id=>put(id,'—'));
-  if(!Number.isFinite(capital)||capital<=0||!Number.isFinite(riskPct)||riskPct<=0||riskPct>10||
-     !Number.isFinite(entry)||entry<=0||!Number.isFinite(stop)||stop<=0||!Number.isFinite(target)||target<=0) {
-    if(status)status.textContent='Please enter positive values. Risk per trade must be above 0% and no more than 10%.';
-    return;
-  }
-  const stopDistance=Math.abs(entry-stop);
-  const rewardDistance=Math.abs(target-entry);
-  if(stopDistance<=0||rewardDistance<=0||((target-entry)*(entry-stop)<=0)) {
-    if(status)status.textContent='For a long setup, set stop below entry and target above; for a short setup, set stop above entry and target below. Entry, stop and target must be different.';
-    return;
-  }
-  const riskBudget=capital*riskPct/100;
-  const quantity=Math.min(Math.floor(riskBudget/stopDistance),Math.floor(capital/entry));
-  if(quantity<1) {
-    if(status)status.textContent='Risk budget is smaller than the loss on one unit. Reduce stop distance or increase capital only if appropriate; do not force a trade.';
-    return;
-  }
-  const exposure=quantity*entry;
-  const plannedLoss=quantity*stopDistance;
-  const potentialGain=quantity*rewardDistance;
-  const remaining=capital-exposure;
-  put('riskAmount','₹'+formatPrice(plannedLoss));
-  put('riskQuantity',String(quantity));
-  put('riskExposure','₹'+formatPrice(exposure));
-  put('riskRatio',(rewardDistance/stopDistance).toFixed(2)+' : 1');
-  put('riskReward','₹'+formatPrice(potentialGain));
-  put('riskRemaining','₹'+formatPrice(remaining));
-  if(status)status.textContent='Calculated from your inputs. Position is limited by both planned risk and whole-unit sizing; estimated exposure '+(remaining<0?'exceeds available capital without leverage.':'fits within capital before costs.')+' No trade has been placed.';
 }
 
 function marketActivityMarkup() {
@@ -1204,9 +1067,6 @@ function render(tab) {
   else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
   else if (tab === 'Stock Explorer') featureContent.innerHTML = stockExplorerMarkup();
   else if (tab === 'Market Activity') featureContent.innerHTML = marketActivityMarkup();
-  else if (tab === 'Capital Protection') featureContent.innerHTML = capitalProtectionMarkup();
-  else if (tab === 'Paper Trading') featureContent.innerHTML = paperTradingMarkup();
-  else if (tab === 'Backtesting') featureContent.innerHTML = backtestingMarkup();
   else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','FII/DII Flow','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gainers & Losers') featureContent.innerHTML = moversMarkup();
   else if (tab === 'Option Chain') featureContent.innerHTML = optionChainMarkup();
@@ -1273,47 +1133,6 @@ function bindTabActions() {
   if(advancedRefresh) advancedRefresh.addEventListener('click',loadAdvancedScanner);
   const loadCandlesBtn=document.querySelector('#loadCandlesBtn');
   if(loadCandlesBtn) loadCandlesBtn.addEventListener('click',loadCandles);
-  const paperForm = document.querySelector('#paperTradeForm');
-  if (paperForm) paperForm.addEventListener('submit', event => {
-    event.preventDefault();
-    const symbol=document.querySelector('#paperSymbol').value;
-    const side=document.querySelector('#paperSide').value;
-    const entry=Number(document.querySelector('#paperEntry').value);
-    const quantity=Math.floor(Number(document.querySelector('#paperQuantity').value));
-    const notes=document.querySelector('#paperNotes').value.trim().slice(0,240);
-    if(!Number.isFinite(entry)||entry<=0||!Number.isFinite(quantity)||quantity<1) {
-      const status=document.querySelector('#paperStatus'); if(status)status.textContent='Enter a valid entry price and whole-unit quantity.'; return;
-    }
-    paperTrades.unshift({id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),symbol,side,entry,quantity,notes,createdAt:new Date().toISOString(),exit:null});
-    paperTrades=paperTrades.slice(0,200);
-    savePaperTrades(); renderPaperTrades();
-    paperForm.reset();
-    const status=document.querySelector('#paperStatus'); if(status)status.textContent='Simulated position saved locally. No order was sent to FYERS.';
-  });
-  const paperList=document.querySelector('#paperTradeList');
-  if(paperList) paperList.addEventListener('click', event => {
-    const closeButton=event.target.closest('[data-paper-close]');
-    const deleteButton=event.target.closest('[data-paper-delete]');
-    if(closeButton) {
-      const trade=paperTrades.find(item=>item.id===closeButton.dataset.paperClose);
-      const exitInput=document.querySelector('[data-paper-exit="'+closeButton.dataset.paperClose+'"]');
-      const exit=Number(exitInput?.value);
-      if(!trade||!Number.isFinite(exit)||exit<=0) { const status=document.querySelector('#paperStatus'); if(status)status.textContent='Enter a valid exit price to close this simulated trade.'; return; }
-      trade.exit=exit; trade.closedAt=new Date().toISOString(); savePaperTrades(); renderPaperTrades();
-    } else if(deleteButton) {
-      paperTrades=paperTrades.filter(item=>item.id!==deleteButton.dataset.paperDelete); savePaperTrades(); renderPaperTrades();
-    }
-  });
-  const clearPaper=document.querySelector('#clearPaperTradesBtn');
-  if(clearPaper) clearPaper.addEventListener('click',()=>{paperTrades=[];savePaperTrades();renderPaperTrades();});
-  const runBacktestBtn=document.querySelector('#runBacktestBtn');
-  if(runBacktestBtn) runBacktestBtn.addEventListener('click',runBacktest);
-  const calculateRiskBtn = document.querySelector('#calculateRiskBtn');
-  if (calculateRiskBtn) calculateRiskBtn.addEventListener('click', calculateRiskPlan);
-  ['riskCapital','riskPercent','riskEntry','riskStop','riskTarget'].forEach(id => {
-    const input=document.getElementById(id);
-    if(input) input.addEventListener('input', calculateRiskPlan);
-  });
   const refreshMarketActivity = document.querySelector('#refreshMarketActivityBtn');
   if (refreshMarketActivity) refreshMarketActivity.addEventListener('click', loadMarketActivity);
   const refreshIndicators = document.querySelector('#refreshIndicatorsBtn');
