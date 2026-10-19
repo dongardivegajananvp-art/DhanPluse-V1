@@ -45,6 +45,9 @@ let currentTab = 'Dashboard';
 let latestQuotes = {};
 let historyBySymbol = {};
 let stockExplorerMoverRows = [];
+let watchlistEquityRows = [];
+let watchlistRequestRunning = false;
+let watchlistSymbols = loadWatchlistSymbols();
 let stockExplorerFetchStarted = false;
 let appLogs = [];
 let alerts = loadAlerts();
@@ -510,12 +513,60 @@ function focusedQuoteMarkup(symbol) {
     '<p class="hint">Indicators use sampled index quotes, not official candle data. Values may differ from charting platforms and are for observation only.</p>';
 }
 
+function loadWatchlistSymbols() {
+  try {
+    const saved=JSON.parse(localStorage.getItem('dhanpulse-watchlist-v1')||'null');
+    if(Array.isArray(saved))return [...new Set(saved.filter(value=>typeof value==='string'&&/^(NSE:[A-Z0-9&-]+-(?:INDEX|EQ))$/.test(value)))].slice(0,30);
+  } catch {}
+  return SYMBOLS.map(item=>item.symbol);
+}
+function saveWatchlistSymbols() {
+  try { localStorage.setItem('dhanpulse-watchlist-v1',JSON.stringify(watchlistSymbols)); }
+  catch { logEvent('Watchlist could not be saved in browser storage.','warn'); }
+}
 function watchlistMarkup() {
-  return '<div class="table-wrap"><table class="console-table"><thead><tr><th>Symbol</th><th>Last price</th><th>Change</th><th>Feed status</th><th>Updated</th></tr></thead><tbody>' +
-    SYMBOLS.map(item => {
-      const quote = quoteFor(item.symbol);
-      return '<tr><td><b>' + item.label + '</b><small>' + item.symbol + '</small></td><td data-price-symbol="' + item.symbol + '">' + (quote ? formatPrice(quote.price) : '—') + '</td><td data-change-symbol="' + item.symbol + '">' + (quote && Number.isFinite(quote.change) ? (quote.change > 0 ? '+' : '') + quote.change.toFixed(2) : '—') + '</td><td><span class="live-tag">' + (quote && quoteAgeMs(quote) < 15000 ? 'LIVE' : 'WAITING') + '</span></td><td class="quote-time" data-time-symbol="' + item.symbol + '">' + (quote ? new Date(quote.receivedAt).toLocaleTimeString('en-IN') : '—') + '</td></tr>';
-    }).join('') + '</tbody></table></div><p class="hint">This watchlist currently contains the two index symbols streamed by the configured backend. Other symbols are not subscribed yet.</p>';
+  return '<div class="console-section"><div class="console-section-head"><div><h4>Personal watchlist</h4><p>Indices use the authenticated stream; selected equities use the verified FYERS quote snapshot.</p></div><span class="live-tag">LOCAL LIST</span></div>' +
+    '<div class="option-controls"><label>Add supported symbol<select id="watchlistSymbolSelect"><option value="">Load available equity symbols…</option></select></label><button class="primary" id="addWatchlistSymbolBtn">Add to watchlist</button><button class="secondary" id="refreshWatchlistBtn">Refresh quotes</button></div>' +
+    '<div id="watchlistStatus" class="hint">Loading verified quote universe when FYERS is connected…</div><div id="watchlistTable" class="table-wrap"></div>' +
+    '<p class="hint">Equity quotes are snapshots, not a streaming feed. The list is saved in this browser only; supported equity symbols are limited to the configured large-cap universe.</p></div>';
+}
+function renderWatchlistTable() {
+  const host=document.querySelector('#watchlistTable'); if(!host)return;
+  const rows=watchlistSymbols.map(symbol=>{
+    const index=SYMBOLS.find(item=>item.symbol===symbol);
+    const quote=index?quoteFor(symbol):null;
+    const equity=watchlistEquityRows.find(item=>item.symbol===symbol);
+    return {symbol,label:index?index.label:symbol.replace(/^NSE:/,'').replace(/-EQ$/,''),quote,equity};
+  });
+  host.innerHTML=rows.length?'<table class="console-table"><thead><tr><th>Symbol</th><th>Last price</th><th>Change %</th><th>Source / updated</th><th>Action</th></tr></thead><tbody>'+
+    rows.map(row=>{const price=row.quote?row.quote.price:row.equity?Number(row.equity.price):null;const change=row.quote?row.quote.changePct:row.equity?Number(row.equity.changePct):null;
+      const updated=row.quote?new Date(row.quote.receivedAt).toLocaleTimeString('en-IN'):row.equity?new Date(watchlistEquityRows.fetchedAt||Date.now()).toLocaleTimeString('en-IN'):'—';
+      return '<tr><td><b>'+escapeHtml(row.label)+'</b><small>'+escapeHtml(row.symbol)+'</small></td><td>'+(price!==null?'₹'+formatPrice(price):'—')+'</td><td class="'+(Number(change)>0?'positive-text':Number(change)<0?'negative-text':'')+'">'+(Number.isFinite(Number(change))?(Number(change)>0?'+':'')+Number(change).toFixed(2)+'%':'—')+'</td><td>'+(row.quote?'Index stream':row.equity?'FYERS snapshot':'Waiting for verified quote')+'<small>'+escapeHtml(updated)+'</small></td><td>'+(SYMBOLS.some(item=>item.symbol===row.symbol)?'<span class="live-tag">INDEX</span>':'<button class="secondary" data-remove-watchlist="'+escapeHtml(row.symbol)+'">Remove</button>')+'</td></tr>';
+    }).join('')+'</tbody></table>':'<div class="chart-empty">Your watchlist is empty. Add a supported symbol above.</div>';
+  host.querySelectorAll('[data-remove-watchlist]').forEach(button=>button.addEventListener('click',()=>{watchlistSymbols=watchlistSymbols.filter(symbol=>symbol!==button.dataset.removeWatchlist);saveWatchlistSymbols();renderWatchlistTable();}));
+}
+async function loadWatchlistQuotes() {
+  if(currentTab!=='Watchlist'||watchlistRequestRunning)return;
+  watchlistRequestRunning=true;
+  const status=document.querySelector('#watchlistStatus'),select=document.querySelector('#watchlistSymbolSelect');
+  if(status)status.textContent='Requesting verified FYERS equity snapshot…';
+  try {
+    const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.detail||result.error||'FYERS equity snapshot unavailable.');
+    watchlistEquityRows=result.data.filter(row=>row&&typeof row.symbol==='string'&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
+    watchlistEquityRows.fetchedAt=result.fetchedAt||new Date().toISOString();
+    if(select){
+      const previous=select.value;
+      select.innerHTML='<option value="">Choose a supported symbol</option>'+watchlistEquityRows.map(row=>'<option value="'+escapeHtml(row.symbol)+'">'+escapeHtml(row.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+'</option>').join('');
+      if(previous&&Array.from(select.options).some(option=>option.value===previous))select.value=previous;
+    }
+    renderWatchlistTable();
+    if(status)status.textContent='FYERS snapshot received · '+watchlistEquityRows.length+' supported equity quotes available.';
+  } catch(error) {
+    if(status)status.textContent=(error.message||'Equity snapshot unavailable.')+' Index stream may still be shown; no prices fabricated.';
+    renderWatchlistTable();
+  } finally {watchlistRequestRunning=false;}
 }
 
 function moversMarkup() {
@@ -1099,6 +1150,22 @@ function bindTabActions() {
     renderStockExplorerResults();
     loadStockExplorerQuotes();
   }
+  if(currentTab==='Watchlist') {
+    renderWatchlistTable();
+    loadWatchlistQuotes();
+  }
+  const addWatchlistBtn=document.querySelector('#addWatchlistSymbolBtn');
+  if(addWatchlistBtn)addWatchlistBtn.addEventListener('click',()=>{
+    const select=document.querySelector('#watchlistSymbolSelect'),status=document.querySelector('#watchlistStatus');
+    const symbol=select?select.value:'';
+    if(!symbol){if(status)status.textContent='Choose a supported equity symbol first.';return;}
+    if(watchlistSymbols.includes(symbol)){if(status)status.textContent='That symbol is already in your watchlist.';return;}
+    if(watchlistSymbols.length>=30){if(status)status.textContent='Watchlist limit is 30 symbols. Remove one before adding another.';return;}
+    watchlistSymbols.push(symbol);saveWatchlistSymbols();renderWatchlistTable();
+    if(status)status.textContent='Added '+symbol+' to your browser-local watchlist.';
+  });
+  const refreshWatchlistBtn=document.querySelector('#refreshWatchlistBtn');
+  if(refreshWatchlistBtn)refreshWatchlistBtn.addEventListener('click',loadWatchlistQuotes);
   const refreshStockQuotesBtn=document.querySelector('#refreshStockQuotesBtn');
   if(refreshStockQuotesBtn)refreshStockQuotesBtn.addEventListener('click',loadStockExplorerQuotes);
   const dashCandles=document.querySelector('#dashboardCandlesBtn');
