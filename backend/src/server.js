@@ -341,9 +341,16 @@ app.get('/api/market/quotes', async (_req, res) => {
   }
 
   const snapshot = liveSnapshot();
-  if (streamConnected && snapshot) {
+  // Keep displaying the most recent verified ticks during a brief socket
+  // reconnect. The response explicitly marks them as non-live so the UI can
+  // show prices without pretending the stream is currently connected.
+  if (snapshot) {
     res.set('Cache-Control', 'no-store');
-    return res.json({ ...snapshot, source: 'websocket' });
+    return res.json({
+      ...snapshot,
+      source: streamConnected ? 'websocket' : 'websocket-recent',
+      streamConnected
+    });
   }
 
   // WebSocket errors should not blank the dashboard when the same FYERS
