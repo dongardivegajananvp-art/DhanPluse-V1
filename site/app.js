@@ -967,7 +967,7 @@ function bindTabActions() {
   }));
 }
 
-function updateQuoteCards(quotes, fetchedAt, source) {
+function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   if (!Array.isArray(quotes)) return false;
   const map = {};
   quotes.forEach(item => {
@@ -1017,8 +1017,13 @@ function updateQuoteCards(quotes, fetchedAt, source) {
         : change === null ? 'FYERS live quote received' : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)');
     }
   });
-  setStatus('FYERS QUOTES RECEIVED');
-  setConnection('FYERS Connected', false);
+  if (source === 'websocket-recent' || streamConnected === false) {
+    setStatus('LIVE DATA STALE');
+    setConnection('Stream reconnecting · last verified prices', true);
+  } else {
+    setStatus('FYERS QUOTES RECEIVED');
+    setConnection('FYERS Connected', false);
+  }
   setFyersStatus('CONNECTED');
   setBackendStatus('ONLINE');
   const lastUpdate = document.querySelector('#lastUpdate');
@@ -1233,13 +1238,17 @@ async function fetchLiveQuotes() {
       return;
     }
     quotePollDelay = QUOTE_POLL_MS;
-    if (!updateQuoteCards(data.data, data.fetchedAt, data.source)) {
+    if (!updateQuoteCards(data.data, data.fetchedAt, data.source, data.streamConnected)) {
       setStatus('INCOMPLETE QUOTE RESPONSE');
       showMessage('Both expected index quotes were not present. No new values were applied.', true);
       logEvent('Quote response was incomplete.', 'warn');
       return;
     }
-    showMessage('NIFTY and BANK NIFTY quotes received from the backend.');
+    if (data.source === 'websocket-recent' || data.streamConnected === false) {
+      showMessage('Showing the last verified FYERS prices while the market socket reconnects. Signals remain blocked until fresh ticks resume.');
+    } else {
+      showMessage('NIFTY and BANK NIFTY quotes received from the backend.');
+    }
   } catch {
     setStatus('LIVE DATA UNAVAILABLE');
     showMessage('Cannot reach the quote API. Retrying automatically.', true);
