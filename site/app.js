@@ -294,6 +294,28 @@ function svgChart(symbol, height) {
     '<text x="12" y="' + (h - 3) + '" class="chart-label">LOW ' + formatPrice(min) + '</text></svg>';
 }
 
+async function loadDashboardCandles() {
+  const symbol=document.querySelector('#dashboardCandleSymbol');
+  const resolution=document.querySelector('#dashboardCandleResolution');
+  const chart=document.querySelector('#dashboardChart');
+  const status=document.querySelector('#dashboardCandleStatus');
+  const count=document.querySelector('#chartSampleCount');
+  if(!symbol||!resolution||!chart||!status)return;
+  status.textContent='Requesting verified FYERS historical candles…';
+  chart.innerHTML='<div class="chart-empty">Loading verified OHLC candles…</div>';
+  try {
+    const response=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:symbol.value,resolution:resolution.value}),{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||result.detail||'Historical candles unavailable.');
+    chart.innerHTML=candleSvg(result.data);
+    if(count)count.textContent=result.data.length+' verified candles';
+    status.textContent=result.data.length+' verified candles · '+symbol.value+' · '+resolution.value+' timeframe · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
+  } catch(error) {
+    chart.innerHTML='<div class="chart-empty">'+escapeHtml(error.message||'Historical candles unavailable.')+'</div>';
+    status.textContent='No chart generated because verified OHLC data was unavailable.';
+  }
+}
+
 function quoteCardsMarkup() {
   return SYMBOLS.map(item => {
     const quote = quoteFor(item.symbol);
@@ -341,9 +363,10 @@ function marketActivityMarkup() {
 
 function dashboardMarkup() {
   return '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
-    '<article class="console-section"><div class="console-section-head"><div><h4>Live quote trace</h4><p>Recent received prices · sampled by this browser</p></div><span class="live-tag">READ ONLY</span></div>' +
-    '<div id="dashboardChart">' + svgChart(SYMBOLS[0].symbol, 210) + '</div>' +
-    '<div class="chart-foot"><span id="chartSampleCount">Samples: ' + (historyBySymbol[SYMBOLS[0].symbol] || []).length + '</span><span>Not a candlestick chart</span></div></article>' +
+    '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
+    '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option><option value="NSE:RELIANCE-EQ">RELIANCE</option><option value="NSE:HDFCBANK-EQ">HDFC BANK</option><option value="NSE:ICICIBANK-EQ">ICICI BANK</option><option value="NSE:SBIN-EQ">SBI</option><option value="NSE:INFY-EQ">INFOSYS</option><option value="NSE:TCS-EQ">TCS</option></select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
+    '<div id="dashboardCandleStatus" class="hint">Choose a symbol and load verified historical candles.</div><div id="dashboardChart"><div class="chart-empty">Candlesticks have not been loaded yet.</div></div>' +
+    '<div class="chart-foot"><span id="chartSampleCount">Historical FYERS candles</span><span>OHLC · READ ONLY</span></div></article>' +
     '<div class="console-grid console-grid-2"><article class="console-section"><h4>Connection monitor</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend</span><b id="dashBackend">CHECKING</b></div><div class="data-row"><span>FYERS quote stream</span><b id="dashFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div></article><article class="console-section"><h4>Console modules</h4><div class="module-links"><button data-jump="Technical Indicators">Technical indicators</button><button data-jump="Option Chain">Option chain &amp; OI</button><button data-jump="Alerts">Price alerts</button><button data-jump="Holdings">Holdings &amp; positions</button></div></article></div>';
 }
 
@@ -907,6 +930,12 @@ function bindTabActions() {
   if(stockSearch) stockSearch.addEventListener('input',renderStockExplorerResults);
   if(stockCategory) stockCategory.addEventListener('change',renderStockExplorerResults);
   if(currentTab==='Stock Explorer') renderStockExplorerResults();
+  const dashCandles=document.querySelector('#dashboardCandlesBtn');
+  if(dashCandles) dashCandles.addEventListener('click',loadDashboardCandles);
+  const dashSymbol=document.querySelector('#dashboardCandleSymbol');
+  const dashResolution=document.querySelector('#dashboardCandleResolution');
+  if(dashSymbol) dashSymbol.addEventListener('change',()=>{const st=document.querySelector('#dashboardCandleStatus');if(st)st.textContent='Selection changed. Load candles to refresh the chart.';});
+  if(currentTab==='Dashboard') loadDashboardCandles();
   const test = document.querySelector('#testBackendBtn');
   if (test) test.addEventListener('click', testBackend);
   const connect = document.querySelector('#connectFyersBtn');
@@ -1090,7 +1119,7 @@ function updateDynamicPanel() {
     mainTabChart.innerHTML = svgChart(activeSymbol, 230);
   }
   const dashboardChart = document.querySelector('#dashboardChart');
-  if (dashboardChart) dashboardChart.innerHTML = svgChart(SYMBOLS[0].symbol, 210);
+  if (dashboardChart && !dashboardChart.querySelector('.candle-chart')) dashboardChart.innerHTML = '<div class="chart-empty">Load verified historical candles to display the candlestick chart.</div>';
   const focusChart = document.querySelector('#focusChart');
   if (focusChart) {
     const active = currentTab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
