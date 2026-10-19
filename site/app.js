@@ -230,7 +230,7 @@ function validateOhlcCandles(candles, resolution) {
 function validateOptionChainPayload(payload) {
   if (!payload || !Array.isArray(payload.optionsChain) || !payload.optionsChain.length) return 'Option-chain rows are missing; no option signal.';
   // FYERS may include the underlying index as a special strike=-1 row; its LTP is spot, not an option premium.
-  const underlyingRow = payload.optionsChain.find(row => Number(row?.strike_price) === -1 && !String(row?.option_type || '').trim() && /-INDEX$/.test(String(row?.symbol || '')) && Number(row?.ltp) > 0);
+  const underlyingRow = payload.optionsChain.find(row => Number(row?.strike_price) === -1 && !String(row?.option_type || '').trim() && /-(INDEX|EQ)$/.test(String(row?.symbol || '')) && Number(row?.ltp) > 0);
   const spot = Number(payload.optionsChain.find(row => Number(row?.underlying_price) > 0)?.underlying_price ?? payload.underlying_price ?? underlyingRow?.ltp);
   if (!Number.isFinite(spot) || spot <= 0) return 'Verified underlying spot is missing from option-chain response.';
   const normalized = payload.optionsChain.map(row => {
@@ -498,7 +498,7 @@ async function loadSureshotSetup() {
     if(!isRegularMarketSession()){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
     else if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
     else if(close<zones.demand.low&&close<previous){bias='PE WATCH';reason='Latest candle closed below the calculated buyer/demand-zone low.';}
-    if(symbol.endsWith('-EQ')) {
+    if(false && symbol.endsWith('-EQ')) {
       if(bias==='NO TRADE') {
         cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE · STOCK</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(reason)+'</p><p class="hint">Stock entry waits for a confirmed close beyond the mapped zone. No levels are invented.</p></article>';
         status.textContent='NO TRADE · '+reason;
