@@ -454,8 +454,16 @@ app.get('/api/market/candles', async (req, res) => {
   const resolution = String(req.query.resolution || '5');
   const allowedResolutions = new Set(['1', '3', '5', '15', '30', '60', 'D']);
   const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-  const today = new Date().toISOString().slice(0, 10);
-  const defaultFrom = new Date(Date.now() - (resolution === 'D' ? 29 : 6) * 86400000).toISOString().slice(0, 10);
+  // FYERS candle dates are exchange-local calendar dates. Use IST rather than UTC
+  // so the default range does not roll over at 00:00 UTC (05:30 IST).
+  const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
+  const today = indiaNow.toISOString().slice(0, 10);
+  const defaultLookbackDays = resolution === 'D' ? 29 : 6;
+  const defaultFrom = new Date(Date.UTC(
+    indiaNow.getUTCFullYear(),
+    indiaNow.getUTCMonth(),
+    indiaNow.getUTCDate() - defaultLookbackDays
+  )).toISOString().slice(0, 10);
   const rangeFrom = String(req.query.from || defaultFrom);
   const rangeTo = String(req.query.to || today);
   if (!allowed.has(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported candle symbol.' });
@@ -473,9 +481,24 @@ app.get('/api/market/candles', async (req, res) => {
     url.searchParams.set('cont_flag', '1');
     const result = await fyersReadOnlyGet(url);
     const candles = Array.isArray(result.candles) ? result.candles : [];
-    const valid = candles.filter(row => Array.isArray(row) && row.length >= 6 && row.slice(0, 5).every(value => Number.isFinite(Number(value))));
+    const isValidCandle = row => {
+      if (!Array.isArray(row) || row.length < 6 || !row.slice(0, 6).every(value => Number.isFinite(Number(value)))) return false;
+      const [timestamp, open, high, low, close, volume] = row.map(Number);
+      return timestamp > 0 && open > 0 && high > 0 && low > 0 && close > 0 && volume >= 0 &&
+        high >= Math.max(open, low, close) && low <= Math.min(open, high, close);
+    };
+    const invalidCandleCount = candles.filter(row => !isValidCandle(row)).length;
+    if (invalidCandleCount > 0) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(502).json({
+        ok: false,
+        error: 'FYERS returned invalid or incomplete OHLC candle rows; analysis blocked.',
+        detail: 'No partial candle set was returned because invalid rows must not be silently discarded.',
+        invalidCandleCount
+      });
+    }
     res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, symbol, resolution, from: rangeFrom, to: rangeTo, fetchedAt: new Date().toISOString(), data: valid });
+    return res.json({ ok: true, symbol, resolution, from: rangeFrom, to: rangeTo, fetchedAt: new Date().toISOString(), data: candles });
   } catch (error) {
     return res.status(error.statusCode || 502).json({ ok: false, error: error.statusCode === 401 ? 'Connect FYERS to load historical candles.' : 'FYERS historical-candle request failed.', detail: String(error.message || 'Upstream request failed.').slice(0, 220) });
   }
@@ -504,20 +527,38 @@ app.get('/api/market/movers', async (_req, res) => {
         const result = await fyersReadOnlyGet(url);
         const quotes = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
         const received = new Set();
+        const marketOpen = nseRegularSessionNow();
+        const quoteFetchedAt = new Date().toISOString();
         const rows = quotes.map(item => {
           const value = item && (item.v || item);
-          const symbol = item && (item.n || item.symbol || value.symbol);
+          const symbol = item && (item.n || item.symbol || value?.symbol);
           const price = Number(value && (value.lp ?? value.ltp));
-          const change = Number(value && value.ch);
-          const changePct = Number(value && value.chp);
+          const previousCloseRaw = value && (value.prev_close_price ?? value.prev_close ?? value.pc);
+          const previousClose = Number(previousCloseRaw);
+          const rawChange = Number(value && value.ch);
+          const rawChangePct = Number(value && value.chp);
+          const hasPreviousClose = Number.isFinite(previousClose) && previousClose > 0;
+          const change = Number.isFinite(rawChange) ? rawChange : (hasPreviousClose && Number.isFinite(price) ? price - previousClose : null);
+          const changePct = Number.isFinite(rawChangePct) ? rawChangePct : (hasPreviousClose && Number.isFinite(price) ? ((price - previousClose) / previousClose) * 100 : null);
+          const tradedAtEpoch = epochSeconds(value && (value.tt ?? value.exch_feed_time ?? value.last_traded_time ?? value.ltt));
           if (!moversSymbols.includes(symbol) || (item.s && item.s !== 'ok') ||
-              !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct)) return null;
+              !Number.isFinite(price) || price <= 0) return null;
           received.add(symbol);
-          return { symbol, price, change: Number.isFinite(change) ? change : null, changePct };
+          return {
+            symbol, price,
+            change: Number.isFinite(change) ? change : null,
+            changePct: Number.isFinite(changePct) ? changePct : null,
+            previousClose: hasPreviousClose ? previousClose : null,
+            priceAsOf: tradedAtEpoch ? new Date(tradedAtEpoch * 1000).toISOString() : null,
+            quoteFetchedAt,
+            marketSession: marketOpen ? 'OPEN' : 'CLOSED',
+            priceStatus: marketOpen ? 'FYERS_QUOTE' : 'LAST_KNOWN_PRICE'
+          };
         }).filter(Boolean);
         if (!rows.length) throw new Error('FYERS returned no valid verified equity quote rows.');
         return {
-          ok: true, fetchedAt: new Date().toISOString(), universe: 'selected-large-cap-NSE',
+          ok: true, fetchedAt: quoteFetchedAt, marketSession: marketOpen ? 'OPEN' : 'CLOSED',
+          universe: 'selected-large-cap-NSE',
           requestedSymbols: moversSymbols.length, receivedSymbols: rows.length,
           partial: rows.length < moversSymbols.length,
           failedSymbols: moversSymbols.filter(symbol => !received.has(symbol)), data: rows
