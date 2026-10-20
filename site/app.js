@@ -351,7 +351,7 @@ function quoteCardsMarkup() {
 function stockExplorerMarkup() {
   return '<div class="console-section"><div class="console-section-head"><div><h4>Stock Explorer</h4><p>Equity prices are fetched as verified FYERS quote snapshots. No prices are invented.</p></div><span class="live-tag">FYERS-READY</span></div>' +
     '<div class="explorer-controls"><label for="stockSearch">Search symbol or company</label><input id="stockSearch" type="search" placeholder="Try NIFTY, BANKNIFTY, RELIANCE, INFY…" autocomplete="off"><label for="stockCategory">Category</label><select id="stockCategory"><option value="all">All supported symbols</option><option value="index">Indices</option><option value="equity">Equity research</option></select><button class="secondary" id="refreshStockQuotesBtn">Refresh equity quotes</button></div>' +
-    '<div id="stockExplorerStatus" class="hint">Requesting a verified FYERS equity snapshot…</div><div id="stockExplorerResults" class="explorer-grid"></div><p class="hint">Index cards use the live stream; equity cards use the authenticated FYERS Quotes API snapshot. Quote availability depends on the symbols returned by FYERS and your API permissions.</p></div>';
+    '<div id="stockExplorerStatus" class="hint">Requesting a verified FYERS equity snapshot…</div><div id="stockExplorerResults" class="explorer-grid"></div><p class="hint">Index cards use the live stream; configured NSE F&O equity symbols use verified FYERS quote batches. After-hours prices are last-known quotes, not live ticks. Unavailable symbols remain unavailable.</p></div>';
 }
 
 let stockExplorerRequestRunning = false;
@@ -411,14 +411,14 @@ function renderStockExplorerResults() {
     {symbol:'NSE:LT-EQ',name:'LARSEN & TOUBRO',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
     {symbol:'NSE:ITC-EQ',name:'ITC',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'}
   ];
-  const dynamicRows=stockExplorerMoverRows.map(x=>({symbol:x.symbol,name:x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''),kind:'equity',tab:'Gainers & Losers',note:'Verified FYERS quote snapshot',price:Number(x.price),changePct:Number(x.changePct)}));
+  const dynamicRows=stockExplorerMoverRows.map(x=>({symbol:x.symbol,name:x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''),kind:'equity',tab:'Gainers & Losers',note:'Verified FYERS quote snapshot',price:Number(x.price),changePct:x.changePct==null?null:Number(x.changePct)}));
   const combined=[...universe,...dynamicRows.filter(x=>!universe.some(y=>y.symbol===x.symbol))];
   const rows=combined.filter(x=>(category==='all'||x.kind===category)&&(!q||(x.symbol+' '+x.name).toLowerCase().includes(q)));
   host.innerHTML=rows.length?rows.map(x=>{
     const quote=quoteFor(x.symbol);
     const mover=stockExplorerMoverRows.find(row=>row.symbol===x.symbol);
     const price=quote?quote.price:(mover?Number(mover.price):null);
-    const changePct=mover&&Number.isFinite(Number(mover.changePct))?Number(mover.changePct):null;
+    const changePct=mover&&mover.changePct!=null&&Number.isFinite(Number(mover.changePct))?Number(mover.changePct):null;
     const fresh=quote&&quoteAgeMs(quote)<15000;
     const marketClosed=mover&&mover.marketSession==='CLOSED';
     const priceTime=mover&&mover.priceAsOf?new Date(mover.priceAsOf).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'trade time not supplied by quote';
