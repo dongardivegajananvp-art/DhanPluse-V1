@@ -541,6 +541,9 @@ app.get('/api/market/movers', async (_req, res) => {
             quoteItems.push(...quotes);
             const returned = new Set(quotes.map(item => item && (item.n || item.symbol || item.v?.symbol)).filter(Boolean));
             failedBatches.push(...batch.filter(symbol => !returned.has(symbol)));
+            if (offset + MOVERS_BATCH_SIZE < moversSymbols.length) {
+              await new Promise(resolve => setTimeout(resolve, 400));
+            }
           } catch (error) {
             failedBatches.push(...batch);
             // A 429 means this endpoint is in cooldown; stop immediately rather
