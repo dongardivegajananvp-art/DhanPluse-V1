@@ -544,12 +544,12 @@ async function refreshMoversUniverse() {
       const cashSymbols = new Map();
       for (const [ticker, item] of Object.entries(cmMaster)) {
         const match = /^NSE:([A-Z0-9&-]+)-EQ$/.exec(ticker);
-        if (match && item?.tradeStatus !== 0) cashSymbols.set(match[1], ticker);
+        if (match && item?.tradeStatus === 1) cashSymbols.set(match[1], ticker);
       }
 
       const underlyingSymbols = new Set();
       for (const [ticker, item] of Object.entries(foMaster)) {
-        if (!ticker.startsWith('NSE:') || item?.tradeStatus === 0) continue;
+        if (!ticker.startsWith('NSE:') || item?.tradeStatus !== 1) continue;
         const isOption = item?.optType === 'CE' || item?.optType === 'PE';
         const isFuture = /FUT$/.test(ticker);
         if (!isOption && !isFuture) continue;
