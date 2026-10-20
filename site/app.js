@@ -722,7 +722,13 @@ async function loadSureshotSetup() {
     const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
     const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
     const type=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
-    const leg=type&&chain.find(x=>Number(x.strike_price)===atm&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0);
+    const atmIndex=atm===null?-1:strikes.indexOf(atm);
+    const nearbyStrikes=new Set(atmIndex<0?[]:strikes.slice(Math.max(0,atmIndex-2),Math.min(strikes.length,atmIndex+3)));
+    const legCandidates=type?chain.filter(x=>nearbyStrikes.has(Number(x.strike_price))&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0):[];
+    // Prefer the most actively traded verified contract among the five nearest strikes,
+    // then use OI, spread, and ATM distance as deterministic tie-breakers.
+    legCandidates.sort((a,b)=>b.volume-a.volume||b.oi-a.oi||a.spreadPct-b.spreadPct||Math.abs(a.strike_price-spot)-Math.abs(b.strike_price-spot));
+    const leg=legCandidates[0]||null;
     if(!type||!leg){
       cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(reason)+'</p><p class="hint">No entry/target is issued without a confirmed breakout and a verified matching option premium.</p></article>';
       status.textContent='NO TRADE · '+reason+' Option chain was verified; no actionable setup passed all filters.';
