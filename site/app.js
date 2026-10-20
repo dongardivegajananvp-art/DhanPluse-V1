@@ -957,6 +957,8 @@ async function loadOptionChain() {
       throw new Error(result.error || result.detail || 'Option-chain response unavailable.');
     }
     const data = result.data;
+    const chainCheck = validateOptionChainPayload(data);
+    if (typeof chainCheck === 'string') throw new Error(chainCheck);
     const expiries = Array.isArray(data.expiryData) ? data.expiryData : [];
     const selectedBefore = expiryEl.value;
     if (expiries.length) {
@@ -972,7 +974,7 @@ async function loadOptionChain() {
     if (callEl) callEl.textContent = displayNumber(callOi, 0);
     if (putEl) putEl.textContent = displayNumber(putOi, 0);
     if (pcrEl) pcrEl.textContent = Number.isFinite(callOi) && callOi > 0 && Number.isFinite(putOi) ? (putOi / callOi).toFixed(2) : '—';
-    const chain = Array.isArray(data.optionsChain) ? data.optionsChain : [];
+    const chain = chainCheck.chain;
     const byStrike = new Map();
     chain.forEach(leg => {
       if (!leg || !['CE', 'PE'].includes(leg.option_type)) return;
@@ -998,6 +1000,10 @@ async function loadOptionChain() {
   } catch (error) {
     status.textContent = (error.message || 'Could not load option chain.') + ' Use FYERS Settings to reconnect if authentication expired.';
     table.innerHTML = '<div class="chart-empty">No verified option-chain data available. No values have been fabricated.</div>';
+    const callEl = document.querySelector('#ocCallOi'), putEl = document.querySelector('#ocPutOi'), pcrEl = document.querySelector('#ocPcr');
+    if (callEl) callEl.textContent = '—';
+    if (putEl) putEl.textContent = '—';
+    if (pcrEl) pcrEl.textContent = '—';
     logEvent('Option-chain request failed.', 'warn');
   } finally {
     optionRequestRunning = false;
