@@ -527,20 +527,38 @@ app.get('/api/market/movers', async (_req, res) => {
         const result = await fyersReadOnlyGet(url);
         const quotes = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
         const received = new Set();
+        const marketOpen = nseRegularSessionNow();
+        const quoteFetchedAt = new Date().toISOString();
         const rows = quotes.map(item => {
           const value = item && (item.v || item);
-          const symbol = item && (item.n || item.symbol || value.symbol);
+          const symbol = item && (item.n || item.symbol || value?.symbol);
           const price = Number(value && (value.lp ?? value.ltp));
-          const change = Number(value && value.ch);
-          const changePct = Number(value && value.chp);
+          const previousCloseRaw = value && (value.prev_close_price ?? value.prev_close ?? value.pc);
+          const previousClose = Number(previousCloseRaw);
+          const rawChange = Number(value && value.ch);
+          const rawChangePct = Number(value && value.chp);
+          const hasPreviousClose = Number.isFinite(previousClose) && previousClose > 0;
+          const change = Number.isFinite(rawChange) ? rawChange : (hasPreviousClose && Number.isFinite(price) ? price - previousClose : null);
+          const changePct = Number.isFinite(rawChangePct) ? rawChangePct : (hasPreviousClose && Number.isFinite(price) ? ((price - previousClose) / previousClose) * 100 : null);
+          const tradedAtEpoch = epochSeconds(value && (value.tt ?? value.exch_feed_time ?? value.last_traded_time ?? value.ltt));
           if (!moversSymbols.includes(symbol) || (item.s && item.s !== 'ok') ||
-              !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct)) return null;
+              !Number.isFinite(price) || price <= 0) return null;
           received.add(symbol);
-          return { symbol, price, change: Number.isFinite(change) ? change : null, changePct };
+          return {
+            symbol, price,
+            change: Number.isFinite(change) ? change : null,
+            changePct: Number.isFinite(changePct) ? changePct : null,
+            previousClose: hasPreviousClose ? previousClose : null,
+            priceAsOf: tradedAtEpoch ? new Date(tradedAtEpoch * 1000).toISOString() : null,
+            quoteFetchedAt,
+            marketSession: marketOpen ? 'OPEN' : 'CLOSED',
+            priceStatus: marketOpen ? 'FYERS_QUOTE' : 'LAST_KNOWN_PRICE'
+          };
         }).filter(Boolean);
         if (!rows.length) throw new Error('FYERS returned no valid verified equity quote rows.');
         return {
-          ok: true, fetchedAt: new Date().toISOString(), universe: 'selected-large-cap-NSE',
+          ok: true, fetchedAt: quoteFetchedAt, marketSession: marketOpen ? 'OPEN' : 'CLOSED',
+          universe: 'selected-large-cap-NSE',
           requestedSymbols: moversSymbols.length, receivedSymbols: rows.length,
           partial: rows.length < moversSymbols.length,
           failedSymbols: moversSymbols.filter(symbol => !received.has(symbol)), data: rows
