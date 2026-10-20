@@ -535,8 +535,8 @@ app.get('/api/market/movers', async (_req, res) => {
           const price = Number(value && (value.lp ?? value.ltp));
           const previousCloseRaw = value && (value.prev_close_price ?? value.prev_close ?? value.pc);
           const previousClose = Number(previousCloseRaw);
-          const rawChange = Number(value && value.ch);
-          const rawChangePct = Number(value && value.chp);
+          const rawChange = value?.ch == null ? NaN : Number(value.ch);
+          const rawChangePct = value?.chp == null ? NaN : Number(value.chp);
           const hasPreviousClose = Number.isFinite(previousClose) && previousClose > 0;
           const change = Number.isFinite(rawChange) ? rawChange : (hasPreviousClose && Number.isFinite(price) ? price - previousClose : null);
           const changePct = Number.isFinite(rawChangePct) ? rawChangePct : (hasPreviousClose && Number.isFinite(price) ? ((price - previousClose) / previousClose) * 100 : null);
