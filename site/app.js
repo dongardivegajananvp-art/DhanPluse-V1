@@ -75,7 +75,8 @@ const descriptions = {
   'Holdings': ['Holdings & positions', 'Account data is private and shown only after a verified account endpoint is available.'],
   'Alerts': ['Price alerts', 'Browser-local alerts for the two live index quotes.'],
   'FYERS Settings': ['FYERS connection settings', 'Connect through the secure backend; credentials remain server-side.'],
-  'Logs': ['System logs', 'Recent frontend, backend, and live-quote events.']
+  'Logs': ['System logs', 'Recent frontend, backend, and live-quote events.'],
+  'Trade Journal': ['Trade journal & discipline', 'Review paper trades, planned risk/reward, rule adherence, and recurring emotional-trading patterns.']
 };
 
 function logEvent(message, level) {
@@ -1628,8 +1629,23 @@ window.addEventListener('appinstalled', () => {
 });
 
 nav.addEventListener('click', event => {
-  const button = event.target.closest('button[data-tab]');
-  if (button) render(button.dataset.tab);
+  const target = event.target instanceof Element ? event.target : event.target && event.target.parentElement;
+  const button = target && target.closest('button[data-tab]');
+  if (!button) return;
+  try {
+    render(button.dataset.tab);
+  } catch (error) {
+    const tab = button.dataset.tab || 'Workspace';
+    const message = error && error.message ? error.message : 'Unexpected workspace error';
+    currentTab = tab;
+    if (title) title.textContent = tab;
+    if (panelTitle) panelTitle.textContent = 'Workspace error';
+    if (featureTitle) featureTitle.textContent = tab;
+    if (featureDesc) featureDesc.textContent = 'Navigation responded, but this workspace hit an error.';
+    if (featureContent) featureContent.innerHTML = '<div class="chart-empty"><strong>Workspace could not load.</strong><p>' + escapeHtml(message) + '</p><p>Open Logs or refresh the page and try again.</p></div>';
+    nav.querySelectorAll('button[data-tab]').forEach(item => item.classList.toggle('active', item === button));
+    logEvent('Workspace render failed for ' + tab + ': ' + message, 'error');
+  }
 });
 document.querySelector('#settingsBtn')?.addEventListener('click', () => render('FYERS Settings'));
 
