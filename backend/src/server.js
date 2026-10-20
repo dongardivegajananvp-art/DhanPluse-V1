@@ -504,17 +504,20 @@ app.get('/api/market/candles', async (req, res) => {
   }
 });
 
-const MOVERS_CACHE_TTL_MS = 15000;
+const MOVERS_CACHE_TTL_MS = 60000;
+const MOVERS_BATCH_SIZE = 50;
 let moversSnapshotCache = null;
 let moversSnapshotInFlight = null;
 
-const moversSymbols = ["NSE:RELIANCE-EQ","NSE:HDFCBANK-EQ","NSE:ICICIBANK-EQ","NSE:INFY-EQ","NSE:TCS-EQ","NSE:BHARTIARTL-EQ","NSE:SBIN-EQ","NSE:ITC-EQ","NSE:LT-EQ","NSE:AXISBANK-EQ","NSE:KOTAKBANK-EQ","NSE:BAJFINANCE-EQ","NSE:HINDUNILVR-EQ","NSE:MARUTI-EQ","NSE:SUNPHARMA-EQ","NSE:TATAMOTORS-EQ","NSE:M&M-EQ","NSE:NTPC-EQ","NSE:TATASTEEL-EQ","NSE:POWERGRID-EQ","NSE:ONGC-EQ","NSE:JSWSTEEL-EQ","NSE:ADANIENT-EQ","NSE:ADANIPORTS-EQ","NSE:COALINDIA-EQ","NSE:WIPRO-EQ","NSE:ULTRACEMCO-EQ","NSE:NESTLEIND-EQ","NSE:TITAN-EQ","NSE:BAJAJFINSV-EQ","NSE:ASIANPAINT-EQ","NSE:GRASIM-EQ","NSE:TECHM-EQ","NSE:HCLTECH-EQ","NSE:INDUSINDBK-EQ","NSE:DRREDDY-EQ","NSE:CIPLA-EQ","NSE:EICHERMOT-EQ","NSE:TRENT-EQ","NSE:BEL-EQ","NSE:SHRIRAMFIN-EQ","NSE:APOLLOHOSP-EQ","NSE:DIVISLAB-EQ","NSE:BPCL-EQ","NSE:HINDALCO-EQ","NSE:TATACONSUM-EQ","NSE:HEROMOTOCO-EQ","NSE:BRITANNIA-EQ","NSE:SBILIFE-EQ","NSE:LTIM-EQ"];
-
+// NSE equity-derivatives underlyings, configured from the exchange's published
+// F&O list and newer additions. FYERS symbol availability is checked per row;
+// missing/renamed contracts are reported as unavailable rather than fabricated.
+const moversSymbols = [
+  "NSE:360ONE-EQ", "NSE:ABB-EQ", "NSE:ABCAPITAL-EQ", "NSE:ADANIENSOL-EQ", "NSE:ADANIENT-EQ", "NSE:ADANIGREEN-EQ", "NSE:ADANIPORTS-EQ", "NSE:ADANIPOWER-EQ", "NSE:ALKEM-EQ", "NSE:AMBER-EQ", "NSE:AMBUJACEM-EQ", "NSE:ANGELONE-EQ", "NSE:APLAPOLLO-EQ", "NSE:APOLLOHOSP-EQ", "NSE:APOLLOTYRE-EQ", "NSE:ASHOKLEY-EQ", "NSE:ASIANPAINT-EQ", "NSE:ASTRAL-EQ", "NSE:ATUL-EQ", "NSE:AUBANK-EQ", "NSE:AUROPHARMA-EQ", "NSE:AXISBANK-EQ", "NSE:BAJAJ-AUTO-EQ", "NSE:BAJFINANCE-EQ", "NSE:BAJAJFINSV-EQ", "NSE:BAJAJHLDNG-EQ", "NSE:BALKRISIND-EQ", "NSE:BALRAMCHIN-EQ", "NSE:BANDHANBNK-EQ", "NSE:BANKBARODA-EQ", "NSE:BANKINDIA-EQ", "NSE:BATAINDIA-EQ", "NSE:BERGEPAINT-EQ", "NSE:BEL-EQ", "NSE:BHARATFORG-EQ", "NSE:BHEL-EQ", "NSE:BPCL-EQ", "NSE:BHARTIARTL-EQ", "NSE:BIOCON-EQ", "NSE:BSOFT-EQ", "NSE:BOSCHLTD-EQ", "NSE:BRITANNIA-EQ", "NSE:CANFINHOME-EQ", "NSE:CANBK-EQ", "NSE:CHAMBLFERT-EQ", "NSE:CHOLAFIN-EQ", "NSE:CIPLA-EQ", "NSE:CUB-EQ", "NSE:COALINDIA-EQ", "NSE:COFORGE-EQ", "NSE:COLPAL-EQ", "NSE:CONCOR-EQ", "NSE:COROMANDEL-EQ", "NSE:CROMPTON-EQ", "NSE:CUMMINSIND-EQ", "NSE:DABUR-EQ", "NSE:DALBHARAT-EQ", "NSE:DEEPAKNTR-EQ", "NSE:DELHIVERY-EQ", "NSE:DEVYANI-EQ", "NSE:DLF-EQ", "NSE:LALPATHLAB-EQ", "NSE:DRREDDY-EQ", "NSE:EICHERMOT-EQ", "NSE:ESCORTS-EQ", "NSE:EXIDEIND-EQ", "NSE:GAIL-EQ", "NSE:GLENMARK-EQ", "NSE:GMRINFRA-EQ", "NSE:GODREJCP-EQ", "NSE:GODREJPROP-EQ", "NSE:GRANULES-EQ", "NSE:GRASIM-EQ", "NSE:GUJGASLTD-EQ", "NSE:HAVELLS-EQ", "NSE:HCLTECH-EQ", "NSE:HDFCAMC-EQ", "NSE:HDFCBANK-EQ", "NSE:HDFCLIFE-EQ", "NSE:HEROMOTOCO-EQ", "NSE:HINDALCO-EQ", "NSE:HAL-EQ", "NSE:HINDCOPPER-EQ", "NSE:HINDPETRO-EQ", "NSE:HINDUNILVR-EQ", "NSE:ICICIBANK-EQ", "NSE:ICICIGI-EQ", "NSE:ICICIPRULI-EQ", "NSE:IDFCFIRSTB-EQ", "NSE:INDIAMART-EQ", "NSE:IEX-EQ", "NSE:IOC-EQ", "NSE:IRCTC-EQ", "NSE:IGL-EQ", "NSE:INDUSTOWER-EQ", "NSE:INDUSINDBK-EQ", "NSE:NAUKRI-EQ", "NSE:INFY-EQ", "NSE:INTELLECT-EQ", "NSE:INDIGO-EQ", "NSE:IPCALAB-EQ", "NSE:ITC-EQ", "NSE:JINDALSTEL-EQ", "NSE:JKCEMENT-EQ", "NSE:JSWSTEEL-EQ", "NSE:JUBLFOOD-EQ", "NSE:KOTAKBANK-EQ", "NSE:LTTS-EQ", "NSE:LTIM-EQ", "NSE:LT-EQ", "NSE:LAURUSLABS-EQ", "NSE:LICHSGFIN-EQ", "NSE:LUPIN-EQ", "NSE:MGL-EQ", "NSE:M&MFIN-EQ", "NSE:M&M-EQ", "NSE:MANAPPURAM-EQ", "NSE:MARICO-EQ", "NSE:MARUTI-EQ", "NSE:MFSL-EQ", "NSE:METROPOLIS-EQ", "NSE:MOTHERSON-EQ", "NSE:MPHASIS-EQ", "NSE:MRF-EQ", "NSE:MCX-EQ", "NSE:MUTHOOTFIN-EQ", "NSE:NATIONALUM-EQ", "NSE:NAVINFLUOR-EQ", "NSE:NESTLEIND-EQ", "NSE:NMDC-EQ", "NSE:NTPC-EQ", "NSE:OBEROIRLTY-EQ", "NSE:ONGC-EQ", "NSE:OFSS-EQ", "NSE:PAGEIND-EQ", "NSE:PERSISTENT-EQ", "NSE:PETRONET-EQ", "NSE:PIIND-EQ", "NSE:PIDILITIND-EQ", "NSE:PEL-EQ", "NSE:POLYCAB-EQ", "NSE:PFC-EQ", "NSE:POWERGRID-EQ", "NSE:PNB-EQ", "NSE:PVRINOX-EQ", "NSE:RAIN-EQ", "NSE:RBLBANK-EQ", "NSE:RECLTD-EQ", "NSE:RELIANCE-EQ", "NSE:SBICARD-EQ", "NSE:SBILIFE-EQ", "NSE:SHREECEM-EQ", "NSE:SHRIRAMFIN-EQ", "NSE:SIEMENS-EQ", "NSE:SRF-EQ", "NSE:SBIN-EQ", "NSE:SAIL-EQ", "NSE:SUNPHARMA-EQ", "NSE:SUNTV-EQ", "NSE:SYNGENE-EQ", "NSE:TATACHEM-EQ", "NSE:TATACOMM-EQ", "NSE:TCS-EQ", "NSE:TATACONSUM-EQ", "NSE:TATAMOTORS-EQ", "NSE:TATAPOWER-EQ", "NSE:TATASTEEL-EQ", "NSE:TECHM-EQ", "NSE:FEDERALBNK-EQ", "NSE:INDHOTEL-EQ", "NSE:RAMCOCEM-EQ", "NSE:TITAN-EQ", "NSE:TORNTPHARM-EQ", "NSE:TRENT-EQ", "NSE:TVSMOTOR-EQ", "NSE:ULTRACEMCO-EQ", "NSE:UBL-EQ", "NSE:MCDOWELL-N-EQ", "NSE:UPL-EQ", "NSE:VEDL-EQ", "NSE:IDEA-EQ", "NSE:VOLTAS-EQ", "NSE:WHIRLPOOL-EQ", "NSE:WIPRO-EQ", "NSE:ZEEL-EQ", "NSE:ZYDUSLIFE-EQ", "NSE:ANANDRATHI-EQ", "NSE:ATHERENERG-EQ", "NSE:DMART-EQ", "NSE:BSE-EQ", "NSE:BLUESTARCO-EQ", "NSE:MAHABANK-EQ", "NSE:BDL-EQ", "NSE:ETERNAL-EQ", "NSE:SWIGGY-EQ", "NSE:HYUNDAI-EQ", "NSE:OLAELEC-EQ", "NSE:INOXWIND-EQ", "NSE:IREDA-EQ", "NSE:HUDCO-EQ", "NSE:PRESTIGE-EQ", "NSE:UNOMINDA-EQ", "NSE:TIINDIA-EQ", "NSE:SONACOMS-EQ", "NSE:INDIANB-EQ", "NSE:MAZDOCK-EQ", "NSE:COCHINSHIP-EQ", "NSE:GRSE-EQ", "NSE:IRFC-EQ", "NSE:RVNL-EQ", "NSE:RAILTEL-EQ", "NSE:NBCC-EQ", "NSE:IRCON-EQ", "NSE:RITES-EQ", "NSE:POWERINDIA-EQ", "NSE:SUZLON-EQ", "NSE:NYKAA-EQ", "NSE:LODHA-EQ", "NSE:PHOENIXLTD-EQ", "NSE:MAXHEALTH-EQ", "NSE:MEDANTA-EQ", "NSE:NUVAMA-EQ", "NSE:KFINTECH-EQ", "NSE:CAMS-EQ", "NSE:CDSL-EQ", "NSE:LICI-EQ", "NSE:IDBI-EQ", "NSE:UNIONBANK-EQ", "NSE:CESC-EQ", "NSE:HFCL-EQ", "NSE:YESBANK-EQ", "NSE:INDIANHOTEL-EQ", "NSE:JKLAKSHMI-EQ", "NSE:KEI-EQ", "NSE:KEC-EQ", "NSE:ACC-EQ", "NSE:ABBOTTINDIA-EQ", "NSE:AARTIIND-EQ", "NSE:ABFRL-EQ", "NSE:DIXON-EQ", "NSE:GNFC-EQ"
+];
 app.get('/api/market/movers', async (_req, res) => {
   if (!accessToken) return res.status(401).json({ ok: false, error: 'Connect FYERS first to load market movers.' });
 
-  // One Quotes API request supports this 50-symbol universe. Cache snapshots
-  // briefly and coalesce concurrent refreshes to avoid FYERS HTTP 429 responses.
   if (moversSnapshotCache && Date.now() - moversSnapshotCache.cachedAt < MOVERS_CACHE_TTL_MS) {
     res.set('Cache-Control', 'no-store');
     return res.json({ ...moversSnapshotCache.payload, cached: true });
@@ -522,14 +525,34 @@ app.get('/api/market/movers', async (_req, res) => {
   try {
     if (!moversSnapshotInFlight) {
       moversSnapshotInFlight = (async () => {
-        const url = new URL('https://api-t1.fyers.in/data/quotes');
-        url.searchParams.set('symbols', moversSymbols.join(','));
-        const result = await fyersReadOnlyGet(url);
-        const quotes = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
-        const received = new Set();
-        const marketOpen = nseRegularSessionNow();
         const quoteFetchedAt = new Date().toISOString();
-        const rows = quotes.map(item => {
+        const marketOpen = nseRegularSessionNow();
+        const quoteItems = [];
+        const failedBatches = [];
+        // Keep each request within the 50-symbol Quotes API limit and avoid
+        // parallel bursts that can trigger FYERS 429 cooldowns.
+        for (let offset = 0; offset < moversSymbols.length; offset += MOVERS_BATCH_SIZE) {
+          const batch = moversSymbols.slice(offset, offset + MOVERS_BATCH_SIZE);
+          try {
+            const url = new URL('https://api-t1.fyers.in/data/quotes');
+            url.searchParams.set('symbols', batch.join(','));
+            const result = await fyersReadOnlyGet(url);
+            const quotes = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
+            quoteItems.push(...quotes);
+            const returned = new Set(quotes.map(item => item && (item.n || item.symbol || item.v?.symbol)).filter(Boolean));
+            failedBatches.push(...batch.filter(symbol => !returned.has(symbol)));
+            if (offset + MOVERS_BATCH_SIZE < moversSymbols.length) {
+              await new Promise(resolve => setTimeout(resolve, 400));
+            }
+          } catch (error) {
+            failedBatches.push(...batch);
+            // A 429 means this endpoint is in cooldown; stop immediately rather
+            // than issuing more requests that cannot succeed.
+            if (Number(error.statusCode) === 429) break;
+          }
+        }
+        const received = new Set();
+        const rows = quoteItems.map(item => {
           const value = item && (item.v || item);
           const symbol = item && (item.n || item.symbol || value?.symbol);
           const price = Number(value && (value.lp ?? value.ltp));
@@ -558,10 +581,11 @@ app.get('/api/market/movers', async (_req, res) => {
         if (!rows.length) throw new Error('FYERS returned no valid verified equity quote rows.');
         return {
           ok: true, fetchedAt: quoteFetchedAt, marketSession: marketOpen ? 'OPEN' : 'CLOSED',
-          universe: 'selected-large-cap-NSE',
+          universe: 'configured-NSE-F&O-equities',
           requestedSymbols: moversSymbols.length, receivedSymbols: rows.length,
-          partial: rows.length < moversSymbols.length,
-          failedSymbols: moversSymbols.filter(symbol => !received.has(symbol)), data: rows
+          partial: rows.length < moversSymbols.length || failedBatches.length > 0,
+          failedSymbols: [...new Set([...moversSymbols.filter(symbol => !received.has(symbol)), ...failedBatches])],
+          data: rows
         };
       })();
     }
@@ -581,7 +605,6 @@ app.get('/api/market/movers', async (_req, res) => {
     moversSnapshotInFlight = null;
   }
 });
-
 app.get('/api/fyers/options-chain', async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
   const allowed = [...allowedSymbols, ...moversSymbols];
