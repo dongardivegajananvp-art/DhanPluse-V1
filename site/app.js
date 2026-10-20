@@ -382,7 +382,7 @@ async function loadStockExplorerQuotes() {
     status.textContent = 'Verified FYERS snapshot received at ' +
       new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') +
       ' · ' + count + ' of ' + requested + ' configured symbols returned.' +
-      (result.partial ? ' Some batches failed; see Logs / retry.' : '');
+      (result.partial ? ' · ' + Math.max(0, requested - count) + ' symbols missing/unavailable; see Logs / retry.' : '');
     logEvent('Stock Explorer FYERS snapshot received (' + count + '/' + requested + ' symbols).', result.partial ? 'warn' : 'info');
   } catch (error) {
     status.textContent = 'Equity quote request failed: ' + (error.message || 'FYERS snapshot unavailable.') +
