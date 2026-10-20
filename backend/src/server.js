@@ -529,6 +529,7 @@ app.get('/api/market/movers', async (_req, res) => {
         const marketOpen = nseRegularSessionNow();
         const quoteItems = [];
         const failedBatches = [];
+        let batchRateLimitError = null;
         // Keep each request within the 50-symbol Quotes API limit and avoid
         // parallel bursts that can trigger FYERS 429 cooldowns.
         for (let offset = 0; offset < moversSymbols.length; offset += MOVERS_BATCH_SIZE) {
@@ -548,7 +549,10 @@ app.get('/api/market/movers', async (_req, res) => {
             failedBatches.push(...batch);
             // A 429 means this endpoint is in cooldown; stop immediately rather
             // than issuing more requests that cannot succeed.
-            if (Number(error.statusCode) === 429) break;
+            if (Number(error.statusCode) === 429) {
+              batchRateLimitError = error;
+              break;
+            }
           }
         }
         const received = new Set();
@@ -578,7 +582,10 @@ app.get('/api/market/movers', async (_req, res) => {
             priceStatus: marketOpen ? 'FYERS_QUOTE' : 'LAST_KNOWN_PRICE'
           };
         }).filter(Boolean);
-        if (!rows.length) throw new Error('FYERS returned no valid verified equity quote rows.');
+        if (!rows.length) {
+          if (batchRateLimitError) throw batchRateLimitError;
+          throw new Error('FYERS returned no valid verified equity quote rows.');
+        }
         return {
           ok: true, fetchedAt: quoteFetchedAt, marketSession: marketOpen ? 'OPEN' : 'CLOSED',
           universe: 'configured-NSE-F&O-equities',
