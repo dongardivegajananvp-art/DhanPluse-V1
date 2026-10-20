@@ -1642,7 +1642,10 @@ nav.addEventListener('click', event => {
     if (panelTitle) panelTitle.textContent = 'Workspace error';
     if (featureTitle) featureTitle.textContent = tab;
     if (featureDesc) featureDesc.textContent = 'Navigation responded, but this workspace hit an error.';
-    if (featureContent) featureContent.innerHTML = '<div class="chart-empty"><strong>Workspace could not load.</strong><p>' + escapeHtml(message) + '</p><p>Open Logs or refresh the page and try again.</p></div>';
+    const diagnostic = '<div class="chart-empty"><strong>Workspace could not load.</strong><p>' + escapeHtml(message) + '</p><p>The navigation click worked, but the workspace renderer stopped. This error is shown instead of leaving old dashboard content in place.</p></div>';
+    if (featureContent) featureContent.innerHTML = diagnostic;
+    const mainWorkspace = document.querySelector('#mainWorkspaceContent');
+    if (mainWorkspace) mainWorkspace.innerHTML = '<div class="main-view-heading"><span class="eyebrow">DHANPULSE DIAGNOSTIC</span><h2>' + escapeHtml(tab) + '</h2></div>' + diagnostic;
     nav.querySelectorAll('button[data-tab]').forEach(item => item.classList.toggle('active', item === button));
     logEvent('Workspace render failed for ' + tab + ': ' + message, 'error');
   }
