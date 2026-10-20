@@ -374,8 +374,7 @@ async function loadStockExplorerQuotes() {
     }
     stockExplorerMoverRows = result.data.filter(row =>
       row && typeof row.symbol === 'string' &&
-      Number.isFinite(Number(row.price)) && Number(row.price) > 0 &&
-      Number.isFinite(Number(row.changePct))
+      Number.isFinite(Number(row.price)) && Number(row.price) > 0
     );
     renderStockExplorerResults();
     const count = Number(result.receivedSymbols ?? stockExplorerMoverRows.length);
@@ -421,7 +420,12 @@ function renderStockExplorerResults() {
     const price=quote?quote.price:(mover?Number(mover.price):null);
     const changePct=mover&&Number.isFinite(Number(mover.changePct))?Number(mover.changePct):null;
     const fresh=quote&&quoteAgeMs(quote)<15000;
-    return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+(fresh||mover?'FYERS SNAPSHOT':'DATA PENDING')+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(price!==null?'₹'+formatPrice(price):'—')+'</strong><p>'+(changePct!==null?'<span class="'+(changePct>=0?'positive-text':'negative-text')+'">'+(changePct>0?'+':'')+changePct.toFixed(2)+'%</span> · ':'')+escapeHtml(quote?'Verified live quote':mover?'Verified FYERS quote snapshot':x.note)+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
+    const marketClosed=mover&&mover.marketSession==='CLOSED';
+    const priceTime=mover&&mover.priceAsOf?new Date(mover.priceAsOf).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'trade time not supplied by quote';
+    const priceLabel=mover?(marketClosed?'LAST KNOWN PRICE':'FYERS QUOTE'):(fresh?'LIVE INDEX QUOTE':'DATA PENDING');
+    const changeLabel=changePct!==null?'<span class="'+(changePct>=0?'positive-text':'negative-text')+'">'+(changePct>0?'+':'')+changePct.toFixed(2)+'%</span>':'<span class="muted-text">Change unavailable</span>';
+    const detail=mover?(marketClosed?'Market closed · last FYERS quote · '+priceTime:'FYERS quote · '+priceTime):(quote?'Verified live index quote':x.note);
+    return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+priceLabel+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(price!==null?'₹'+formatPrice(price):'—')+'</strong><p>'+changeLabel+' · '+escapeHtml(detail)+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
   }).join(''):'<div class="chart-empty">No symbols match this search.</div>';
   host.querySelectorAll('[data-explorer-jump]').forEach(btn=>btn.addEventListener('click',()=>render(btn.dataset.explorerJump)));
 }
