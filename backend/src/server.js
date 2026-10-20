@@ -512,12 +512,86 @@ let moversSnapshotInFlight = null;
 // NSE equity-derivatives underlyings, configured from the exchange's published
 // F&O list and newer additions. FYERS symbol availability is checked per row;
 // missing/renamed contracts are reported as unavailable rather than fabricated.
-const moversSymbols = [
+const configuredMoversSymbols = [
   "NSE:360ONE-EQ", "NSE:ABB-EQ", "NSE:ABCAPITAL-EQ", "NSE:ADANIENSOL-EQ", "NSE:ADANIENT-EQ", "NSE:ADANIGREEN-EQ", "NSE:ADANIPORTS-EQ", "NSE:ADANIPOWER-EQ", "NSE:ALKEM-EQ", "NSE:AMBER-EQ", "NSE:AMBUJACEM-EQ", "NSE:ANGELONE-EQ", "NSE:APLAPOLLO-EQ", "NSE:APOLLOHOSP-EQ", "NSE:APOLLOTYRE-EQ", "NSE:ASHOKLEY-EQ", "NSE:ASIANPAINT-EQ", "NSE:ASTRAL-EQ", "NSE:ATUL-EQ", "NSE:AUBANK-EQ", "NSE:AUROPHARMA-EQ", "NSE:AXISBANK-EQ", "NSE:BAJAJ-AUTO-EQ", "NSE:BAJFINANCE-EQ", "NSE:BAJAJFINSV-EQ", "NSE:BAJAJHLDNG-EQ", "NSE:BALKRISIND-EQ", "NSE:BALRAMCHIN-EQ", "NSE:BANDHANBNK-EQ", "NSE:BANKBARODA-EQ", "NSE:BANKINDIA-EQ", "NSE:BATAINDIA-EQ", "NSE:BERGEPAINT-EQ", "NSE:BEL-EQ", "NSE:BHARATFORG-EQ", "NSE:BHEL-EQ", "NSE:BPCL-EQ", "NSE:BHARTIARTL-EQ", "NSE:BIOCON-EQ", "NSE:BSOFT-EQ", "NSE:BOSCHLTD-EQ", "NSE:BRITANNIA-EQ", "NSE:CANFINHOME-EQ", "NSE:CANBK-EQ", "NSE:CHAMBLFERT-EQ", "NSE:CHOLAFIN-EQ", "NSE:CIPLA-EQ", "NSE:CUB-EQ", "NSE:COALINDIA-EQ", "NSE:COFORGE-EQ", "NSE:COLPAL-EQ", "NSE:CONCOR-EQ", "NSE:COROMANDEL-EQ", "NSE:CROMPTON-EQ", "NSE:CUMMINSIND-EQ", "NSE:DABUR-EQ", "NSE:DALBHARAT-EQ", "NSE:DEEPAKNTR-EQ", "NSE:DELHIVERY-EQ", "NSE:DEVYANI-EQ", "NSE:DLF-EQ", "NSE:LALPATHLAB-EQ", "NSE:DRREDDY-EQ", "NSE:EICHERMOT-EQ", "NSE:ESCORTS-EQ", "NSE:EXIDEIND-EQ", "NSE:GAIL-EQ", "NSE:GLENMARK-EQ", "NSE:GMRINFRA-EQ", "NSE:GODREJCP-EQ", "NSE:GODREJPROP-EQ", "NSE:GRANULES-EQ", "NSE:GRASIM-EQ", "NSE:GUJGASLTD-EQ", "NSE:HAVELLS-EQ", "NSE:HCLTECH-EQ", "NSE:HDFCAMC-EQ", "NSE:HDFCBANK-EQ", "NSE:HDFCLIFE-EQ", "NSE:HEROMOTOCO-EQ", "NSE:HINDALCO-EQ", "NSE:HAL-EQ", "NSE:HINDCOPPER-EQ", "NSE:HINDPETRO-EQ", "NSE:HINDUNILVR-EQ", "NSE:ICICIBANK-EQ", "NSE:ICICIGI-EQ", "NSE:ICICIPRULI-EQ", "NSE:IDFCFIRSTB-EQ", "NSE:INDIAMART-EQ", "NSE:IEX-EQ", "NSE:IOC-EQ", "NSE:IRCTC-EQ", "NSE:IGL-EQ", "NSE:INDUSTOWER-EQ", "NSE:INDUSINDBK-EQ", "NSE:NAUKRI-EQ", "NSE:INFY-EQ", "NSE:INTELLECT-EQ", "NSE:INDIGO-EQ", "NSE:IPCALAB-EQ", "NSE:ITC-EQ", "NSE:JINDALSTEL-EQ", "NSE:JKCEMENT-EQ", "NSE:JSWSTEEL-EQ", "NSE:JUBLFOOD-EQ", "NSE:KOTAKBANK-EQ", "NSE:LTTS-EQ", "NSE:LTIM-EQ", "NSE:LT-EQ", "NSE:LAURUSLABS-EQ", "NSE:LICHSGFIN-EQ", "NSE:LUPIN-EQ", "NSE:MGL-EQ", "NSE:M&MFIN-EQ", "NSE:M&M-EQ", "NSE:MANAPPURAM-EQ", "NSE:MARICO-EQ", "NSE:MARUTI-EQ", "NSE:MFSL-EQ", "NSE:METROPOLIS-EQ", "NSE:MOTHERSON-EQ", "NSE:MPHASIS-EQ", "NSE:MRF-EQ", "NSE:MCX-EQ", "NSE:MUTHOOTFIN-EQ", "NSE:NATIONALUM-EQ", "NSE:NAVINFLUOR-EQ", "NSE:NESTLEIND-EQ", "NSE:NMDC-EQ", "NSE:NTPC-EQ", "NSE:OBEROIRLTY-EQ", "NSE:ONGC-EQ", "NSE:OFSS-EQ", "NSE:PAGEIND-EQ", "NSE:PERSISTENT-EQ", "NSE:PETRONET-EQ", "NSE:PIIND-EQ", "NSE:PIDILITIND-EQ", "NSE:PEL-EQ", "NSE:POLYCAB-EQ", "NSE:PFC-EQ", "NSE:POWERGRID-EQ", "NSE:PNB-EQ", "NSE:PVRINOX-EQ", "NSE:RAIN-EQ", "NSE:RBLBANK-EQ", "NSE:RECLTD-EQ", "NSE:RELIANCE-EQ", "NSE:SBICARD-EQ", "NSE:SBILIFE-EQ", "NSE:SHREECEM-EQ", "NSE:SHRIRAMFIN-EQ", "NSE:SIEMENS-EQ", "NSE:SRF-EQ", "NSE:SBIN-EQ", "NSE:SAIL-EQ", "NSE:SUNPHARMA-EQ", "NSE:SUNTV-EQ", "NSE:SYNGENE-EQ", "NSE:TATACHEM-EQ", "NSE:TATACOMM-EQ", "NSE:TCS-EQ", "NSE:TATACONSUM-EQ", "NSE:TATAMOTORS-EQ", "NSE:TATAPOWER-EQ", "NSE:TATASTEEL-EQ", "NSE:TECHM-EQ", "NSE:FEDERALBNK-EQ", "NSE:INDHOTEL-EQ", "NSE:RAMCOCEM-EQ", "NSE:TITAN-EQ", "NSE:TORNTPHARM-EQ", "NSE:TRENT-EQ", "NSE:TVSMOTOR-EQ", "NSE:ULTRACEMCO-EQ", "NSE:UBL-EQ", "NSE:MCDOWELL-N-EQ", "NSE:UPL-EQ", "NSE:VEDL-EQ", "NSE:IDEA-EQ", "NSE:VOLTAS-EQ", "NSE:WHIRLPOOL-EQ", "NSE:WIPRO-EQ", "NSE:ZEEL-EQ", "NSE:ZYDUSLIFE-EQ", "NSE:ANANDRATHI-EQ", "NSE:ATHERENERG-EQ", "NSE:DMART-EQ", "NSE:BSE-EQ", "NSE:BLUESTARCO-EQ", "NSE:MAHABANK-EQ", "NSE:BDL-EQ", "NSE:ETERNAL-EQ", "NSE:SWIGGY-EQ", "NSE:HYUNDAI-EQ", "NSE:OLAELEC-EQ", "NSE:INOXWIND-EQ", "NSE:IREDA-EQ", "NSE:HUDCO-EQ", "NSE:PRESTIGE-EQ", "NSE:UNOMINDA-EQ", "NSE:TIINDIA-EQ", "NSE:SONACOMS-EQ", "NSE:INDIANB-EQ", "NSE:MAZDOCK-EQ", "NSE:COCHINSHIP-EQ", "NSE:GRSE-EQ", "NSE:IRFC-EQ", "NSE:RVNL-EQ", "NSE:RAILTEL-EQ", "NSE:NBCC-EQ", "NSE:IRCON-EQ", "NSE:RITES-EQ", "NSE:POWERINDIA-EQ", "NSE:SUZLON-EQ", "NSE:NYKAA-EQ", "NSE:LODHA-EQ", "NSE:PHOENIXLTD-EQ", "NSE:MAXHEALTH-EQ", "NSE:MEDANTA-EQ", "NSE:NUVAMA-EQ", "NSE:KFINTECH-EQ", "NSE:CAMS-EQ", "NSE:CDSL-EQ", "NSE:LICI-EQ", "NSE:IDBI-EQ", "NSE:UNIONBANK-EQ", "NSE:CESC-EQ", "NSE:HFCL-EQ", "NSE:YESBANK-EQ", "NSE:INDIANHOTEL-EQ", "NSE:JKLAKSHMI-EQ", "NSE:KEI-EQ", "NSE:KEC-EQ", "NSE:ACC-EQ", "NSE:ABBOTTINDIA-EQ", "NSE:AARTIIND-EQ", "NSE:ABFRL-EQ", "NSE:DIXON-EQ", "NSE:GNFC-EQ"
 ];
+let moversSymbols = [...configuredMoversSymbols];
+let moversUniverseSource = 'configured-fallback';
+let moversMasterUpdatedAt = null;
+let moversMasterNextRefreshAt = 0;
+let moversMasterRefreshInFlight = null;
+const MOVERS_MASTER_REFRESH_MS = 24 * 60 * 60 * 1000;
+const MOVERS_MASTER_RETRY_MS = 5 * 60 * 1000;
+
+// Refresh the stock universe from FYERS' daily symbol masters. Keep the known
+// list as a safe fallback if either master is unavailable or validation fails.
+async function refreshMoversUniverse() {
+  if (Date.now() < moversMasterNextRefreshAt) return;
+  if (moversMasterRefreshInFlight) return moversMasterRefreshInFlight;
+
+  moversMasterRefreshInFlight = (async () => {
+    try {
+      const [foResponse, cmResponse] = await Promise.all([
+        fetch('https://public.fyers.in/sym_details/NSE_FO_sym_master.json', { signal: AbortSignal.timeout(12000) }),
+        fetch('https://public.fyers.in/sym_details/NSE_CM_sym_master.json', { signal: AbortSignal.timeout(12000) })
+      ]);
+      if (!foResponse.ok || !cmResponse.ok) throw new Error('FYERS symbol master download failed.');
+      const [foMaster, cmMaster] = await Promise.all([foResponse.json(), cmResponse.json()]);
+      if (!foMaster || typeof foMaster !== 'object' || !cmMaster || typeof cmMaster !== 'object') {
+        throw new Error('FYERS symbol master format was invalid.');
+      }
+
+      const cashSymbols = new Map();
+      for (const [ticker, item] of Object.entries(cmMaster)) {
+        const match = /^NSE:([A-Z0-9&-]+)-EQ$/.exec(ticker);
+        if (match && item?.tradeStatus !== 0) cashSymbols.set(match[1], ticker);
+      }
+
+      const underlyingSymbols = new Set();
+      for (const [ticker, item] of Object.entries(foMaster)) {
+        if (!ticker.startsWith('NSE:') || item?.tradeStatus === 0) continue;
+        const isOption = item?.optType === 'CE' || item?.optType === 'PE';
+        const isFuture = /FUT$/.test(ticker);
+        if (!isOption && !isFuture) continue;
+        const underlying = String(item?.underSym || '').trim().toUpperCase();
+        if (underlying && cashSymbols.has(underlying)) underlyingSymbols.add(underlying);
+      }
+
+      const dynamicSymbols = [...underlyingSymbols]
+        .map(symbol => cashSymbols.get(symbol))
+        .sort();
+      // A suspiciously small master should never replace the known fallback.
+      if (dynamicSymbols.length < 180) {
+        throw new Error('FYERS symbol master validation failed: too few NSE F&O equity underlyings.');
+      }
+
+      const previousSymbols = moversSymbols.join(',');
+      moversSymbols = dynamicSymbols;
+      moversUniverseSource = 'FYERS_NSE_FO_SYMBOL_MASTER';
+      moversMasterUpdatedAt = new Date().toISOString();
+      moversMasterNextRefreshAt = Date.now() + MOVERS_MASTER_REFRESH_MS;
+      if (previousSymbols !== moversSymbols.join(',')) moversSnapshotCache = null;
+      console.log('FYERS NSE F&O universe refreshed:', JSON.stringify({
+        symbols: moversSymbols.length,
+        source: moversUniverseSource,
+        updatedAt: moversMasterUpdatedAt
+      }));
+    } catch (error) {
+      moversMasterNextRefreshAt = Date.now() + MOVERS_MASTER_RETRY_MS;
+      console.warn('FYERS symbol master refresh failed; using last valid universe:', String(error?.message || error).slice(0, 180));
+    }
+  })();
+
+  try {
+    await moversMasterRefreshInFlight;
+  } finally {
+    moversMasterRefreshInFlight = null;
+  }
+}
 app.get('/api/market/movers', async (_req, res) => {
   if (!accessToken) return res.status(401).json({ ok: false, error: 'Connect FYERS first to load market movers.' });
 
+  await refreshMoversUniverse();
   if (moversSnapshotCache && Date.now() - moversSnapshotCache.cachedAt < MOVERS_CACHE_TTL_MS) {
     res.set('Cache-Control', 'no-store');
     return res.json({ ...moversSnapshotCache.payload, cached: true });
@@ -588,7 +662,8 @@ app.get('/api/market/movers', async (_req, res) => {
         }
         return {
           ok: true, fetchedAt: quoteFetchedAt, marketSession: marketOpen ? 'OPEN' : 'CLOSED',
-          universe: 'configured-NSE-F&O-equities',
+          universe: moversUniverseSource === 'FYERS_NSE_FO_SYMBOL_MASTER' ? 'FYERS-NSE-FO-symbol-master' : 'configured-NSE-F&O-equities-fallback',
+          universeUpdatedAt: moversMasterUpdatedAt,
           requestedSymbols: moversSymbols.length, receivedSymbols: rows.length,
           partial: rows.length < moversSymbols.length || failedBatches.length > 0,
           failedSymbols: [...new Set([...moversSymbols.filter(symbol => !received.has(symbol)), ...failedBatches])],
