@@ -190,6 +190,103 @@ function renderQuotePanel(key){
  void renderLiveQuotes(key);
 }
 
+function istDateString(date){
+ return new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).format(date);
+}
+function svgNode(name,attrs={}){
+ const node=document.createElementNS("http://www.w3.org/2000/svg",name);
+ for(const [key,value] of Object.entries(attrs))node.setAttribute(key,String(value));
+ return node;
+}
+function renderCandleChart(key){
+ const wrap=el("section",undefined,"candle-tool");
+ wrap.append(el("h3",key==="charts"?"Verified candlestick chart":"Candlestick chart · FYERS history"));
+ wrap.append(el("p","Historical FYERS OHLC candles only. This chart is not a live-tick chart or a trade signal."));
+ const form=el("form",undefined,"gap-form");
+ const symbols=[
+  ["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],
+  ["NSE:RELIANCE-EQ","RELIANCE"],["NSE:TCS-EQ","TCS"],["NSE:INFY-EQ","INFY"],
+  ["NSE:HDFCBANK-EQ","HDFCBANK"],["NSE:ICICIBANK-EQ","ICICIBANK"],["NSE:SBIN-EQ","SBIN"],
+  ["NSE:ITC-EQ","ITC"],["NSE:LT-EQ","LT"],["NSE:AXISBANK-EQ","AXISBANK"],["NSE:BAJFINANCE-EQ","BAJFINANCE"]
+ ];
+ const fixedSymbol=key==="nifty"?"NSE:NIFTY50-INDEX":key==="banknifty"?"NSE:NIFTYBANK-INDEX":null;
+ if(!fixedSymbol){
+  const label=el("label","Symbol");
+  const select=document.createElement("select");select.name="symbol";
+  for(const [value,title] of symbols){const option=el("option",title);option.value=value;select.append(option);}
+  label.append(select);form.append(label);
+ }
+ const resolutionLabel=el("label","Candle interval");
+ const resolution=document.createElement("select");resolution.name="resolution";
+ for(const [value,title] of [["5","5 minutes"],["15","15 minutes"],["30","30 minutes"],["60","1 hour"],["D","Daily"]]){const option=el("option",title);option.value=value;resolution.append(option);}
+ resolutionLabel.append(resolution);form.append(resolutionLabel);
+ const today=istDateString(new Date());
+ const fromDefault=istDateString(new Date(Date.now()-7*86400000));
+ for(const [name,labelText,value] of [["from","From date",fromDefault],["to","To date",today]]){
+  const label=el("label",labelText);const input=document.createElement("input");input.name=name;input.type="date";input.value=value;input.required=true;label.append(input);form.append(label);
+ }
+ const submit=el("button","Load verified candles");submit.type="submit";form.append(submit);
+ const status=el("p","Choose an interval and load historical candles.");
+ const chartHost=el("div",undefined,"candle-chart-host");
+ const details=el("p",undefined,"candle-details");
+ resolution.addEventListener("change",()=>{
+  const daily=resolution.value==="D";
+  form.elements.from.value=istDateString(new Date(Date.now()-(daily?60:7)*86400000));
+ });
+ form.addEventListener("submit",async event=>{
+  event.preventDefault();
+  const symbol=fixedSymbol||form.elements.symbol.value;
+  const interval=resolution.value;
+  const from=form.elements.from.value,to=form.elements.to.value;
+  if(!sessionToken){status.textContent="Connect FYERS first. No candle data is shown without an authenticated session.";chartHost.replaceChildren();details.textContent="";return;}
+  if(!from||!to||from>to){status.textContent="Choose a valid date range.";return;}
+  submit.disabled=true;status.textContent="Requesting verified FYERS candles…";chartHost.replaceChildren();details.textContent="";
+  const query=new URLSearchParams({symbol,resolution:interval,from,to});
+  try{
+   const response=await fetch(API_BASE+"/api/market/candles?"+query.toString(),{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
+   const result=await response.json();
+   if(response.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);}
+   if(!response.ok||!result.ok||!Array.isArray(result.data)||!result.data.length)throw new Error(result.detail||result.error||"No verified candles returned.");
+   const candles=result.data.filter(c=>c.verified===true&&c.source==="FYERS"&&Number.isFinite(Date.parse(c.timestamp))&&[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))&&Number(v)>0)&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)<=Math.min(Number(c.open),Number(c.close),Number(c.high)));
+   if(!candles.length)throw new Error("Returned candles failed OHLC/source validation; chart blocked.");
+   const shown=candles.slice(-100);
+   const width=900,height=360,left=64,right=20,top=20,bottom=48,plotW=width-left-right,plotH=height-top-bottom;
+   const lows=shown.map(c=>Number(c.low)),highs=shown.map(c=>Number(c.high));
+   let min=Math.min(...lows),max=Math.max(...highs);
+   if(!Number.isFinite(min)||!Number.isFinite(max)||max<=0)throw new Error("Invalid chart price range.");
+   if(max===min){max+=1;min=Math.max(0,min-1);}
+   const y=value=>top+(max-value)/(max-min)*plotH;
+   const svg=svgNode("svg",{viewBox:"0 0 "+width+" "+height,role:"img","aria-label":symbol+" verified FYERS candlestick chart, "+shown.length+" candles"});
+   for(let i=0;i<5;i++){
+    const val=max-(max-min)*i/4,yy=y(val);
+    svg.append(svgNode("line",{x1:left,y1:yy,x2:width-right,y2:yy,class:"chart-grid"}));
+    const label=svgNode("text",{x:left-8,y:yy+4,"text-anchor":"end",class:"chart-axis"});
+    label.textContent=val.toLocaleString("en-IN",{maximumFractionDigits:2});svg.append(label);
+   }
+   const step=plotW/shown.length,bodyW=Math.max(2,Math.min(9,step*.62));
+   shown.forEach((c,i)=>{
+    const x=left+step*(i+.5),o=Number(c.open),cl=Number(c.close),hi=Number(c.high),lo=Number(c.low),up=cl>=o;
+    svg.append(svgNode("line",{x1:x,y1:y(hi),x2:x,y2:y(lo),class:up?"candle-up":"candle-down","stroke-width":1.2}));
+    const bodyTop=Math.min(y(o),y(cl)),bodyHeight=Math.max(1,Math.abs(y(o)-y(cl)));
+    svg.append(svgNode("rect",{x:x-bodyW/2,y:bodyTop,width:bodyW,height:bodyHeight,rx:.4,class:up?"candle-up":"candle-down"}));
+   });
+   for(const i of [0,Math.floor((shown.length-1)/2),shown.length-1]){
+    const x=left+(i+.5)*step;const d=new Date(shown[i].timestamp);
+    const label=svgNode("text",{x,y:height-18,"text-anchor":"middle",class:"chart-axis"});
+    label.textContent=interval==="D"?d.toLocaleDateString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short"}):d.toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata",day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"});
+    svg.append(label);
+   }
+   chartHost.append(svg);
+   const last=shown[shown.length-1];
+   details.textContent="Source: "+result.source+" · "+candles.length+" valid candles returned; showing latest "+shown.length+" · Last candle close ₹"+Number(last.close).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})+" · Exchange candle time "+new Date(last.timestamp).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" · Fetched "+new Date(result.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+".";
+   status.textContent=symbol+" · "+(interval==="D"?"daily":interval+"-minute")+" candles · Verified FYERS historical data";
+  }catch(error){status.textContent=String(error?.message||"Verified candles unavailable.")+" No placeholder candles are displayed.";chartHost.replaceChildren();details.textContent="";}
+  finally{submit.disabled=false;}
+ });
+ wrap.append(form,status,chartHost,details);
+ panel.append(wrap);
+}
+
 function renderPage(key){
  const [title,description]=pages[key]||["Module","Status unavailable."];
  panel.replaceChildren();
@@ -198,7 +295,9 @@ function renderPage(key){
  if(key==="journal"){renderJournal();return;}
  if(key==="journalRules"){renderJournalRules();return;}
  panel.append(el("h2",title),el("p",description));
+ if(key==="charts"){renderCandleChart(key);return;}
  if(["dashboard","nifty","banknifty"].includes(key))renderQuotePanel(key);
+ if(["nifty","banknifty"].includes(key))renderCandleChart(key);
  if(key==="dashboard"){const b=el("button","Open Gap-Up / Gap-Down Analysis");b.addEventListener("click",()=>{document.querySelector('[data-tab="gap"]').click();});panel.append(b);}
 }
 document.querySelector("#tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-tab]");if(!b)return;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("active",x===b));renderPage(b.dataset.tab);});
