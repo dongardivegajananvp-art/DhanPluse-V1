@@ -404,6 +404,39 @@ let stockQuoteCooldown = { until: 0, backoffMs: 30000 };
 const STOCK_QUOTE_CACHE_MS = 30000;
 const STOCK_QUOTE_BATCH_SIZE = 50;
 const STOCK_QUOTE_BATCH_PAUSE_MS = 1200;
+async function getNseFnoEquityUniverse() {
+  if (fnoUniverseCache.data && Date.now() - fnoUniverseCache.fetchedAt < 24 * 60 * 60 * 1000) return fnoUniverseCache.data;
+  if (fnoUniversePromise) return fnoUniversePromise;
+  fnoUniversePromise = (async () => {
+    const [foResponse, cmResponse] = await Promise.all([
+      fetch("https://public.fyers.in/sym_details/NSE_FO_sym_master.json", { signal: AbortSignal.timeout(45000) }),
+      fetch("https://public.fyers.in/sym_details/NSE_CM_sym_master.json", { signal: AbortSignal.timeout(45000) })
+    ]);
+    if (!foResponse.ok || !cmResponse.ok) throw new Error("FYERS NSE_FO/NSE_CM symbol master download failed.");
+    const [foMaster, cmMaster] = await Promise.all([foResponse.json(), cmResponse.json()]);
+    if (!foMaster || typeof foMaster !== "object" || !cmMaster || typeof cmMaster !== "object") throw new Error("FYERS symbol master format was invalid.");
+    const cashSymbols = new Map();
+    for (const [ticker, item] of Object.entries(cmMaster)) {
+      const match = /^NSE:([A-Z0-9&-]+)-EQ$/.exec(ticker);
+      if (match && item?.tradeStatus !== 0) cashSymbols.set(match[1], ticker);
+    }
+    const underlyings = new Set();
+    for (const [ticker, item] of Object.entries(foMaster)) {
+      if (!ticker.startsWith("NSE:") || item?.tradeStatus === 0) continue;
+      if (item?.optType !== "CE" && item?.optType !== "PE" && !/FUT$/.test(ticker)) continue;
+      const underlying = String(item?.underSym || "").trim().toUpperCase();
+      if (underlying && cashSymbols.has(underlying)) underlyings.add(underlying);
+    }
+    const symbols = [...underlyings].map(name => ({ symbol: cashSymbols.get(name), underlying: name })).sort((a,b) => a.symbol.localeCompare(b.symbol));
+    if (symbols.length < 180) throw new Error("FYERS symbol master validation failed: too few NSE F&O equity underlyings.");
+    const result = { source: "FYERS NSE_FO + NSE_CM symbol masters", fetchedAt: new Date().toISOString(), count: symbols.length, data: symbols };
+    fnoUniverseCache = { fetchedAt: Date.now(), data: result };
+    console.log("FYERS NSE F&O equity universe loaded:", JSON.stringify({ count: symbols.length, source: result.source }));
+    return result;
+  })();
+  try { return await fnoUniversePromise; }
+  finally { fnoUniversePromise = null; }
+}
 function stockQuoteRateLimitError() {
   const now = Date.now();
   const until = now + stockQuoteCooldown.backoffMs;
