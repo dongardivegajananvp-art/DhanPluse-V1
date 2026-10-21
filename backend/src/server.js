@@ -303,7 +303,7 @@ app.get("/api/market/candles", requireSession, async (req, res) => {
     "NSE:HDFCBANK-EQ", "NSE:ICICIBANK-EQ", "NSE:SBIN-EQ",
     "NSE:ITC-EQ", "NSE:LT-EQ", "NSE:AXISBANK-EQ", "NSE:BAJFINANCE-EQ"
   ]);
-  const datePattern = /^\\d{4}-\\d{2}-\\d{2}$/;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
   const isRealDate = value => datePattern.test(value) && Number.isFinite(Date.parse(value + "T00:00:00Z")) && new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
   const allowedResolutions = new Set(["1", "2", "3", "5", "10", "15", "20", "30", "60", "D"]);
   if (!allowedSymbolsForCandles.has(symbol)) return res.status(400).json({ ok: false, error: "Unsupported symbol for this verified candle release." });
