@@ -318,6 +318,35 @@ app.get("/api/market/quotes", requireSession, (_req, res) => {
     marketSocketConnected: streamConnected, retryAfterSeconds: 5
   });
 });
+app.get("/api/market/stock-quotes", requireSession, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!accessToken) return res.status(401).json({ok:false,error:"Connect FYERS first."});
+  const symbols = [
+    "NSE:RELIANCE-EQ","NSE:TCS-EQ","NSE:INFY-EQ","NSE:HDFCBANK-EQ",
+    "NSE:ICICIBANK-EQ","NSE:SBIN-EQ","NSE:ITC-EQ","NSE:LT-EQ",
+    "NSE:AXISBANK-EQ","NSE:BAJFINANCE-EQ"
+  ];
+  const now = Date.now();
+  try {
+    const url = new URL("https://api-t1.fyers.in/data/quotes");
+    url.searchParams.set("symbols", symbols.join(","));
+    const response = await fetch(url,{headers:{Authorization:appId+":"+accessToken,Accept:"application/json"},cache:"no-store",signal:AbortSignal.timeout(12000)});
+    const body = await response.json().catch(()=>({}));
+    if (response.status===429) return res.status(429).json({ok:false,error:"FYERS quote rate limit reached. Wait before retrying."});
+    if (!response.ok || body.s!=="ok" || !Array.isArray(body.d)) return res.status(response.status===401?401:502).json({ok:false,error:"FYERS stock quotes unavailable or unverified.",detail:String(body.message||"Invalid quote response").slice(0,160)});
+    const data = body.d.filter(item => item && symbols.includes(item.n) && item.s==="ok" && item.v)
+      .map(item => {
+        const v=item.v;
+        const lp=Number(v.lp), tt=Number(v.tt), ch=Number(v.ch), chp=Number(v.chp);
+        const stamp=tt>0?tt*1000:0;
+        return {n:item.n,v:{lp,ch,chp,tt},verified:Number.isFinite(lp)&&lp>0&&Number.isFinite(chp)&&stamp>0&&Math.abs(now-stamp)<=120000};
+      }).filter(item=>item.verified);
+    if (!data.length) return res.status(503).json({ok:false,error:"No fresh exchange-timestamped stock quotes. No stale prices shown.",marketOpenDataRequired:true});
+    return res.json({ok:true,source:"FYERS quotes API",verified:true,fetchedAt:new Date().toISOString(),freshnessLimitSeconds:120,universe:"supported-symbol-subset",data,missingSymbols:symbols.filter(s=>!data.some(item=>item.n===s))});
+  } catch (error) {
+    return res.status(502).json({ok:false,error:"FYERS quote request failed.",detail:String(error?.message||"network error").slice(0,160)});
+  }
+});
 app.get("/api/fyers/options-chain", requireSession, async (req, res) => {
   res.set("Cache-Control", "no-store");
   const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
