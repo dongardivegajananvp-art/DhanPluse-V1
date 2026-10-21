@@ -226,6 +226,7 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/health', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
   res.json({
     ok: true,
@@ -239,6 +240,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/api/status', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
   res.json({
     backend: 'online',
