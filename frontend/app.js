@@ -241,14 +241,16 @@ async function renderLiveQuotes(key){
    const price=Number(item.v?.lp);
    const stamp=Number(item.v?.tt);
    const time=stamp>0?new Date(stamp*1000):null;
-   if(!Number.isFinite(price)||price<=0||!time||Number.isNaN(time.getTime()))continue;
+   const ageMs=time?Date.now()-time.getTime():Infinity;
+   if(!Number.isFinite(price)||price<=0||!time||Number.isNaN(time.getTime())||ageMs < -30000||ageMs > 120000)continue;
    const card=el("article",undefined,"quote-card");
    card.append(el("span",label),el("strong","₹"+price.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})),el("small","Exchange time: "+time.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})));
    const chp=Number(item.v?.chp);
    if(Number.isFinite(chp))card.append(el("small",(chp>=0?"+":"")+chp.toFixed(2)+"% (FYERS reported change)"));
    target.append(card);
   }
-  if(target.children.length===1)throw new Error("Quote values or exchange timestamps failed validation.");
+  const validCards=target.querySelectorAll(".quote-card").length;
+  if(validCards!==wanted.length)throw new Error("Only "+validCards+" of "+wanted.length+" required index quote(s) passed price and 120-second exchange-timestamp validation.");
  }catch(error){
   target.append(el("p",String(error?.message||"Verified quotes unavailable.")+" No placeholder price is displayed."));
  }
