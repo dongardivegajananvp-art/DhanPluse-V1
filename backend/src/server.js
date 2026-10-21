@@ -396,33 +396,91 @@ app.get("/api/market/quotes", requireSession, (_req, res) => {
     marketSocketConnected: streamConnected, retryAfterSeconds: 5
   });
 });
+let fnoUniverseCache = { fetchedAt: 0, data: null };
+let stockQuoteCache = { fetchedAt: 0, data: null };
+async function getNseFnoEquityUniverse() {
+  if (fnoUniverseCache.data && Date.now() - fnoUniverseCache.fetchedAt < 6 * 60 * 60 * 1000) return fnoUniverseCache;
+  const fetchMaster = async url => {
+    const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(15000) });
+    if (!response.ok) throw new Error("FYERS symbol master HTTP " + response.status);
+    const data = await response.json();
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid FYERS symbol master format");
+    return data;
+  };
+  const [fo, cm] = await Promise.all([
+    fetchMaster("https://public.fyers.in/sym_details/NSE_FO_sym_master.json"),
+    fetchMaster("https://public.fyers.in/sym_details/NSE_CM_sym_master.json")
+  ]);
+  const derivatives = new Set();
+  for (const [ticker, item] of Object.entries(fo)) {
+    if (!item || item.tradeStatus === 0) continue;
+    const instrumentType = Number(item.exInstType);
+    const optionType = String(item.optType || "XX").toUpperCase();
+    const underlying = String(item.underSym || item.exSymName || "").trim().toUpperCase();
+    if ((instrumentType === 13 || instrumentType === 15) && underlying && (optionType === "XX" || optionType === "CE" || optionType === "PE")) derivatives.add(underlying);
+  }
+  const cashByName = new Map();
+  for (const [ticker, item] of Object.entries(cm)) {
+    if (!item || item.tradeStatus === 0 || !/^NSE:[A-Z0-9&._-]+-EQ$/.test(ticker)) continue;
+    const name = String(item.exSymName || ticker.slice(4, -3)).trim().toUpperCase();
+    cashByName.set(name, ticker);
+  }
+  const data = [...derivatives].map(name => ({ name, symbol: cashByName.get(name) })).filter(item => item.symbol).sort((a,b) => a.name.localeCompare(b.name));
+  if (data.length < 50) throw new Error("FYERS symbol master returned an unexpectedly small F&O equity universe; refusing incomplete data.");
+  fnoUniverseCache = { fetchedAt: Date.now(), data };
+  return fnoUniverseCache;
+}
+
+app.get("/api/market/fno-universe", requireSession, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    const master = await getNseFnoEquityUniverse();
+    res.json({ ok: true, source: "FYERS NSE_FO and NSE_CM symbol masters", fetchedAt: new Date(master.fetchedAt).toISOString(), count: master.data.length, data: master.data, note: "Universe is derived from current FYERS symbol masters; quotes are not implied by membership." });
+  } catch (error) {
+    res.status(502).json({ ok: false, error: "Current FYERS F&O universe could not be verified.", detail: String(error?.message || "Symbol master unavailable").slice(0, 180) });
+  }
+});
+
 app.get("/api/market/stock-quotes", requireSession, async (_req, res) => {
   res.set("Cache-Control", "no-store");
   if (!accessToken) return res.status(401).json({ok:false,error:"Connect FYERS first."});
-  const symbols = [
-    "NSE:RELIANCE-EQ","NSE:TCS-EQ","NSE:INFY-EQ","NSE:HDFCBANK-EQ",
-    "NSE:ICICIBANK-EQ","NSE:SBIN-EQ","NSE:ITC-EQ","NSE:LT-EQ",
-    "NSE:AXISBANK-EQ","NSE:BAJFINANCE-EQ"
-  ];
-  const now = Date.now();
+  if (stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < 15000) {
+    const cache = stockQuoteCache.data;
+    const fresh = cache.data.filter(item => Math.abs(Date.now() - Number(item.v.tt) * 1000) <= 120000);
+    if (fresh.length) return res.json({ ...cache, data: fresh, cached: true, fetchedAt: new Date(stockQuoteCache.fetchedAt).toISOString() });
+  }
   try {
-    const url = new URL("https://api-t1.fyers.in/data/quotes");
-    url.searchParams.set("symbols", symbols.join(","));
-    const response = await fetch(url,{headers:{Authorization:appId+":"+accessToken,Accept:"application/json"},cache:"no-store",signal:AbortSignal.timeout(12000)});
-    const body = await response.json().catch(()=>({}));
-    if (response.status===429) return res.status(429).json({ok:false,error:"FYERS quote rate limit reached. Wait before retrying."});
-    if (!response.ok || body.s!=="ok" || !Array.isArray(body.d)) return res.status(response.status===401?401:502).json({ok:false,error:"FYERS stock quotes unavailable or unverified.",detail:String(body.message||"Invalid quote response").slice(0,160)});
-    const data = body.d.filter(item => item && symbols.includes(item.n) && item.v)
-      .map(item => {
-        const v=item.v;
-        const lp=Number(v.lp), tt=Number(v.tt), ch=Number(v.ch), chp=Number(v.chp);
-        const stamp=tt>0?tt*1000:0;
-        return {n:item.n,v:{lp,ch,chp,tt},verified:Number.isFinite(lp)&&lp>0&&Number.isFinite(chp)&&stamp>0&&Math.abs(now-stamp)<=120000};
-      }).filter(item=>item.verified);
-    if (!data.length) return res.status(503).json({ok:false,error:"No fresh exchange-timestamped stock quotes. No stale prices shown.",marketOpenDataRequired:true});
-    return res.json({ok:true,source:"FYERS quotes API",verified:true,fetchedAt:new Date().toISOString(),freshnessLimitSeconds:120,universe:"supported-symbol-subset",data,missingSymbols:symbols.filter(s=>!data.some(item=>item.n===s))});
+    const master = await getNseFnoEquityUniverse();
+    const symbols = master.data.map(item => item.symbol);
+    const now = Date.now();
+    const data = [];
+    const missingSymbols = [];
+    // Keep each request to 50 symbols; stop on an upstream rate limit rather than hiding it.
+    for (let offset = 0; offset < symbols.length; offset += 50) {
+      const batch = symbols.slice(offset, offset + 50);
+      const url = new URL("https://api-t1.fyers.in/data/quotes");
+      url.searchParams.set("symbols", batch.join(","));
+      const response = await fetch(url, { headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 429) return res.status(429).json({ok:false,error:"FYERS quote rate limit reached while loading the F&O universe. Wait before retrying; partial results are not ranked.",partialQuotesDiscarded:true});
+      if (!response.ok || body.s !== "ok" || !Array.isArray(body.d)) return res.status(response.status === 401 ? 401 : 502).json({ok:false,error:"FYERS F&O quotes unavailable or unverified.",detail:String(body.message || "Invalid quote response").slice(0,160)});
+      const returned = new Set();
+      for (const item of body.d) {
+        if (!item || !batch.includes(item.n) || !item.v) continue;
+        returned.add(item.n);
+        const v = item.v;
+        const lp = Number(v.lp), tt = Number(v.tt), ch = Number(v.ch), chp = Number(v.chp);
+        const stamp = tt > 0 ? tt * 1000 : 0;
+        if (Number.isFinite(lp) && lp > 0 && Number.isFinite(chp) && stamp > 0 && Math.abs(now - stamp) <= 120000) data.push({n:item.n,v:{lp,ch:Number.isFinite(ch)?ch:null,chp,tt},verified:true});
+      }
+      for (const symbol of batch) if (!returned.has(symbol) || !data.some(item => item.n === symbol)) missingSymbols.push(symbol);
+    }
+    if (!data.length) return res.status(503).json({ok:false,error:"No fresh exchange-timestamped F&O stock quotes. No stale prices shown.",marketOpenDataRequired:true,universeCount:symbols.length});
+    const result = {ok:true,source:"FYERS quotes API",verified:true,fetchedAt:new Date().toISOString(),freshnessLimitSeconds:120,universe:"FYERS current NSE F&O equity symbol master",universeCount:symbols.length,quotedCount:data.length,data,missingSymbols};
+    stockQuoteCache = { fetchedAt: Date.now(), data: result };
+    return res.json(result);
   } catch (error) {
-    return res.status(502).json({ok:false,error:"FYERS quote request failed.",detail:String(error?.message||"network error").slice(0,160)});
+    return res.status(502).json({ok:false,error:"FYERS F&O quotes could not be verified.",detail:String(error?.message||"network error").slice(0,160)});
   }
 });
 app.get("/api/fyers/options-chain", requireSession, async (req, res) => {
