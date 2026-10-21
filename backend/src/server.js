@@ -388,7 +388,7 @@ app.get('/api/market/quotes', async (_req, res) => {
 // repeatedly hammered while other read-only routes can be diagnosed normally.
 const fyersRateLimits = new Map();
 const FYERS_429_INITIAL_BACKOFF_MS = 60_000;
-const FYERS_429_MAX_BACKOFF_MS = 15 * 60_000;
+const FYERS_429_MAX_BACKOFF_MS = 60 * 60_000;
 
 async function fyersReadOnlyGet(url) {
   if (!accessToken) {
@@ -420,9 +420,15 @@ async function fyersReadOnlyGet(url) {
     const retryAfterSeconds = retryAfterHeader && /^\d+(?:\.\d+)?$/.test(retryAfterHeader)
       ? Math.ceil(Number(retryAfterHeader))
       : 0;
-    const backoffMs = retryAfterSeconds > 0
-      ? Math.max(rateLimit.backoffMs, retryAfterSeconds * 1000)
-      : rateLimit.backoffMs;
+    // Cloudflare Error 1015 is an upstream rate-limit block; Retry-After may
+    // misleadingly be "0". Stop retrying this endpoint for an hour instead
+    // of re-triggering the block every few minutes.
+    const cloudflare1015 = /error\s*1015|cloudflare.{0,80}1015/i.test(responseText);
+    const backoffMs = cloudflare1015
+      ? FYERS_429_MAX_BACKOFF_MS
+      : retryAfterSeconds > 0
+        ? Math.max(rateLimit.backoffMs, retryAfterSeconds * 1000)
+        : rateLimit.backoffMs;
     fyersRateLimits.set(rateLimitKey, {
       until: Date.now() + backoffMs,
       backoffMs: Math.min(Math.max(rateLimit.backoffMs * 2, backoffMs), FYERS_429_MAX_BACKOFF_MS)
