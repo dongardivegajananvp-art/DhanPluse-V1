@@ -155,7 +155,8 @@ function renderPage(key){
  panel.replaceChildren();
  if(key==="gap"){renderGap();return;}
  if(key==="capital"){renderCapital();return;}
- if(key==="journal"){renderJournal();return;}\n if(key==="journalRules"){renderJournalRules();return;}
+ if(key==="journal"){renderJournal();return;}
+ if(key==="journalRules"){renderJournalRules();return;}
  panel.append(el("h2",title),el("p",description));
  if(key==="dashboard"){const b=el("button","Open Gap-Up / Gap-Down Analysis");b.addEventListener("click",()=>{document.querySelector('[data-tab="gap"]').click();});panel.append(b);}
 }
