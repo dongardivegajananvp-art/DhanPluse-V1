@@ -359,7 +359,7 @@ function quoteCardsMarkup() {
 }
 
 function stockExplorerMarkup() {
-  return '<div class="console-section"><div class="console-section-head"><div><h4>Stock Explorer</h4><p>Equity prices are fetched as verified FYERS quote snapshots. No prices are invented.</p></div><span class="live-tag">FYERS-READY</span></div>' +
+  return '<div class="console-section"><div class="console-section-head"><div><h4>Stock Explorer</h4><p>FYERS NSE F&O equity universe · ranked by percent change. No prices are invented.</p></div><span class="live-tag">FYERS-READY</span></div>' +
     '<div class="explorer-controls"><label for="stockSearch">Search symbol or company</label><input id="stockSearch" type="search" placeholder="Try NIFTY, BANKNIFTY, RELIANCE, INFY…" autocomplete="off"><label for="stockCategory">Category</label><select id="stockCategory"><option value="all">All supported symbols</option><option value="index">Indices</option><option value="equity">Equity research</option></select><button class="secondary" id="refreshStockQuotesBtn">Refresh equity quotes</button></div>' +
     '<div id="stockExplorerStatus" class="hint">Requesting a verified FYERS equity snapshot…</div><div id="stockExplorerResults" class="explorer-grid"></div><p class="hint">Index cards use the live stream; Stock Explorer refreshes its F&O equity universe from the daily FYERS symbol master, with a validated configured fallback if that master is unavailable. After-hours prices are last-known quotes, not live ticks. Unavailable symbols remain unavailable.</p></div>';
 }
@@ -411,18 +411,17 @@ function renderStockExplorerResults() {
   const category=document.querySelector('#stockCategory')?.value||'all';
   const universe=[
     {symbol:'NSE:NIFTY50-INDEX',name:'NIFTY 50',kind:'index',tab:'NIFTY',note:'Benchmark index'},
-    {symbol:'NSE:NIFTYBANK-INDEX',name:'BANK NIFTY',kind:'index',tab:'BANKNIFTY',note:'Banking index'},
-    {symbol:'NSE:RELIANCE-EQ',name:'RELIANCE',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
-    {symbol:'NSE:TCS-EQ',name:'TCS',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
-    {symbol:'NSE:HDFCBANK-EQ',name:'HDFC BANK',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
-    {symbol:'NSE:INFY-EQ',name:'INFOSYS',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
-    {symbol:'NSE:ICICIBANK-EQ',name:'ICICI BANK',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
-    {symbol:'NSE:SBIN-EQ',name:'STATE BANK OF INDIA',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
-    {symbol:'NSE:LT-EQ',name:'LARSEN & TOUBRO',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'},
-    {symbol:'NSE:ITC-EQ',name:'ITC',kind:'equity',tab:'Gainers & Losers',note:'Equity quote not subscribed'}
+    {symbol:'NSE:NIFTYBANK-INDEX',name:'BANK NIFTY',kind:'index',tab:'BANKNIFTY',note:'Banking index'}
   ];
+  // Use the backend's current FYERS NSE F&O master snapshot, not a short hard-coded
+  // stock list. Rank equity rows by verified percent change before showing indices.
   const dynamicRows=stockExplorerMoverRows.map(x=>({symbol:x.symbol,name:x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''),kind:'equity',tab:'Gainers & Losers',note:'Verified FYERS quote snapshot',price:Number(x.price),changePct:x.changePct==null?null:Number(x.changePct)}));
-  const combined=[...universe,...dynamicRows.filter(x=>!universe.some(y=>y.symbol===x.symbol))];
+  dynamicRows.sort((a,b)=>{
+    const av=Number.isFinite(a.changePct)?a.changePct:-Infinity;
+    const bv=Number.isFinite(b.changePct)?b.changePct:-Infinity;
+    return bv-av;
+  });
+  const combined=[...dynamicRows,...universe];
   const rows=combined.filter(x=>(category==='all'||x.kind===category)&&(!q||(x.symbol+' '+x.name).toLowerCase().includes(q)));
   host.innerHTML=rows.length?rows.map(x=>{
     const quote=quoteFor(x.symbol);
