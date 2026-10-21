@@ -816,6 +816,15 @@ async function loadAdvancedScanner() {
       status.textContent='Market closed · live breakout/momentum scan withheld. Refresh during NSE market hours.';
       return;
     }
+    const requestedCount=Number(result.requestedSymbols);
+    const receivedCount=Number(result.receivedSymbols);
+    const failedCount=Array.isArray(result.failedSymbols)?result.failedSymbols.length:0;
+    if(result.partial===true || !Number.isFinite(requestedCount) || !Number.isFinite(receivedCount) || requestedCount<1 || receivedCount!==requestedCount || failedCount>0){
+      table.innerHTML='<div class="chart-empty"><b>NO TRADE — incomplete F&O universe.</b><p>FYERS returned only '+(Number.isFinite(receivedCount)?receivedCount:'an unknown number')+' of '+(Number.isFinite(requestedCount)?requestedCount:'an unknown number')+' requested symbols. '+(failedCount?' '+failedCount+' symbol entries are reported unavailable or failed.':'')+' Scanner candidates are withheld until full universe coverage is verified.</p></div>';
+      status.textContent='Signal blocked · incomplete FYERS F&O coverage. Partial snapshots may inform research but cannot confirm scanner candidates.';
+      logEvent(currentTab+' blocked because FYERS F&O quote coverage was incomplete.','warn');
+      return;
+    }
     const rows=result.data.filter(x=>{
       if(!x||!Number.isFinite(Number(x.changePct))||!Number.isFinite(Number(x.price))||Number(x.price)<=0) return false;
       if(x.priceStatus!=='LIVE_QUOTE'||!x.priceAsOf) return false;
