@@ -427,9 +427,9 @@ function renderStockExplorerResults() {
     const priceAsOfMs=mover&&mover.priceAsOf?Date.parse(mover.priceAsOf):NaN;
     const currentQuoteAgeMs=Number.isFinite(priceAsOfMs)?Date.now()-priceAsOfMs:Infinity;
     const moverStatus=!mover?'':marketClosed?'LAST_KNOWN_PRICE'
+      :mover.priceStatus==='TIME_UNVERIFIED'?'TIME_UNVERIFIED'
       :mover.priceStatus!=='LIVE_QUOTE'?'STALE_QUOTE'
-      :Number.isFinite(currentQuoteAgeMs)&&currentQuoteAgeMs>=-30000&&currentQuoteAgeMs<=180000?'LIVE_QUOTE'
-      :mover.priceStatus==='TIME_UNVERIFIED'?'TIME_UNVERIFIED':'STALE_QUOTE';
+      :Number.isFinite(currentQuoteAgeMs)&&currentQuoteAgeMs>=-30000&&currentQuoteAgeMs<=180000?'LIVE_QUOTE':'STALE_QUOTE';
     const priceLabel=mover
       ? (moverStatus==='LIVE_QUOTE'?'LIVE FYERS QUOTE':moverStatus==='LAST_KNOWN_PRICE'?'LAST KNOWN PRICE':moverStatus==='STALE_QUOTE'?'STALE QUOTE':'QUOTE TIME UNKNOWN')
       : (fresh?'LIVE INDEX QUOTE':'DATA PENDING');
