@@ -467,8 +467,8 @@ function renderStockExplorerResults() {
     const mover=stockExplorerMoverRows.find(row=>row.symbol===x.symbol);
     const price=quote?quote.price:(mover?Number(mover.price):null);
     const changePct=mover&&mover.changePct!=null&&Number.isFinite(Number(mover.changePct))?Number(mover.changePct):null;
-    const fresh=quote&&quoteAgeMs(quote)<15000;
-    const marketClosed=mover&&mover.marketSession==='CLOSED';
+    const fresh=hasFreshLiveQuote(quote);
+    const marketClosed=mover?mover.marketSession==='CLOSED':!isRegularMarketSession();
     const priceTime=mover&&mover.priceAsOf?new Date(mover.priceAsOf).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'exchange trade time unavailable';
     const priceAsOfMs=mover&&mover.priceAsOf?Date.parse(mover.priceAsOf):NaN;
     const currentQuoteAgeMs=Number.isFinite(priceAsOfMs)?Date.now()-priceAsOfMs:Infinity;
@@ -478,14 +478,15 @@ function renderStockExplorerResults() {
       :Number.isFinite(currentQuoteAgeMs)&&currentQuoteAgeMs>=0&&currentQuoteAgeMs<=180000?'LIVE_QUOTE':'STALE_QUOTE';
     const priceLabel=mover
       ? (moverStatus==='LIVE_QUOTE'?'LIVE FYERS QUOTE':moverStatus==='LAST_KNOWN_PRICE'?'LAST KNOWN PRICE':moverStatus==='STALE_QUOTE'?'STALE QUOTE':'QUOTE TIME UNKNOWN')
-      : (fresh?'LIVE INDEX QUOTE':'DATA PENDING');
+      : (fresh?'LIVE INDEX QUOTE':quote?(marketClosed?'LAST KNOWN INDEX PRICE':'STALE / RECONNECTING INDEX QUOTE'):'DATA PENDING');
     const changeLabel=changePct!==null?'<span class="'+(changePct>=0?'positive-text':'negative-text')+'">'+(changePct>0?'+':'')+changePct.toFixed(2)+'%</span>':'<span class="muted-text">Change unavailable</span>';
+    const indexTime=quote&&quote.sourceTime&&Number.isFinite(Date.parse(quote.sourceTime))?new Date(quote.sourceTime).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'exchange trade time unavailable';
     const detail=mover
       ? (moverStatus==='LIVE_QUOTE'?'Fresh exchange-timestamped FYERS quote · '+priceTime
         : moverStatus==='LAST_KNOWN_PRICE'?'Market closed · last known FYERS price · '+priceTime
         : moverStatus==='STALE_QUOTE'?'Quote timestamp is stale · '+priceTime
         :'FYERS returned a price but its exchange timestamp is unavailable; freshness is unverified')
-      : (quote?'Verified live index quote':x.note);
+      : (quote?(fresh?'Fresh exchange-timestamped FYERS index quote · '+indexTime:marketClosed?'Market closed · last known FYERS index price · '+indexTime:'Last received FYERS index price; live freshness is not verified · '+indexTime):x.note);
     return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+priceLabel+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(price!==null?'₹'+formatPrice(price):'—')+'</strong><p>'+changeLabel+' · '+escapeHtml(detail)+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
   }).join(''):'<div class="chart-empty">No symbols match this search.</div>';
   host.querySelectorAll('[data-explorer-jump]').forEach(btn=>btn.addEventListener('click',()=>render(btn.dataset.explorerJump)));
