@@ -178,6 +178,10 @@ function quoteAgeMs(quote) {
   return Date.now() - quote.receivedAt;
 }
 
+function hasFreshLiveQuote(quote) {
+  return isRegularMarketSession() && !!quote && quote.source === 'websocket' && quote.streamConnected === true && quoteAgeMs(quote) >= 0 && quoteAgeMs(quote) <= 15000;
+}
+
 function calculateIndicators(symbol) {
   const values = (historyBySymbol[symbol] || []).map(point => point.price);
   const sma = function (n) {
@@ -208,10 +212,11 @@ function signalDataBlockReason(symbol) {
   const quote = quoteFor(symbol);
   if (!isRegularMarketSession()) return 'Market session is closed or outside NSE regular hours; no actionable signal.';
   if (!quote || !Number.isFinite(quote.price) || quote.price <= 0) return 'Verified quote is missing; no signal.';
-  if (quoteAgeMs(quote) > 15000) return 'Quote is stale (>15 seconds); no signal.';
+  if (quote.source !== 'websocket' || quote.streamConnected !== true) return 'A connected live FYERS stream is required; last-known/reconnecting quotes cannot generate signals.';
+  if (quoteAgeMs(quote) < 0 || quoteAgeMs(quote) > 15000) return 'Quote is stale or has a future timestamp; no signal.';
   const other = SYMBOLS.find(item => item.symbol !== symbol);
   const otherQuote = other ? quoteFor(other.symbol) : null;
-  if (!otherQuote || !Number.isFinite(otherQuote.price) || quoteAgeMs(otherQuote) > 15000) return 'Both index quotes are not fresh; signal blocked.';
+  if (!otherQuote || !Number.isFinite(otherQuote.price) || otherQuote.source !== 'websocket' || otherQuote.streamConnected !== true || quoteAgeMs(otherQuote) < 0 || quoteAgeMs(otherQuote) > 15000) return 'Both index quotes are not fresh from a connected stream; signal blocked.';
   return '';
 }
 
@@ -1389,7 +1394,9 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
             : (source === 'websocket' && Number.isFinite(Date.parse(fetchedAt)) ? Date.parse(fetchedAt) : 0),
           sourceTime: Number.isFinite(Number(item.v.tt)) && Number(item.v.tt) > 0
             ? new Date(Number(item.v.tt) > 1e12 ? Number(item.v.tt) : Number(item.v.tt) * 1000).toISOString()
-            : (source === 'websocket' ? fetchedAt || null : null)
+            : (source === 'websocket' ? fetchedAt || null : null),
+          source: source || 'unknown',
+          streamConnected: streamConnected === true
         };
       }
     }
@@ -1560,11 +1567,11 @@ function updateDynamicPanel() {
   const dashBackend = document.querySelector('#dashBackend');
   if (dashBackend) dashBackend.textContent = backendHealthState;
   const dashFeed = document.querySelector('#dashFeed');
-  if (dashFeed) dashFeed.textContent = SYMBOLS.every(item => quoteFor(item.symbol) && quoteAgeMs(quoteFor(item.symbol)) < 15000) ? 'LIVE' : 'WAITING';
+  if (dashFeed) dashFeed.textContent = SYMBOLS.every(item => hasFreshLiveQuote(quoteFor(item.symbol))) ? 'LIVE' : (isRegularMarketSession() ? 'WAITING' : 'MARKET CLOSED / LAST KNOWN');
   const settingsBackend = document.querySelector('#settingsBackend');
   if (settingsBackend) settingsBackend.textContent = backendHealthState;
   const settingsFeed = document.querySelector('#settingsFeed');
-  if (settingsFeed) settingsFeed.textContent = SYMBOLS.every(item => quoteFor(item.symbol) && quoteAgeMs(quoteFor(item.symbol)) < 15000) ? 'LIVE' : 'WAITING';
+  if (settingsFeed) settingsFeed.textContent = SYMBOLS.every(item => hasFreshLiveQuote(quoteFor(item.symbol))) ? 'LIVE' : (isRegularMarketSession() ? 'WAITING' : 'MARKET CLOSED / LAST KNOWN');
   const sampleCount = document.querySelector('#chartSampleCount');
   if (sampleCount) sampleCount.textContent = 'Samples: ' + (historyBySymbol[SYMBOLS[0].symbol] || []).length;
 }
