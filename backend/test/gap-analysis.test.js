@@ -16,7 +16,7 @@ test("summarizes historical gap fills using validated OHLC bars", () => {
   const bars = [
     { timestamp: "2026-10-19T09:15:00+05:30", open: 100, high: 102, low: 99, close: 101, verified: true },
     { timestamp: "2026-10-20T09:15:00+05:30", open: 103, high: 104, low: 100, close: 102, verified: true },
-    { timestamp: "2026-10-21T09:15:00+05:30", open: 99, high: 101, low: 98, close: 100, verified: true }
+    { timestamp: "2026-10-21T09:15:00+05:30", open: 99, high: 103, low: 98, close: 100, verified: true }
   ];
   const summary = summarizeHistoricalGaps(bars, { minAbsGapPct: 0.3 });
   assert.equal(summary.sampleSize, 2);
