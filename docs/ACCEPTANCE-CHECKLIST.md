@@ -16,6 +16,13 @@
 - [ ] A signal requires fresh underlying data and verified option-chain data where applicable.
 - [ ] Planned reward:risk must be at least 1:2; otherwise show no-trade.
 
+## Gap-Up / Gap-Down
+- [ ] Gap percentage is calculated from verified previous close and opening price.
+- [ ] Volume expansion is only assessed when comparable volume data is available.
+- [ ] Major event risk is shown as a caution, not a directional prediction.
+- [ ] No fixed gap-fill probability or FII/DII/operator attribution without evidence and backtesting.
+- [ ] Missing/stale source data blocks automatic gap signals; manual analysis is clearly labeled.
+
 ## UI and deployment
 - [ ] Every navigation item opens a real page/module, not only a changed heading.
 - [ ] Loading, empty, stale, disconnected, rate-limited, and server-error states are tested.
