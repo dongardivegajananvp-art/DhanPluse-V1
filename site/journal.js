@@ -86,9 +86,12 @@
       trades.push(trade);
       const saved = save(trades);
       const feedback = document.querySelector('#dpJFeedback');
-      if (feedback) feedback.textContent = violations.length
-        ? 'RULE REVIEW — ' + violations.join('; ') + '. Consider NO TRADE and review the plan. This is a dashboard warning, not a broker-side lock.' + (saved ? '' : ' Browser storage failed; the entry may not persist.')
-        : 'Checklist passed. Keep trading in paper mode until your strategy has been tested across enough trades.';
+      if (feedback) {
+        const ruleMessage = violations.length
+          ? 'RULE REVIEW — ' + violations.join('; ') + '. Consider NO TRADE and review the plan. This is a dashboard warning, not a broker-side lock.'
+          : 'Checklist passed. Keep trading in paper mode until your strategy has been tested across enough trades.';
+        feedback.textContent = ruleMessage + (saved ? '' : ' STORAGE ERROR — browser storage failed; this entry may not persist. Export or copy it before leaving this page.');
+      }
       const feedbackText = feedback ? feedback.textContent : '';
       renderStats();
       const updatedFeedback = document.querySelector('#dpJFeedback');
