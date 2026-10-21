@@ -1429,6 +1429,10 @@ function render(tab) {
   else if (tab === 'FYERS Settings') featureContent.innerHTML = settingsMarkup();
   else featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
   bindTabActions();
+  if (tab === 'Gap-Up/Down') {
+    const gapButton = document.querySelector('#loadGapAnalysisBtn');
+    if (gapButton) gapButton.onclick = loadGapAnalysis;
+  }
   updateDynamicPanel();
   if (tab === 'Market Activity') loadMarketActivity();
   if (tab === 'Gap-Up/Down') loadGapAnalysis();
