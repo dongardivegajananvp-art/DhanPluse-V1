@@ -284,7 +284,7 @@ async function renderStockExplorer(){
     vals.forEach((v,i)=>{const td=el("td",v);if(i===3)td.style.color=Number(item.v.chp)>=0?"#63f0cb":"#ff718c";tr.append(td);});
     tbody.append(tr);
    }
-   status.textContent="Source: FYERS quotes API · "+rows.length+" fresh verified quote(s) · fetched "+new Date(data.fetchedAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST"+(data.missingSymbols?.length?(" · missing/stale: "+data.missingSymbols.map(x=>x.replace("NSE:","").replace("-EQ","")).join(", ")):"");
+   status.textContent="Source: FYERS quotes API · "+rows.length+" fresh verified quote(s) of "+(data.universeCount||rows.length)+" F&O symbols · fetched "+new Date(data.fetchedAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST · missing/stale symbols omitted.";
   }catch(err){status.textContent=String(err?.message||"Verified quotes unavailable.")+" No stale or placeholder prices are shown.";}
   finally{refresh.disabled=false;}
  }
