@@ -194,7 +194,7 @@ async function renderOptionChain(){
    summary.append(el("h3",result.symbol+" · Underlying ₹"+Number(result.underlyingLtp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})));
    summary.append(el("p","Source: "+result.source+" · Retrieved: "+new Date(result.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})));
    summary.append(el("p","Total call OI: "+(result.callOi===null?"Unavailable":Number(result.callOi).toLocaleString("en-IN"))+" · Total put OI: "+(result.putOi===null?"Unavailable":Number(result.putOi).toLocaleString("en-IN"))));
-   summary.append(el("p",result.dataComplete?"OI and volume fields passed completeness checks. No trade signal is generated here.":"Data incomplete: "+result.warning+" Trade analysis must remain blocked.","risk-note"));
+   summary.append(el("p",result.dataComplete?"OI and volume fields passed completeness checks, but exchange-time freshness and liquidity are not independently validated. Signals remain blocked.":"Data incomplete: "+result.warning+" Trade analysis must remain blocked.","risk-note"));
    const byStrike=new Map();
    for(const leg of result.data){if(leg.verified!==true||!Number.isFinite(Number(leg.strike))||!["CE","PE"].includes(leg.type))continue;const row=byStrike.get(Number(leg.strike))||{};row[leg.type]=leg;byStrike.set(Number(leg.strike),row);}
    const table=document.createElement("table");table.className="option-chain-table";
@@ -209,7 +209,7 @@ async function renderOptionChain(){
     body.append(tr);
    }
    table.append(body);host.append(table);
-   status.textContent="FYERS option chain loaded · "+byStrike.size+" strikes · "+(result.signalsAllowed?"required OI/volume present":"incomplete data — analysis blocked");
+   status.textContent="FYERS option chain loaded · "+byStrike.size+" strikes · "+(result.dataComplete?"OI/volume present; signals blocked pending freshness validation":"incomplete data — analysis blocked");
   }catch(error){status.textContent=String(error?.message||"Option-chain data unavailable.")+" No placeholder option data is displayed.";host.replaceChildren();summary.replaceChildren();}
   finally{submit.disabled=false;}
  });
