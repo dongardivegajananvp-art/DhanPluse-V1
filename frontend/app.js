@@ -169,7 +169,7 @@ async function refreshStatus(){
   document.querySelector("#backendStatus").textContent=s.backend||"Unknown";
   document.querySelector("#fyersStatus").textContent=s.fyers||"Not verified";
   document.querySelector("#feedStatus").textContent=s.liveData||"Waiting";
-  document.querySelector("#connection").textContent=s.fyers==="connected"?"FYERS authenticated · historical API only":s.backend==="online"?"Backend online · FYERS not connected":"Backend status unavailable";
+  document.querySelector("#connection").textContent=s.fyers==="connected"?"FYERS authenticated · live feed status shown separately":s.backend==="online"?"Backend online · FYERS not connected":"Backend status unavailable";
  }catch{
   document.querySelector("#backendStatus").textContent="Unreachable";document.querySelector("#fyersStatus").textContent="Not verified";document.querySelector("#feedStatus").textContent="Unavailable";document.querySelector("#connection").textContent="Backend unavailable";
  }
