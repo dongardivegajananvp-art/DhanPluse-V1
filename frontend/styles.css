@@ -13,3 +13,10 @@
 .candle-details{font-size:12px;overflow-wrap:anywhere}
 
 .zone-supply{fill:#fb7185;fill-opacity:.13;stroke:#fb7185;stroke-opacity:.55;stroke-width:1;stroke-dasharray:5 3;pointer-events:none}.zone-demand{fill:#6ee7b7;fill-opacity:.13;stroke:#6ee7b7;stroke-opacity:.55;stroke-width:1;stroke-dasharray:5 3;pointer-events:none}
+
+.option-chain-table-wrap{max-width:100%;overflow-x:auto;margin-top:12px;border:1px solid var(--line);border-radius:10px}
+.option-chain-table{border-collapse:collapse;width:100%;min-width:780px;font-size:12px;font-variant-numeric:tabular-nums}
+.option-chain-table th,.option-chain-table td{padding:9px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+.option-chain-table th{position:sticky;top:0;background:#172235;color:var(--text);font-weight:600}
+.option-chain-table td:first-child,.option-chain-table th:first-child{text-align:left}
+@media(max-width:640px){.option-chain-table-wrap{margin-left:-4px;margin-right:-4px}.option-chain-table{font-size:11px}.option-chain-table th,.option-chain-table td{padding:8px 7px}}
