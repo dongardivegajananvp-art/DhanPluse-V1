@@ -29,7 +29,7 @@ export function buildFnoEquityUniverse(foMaster, cmMaster) {
 
   const underlyingByTicker = new Map();
   for (const [ticker, item] of Object.entries(foMaster)) {
-    if (!ticker.startsWith("NSE:") || item?.tradeStatus === 0) continue;
+    if (!ticker.startsWith("NSE:") || Number(item?.tradeStatus) === 0) continue;
     const type = Number(item?.exInstType);
     const isStockFuture = type === 13 || /FUT$/.test(ticker);
     const isOption = item?.optType === "CE" || item?.optType === "PE";
