@@ -5,7 +5,7 @@ let sessionToken = sessionStorage.getItem(sessionKey) || "";
 let candleRefreshTimer = null;
 const pages = {
  dashboard:["Dashboard","Verified FYERS streaming quotes are displayed for NIFTY and BANKNIFTY when exchange timestamps are fresh. Historical FYERS candlesticks and gap analysis are available. Full NSE F&O coverage and complete breakout, momentum, and Zero-to-Hero scanners are still incomplete; missing or stale data must block signals."],
- explorer:["Stock Explorer","The complete F&O quote universe is not connected in this branch. No prices are fabricated."],
+ explorer:["Stock Explorer","Loads the current NSE F&O equity universe from FYERS symbol masters and shows only fresh, verified FYERS quotes. Missing or stale symbols are omitted."],
  nifty:["NIFTY","Verified FYERS index quotes and historical candlestick charts are supported. Live tick candles are available only while fresh FYERS ticks are received; stale data blocks the chart."],
  banknifty:["BANKNIFTY","Verified FYERS index quotes and historical candlestick charts are supported. Live tick candles are available only while fresh FYERS ticks are received; stale data blocks the chart."],
  gap:["Gap-Up / Gap-Down","Load verified FYERS daily candles and calculate descriptive historical gap-fill statistics."],
@@ -14,7 +14,7 @@ const pages = {
  journal:["Paper Journal","Paper trading only. Record entry, stop, target, rule adherence, and outcome."],
  activity:["Market Activity","Market-wide activity feed is not implemented yet. No unverified activity is displayed."],
  charts:["Charts & Patterns","Historical FYERS candlestick charts are available for supported symbols and intervals. Pattern detection is still blocked pending validation."],
- movers:["Gainers & Losers","Verified all-F&O gainers and losers are not connected yet."],
+ movers:["Gainers & Losers","Ranks the current NSE F&O equity universe only when fresh FYERS quotes are available. Missing or stale symbols are excluded."],
  technical:["Technical Indicators","Technical indicators are blocked until verified intraday candles are available."],
  signals:["Sureshot CE/PE","No trade signal is generated in this build. Entry, stop-loss, target and minimum 1:2 risk/reward require verified data."],
  breakout:["Breakout Scanner","Breakout scanning is not implemented yet; no candidates will be fabricated."],
@@ -257,7 +257,7 @@ async function renderLiveQuotes(key){
 }
 async function renderStockExplorer(){
  const box=el("section",undefined,"stock-explorer");
- box.append(el("p","Loading fresh FYERS quotes for the supported stock subset…"));
+ box.append(el("p","Loading the current NSE F&O equity universe and fresh FYERS quotes…"));
  panel.append(box);
  if(!sessionToken){box.replaceChildren(el("p","Connect FYERS to load verified stock quotes. No sample prices are shown."));return;}
  const refresh=el("button","Refresh verified quotes");refresh.type="button";
@@ -267,7 +267,7 @@ async function renderStockExplorer(){
  const head=document.createElement("thead"),hr=document.createElement("tr");
  for(const name of ["Symbol","LTP (₹)","Change (₹)","Change %","Exchange time (IST)"]){const th=el("th",name);hr.append(th);}
  head.append(hr);table.append(head);const tbody=document.createElement("tbody");table.append(tbody);tableHost.append(table);
- box.replaceChildren(el("h3","Verified stock quotes · supported subset"),el("p","This is not yet the complete NSE F&O universe. Rows are shown only when FYERS returns a fresh, valid exchange timestamp."),refresh,status,tableHost);
+ box.replaceChildren(el("h3","Verified NSE F&O equity quotes"),el("p","Universe source: current FYERS NSE_FO + NSE_CM symbol masters. Only quotes with valid exchange timestamps within 120 seconds are displayed. If FYERS rate-limits a batch, partial rankings are discarded."),refresh,status,tableHost);
  async function load(){
   refresh.disabled=true;status.textContent="Requesting fresh FYERS quotes…";tbody.replaceChildren();
   try{
@@ -502,7 +502,7 @@ async function fetchStockQuotes(){
  return {rows, fetchedAt:data.fetchedAt, missingSymbols:Array.isArray(data.missingSymbols)?data.missingSymbols:[]};
 }
 function renderMovers(){
- panel.replaceChildren(el("h2","Verified Gainers & Losers"),el("p","Ranks only the currently supported stock subset returned by FYERS; this is not the complete NSE F&O universe. Quotes older than 120 seconds are rejected."));
+ panel.replaceChildren(el("h2","Verified NSE F&O Gainers & Losers"),el("p","Ranks current NSE F&O equities using the FYERS symbol master and fresh quotes. Quotes older than 120 seconds are rejected; rate-limited partial batches are not ranked."));
  const btn=el("button","Refresh verified movers");btn.type="button";
  const status=el("p","Connect FYERS to load current quotes."),host=el("div",undefined,"option-chain-table-wrap");
  btn.addEventListener("click",load);panel.append(btn,status,host);
@@ -514,7 +514,7 @@ function renderMovers(){
   const body=document.createElement("tbody");
   rows.forEach((item,i)=>{const tr=document.createElement("tr"),stamp=new Date(Number(item.v.tt)*1000),symbol=item.n.replace("NSE:","").replace("-EQ","");
    [String(i+1),symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),safeNumber(item.v.ch)===null?"—":Number(item.v.ch).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(Number(item.v.chp)>=0?"+":"")+Number(item.v.chp).toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})].forEach((v,j)=>{const td=el("td",v);if(j===4)td.style.color=Number(item.v.chp)>=0?"#63f0cb":"#ff718c";tr.append(td);});body.append(tr);});
-  table.append(body);host.append(table);status.textContent="FYERS verified subset · "+rows.length+" fresh quote(s) · fetched "+new Date(result.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" · missing/stale symbols omitted.";
+  table.append(body);host.append(table);status.textContent="FYERS F&O universe · "+rows.length+" fresh verified quote(s) of "+(result.universeCount||rows.length)+" symbols · fetched "+new Date(result.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" · missing/stale symbols omitted.";
  }catch(e){status.textContent=String(e.message||e)+" No stale prices shown.";}finally{btn.disabled=false;}}
  if(sessionToken)load();
 }
