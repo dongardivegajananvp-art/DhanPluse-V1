@@ -1,5 +1,5 @@
-const CACHE_NAME = 'dhanpulse-shell-v58';
-const SHELL = ['./', './index.html', './style.css?v=20261019-streamfix1', './app.js?v=20261021-market-activity-guard1', './journal.js?v=20261019-streamfix1', './risk-calculator.js?v=20261019-streamfix1', './backtest.js?v=20261019-streamfix1', './manifest.webmanifest', './dhanpulse-icon.svg'];
+const CACHE_NAME = 'dhanpulse-shell-v59';
+const SHELL = ['./', './index.html', './style.css?v=20261019-streamfix1', './app.js?v=20261021-watchlist-freshness1', './journal.js?v=20261019-streamfix1', './risk-calculator.js?v=20261019-streamfix1', './backtest.js?v=20261019-streamfix1', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
