@@ -130,7 +130,11 @@ function parseTick(raw) {
     });
     const acceptedCount = (acceptedTickCounts.get(symbol) || 0) + 1;
     acceptedTickCounts.set(symbol, acceptedCount);
-    if (acceptedCount === 1 || acceptedCount % 50 === 0) recordDiagnostic("info", "fresh_tick_accepted", { symbol, acceptedCount, exchangeTime: tickTime });
+    if (acceptedCount === 1 || acceptedCount % 50 === 0) {
+      const acceptedEvent = { symbol, acceptedCount, exchangeTime: tickTime };
+      recordDiagnostic("info", "fresh_tick_accepted", acceptedEvent);
+      console.log("FYERS fresh tick accepted:", JSON.stringify(acceptedEvent));
+    }
     recordLiveCandles(symbol, ltp, exchangeTime);
   }
 }
