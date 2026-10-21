@@ -267,6 +267,7 @@ function requireDashboardSession(req, res, next) {
 // CORS is not authentication; this short-lived opaque session token is.
 app.use('/api/market', requireDashboardSession);
 app.use('/api/fyers/options-chain', requireDashboardSession);
+app.use('/api/fyers/option-quote', requireDashboardSession);
 app.use('/api/fyers/holdings', requireDashboardSession);
 app.use('/api/fyers/positions', requireDashboardSession);
 
@@ -738,6 +739,42 @@ app.get('/api/fyers/options-chain', async (req, res) => {
       ok: false,
       error: error.statusCode === 401 ? 'Connect FYERS to view option-chain data.' : 'FYERS option-chain request failed.',
       detail: String(error.message || 'Upstream request failed.').slice(0, 220)
+    });
+  }
+});
+
+app.get('/api/fyers/option-quote', async (req, res) => {
+  const symbol = String(req.query.symbol || '');
+  // Read-only single-contract quote; this endpoint never places orders.
+  if (!/^NSE:[A-Z0-9&-]{3,48}$/.test(symbol) || !/(CE|PE)$/.test(symbol)) {
+    return res.status(400).json({ ok: false, error: 'Invalid NSE option contract symbol.' });
+  }
+  try {
+    const url = new URL('https://api-t1.fyers.in/data/quotes');
+    url.searchParams.set('symbols', symbol);
+    const result = await fyersReadOnlyGet(url);
+    const rows = Array.isArray(result.d) ? result.d : (Array.isArray(result.data) ? result.data : []);
+    const row = rows.find(item => (item?.n || item?.symbol || item?.v?.symbol) === symbol);
+    const v = row?.v || row;
+    const ltp = Number(v?.lp ?? v?.ltp);
+    const bid = Number(v?.bid ?? v?.bid_price);
+    const ask = Number(v?.ask ?? v?.ask_price);
+    const rawTime = v?.ltt ?? v?.tt ?? v?.exch_feed_time;
+    const n = Number(rawTime);
+    const quoteTimeMs = Number.isFinite(n) && n > 0 ? (n > 1e12 ? n : n * 1000) : Date.parse(String(rawTime || ''));
+    const ageMs = Date.now() - quoteTimeMs;
+    if (!Number.isFinite(ltp) || ltp <= 0 || !Number.isFinite(bid) || bid <= 0 ||
+        !Number.isFinite(ask) || ask < bid || !Number.isFinite(quoteTimeMs) ||
+        ageMs < -5000 || ageMs > 15000) {
+      return res.status(502).json({ ok: false, error: 'Selected option contract quote is missing, stale, or invalid; no signal.' });
+    }
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, symbol, quote: { ltp, bid, ask, quoteTimeMs, quoteAgeSeconds: Math.max(0, ageMs / 1000) } });
+  } catch (error) {
+    return res.status(error.statusCode || 502).json({
+      ok: false,
+      error: error.statusCode === 401 ? 'Connect FYERS to verify the selected option quote.' : 'Selected option quote verification failed.',
+      detail: String(error.message || 'FYERS quote request failed.').slice(0, 220)
     });
   }
 });
