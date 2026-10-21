@@ -832,6 +832,12 @@ async function loadAdvancedScanner() {
       const timestamp=Date.parse(x.priceAsOf);
       return Number.isFinite(age)&&age>=0&&age<=180&&Number.isFinite(timestamp)&&Date.now()-timestamp>=-30000&&Date.now()-timestamp<=180000;
     });
+    if(rows.length!==requestedCount){
+      table.innerHTML='<div class="chart-empty"><b>NO TRADE — incomplete fresh-quote coverage.</b><p>Only '+rows.length+' of '+requestedCount+' F&O symbols have fresh, exchange-timestamped quotes. Stale or timestamp-unverified symbols are not silently excluded to create a misleading shortlist; scanner candidates are withheld.</p></div>';
+      status.textContent='Signal blocked · fresh verified quotes cover '+rows.length+' / '+requestedCount+' requested F&O symbols.';
+      logEvent(currentTab+' blocked because one or more F&O quotes were stale or timestamp-unverified.','warn');
+      return;
+    }
     if(!rows.length){
       table.innerHTML='<div class="chart-empty">No fresh exchange-timestamped FYERS quotes. Scanner output is blocked until fresh quotes are available.</div>';
       status.textContent='No live scanner candidates · fresh quote timestamps are missing or stale.';
