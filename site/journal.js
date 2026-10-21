@@ -63,7 +63,7 @@
       const entry = Number(val('dpJEntry')), stop = Number(val('dpJStop')), target = Number(val('dpJTarget'));
       const exit = val('dpJExit') === '' ? null : Number(val('dpJExit'));
       const qty = Number(val('dpJQty')), side = val('dpJSide'), mood = val('dpJMood');
-      if (![entry, stop, target, qty].every(Number.isFinite) || entry <= 0 || stop <= 0 || target <= 0 || qty < 1 || (exit !== null && (!Number.isFinite(exit) || exit <= 0))) {
+      if (![entry, stop, target, qty].every(Number.isFinite) || entry <= 0 || stop <= 0 || target <= 0 || qty < 1 || !Number.isInteger(qty) || (exit !== null && (!Number.isFinite(exit) || exit <= 0))) {
         document.querySelector('#dpJFeedback').textContent = 'Invalid values: trade was not saved.';
         return;
       }
