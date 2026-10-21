@@ -468,7 +468,7 @@ function renderStockExplorerResults() {
     const price=quote?quote.price:(mover?Number(mover.price):null);
     const changePct=mover&&mover.changePct!=null&&Number.isFinite(Number(mover.changePct))?Number(mover.changePct):null;
     const fresh=hasFreshLiveQuote(quote);
-    const marketClosed=mover?mover.marketSession==='CLOSED':!isRegularMarketSession();
+    const marketClosed=!isRegularMarketSession();
     const priceTime=mover&&mover.priceAsOf?new Date(mover.priceAsOf).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'exchange trade time unavailable';
     const priceAsOfMs=mover&&mover.priceAsOf?Date.parse(mover.priceAsOf):NaN;
     const currentQuoteAgeMs=Number.isFinite(priceAsOfMs)?Date.now()-priceAsOfMs:Infinity;
