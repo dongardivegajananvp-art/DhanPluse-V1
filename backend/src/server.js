@@ -658,10 +658,10 @@ app.get('/api/market/movers', async (_req, res) => {
           // A successful HTTP response is not proof that the underlying quote is fresh.
           // Only exchange-timestamped quotes within three minutes during the NSE session
           // are eligible to be called live; old or timestamp-less values stay visibly qualified.
-          const priceStatus = !tradedAtEpoch
-            ? 'TIME_UNVERIFIED'
-            : (!marketOpen
-              ? 'LAST_KNOWN_PRICE'
+          const priceStatus = !marketOpen
+            ? 'LAST_KNOWN_PRICE'
+            : (!tradedAtEpoch
+              ? 'TIME_UNVERIFIED'
               : (quoteAgeSeconds <= 180 ? 'LIVE_QUOTE' : 'STALE_QUOTE'));
           return {
             symbol, price,
