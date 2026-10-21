@@ -1408,8 +1408,12 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
     latestQuotes[item.symbol] = next;
     const history = historyBySymbol[item.symbol];
     const last = history.length ? history[history.length - 1] : null;
-    // Last-known display values are never samples for indicators or alert triggers.
-    if (source !== 'last-known') {
+    // Only fresh ticks from a connected WebSocket may feed indicators or trigger alerts.
+    // Last-known and reconnecting snapshots are display-only, even if their timestamps look recent.
+    const verifiedLiveTick = source === 'websocket' && streamConnected === true &&
+      Number.isFinite(next.receivedAt) && next.receivedAt > 0 &&
+      Date.now() - next.receivedAt >= 0 && Date.now() - next.receivedAt <= 15000;
+    if (verifiedLiveTick) {
       if (!last || last.price !== next.price) {
         history.push({ price: next.price, time: next.receivedAt });
         if (history.length > 180) history.splice(0, history.length - 180);
