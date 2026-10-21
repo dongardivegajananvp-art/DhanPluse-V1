@@ -318,6 +318,33 @@ app.get("/api/market/quotes", requireSession, (_req, res) => {
     marketSocketConnected: streamConnected, retryAfterSeconds: 5
   });
 });
+app.get("/api/fyers/options-chain", requireSession, async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
+  const allowed = new Set(["NSE:NIFTY50-INDEX","NSE:NIFTYBANK-INDEX","NSE:RELIANCE-EQ","NSE:TCS-EQ","NSE:INFY-EQ","NSE:HDFCBANK-EQ","NSE:ICICIBANK-EQ","NSE:SBIN-EQ","NSE:ITC-EQ","NSE:LT-EQ","NSE:AXISBANK-EQ","NSE:BAJFINANCE-EQ"]);
+  const count = Number(req.query.strikecount ?? 10);
+  const expiry = String(req.query.timestamp ?? "");
+  if (!allowed.has(symbol)) return res.status(400).json({ok:false,error:"Unsupported underlying."});
+  if (!Number.isInteger(count) || count < 1 || count > 50) return res.status(400).json({ok:false,error:"strikecount must be 1–50."});
+  if (expiry && !/^\d{10}$/.test(expiry)) return res.status(400).json({ok:false,error:"Invalid expiry timestamp."});
+  const url = new URL("https://api-t1.fyers.in/data/options-chain-v3");
+  url.searchParams.set("symbol",symbol);url.searchParams.set("strikecount",String(count));url.searchParams.set("greeks","1");
+  if (expiry) url.searchParams.set("timestamp",expiry);
+  try {
+    const response = await fetch(url,{headers:{Authorization:appId+":"+accessToken,Accept:"application/json"},cache:"no-store",signal:AbortSignal.timeout(12000)});
+    const body = await response.json().catch(()=>({}));
+    if (!response.ok || body.s!=="ok" || !Array.isArray(body.data?.optionsChain)) return res.status(response.status===401?401:response.status===429?429:502).json({ok:false,error:"FYERS option-chain data unavailable or unverified.",detail:String(body.message||"Invalid response").slice(0,160)});
+    const underlying=body.data.optionsChain.find(x=>x&&x.option_type===""&&Number(x.strike_price)===-1);
+    if (!underlying || !Number.isFinite(Number(underlying.ltp)) || Number(underlying.ltp)<=0) return res.status(502).json({ok:false,error:"Underlying quote missing; analysis blocked."});
+    const legs=body.data.optionsChain.filter(x=>x&&(x.option_type==="CE"||x.option_type==="PE"));
+    if (!legs.length) return res.status(422).json({ok:false,error:"No option legs returned."});
+    const data=legs.map(x=>({symbol:x.symbol,type:x.option_type,strike:Number(x.strike_price),ltp:Number(x.ltp),oi:Number.isFinite(Number(x.oi))&&Number(x.oi)>=0?Number(x.oi):null,oiChange:Number.isFinite(Number(x.oich))?Number(x.oich):null,volume:Number.isFinite(Number(x.volume))&&Number(x.volume)>=0?Number(x.volume):null,verified:typeof x.symbol==="string"&&x.symbol.startsWith("NSE:")&&Number(x.strike_price)>0&&Number.isFinite(Number(x.ltp))&&Number(x.ltp)>=0}));
+    if (data.some(x=>!x.verified)) return res.status(502).json({ok:false,error:"Option leg validation failed; chain blocked."});
+    const complete=data.every(x=>x.oi!==null&&x.volume!==null);
+    res.json({ok:true,symbol,source:"FYERS option-chain API",fetchedAt:new Date().toISOString(),underlyingLtp:Number(underlying.ltp),expiryData:Array.isArray(body.data.expiryData)?body.data.expiryData:[],callOi:Number.isFinite(Number(body.data.callOi))?Number(body.data.callOi):null,putOi:Number.isFinite(Number(body.data.putOi))?Number(body.data.putOi):null,dataComplete:complete,signalsAllowed:complete,count:data.length,data,warning:complete?"FYERS option-chain data; verify freshness and liquidity before analysis.":"OI or volume missing on one or more legs; signals blocked."});
+  } catch (error) { res.status(502).json({ok:false,error:"FYERS option-chain request failed; analysis blocked.",detail:String(error.message||"Network error").slice(0,160)}); }
+});
+
 app.get("/api/market/live-candles", requireSession, (req, res) => {
   res.set("Cache-Control", "no-store");
   const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
