@@ -213,7 +213,9 @@ async function renderOptionChain(){
   }catch(error){status.textContent=String(error?.message||"Option-chain data unavailable.")+" No placeholder option data is displayed.";host.replaceChildren();summary.replaceChildren();}
   finally{submit.disabled=false;}
  });
- for(const control of [symbol,count,expiry])control.addEventListener("change",()=>{if(sessionToken&&control===expiry&&expiry.value==="")return;if(sessionToken)form.requestSubmit();});
+ symbol.addEventListener("change",()=>{expiry.value="";if(sessionToken)form.requestSubmit();});
+ count.addEventListener("change",()=>{if(sessionToken)form.requestSubmit();});
+ expiry.addEventListener("change",()=>{if(sessionToken&&expiry.value)form.requestSubmit();});
  panel.append(form,status,summary,host);
  if(sessionToken)form.requestSubmit();
 }
