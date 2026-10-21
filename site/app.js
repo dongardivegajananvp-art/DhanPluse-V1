@@ -227,6 +227,7 @@ function validateOhlcCandles(candles, resolution) {
     if (!Array.isArray(row) || row.length < 5) return 'Candle row is incomplete.';
     const time = Number(row[0]), open = Number(row[1]), high = Number(row[2]), low = Number(row[3]), close = Number(row[4]);
     if (![time, open, high, low, close].every(Number.isFinite) || time <= 0 || Math.min(open, high, low, close) <= 0) return 'Candle data contains missing or invalid numbers.';
+    if (time * 1000 > Date.now() + 5000) return 'Candle timestamp is in the future; signal blocked.';
     if (high < Math.max(open, close, low) || low > Math.min(open, close, high)) return 'OHLC values are inconsistent; signal blocked.';
     if (time <= previousTime) return 'Candle timestamps are duplicated or out of order.';
     previousTime = time;
