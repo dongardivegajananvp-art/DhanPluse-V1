@@ -7,6 +7,7 @@ import helmet from "helmet";
 import cors from "cors";
 import { analyzeOpeningGap, summarizeHistoricalGaps } from "./gap-analysis.js";
 import { getNseSessionWindow } from "./market-data.js";
+import { buildFnoEquityUniverse } from "./fno-universe.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -418,20 +419,12 @@ async function getNseFnoEquityUniverse() {
     if (!foResponse.ok || !cmResponse.ok) throw new Error("FYERS NSE_FO/NSE_CM symbol master download failed.");
     const [foMaster, cmMaster] = await Promise.all([foResponse.json(), cmResponse.json()]);
     if (!foMaster || typeof foMaster !== "object" || !cmMaster || typeof cmMaster !== "object") throw new Error("FYERS symbol master format was invalid.");
-    const cashSymbols = new Map();
-    for (const [ticker, item] of Object.entries(cmMaster)) {
-      const match = /^NSE:([A-Z0-9&-]+)-EQ$/.exec(ticker);
-      if (match && item?.tradeStatus !== 0) cashSymbols.set(match[1], ticker);
+    const symbols = buildFnoEquityUniverse(foMaster, cmMaster);
+    if (symbols.length < 180) {
+      const error = new Error("FYERS symbol master returned an unexpectedly small F&O equity universe (" + symbols.length + " matched; refusing incomplete data).");
+      error.diagnostics = { foEntries: Object.keys(foMaster).length, cmEntries: Object.keys(cmMaster).length, matchedEquities: symbols.length };
+      throw error;
     }
-    const underlyings = new Set();
-    for (const [ticker, item] of Object.entries(foMaster)) {
-      if (!ticker.startsWith("NSE:") || item?.tradeStatus === 0) continue;
-      if (item?.optType !== "CE" && item?.optType !== "PE" && !/FUT$/.test(ticker)) continue;
-      const underlying = String(item?.underSym || "").trim().toUpperCase();
-      if (underlying && cashSymbols.has(underlying)) underlyings.add(underlying);
-    }
-    const symbols = [...underlyings].map(name => ({ symbol: cashSymbols.get(name), underlying: name })).sort((a,b) => a.symbol.localeCompare(b.symbol));
-    if (symbols.length < 180) throw new Error("FYERS symbol master validation failed: too few NSE F&O equity underlyings.");
     const result = { source: "FYERS NSE_FO + NSE_CM symbol masters", fetchedAt: new Date().toISOString(), count: symbols.length, data: symbols };
     fnoUniverseCache = { fetchedAt: Date.now(), data: result };
     console.log("FYERS NSE F&O equity universe loaded:", JSON.stringify({ count: symbols.length, source: result.source }));
