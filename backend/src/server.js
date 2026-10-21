@@ -570,7 +570,7 @@ app.get('/api/gap-analysis/history', requireDashboardSession, async (req, res) =
   const to = String(req.query.to || today);
   const minGapPct = Number(req.query.minGapPct ?? 0.3);
   if (!allowed.has(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported symbol for verified gap analysis.' });
-  if (!isValidIsoDate(from) || !isValidIsoDate(to) || from > to) return res.status(400).json({ ok: false, error: 'Use real calendar dates in YYYY-MM-DD format.' });
+  if (!isValidIsoDate(from) || !isValidIsoDate(to) || from > to || to > today) return res.status(400).json({ ok: false, error: 'Use real calendar dates in YYYY-MM-DD format, ending no later than today (IST).' });
   const spanDays = (Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 86400000;
   if (!Number.isFinite(spanDays) || spanDays > 365) return res.status(400).json({ ok: false, error: 'Gap-analysis range must be 365 days or less.' });
   if (!Number.isFinite(minGapPct) || minGapPct < 0 || minGapPct > 20) return res.status(400).json({ ok: false, error: 'Minimum gap must be between 0 and 20%.' });
