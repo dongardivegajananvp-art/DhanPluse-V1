@@ -433,6 +433,23 @@ async function getNseFnoEquityUniverse() {
   try { return await fnoUniversePromise; }
   finally { fnoUniversePromise = null; }
 }
+app.get("/api/market/fno-universe", requireSession, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
+  try {
+    const universe = await getNseFnoEquityUniverse();
+    res.json({
+      ok: true,
+      source: universe.source,
+      fetchedAt: universe.fetchedAt,
+      count: universe.count,
+      data: universe.data
+    });
+  } catch (error) {
+    recordDiagnostic("warn", "fno_universe_unavailable", { message: String(error?.message || error).slice(0, 160) });
+    res.status(503).json({ ok: false, error: "Verified NSE F&O universe unavailable; symbol selection blocked.", detail: String(error?.message || error).slice(0, 160) });
+  }
+});
 function stockQuoteRateLimitError() {
   const now = Date.now();
   const until = now + stockQuoteCooldown.backoffMs;
