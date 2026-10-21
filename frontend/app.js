@@ -378,11 +378,27 @@ function renderCandleChart(key){
   ["NSE:ITC-EQ","ITC"],["NSE:LT-EQ","LT"],["NSE:AXISBANK-EQ","AXISBANK"],["NSE:BAJFINANCE-EQ","BAJFINANCE"]
  ];
  const fixedSymbol=key==="nifty"?"NSE:NIFTY50-INDEX":key==="banknifty"?"NSE:NIFTYBANK-INDEX":null;
+ let symbolSelect=null;
  if(!fixedSymbol){
   const label=el("label","Symbol");
-  const select=document.createElement("select");select.name="symbol";
+  const select=document.createElement("select");select.name="symbol";symbolSelect=select;
   for(const [value,title] of symbols){const option=el("option",title);option.value=value;select.append(option);}
   label.append(select);form.append(label);
+  if(sessionToken){
+   fetch(API_BASE+"/api/market/fno-universe",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}})
+    .then(r=>r.json().then(data=>({ok:r.ok,data})))
+    .then(({ok,data})=>{
+     if(!ok||data.ok!==true||!Array.isArray(data.data)||!data.data.length)throw new Error("Verified F&O symbol list unavailable.");
+     if(!document.body.contains(wrap)||!symbolSelect)return;
+     const selected=symbolSelect.value;
+     const options=[["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],...data.data.map(item=>[item.symbol,item.underlying])];
+     symbolSelect.replaceChildren();
+     for(const [value,title] of options){const option=el("option",title);option.value=value;symbolSelect.append(option);}
+     if(options.some(([value])=>value===selected))symbolSelect.value=selected;
+     status.textContent="Loaded "+data.count+" verified NSE F&O stock symbols from FYERS symbol masters.";
+    })
+    .catch(()=>{status.textContent="Full NSE F&O list unavailable; only the built-in symbol choices remain. No symbols are guessed.";});
+  }
  }
  const sourceLabel=el("label","Data source");
  const sourceSelect=document.createElement("select");sourceSelect.name="source";
