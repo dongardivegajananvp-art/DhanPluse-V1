@@ -111,9 +111,11 @@ function startMarketDataStream(token) {
       streamError = '';
       console.log('FYERS market socket connected; subscribing to configured index symbols.');
       try {
-        socket.subscribe(allowedSymbols);
-        // Full mode preserves exch_feed_time so replayed after-hours snapshots cannot masquerade as live ticks.
+        // Select full updates before subscribing so exchange timestamps are present
+        // when the first index messages arrive; this prevents stale snapshots from
+        // being treated as fresh live data.
         socket.mode(socket.FullMode);
+        socket.subscribe(allowedSymbols);
         console.log('FYERS market socket subscription request sent.');
       } catch (error) {
         streamError = 'Could not subscribe to FYERS index symbols.';
@@ -145,10 +147,14 @@ function startMarketDataStream(token) {
       console.error('FYERS market socket error:', String(error?.message || error).slice(0, 240));
     });
 
-    socket.on('close', () => {
+    socket.on('close', (code, reason) => {
       if (marketSocket !== socket) return;
       streamConnected = false;
-      console.log('FYERS market socket closed.');
+      const safeReason = reason == null ? '' : String(reason).slice(0, 160);
+      console.warn('FYERS market socket closed:', JSON.stringify({
+        code: code ?? null,
+        reason: safeReason || null
+      }));
     });
 
     socket.connect();
