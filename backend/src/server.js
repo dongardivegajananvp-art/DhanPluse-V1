@@ -137,9 +137,10 @@ app.get("/api/gap-analysis/history", requireSession, async (req, res) => {
   const from = String(req.query.from || "");
   const to = String(req.query.to || "");
   const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const isRealDate = value => datePattern.test(value) && Number.isFinite(Date.parse(value + "T00:00:00Z")) && new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
   const minGapPct = req.query.minGapPct == null ? 0.3 : Number(req.query.minGapPct);
   if (!allowed.has(symbol)) return res.status(400).json({ ok: false, error: "Unsupported symbol for this first verified gap-analysis release." });
-  if (!datePattern.test(from) || !datePattern.test(to) || from > to || (Date.parse(to+"T00:00:00Z")-Date.parse(from+"T00:00:00Z"))/86400000 > 365) return res.status(400).json({ ok: false, error: "Provide a valid YYYY-MM-DD date range of at most 365 days." });
+  if (!isRealDate(from) || !isRealDate(to) || from > to || (Date.parse(to+"T00:00:00Z")-Date.parse(from+"T00:00:00Z"))/86400000 > 365) return res.status(400).json({ ok: false, error: "Provide a valid YYYY-MM-DD date range of at most 365 days." });
   if (!Number.isFinite(minGapPct) || minGapPct < 0 || minGapPct > 20) return res.status(400).json({ ok: false, error: "minGapPct must be between 0 and 20." });
   try {
     const bars = await fyersHistory(symbol, from, to);
