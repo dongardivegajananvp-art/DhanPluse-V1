@@ -100,9 +100,14 @@
     });
     document.querySelector('#dpJClear').addEventListener('click', () => {
       if (!window.confirm('Delete all locally saved trade journal entries?')) return;
+      const feedback = document.querySelector('#dpJFeedback');
+      if (!save([])) {
+        if (feedback) feedback.textContent = 'STORAGE ERROR — browser could not clear the saved journal. Existing entries were kept on screen; retry only after browser storage is available.';
+        return;
+      }
       trades = [];
-      save(trades);
       renderStats();
+      if (feedback) feedback.textContent = 'Journal cleared from this browser.';
     });
   }
 
