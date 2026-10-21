@@ -1,1 +1,0 @@
-export default async () => new Response(JSON.stringify({ ok: true, service: 'dhanpulse-netlify-function', liveDataConnected: false, orderPlacementEnabled: false, message: 'Frontend deployment health only; FYERS is not connected.' }), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
