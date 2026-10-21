@@ -2,6 +2,7 @@ const API_BASE = window.DHANPULSE_API_BASE || "https://dhanpulse-clean-test.onre
 const panel = document.querySelector("#panel");
 const sessionKey = "dhanpulseGapSession";
 let sessionToken = sessionStorage.getItem(sessionKey) || "";
+let candleRefreshTimer = null;
 const pages = {
  dashboard:["Dashboard","Verified FYERS streaming quotes are displayed for NIFTY and BANKNIFTY. Historical gap analysis is available; full Stock Explorer, candlesticks, and scanners remain incomplete."],
  explorer:["Stock Explorer","The complete F&O quote universe is not connected in this branch. No prices are fabricated."],
@@ -201,7 +202,7 @@ function svgNode(name,attrs={}){
 function renderCandleChart(key){
  const wrap=el("section",undefined,"candle-tool");
  wrap.append(el("h3",key==="charts"?"Verified candlestick chart":"Candlestick chart · FYERS history"));
- wrap.append(el("p","Verified FYERS historical OHLC candles. Supply/demand bands are historical pivot-based study areas; this is not yet a live-updating candle chart or a trade signal."));
+ wrap.append(el("p","Historical mode uses verified FYERS OHLC. Live mode aggregates received FYERS ticks into provisional OHLC bars; it does not reconstruct missed ticks or supply volume. Supply/demand bands are historical pivot-based study areas, not trade signals."));
  const form=el("form",undefined,"gap-form");
  const symbols=[
   ["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],
@@ -233,7 +234,7 @@ function renderCandleChart(key){
  const status=el("p","Choose an interval and load historical candles.");
  const chartHost=el("div",undefined,"candle-chart-host");
  const details=el("p",undefined,"candle-details");
- sourceSelect.addEventListener("change",()=>{if(sourceSelect.value==="live"){if(fixedSymbol===null){status.textContent="Live tick candles are supported on NIFTY/BANKNIFTY tabs only.";return;}if(resolution.value==="D")resolution.value="5";}if(sessionToken)form.requestSubmit();});
+ sourceSelect.addEventListener("change",()=>{if(candleRefreshTimer){clearInterval(candleRefreshTimer);candleRefreshTimer=null;}if(sourceSelect.value==="live"){if(fixedSymbol===null){status.textContent="Live tick candles are supported on NIFTY/BANKNIFTY tabs only.";return;}if(resolution.value==="D")resolution.value="5";if(sessionToken){form.requestSubmit();candleRefreshTimer=setInterval(()=>{if(document.body.contains(wrap)&&sourceSelect.value==="live"&&!submit.disabled)form.requestSubmit();},15000);}}else if(sessionToken)form.requestSubmit();});
  resolution.addEventListener("change",()=>{
   const daily=resolution.value==="D";
   form.elements.from.value=istDateString(new Date(Date.now()-(daily?60:7)*86400000));
@@ -327,6 +328,7 @@ function renderCandleChart(key){
 }
 
 function renderPage(key){
+ if(candleRefreshTimer){clearInterval(candleRefreshTimer);candleRefreshTimer=null;}
  const [title,description]=pages[key]||["Module","Status unavailable."];
  panel.replaceChildren();
  if(key==="gap"){renderGap();return;}
