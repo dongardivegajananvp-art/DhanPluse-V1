@@ -649,9 +649,23 @@ function renderWatchlistTable() {
     return {symbol,label:index?index.label:symbol.replace(/^NSE:/,'').replace(/-EQ$/,''),quote,equity};
   });
   host.innerHTML=rows.length?'<table class="console-table"><thead><tr><th>Symbol</th><th>Last price</th><th>Change %</th><th>Source / updated</th><th>Action</th></tr></thead><tbody>'+
-    rows.map(row=>{const price=row.quote?row.quote.price:row.equity?Number(row.equity.price):null;const change=row.quote?row.quote.changePct:row.equity?Number(row.equity.changePct):null;
-      const updated=row.quote?new Date(row.quote.receivedAt).toLocaleTimeString('en-IN'):row.equity?new Date(watchlistEquityRows.fetchedAt||Date.now()).toLocaleTimeString('en-IN'):'—';
-      return '<tr><td><b>'+escapeHtml(row.label)+'</b><small>'+escapeHtml(row.symbol)+'</small></td><td>'+(price!==null?'₹'+formatPrice(price):'—')+'</td><td class="'+(Number(change)>0?'positive-text':Number(change)<0?'negative-text':'')+'">'+(Number.isFinite(Number(change))?(Number(change)>0?'+':'')+Number(change).toFixed(2)+'%':'—')+'</td><td>'+(row.quote?'Index stream':row.equity?'FYERS snapshot':'Waiting for verified quote')+'<small>'+escapeHtml(updated)+'</small></td><td>'+(SYMBOLS.some(item=>item.symbol===row.symbol)?'<span class="live-tag">INDEX</span>':'<button class="secondary" data-remove-watchlist="'+escapeHtml(row.symbol)+'">Remove</button>')+'</td></tr>';
+    rows.map(row=>{
+      const marketClosed=!isRegularMarketSession();
+      const indexFresh=hasFreshLiveQuote(row.quote);
+      const equityTime=row.equity&&row.equity.priceAsOf?Date.parse(row.equity.priceAsOf):NaN;
+      const equityAge=Number.isFinite(equityTime)?(Date.now()-equityTime)/1000:Infinity;
+      const equityFresh=!!row.equity&&!marketClosed&&row.equity.priceStatus==='LIVE_QUOTE'&&equityAge>=0&&equityAge<=180&&Number(row.equity.quoteAgeSeconds)>=0&&Number(row.equity.quoteAgeSeconds)<=180;
+      const hasIndexPrice=!!row.quote&&Number.isFinite(Number(row.quote.price))&&Number(row.quote.price)>0;
+      const hasEquityPrice=!!row.equity&&Number.isFinite(Number(row.equity.price))&&Number(row.equity.price)>0;
+      const price=row.quote?(hasIndexPrice?Number(row.quote.price):null):hasEquityPrice?Number(row.equity.price):null;
+      const change=row.quote?row.quote.changePct:row.equity?Number(row.equity.changePct):null;
+      const updated=row.quote?(row.quote.sourceTime||new Date(row.quote.receivedAt).toISOString()):row.equity?(row.equity.priceAsOf||watchlistEquityRows.fetchedAt||'—'):'—';
+      const source=row.quote?(indexFresh?'LIVE INDEX STREAM':marketClosed&&hasIndexPrice?'LAST KNOWN INDEX PRICE':hasIndexPrice?'STALE / RECONNECTING INDEX':'DATA UNAVAILABLE')
+        :row.equity?(marketClosed&&hasEquityPrice?'LAST KNOWN · MARKET CLOSED':equityFresh?'LIVE FYERS QUOTE':hasEquityPrice?'STALE / UNVERIFIED EQUITY QUOTE':'DATA UNAVAILABLE')
+        :'Waiting for verified quote';
+      const displayPrice=price!==null?'₹'+formatPrice(price):'—';
+      const displayChange=price!==null&&Number.isFinite(Number(change))?(Number(change)>0?'+':'')+Number(change).toFixed(2)+'%':'—';
+      return '<tr><td><b>'+escapeHtml(row.label)+'</b><small>'+escapeHtml(row.symbol)+'</small></td><td>'+displayPrice+'</td><td class="'+(Number(change)>0?'positive-text':Number(change)<0?'negative-text':'')+'">'+displayChange+'</td><td>'+source+'<small>'+escapeHtml(updated==='—'?'—':new Date(updated).toLocaleString('en-IN'))+'</small></td><td>'+(SYMBOLS.some(item=>item.symbol===row.symbol)?'<span class="live-tag">INDEX</span>':'<button class="secondary" data-remove-watchlist="'+escapeHtml(row.symbol)+'">Remove</button>')+'</td></tr>';
     }).join('')+'</tbody></table>':'<div class="chart-empty">Your watchlist is empty. Add a supported symbol above.</div>';
   host.querySelectorAll('[data-remove-watchlist]').forEach(button=>button.addEventListener('click',()=>{watchlistSymbols=watchlistSymbols.filter(symbol=>symbol!==button.dataset.removeWatchlist);saveWatchlistSymbols();renderWatchlistTable();}));
 }
