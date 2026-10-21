@@ -1609,6 +1609,8 @@ async function exchangeAuthCode() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok !== true || !data.dashboardSessionToken) throw new Error(data.error || data.detail || 'Authentication failed or session was not issued.');
     sessionStorage.setItem('dhanpulse-dashboard-session-v1', data.dashboardSessionToken);
+    setFyersStatus('CONNECTED');
+    setBackendStatus('ONLINE');
     logEvent('FYERS authentication succeeded; checking live quotes.', 'info');
     showMessage('FYERS authentication succeeded. Verifying live quotes…');
     await fetchLiveQuotes();
