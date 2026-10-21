@@ -473,12 +473,113 @@ function renderCandleChart(key){
  }
 }
 
+
+const supportedStockSymbols = [
+ ["NSE:RELIANCE-EQ","RELIANCE"],["NSE:TCS-EQ","TCS"],["NSE:INFY-EQ","INFY"],
+ ["NSE:HDFCBANK-EQ","HDFCBANK"],["NSE:ICICIBANK-EQ","ICICIBANK"],["NSE:SBIN-EQ","SBIN"],
+ ["NSE:ITC-EQ","ITC"],["NSE:LT-EQ","LT"],["NSE:AXISBANK-EQ","AXISBANK"],["NSE:BAJFINANCE-EQ","BAJFINANCE"]
+];
+function safeNumber(value){const n=Number(value);return Number.isFinite(n)?n:null;}
+function verifiedQuoteRows(data){
+ const now=Date.now();
+ if(!data||data.ok!==true||!Array.isArray(data.data))return [];
+ return data.data.filter(item=>{
+  const v=item?.v, price=safeNumber(v?.lp), stamp=safeNumber(v?.tt);
+  return item.verified===true&&price!==null&&price>0&&stamp!==null&&stamp>0&&Math.abs(now-stamp*1000)<=120000&&safeNumber(v?.chp)!==null;
+ });
+}
+async function fetchStockQuotes(){
+ if(!sessionToken)throw new Error("Connect FYERS first. No sample prices are displayed.");
+ const r=await fetch(API_BASE+"/api/market/stock-quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
+ const data=await r.json();
+ if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Connect FYERS again.");}
+ if(r.status===429)throw new Error(data.error||"FYERS rate limit reached. Wait before retrying.");
+ if(!r.ok)throw new Error(data.detail||data.error||"Verified stock quotes unavailable.");
+ const rows=verifiedQuoteRows(data);
+ if(!rows.length)throw new Error("No supported stock quote has a fresh exchange timestamp. Results blocked.");
+ return {rows, fetchedAt:data.fetchedAt, missingSymbols:Array.isArray(data.missingSymbols)?data.missingSymbols:[]};
+}
+function renderMovers(){
+ panel.replaceChildren(el("h2","Verified Gainers & Losers"),el("p","Ranks only the currently supported stock subset returned by FYERS; this is not the complete NSE F&O universe. Quotes older than 120 seconds are rejected."));
+ const btn=el("button","Refresh verified movers");btn.type="button";
+ const status=el("p","Connect FYERS to load current quotes."),host=el("div",undefined,"option-chain-table-wrap");
+ btn.addEventListener("click",load);panel.append(btn,status,host);
+ async function load(){btn.disabled=true;status.textContent="Requesting FYERS quotes…";host.replaceChildren();try{
+  const result=await fetchStockQuotes(),rows=result.rows.slice().sort((a,b)=>Number(b.v.chp)-Number(a.v.chp));
+  const table=document.createElement("table");table.className="option-chain-table";
+  const thead=document.createElement("thead"),hr=document.createElement("tr");
+  ["Rank","Symbol","LTP (₹)","Change (₹)","Change %","Exchange time (IST)"].forEach(x=>hr.append(el("th",x)));thead.append(hr);table.append(thead);
+  const body=document.createElement("tbody");
+  rows.forEach((item,i)=>{const tr=document.createElement("tr"),stamp=new Date(Number(item.v.tt)*1000),symbol=item.n.replace("NSE:","").replace("-EQ","");
+   [String(i+1),symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),safeNumber(item.v.ch)===null?"—":Number(item.v.ch).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(Number(item.v.chp)>=0?"+":"")+Number(item.v.chp).toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})].forEach((v,j)=>{const td=el("td",v);if(j===4)td.style.color=Number(item.v.chp)>=0?"#63f0cb":"#ff718c";tr.append(td);});body.append(tr);});
+  table.append(body);host.append(table);status.textContent="FYERS verified subset · "+rows.length+" fresh quote(s) · fetched "+new Date(result.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" · missing/stale symbols omitted.";
+ }catch(e){status.textContent=String(e.message||e)+" No stale prices shown.";}finally{btn.disabled=false;}}
+ if(sessionToken)load();
+}
+function renderWatchlist(){
+ panel.replaceChildren(el("h2","Watchlist"),el("p","Your personal watchlist is stored only in this browser. Prices are requested from FYERS and shown only when exchange timestamps are fresh."));
+ const key="dhanpulseWatchlist";let selected;
+ try{selected=JSON.parse(localStorage.getItem(key)||"[\"NSE:RELIANCE-EQ\",\"NSE:TCS-EQ\",\"NSE:INFY-EQ\",\"NSE:HDFCBANK-EQ\",\"NSE:SBIN-EQ\"]");if(!Array.isArray(selected))selected=[];}catch{selected=[];}
+ const chooser=el("div",undefined,"gap-form"),status=el("p","Connect FYERS to load verified quotes."),host=el("div",undefined,"option-chain-table-wrap");
+ const label=el("label","Add supported symbol");const select=document.createElement("select");
+ supportedStockSymbols.forEach(([symbol,name])=>{const opt=el("option",name);opt.value=symbol;select.append(opt);});label.append(select);
+ const add=el("button","Add to watchlist");add.type="button";add.addEventListener("click",()=>{if(!selected.includes(select.value))selected.push(select.value);localStorage.setItem(key,JSON.stringify(selected));load();});
+ const refresh=el("button","Refresh quotes");refresh.type="button";refresh.addEventListener("click",load);chooser.append(label,add,refresh);panel.append(chooser,status,host);
+ async function load(){status.textContent="Loading verified quotes…";host.replaceChildren();try{
+  const result=await fetchStockQuotes(),wanted=result.rows.filter(row=>selected.includes(row.n));
+  const table=document.createElement("table");table.className="option-chain-table";const h=document.createElement("thead"),hr=document.createElement("tr");
+  ["Symbol","LTP (₹)","Change %","Exchange time","Action"].forEach(x=>hr.append(el("th",x)));h.append(hr);table.append(h);const body=document.createElement("tbody");
+  for(const row of wanted){const tr=document.createElement("tr"),symbol=row.n.replace("NSE:","").replace("-EQ",""),stamp=new Date(Number(row.v.tt)*1000);
+   [symbol,Number(row.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(Number(row.v.chp)>=0?"+":"")+Number(row.v.chp).toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})].forEach(v=>tr.append(el("td",v)));
+   const td=document.createElement("td"),remove=el("button","Remove");remove.type="button";remove.addEventListener("click",()=>{selected=selected.filter(s=>s!==row.n);localStorage.setItem(key,JSON.stringify(selected));load();});td.append(remove);tr.append(td);body.append(tr);
+  }
+  table.append(body);host.append(table);status.textContent=wanted.length+" of "+selected.length+" selected symbols have fresh verified quotes. Universe limited to 10 supported stocks; not full F&O.";
+ }catch(e){status.textContent=String(e.message||e)+" No stale prices shown.";} }
+ if(sessionToken)load();
+}
+function renderScanner(key){
+ const titles={breakout:"Breakout Scanner · Supported Symbol Study",momentum:"Momentum Scanner · Supported Symbol Study",zerohero:"Zero-to-Hero · Movement Watchlist"};
+ panel.replaceChildren(el("h2",titles[key]||"Verified Scanner"),el("p","This is a single-symbol, historical-candle study for the supported list—not a full-market scanner or guaranteed option setup. It blocks when verified candles are missing, malformed, or stale."));
+ const form=el("form",undefined,"gap-form"),symLabel=el("label","Underlying");
+ const sym=document.createElement("select");supportedStockSymbols.forEach(([v,n])=>{const o=el("option",n);o.value=v;sym.append(o);});symLabel.append(sym);form.append(symLabel);
+ const resLabel=el("label","Interval"),resolution=document.createElement("select");
+ [["5","5 minutes"],["15","15 minutes"],["30","30 minutes"]].forEach(([v,n])=>{const o=el("option",n);o.value=v;resolution.append(o);});resLabel.append(resolution);form.append(resLabel);
+ const run=el("button",key==="zerohero"?"Review price movement":"Run verified study");run.type="submit";form.append(run);
+ const status=el("p","Connect FYERS to run a verified study."),out=el("div",undefined,"gap-result");form.addEventListener("submit",async ev=>{ev.preventDefault();if(!sessionToken){status.textContent="Connect FYERS first.";return;}
+  run.disabled=true;status.textContent="Requesting verified FYERS candles…";out.replaceChildren();
+  const now=new Date(),from=new Date(Date.now()-7*86400000),fmt=d=>{const z=new Date(d.getTime()-d.getTimezoneOffset()*60000);return z.toISOString().slice(0,10);};
+  const q=new URLSearchParams({symbol:sym.value,resolution:resolution.value,from:fmt(from),to:fmt(now)});
+  try{const r=await fetch(API_BASE+"/api/market/candles?"+q.toString(),{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}}),data=await r.json();
+   if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);}
+   if(r.status===429)throw new Error("FYERS historical-data rate limit/cooldown. Wait before retrying; do not repeatedly refresh.");
+   if(!r.ok||data.ok!==true||!Array.isArray(data.data))throw new Error(data.detail||data.error||"Verified candle request failed.");
+   const bars=data.data.filter(c=>c.verified===true&&c.source==="FYERS"&&Number.isFinite(Date.parse(c.timestamp))&&[c.open,c.high,c.low,c.close].every(v=>safeNumber(v)>0)&&Number(c.high)>=Math.max(Number(c.open),Number(c.low),Number(c.close))&&Number(c.low)<=Math.min(Number(c.open),Number(c.high),Number(c.close))).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
+   if(bars.length<22)throw new Error("Need at least 22 valid FYERS candles; only "+bars.length+" passed validation.");
+   const latest=bars[bars.length-1],prior=bars.slice(-21,-1),priorHigh=Math.max(...prior.map(c=>Number(c.high))),priorLow=Math.min(...prior.map(c=>Number(c.low)));
+   const close=Number(latest.close),first=Number(bars[bars.length-6].close),move=(close/first-1)*100;
+   const gains=[],losses=[];for(let i=bars.length-14;i<bars.length;i++){const delta=Number(bars[i].close)-Number(bars[i-1].close);if(delta>=0)gains.push(delta);else losses.push(-delta);}
+   const avgGain=gains.reduce((a,b)=>a+b,0)/14,avgLoss=losses.reduce((a,b)=>a+b,0)/14,rsi=avgLoss===0?100:100-(100/(1+avgGain/avgLoss));
+   const breakoutUp=close>priorHigh,breakoutDown=close<priorLow;
+   out.append(el("h3",sym.options[sym.selectedIndex].text+" · ₹"+close.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})));
+   out.append(el("p","Last candle: "+new Date(latest.timestamp).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" · Source: "+data.source+" · Valid candles: "+bars.length));
+   if(key==="breakout"){out.append(el("p",breakoutUp?"Possible upside range break: last close is above the previous 20-candle high.":breakoutDown?"Possible downside range break: last close is below the previous 20-candle low.":"No 20-candle range break on the last close."));out.append(el("p","Previous 20-candle high ₹"+priorHigh.toFixed(2)+" · low ₹"+priorLow.toFixed(2)));}
+   else if(key==="momentum"){out.append(el("p","Last 5-candle close change: "+(move>=0?"+":"")+move.toFixed(2)+"% · Simple 14-period RSI: "+rsi.toFixed(1)));out.append(el("p",move>0&&rsi>=55?"Positive price momentum in this sample; not an entry signal.":move<0&&rsi<=45?"Negative price momentum in this sample; not an entry signal.":"Momentum is mixed/neutral; no directional claim."));}
+   else{out.append(el("p","5-candle close change: "+(move>=0?"+":"")+move.toFixed(2)+"%. This page ranks only one selected underlying at a time; it cannot verify option premium, traded quantity, or a zero-to-hero contract."));}
+   out.append(el("p","No option entry, stop, target, or trade recommendation is generated. Historical candles alone do not validate live execution, liquidity, or a 1:2 setup.","risk-note"));
+   status.textContent="Study complete · verified FYERS historical candles only.";
+  }catch(e){status.textContent=String(e.message||e)+" Signals remain blocked.";out.replaceChildren();}finally{run.disabled=false;}
+ });panel.append(form,status,out);
+}
+
 function renderPage(key){
  if(candleRefreshTimer){clearInterval(candleRefreshTimer);candleRefreshTimer=null;}
  const [title,description]=pages[key]||["Module","Status unavailable."];
  panel.replaceChildren();
  if(key==="gap"){renderGap();return;}
  if(key==="explorer"){renderStockExplorer();return;}
+ if(key==="watchlist"){renderWatchlist();return;}
+ if(key==="movers"){renderMovers();return;}
+ if(["breakout","momentum","zerohero"].includes(key)){renderScanner(key);return;}
  if(key==="capital"){renderCapital();return;}
  if(key==="journal"){renderJournal();return;}
  if(key==="journalRules"){renderJournalRules();return;}
