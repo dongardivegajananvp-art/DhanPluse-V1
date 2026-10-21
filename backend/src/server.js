@@ -6,6 +6,7 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import { analyzeOpeningGap, summarizeHistoricalGaps } from "./gap-analysis.js";
+import { getNseSessionWindow } from "./market-data.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -232,6 +233,7 @@ app.get("/health", (_req, res) => {
   const snapshot = liveSnapshot();
   res.set("Cache-Control", "no-store").json({
     backend: "online", uptimeSeconds: Math.floor((Date.now()-startedAt)/1000),
+    marketSession: getNseSessionWindow(),
     fyersConfigured: Boolean(appId && appSecret && redirectUri),
     liveDataConnected: Boolean(streamConnected && snapshot),
     marketSocketConnected: streamConnected, lastTickAt: snapshot?.fetchedAt || null,
@@ -250,6 +252,7 @@ app.get("/api/diagnostics", requireSession, (_req, res) => {
 
 app.get("/api/status", (_req, res) => res.set("Cache-Control", "no-store").json({
   backend: "online",
+  marketSession: getNseSessionWindow(),
   fyersConfigured: Boolean(appId && appSecret && redirectUri),
   fyers: accessToken ? "connected" : "not-connected",
   authenticatedAt,
