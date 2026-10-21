@@ -617,7 +617,8 @@ app.get('/api/market/movers', async (_req, res) => {
             const returned = new Set(quotes.map(item => item && (item.n || item.symbol || item.v?.symbol)).filter(Boolean));
             failedBatches.push(...batch.filter(symbol => !returned.has(symbol)));
             if (offset + MOVERS_BATCH_SIZE < moversSymbols.length) {
-              await new Promise(resolve => setTimeout(resolve, 400));
+              // Space provider quote batches conservatively to reduce HTTP 429 / Cloudflare throttling.
+              await new Promise(resolve => setTimeout(resolve, 1250));
             }
           } catch (error) {
             failedBatches.push(...batch);
