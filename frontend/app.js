@@ -292,9 +292,16 @@ async function renderStockExplorer(){
    const data=await r.json();
    if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Connect FYERS again.");}
    if(!r.ok||!Array.isArray(data.data))throw new Error([data.error,data.detail,data.retryAfterSeconds?("Retry in "+data.retryAfterSeconds+" seconds."):null].filter(Boolean).join(" · ")||"Fresh verified quotes unavailable.");
-   verifiedRows=data.data.filter(item=>item&&item.v&&Number(item.v.lp)>0&&Number.isFinite(Number(item.v.chp))&&Number.isFinite(Number(item.v.ch))&&Number(item.v.tt)>0);
+   const nowMs=Date.now();
+   verifiedRows=data.data.filter(item=>{
+    if(!item||item.verified!==true||!item.v)return false;
+    const lp=Number(item.v.lp),ch=Number(item.v.ch),chp=Number(item.v.chp),stamp=Number(item.v.tt)*1000;
+    const age=nowMs-stamp;
+    return Number.isFinite(lp)&&lp>0&&Number.isFinite(ch)&&Number.isFinite(chp)&&stamp>0&&age>=-30000&&age<=120000;
+   });
+   if(!verifiedRows.length)throw new Error("FYERS returned no quotes that passed the client-side 120-second freshness check. Wait for fresh data; no stale prices are shown.");
    paintRows();
-   status.textContent="Source: FYERS quotes API · "+verifiedRows.length+" fresh verified quote(s) of "+(data.universeCount||verifiedRows.length)+" F&O symbols · sorted by "+sort.options[sort.selectedIndex].text+" · fetched "+new Date(data.fetchedAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST · missing/stale symbols omitted.";
+   status.textContent="Source: FYERS quotes API · "+verifiedRows.length+" fresh verified quote(s) of "+(data.universeCount||verifiedRows.length)+" F&O symbols · sorted by "+sort.options[sort.selectedIndex].text+" · fetched "+new Date(data.fetchedAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST · client-side freshness checked · missing/stale symbols omitted.";
   }catch(err){verifiedRows=[];tbody.replaceChildren();status.textContent=String(err?.message||"Verified quotes unavailable.")+" No stale or placeholder prices are shown.";}
   finally{refresh.disabled=false;}
  }
