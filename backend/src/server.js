@@ -426,7 +426,17 @@ async function getNseFnoEquityUniverse() {
     cashByName.set(name, ticker);
   }
   const data = [...derivatives].map(name => ({ name, symbol: cashByName.get(name) })).filter(item => item.symbol).sort((a,b) => a.name.localeCompare(b.name));
-  if (data.length < 50) throw new Error("FYERS symbol master returned an unexpectedly small F&O equity universe; refusing incomplete data.");
+  if (data.length < 50) {
+    const typeCounts = {};
+    for (const item of Object.values(fo)) {
+      const type = String(item?.exInstType ?? "missing");
+      typeCounts[type] = (typeCounts[type] || 0) + 1;
+    }
+    const derivativeSamples = Object.entries(fo).filter(([, item]) => [13, 15].includes(Number(item?.exInstType))).slice(0, 5).map(([ticker, item]) => ({ ticker, exInstType: item?.exInstType, underSym: item?.underSym, exSymName: item?.exSymName, optType: item?.optType, tradeStatus: item?.tradeStatus }));
+    const cashSamples = Object.entries(cm).filter(([ticker]) => ticker.startsWith("NSE:") && ticker.includes("-EQ")).slice(0, 5).map(([ticker, item]) => ({ ticker, exSymName: item?.exSymName, tradeStatus: item?.tradeStatus }));
+    console.error("FYERS symbol master parser diagnostic:", JSON.stringify({ foEntries: Object.keys(fo).length, cmEntries: Object.keys(cm).length, typeCounts, derivativeSamples, cashSamples, derivativeUnderlyingCount: derivatives.size, cashNameCount: cashByName.size, matchedCount: data.length }));
+    throw new Error("FYERS symbol master returned an unexpectedly small F&O equity universe (" + data.length + " matched; refusing incomplete data).");
+  }
   fnoUniverseCache = { fetchedAt: Date.now(), data };
   return fnoUniverseCache;
 }
