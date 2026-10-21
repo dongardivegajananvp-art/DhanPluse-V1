@@ -501,6 +501,14 @@ async function loadVerifiedFnoStockQuotes() {
     }
     for (const symbol of batch) if (!returned.has(symbol) || !data.some(item => item.n === symbol)) missingSymbols.push(symbol);
   }
+  if (missingSymbols.length > 0) {
+    const error = new Error(`Incomplete verified F&O quote coverage (${data.length}/${symbols.length}); partial rankings discarded.`);
+    error.statusCode = 503;
+    error.universeCount = symbols.length;
+    error.quotedCount = data.length;
+    error.missingCount = missingSymbols.length;
+    throw error;
+  }
   if (!data.length) {
     const error = new Error("No fresh exchange-timestamped F&O stock quotes. No stale prices shown.");
     error.statusCode = 503;
@@ -555,6 +563,9 @@ app.get("/api/market/stock-quotes", requireSession, async (_req, res) => {
       ok: false,
       error: status === 401 ? "FYERS session expired; reconnect." : status === 503 ? error.message : "FYERS F&O quotes could not be verified.",
       ...(error.universeCount ? { universeCount: error.universeCount } : {}),
+      ...(Number.isFinite(error.quotedCount) ? { quotedCount: error.quotedCount } : {}),
+      ...(Number.isFinite(error.missingCount) ? { missingCount: error.missingCount } : {}),
+      partialQuotesDiscarded: status === 503,
       detail: String(error.message || "network error").slice(0, 160)
     });
   } finally {
