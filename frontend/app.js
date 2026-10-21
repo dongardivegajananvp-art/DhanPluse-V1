@@ -150,6 +150,46 @@ function renderJournalRules(){
  else{const list=el("div",undefined,"gap-result");for(const t of notFollowed.slice(0,100)){const item=el("article",undefined,"journal-item");item.append(el("h3",t.symbol+" · "+t.side+" · "+t.followed.toUpperCase()),el("p","Entry ₹"+t.entry+" · SL ₹"+t.stop+" · Target ₹"+t.target),el("p",t.notes||"No note was recorded; add a reason in your next journal entry."));list.append(item);}panel.append(list);}
  panel.append(el("p","Limitations: this summary cannot establish strategy profitability from a small sample and does not include brokerage, taxes, slippage, quantity, or market context."));
 }
+async function renderLiveQuotes(key){
+ const target=document.querySelector("#liveQuotePanel");
+ if(!target)return;
+ target.replaceChildren(el("h3","Verified index quotes"));
+ if(!sessionToken){
+  target.append(el("p","Connect FYERS to load authenticated live quotes."));
+  return;
+ }
+ try{
+  const r=await fetch(API_BASE+"/api/market/quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
+  const data=await r.json();
+  if(!r.ok||!Array.isArray(data.data))throw new Error(data.detail||data.error||"Fresh verified quotes are not available.");
+  const wanted=key==="nifty"?["NSE:NIFTY50-INDEX"]:key==="banknifty"?["NSE:NIFTYBANK-INDEX"]:["NSE:NIFTY50-INDEX","NSE:NIFTYBANK-INDEX"];
+  const rows=data.data.filter(item=>wanted.includes(item.n));
+  if(rows.length!==wanted.length)throw new Error("Required index quote is missing; no price shown.");
+  for(const item of rows){
+   const symbol=item.n;
+   const label=symbol==="NSE:NIFTY50-INDEX"?"NIFTY":"BANKNIFTY";
+   const price=Number(item.v?.lp);
+   const stamp=Number(item.v?.tt);
+   const time=stamp>0?new Date(stamp*1000):null;
+   if(!Number.isFinite(price)||price<=0||!time||Number.isNaN(time.getTime()))continue;
+   const card=el("article",undefined,"quote-card");
+   card.append(el("span",label),el("strong","₹"+price.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})),el("small","Exchange time: "+time.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})));
+   const chp=Number(item.v?.chp);
+   if(Number.isFinite(chp))card.append(el("small",(chp>=0?"+":"")+chp.toFixed(2)+"% (FYERS reported change)"));
+   target.append(card);
+  }
+  if(target.children.length===1)throw new Error("Quote values or exchange timestamps failed validation.");
+ }catch(error){
+  target.append(el("p",String(error?.message||"Verified quotes unavailable.")+" No placeholder price is displayed."));
+ }
+}
+function renderQuotePanel(key){
+ const box=el("section",undefined,"live-quotes");
+ box.id="liveQuotePanel";
+ panel.append(box);
+ void renderLiveQuotes(key);
+}
+
 function renderPage(key){
  const [title,description]=pages[key]||["Module","Status unavailable."];
  panel.replaceChildren();
@@ -158,6 +198,7 @@ function renderPage(key){
  if(key==="journal"){renderJournal();return;}
  if(key==="journalRules"){renderJournalRules();return;}
  panel.append(el("h2",title),el("p",description));
+ if(["dashboard","nifty","banknifty"].includes(key))renderQuotePanel(key);
  if(key==="dashboard"){const b=el("button","Open Gap-Up / Gap-Down Analysis");b.addEventListener("click",()=>{document.querySelector('[data-tab="gap"]').click();});panel.append(b);}
 }
 document.querySelector("#tabs").addEventListener("click",e=>{const b=e.target.closest("button[data-tab]");if(!b)return;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("active",x===b));renderPage(b.dataset.tab);});
@@ -169,7 +210,9 @@ async function refreshStatus(){
   document.querySelector("#backendStatus").textContent=s.backend||"Unknown";
   document.querySelector("#fyersStatus").textContent=s.fyers||"Not verified";
   document.querySelector("#feedStatus").textContent=s.liveData||"Waiting";
-  document.querySelector("#connection").textContent=s.fyers==="connected"?"FYERS authenticated · live feed status shown separately":s.backend==="online"?"Backend online · FYERS not connected":"Backend status unavailable";
+  document.querySelector("#connection").textContent=s.fyers==="connected"?(s.liveData==="streaming"?"FYERS authenticated · verified feed streaming":"FYERS authenticated · waiting for fresh verified ticks"):s.backend==="online"?"Backend online · FYERS not connected":"Backend status unavailable";
+  const active=document.querySelector("#tabs button.active")?.dataset.tab;
+  if(["dashboard","nifty","banknifty"].includes(active)&&document.querySelector("#liveQuotePanel"))void renderLiveQuotes(active);
  }catch{
   document.querySelector("#backendStatus").textContent="Unreachable";document.querySelector("#fyersStatus").textContent="Not verified";document.querySelector("#feedStatus").textContent="Unavailable";document.querySelector("#connection").textContent="Backend unavailable";
  }
