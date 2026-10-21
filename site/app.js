@@ -423,10 +423,18 @@ function renderStockExplorerResults() {
     const changePct=mover&&mover.changePct!=null&&Number.isFinite(Number(mover.changePct))?Number(mover.changePct):null;
     const fresh=quote&&quoteAgeMs(quote)<15000;
     const marketClosed=mover&&mover.marketSession==='CLOSED';
-    const priceTime=mover&&mover.priceAsOf?new Date(mover.priceAsOf).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'trade time not supplied by quote';
-    const priceLabel=mover?(marketClosed?'LAST KNOWN PRICE':'FYERS QUOTE'):(fresh?'LIVE INDEX QUOTE':'DATA PENDING');
+    const priceTime=mover&&mover.priceAsOf?new Date(mover.priceAsOf).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'exchange trade time unavailable';
+    const moverStatus=mover?(mover.priceStatus||'TIME_UNVERIFIED'):'';
+    const priceLabel=mover
+      ? (moverStatus==='LIVE_QUOTE'?'LIVE FYERS QUOTE':moverStatus==='LAST_KNOWN_PRICE'?'LAST KNOWN PRICE':moverStatus==='STALE_QUOTE'?'STALE QUOTE':'QUOTE TIME UNKNOWN')
+      : (fresh?'LIVE INDEX QUOTE':'DATA PENDING');
     const changeLabel=changePct!==null?'<span class="'+(changePct>=0?'positive-text':'negative-text')+'">'+(changePct>0?'+':'')+changePct.toFixed(2)+'%</span>':'<span class="muted-text">Change unavailable</span>';
-    const detail=mover?(marketClosed?'Market closed · last FYERS quote · '+priceTime:'FYERS quote · '+priceTime):(quote?'Verified live index quote':x.note);
+    const detail=mover
+      ? (moverStatus==='LIVE_QUOTE'?'Fresh exchange-timestamped FYERS quote · '+priceTime
+        : moverStatus==='LAST_KNOWN_PRICE'?'Market closed · last known FYERS price · '+priceTime
+        : moverStatus==='STALE_QUOTE'?'Quote timestamp is stale · '+priceTime
+        :'FYERS returned a price but its exchange timestamp is unavailable; freshness is unverified')
+      : (quote?'Verified live index quote':x.note);
     return '<article class="explorer-card"><div class="explorer-card-top"><span class="live-tag">'+(x.kind==='index'?'INDEX':'EQUITY')+'</span><span class="quote-time">'+priceLabel+'</span></div><h4>'+escapeHtml(x.name)+'</h4><small>'+escapeHtml(x.symbol)+'</small><strong class="explorer-price">'+(price!==null?'₹'+formatPrice(price):'—')+'</strong><p>'+changeLabel+' · '+escapeHtml(detail)+'</p><button class="secondary" data-explorer-jump="'+x.tab+'">Open workspace</button></article>';
   }).join(''):'<div class="chart-empty">No symbols match this search.</div>';
   host.querySelectorAll('[data-explorer-jump]').forEach(btn=>btn.addEventListener('click',()=>render(btn.dataset.explorerJump)));
@@ -763,26 +771,51 @@ async function loadAdvancedScanner() {
     const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
     const result=await response.json().catch(()=>({}));
     if(!response.ok||result.ok!==true||!Array.isArray(result.data)) throw new Error(result.error||result.detail||'Verified snapshot unavailable.');
-    const rows=result.data.filter(x=>x&&Number.isFinite(Number(x.changePct))&&Number.isFinite(Number(x.price))&&Number(x.price)>0);
+    if(result.marketSession!=='OPEN'){
+      table.innerHTML='<div class="chart-empty">Market is closed. Last-known quotes are not used to create live scanner candidates or trade signals.</div>';
+      status.textContent='Market closed · live breakout/momentum scan withheld. Refresh during NSE market hours.';
+      return;
+    }
+    const rows=result.data.filter(x=>{
+      if(!x||!Number.isFinite(Number(x.changePct))||!Number.isFinite(Number(x.price))||Number(x.price)<=0) return false;
+      if(x.priceStatus!=='LIVE_QUOTE'||!x.priceAsOf) return false;
+      const age=Number(x.quoteAgeSeconds);
+      const timestamp=Date.parse(x.priceAsOf);
+      return Number.isFinite(age)&&age>=0&&age<=180&&Number.isFinite(timestamp)&&Date.now()-timestamp>=-30000&&Date.now()-timestamp<=180000;
+    });
+    if(!rows.length){
+      table.innerHTML='<div class="chart-empty">No fresh exchange-timestamped FYERS quotes. Scanner output is blocked until fresh quotes are available.</div>';
+      status.textContent='No live scanner candidates · fresh quote timestamps are missing or stale.';
+      return;
+    }
     let sorted=rows.slice().sort((x,y)=>Number(y.changePct)-Number(x.changePct));
     if(currentTab==='Breakout Scanner') sorted=sorted.filter(x=>Number(x.changePct)>0).slice(0,8);
     else if(currentTab==='Momentum Scanner') sorted=sorted.sort((x,y)=>Math.abs(Number(y.changePct))-Math.abs(Number(x.changePct))).slice(0,20);
     else sorted=sorted.sort((x,y)=>Math.abs(Number(y.changePct))-Math.abs(Number(x.changePct))).slice(0,15);
     if(currentTab==='Breakout Scanner'&&sorted.length){
       status.textContent='Checking verified historical candles for the strongest positive movers…';
-      sorted=await Promise.all(sorted.map(async x=>{
+      const candleChecked=[];
+      // Fetch sequentially to avoid bursting the FYERS historical API and triggering 429 cooldowns.
+      for(const x of sorted){
         try{
           const cr=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:x.symbol,resolution:'5'}),{headers:{Accept:'application/json'},cache:'no-store'});
           const cj=await cr.json().catch(()=>({}));
-          if(!cr.ok||cj.ok!==true||!Array.isArray(cj.data))return {...x,pattern:'Verified candles unavailable; pattern not assessed.'};
-          const candleError=validateOhlcCandles(cj.data,'5');
-          if(candleError)return {...x,pattern:candleError+' Pattern not assessed.'};
-          return {...x,pattern:summarizeCandles(cj.data)};
-        }catch{return {...x,pattern:'Candle request failed; pattern not assessed.'};}
-      }));
+          if(!cr.ok||cj.ok!==true||!Array.isArray(cj.data)){
+            candleChecked.push({...x,pattern:'Verified candles unavailable; pattern not assessed.',candleVerified:false});
+          }else{
+            const candleError=validateOhlcCandles(cj.data,'5');
+            if(candleError)candleChecked.push({...x,pattern:candleError+' Pattern not assessed.',candleVerified:false});
+            else candleChecked.push({...x,pattern:summarizeCandles(cj.data),candleVerified:true});
+          }
+        }catch{
+          candleChecked.push({...x,pattern:'Candle request failed; pattern not assessed.',candleVerified:false});
+        }
+        await new Promise(resolve=>setTimeout(resolve,350));
+      }
+      sorted=candleChecked;
     }
     table.innerHTML=sorted.length?'<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>Research note</th></tr></thead><tbody>'+sorted.map(x=>'<tr><td><b>'+escapeHtml(x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+'</b></td><td>₹'+formatPrice(x.price)+'</td><td class="'+(x.changePct>=0?'positive-text':'negative-text')+'">'+(x.changePct>0?'+':'')+Number(x.changePct).toFixed(2)+'%</td><td>'+escapeHtml(currentTab==='Breakout Scanner'?(x.pattern||'No candle pattern assessed.'):currentTab==='Momentum Scanner'?'Ranked by absolute verified percentage change; volume/traded value unavailable in this quote response.':'High percentage movement only; option-chain liquidity and risk are not yet verified.')+'</td></tr>').join('')+'</tbody></table>':'<div class="chart-empty">No qualifying rows in this verified snapshot.</div>';
-    status.textContent='Verified FYERS snapshot '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · '+rows.length+' valid symbols. '+(currentTab==='Breakout Scanner'?'Top positive movers checked against verified 5-minute OHLC candles; pattern labels are heuristic candidates, not trade confirmations.':currentTab==='Momentum Scanner'?'Ranked by percentage change only; volume/traded value is not verified here.':'Ranked by percentage change only; option liquidity and strike selection are not yet verified.');
+    status.textContent='Fresh exchange-timestamped FYERS snapshot '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · '+rows.length+' fresh symbols eligible. '+(currentTab==='Breakout Scanner'?'5-minute OHLC checks are shown per symbol; rows with missing candles are explicitly marked, and patterns are not trade confirmations.':currentTab==='Momentum Scanner'?'Ranked by percentage change only; volume/traded value is not verified here.':'Ranked by percentage change only; option liquidity and strike selection are not yet verified.');
     logEvent(currentTab+' refreshed from verified FYERS quotes.','info');
   } catch(error) {
     status.textContent=(error.message||'Snapshot unavailable.')+' No demo prices shown.';
