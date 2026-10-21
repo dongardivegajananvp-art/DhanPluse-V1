@@ -507,7 +507,6 @@ app.get('/api/market/candles', async (req, res) => {
   const allowed = new Set([...allowedSymbols, ...moversSymbols]);
   const resolution = String(req.query.resolution || '5');
   const allowedResolutions = new Set(['1', '3', '5', '15', '30', '60', 'D']);
-  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
   // FYERS candle dates are exchange-local calendar dates. Use IST rather than UTC
   // so the default range does not roll over at 00:00 UTC (05:30 IST).
   const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
@@ -522,7 +521,9 @@ app.get('/api/market/candles', async (req, res) => {
   const rangeTo = String(req.query.to || today);
   if (!allowed.has(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported candle symbol.' });
   if (!allowedResolutions.has(resolution)) return res.status(400).json({ ok: false, error: 'Unsupported candle resolution.' });
-  if (!datePattern.test(rangeFrom) || !datePattern.test(rangeTo) || rangeFrom > rangeTo) return res.status(400).json({ ok: false, error: 'Use valid YYYY-MM-DD date ranges.' });
+  if (!isValidIsoDate(rangeFrom) || !isValidIsoDate(rangeTo) || rangeFrom > rangeTo || rangeTo > today) {
+    return res.status(400).json({ ok: false, error: 'Use real calendar dates in YYYY-MM-DD format, ending no later than today (IST).' });
+  }
   const spanDays = (Date.parse(rangeTo + 'T00:00:00Z') - Date.parse(rangeFrom + 'T00:00:00Z')) / 86400000;
   if (!Number.isFinite(spanDays) || spanDays > (resolution === 'D' ? 365 : 30)) return res.status(400).json({ ok: false, error: 'Requested candle range is too large.' });
   try {
@@ -550,6 +551,16 @@ app.get('/api/market/candles', async (req, res) => {
         detail: 'No partial candle set was returned because invalid rows must not be silently discarded.',
         invalidCandleCount
       });
+    }
+    for (let i = 1; i < candles.length; i++) {
+      if (Number(candles[i][0]) <= Number(candles[i - 1][0])) {
+        res.set('Cache-Control', 'no-store');
+        return res.status(502).json({
+          ok: false,
+          error: 'FYERS candle timestamps are duplicate or non-increasing; analysis blocked.',
+          detail: 'No partial candle set was returned because timestamp order must be verified.'
+        });
+      }
     }
     res.set('Cache-Control', 'no-store');
     return res.json({ ok: true, symbol, resolution, from: rangeFrom, to: rangeTo, fetchedAt: new Date().toISOString(), data: candles });
