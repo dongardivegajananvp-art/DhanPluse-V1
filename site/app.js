@@ -76,7 +76,9 @@ const descriptions = {
   'Alerts': ['Price alerts', 'Browser-local alerts for the two live index quotes.'],
   'FYERS Settings': ['FYERS connection settings', 'Connect through the secure backend; credentials remain server-side.'],
   'Logs': ['System logs', 'Recent frontend, backend, and live-quote events.'],
-  'Trade Journal': ['Trade journal & discipline', 'Review paper trades, planned risk/reward, rule adherence, and recurring emotional-trading patterns.']
+  'Trade Journal': ['Trade journal & discipline', 'Review paper trades, planned risk/reward, rule adherence, and recurring emotional-trading patterns.'],
+  'Capital Protection': ['Capital protection calculator', 'Estimate position size, planned risk/reward and daily loss guardrails. This calculator never places orders.'],
+  'Backtesting': ['Historical candle backtest', 'Simulate a simple strategy against verified historical candles. Results are not forecasts and never place orders.']
 };
 
 function logEvent(message, level) {
