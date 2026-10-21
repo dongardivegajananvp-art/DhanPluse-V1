@@ -10,7 +10,25 @@ const pages = {
  gap:["Gap-Up / Gap-Down","Load verified FYERS daily candles and calculate descriptive historical gap-fill statistics."],
  options:["Option Chain & OI","Option-chain data is not connected in this branch. Do not use this page for trade decisions."],
  scanners:["Scanners","Scanners remain blocked until quotes, candles, and option data are verified."],
- journal:["Paper Journal","Paper trading only. Record entry, stop, target, rule adherence, and outcome."]
+ journal:["Paper Journal","Paper trading only. Record entry, stop, target, rule adherence, and outcome."],
+ activity:["Market Activity","Market-wide activity feed is not implemented yet. No unverified activity is displayed."],
+ charts:["Charts & Patterns","Candlestick charting and pattern detection are not implemented in this clean test build."],
+ movers:["Gainers & Losers","Verified all-F&O gainers and losers are not connected yet."],
+ technical:["Technical Indicators","Technical indicators are blocked until verified intraday candles are available."],
+ signals:["Sureshot CE/PE","No trade signal is generated in this build. Entry, stop-loss, target and minimum 1:2 risk/reward require verified data."],
+ breakout:["Breakout Scanner","Breakout scanning is not implemented yet; no candidates will be fabricated."],
+ momentum:["Momentum Scanner","Momentum scanning is not implemented yet; verified live quotes and candles are required."],
+ zerohero:["Zero-to-Hero","Zero-to-Hero scanner is not implemented yet."],
+ fii:["FII/DII Flow","Verified FII/DII flow data is not connected in this build."],
+ watchlist:["Watchlist","Watchlist quotes are not connected yet. Prices will not be simulated."],
+ alerts:["Price Alerts","Price alerts are not active in this build."],
+ holdings:["Holdings & Positions","Broker holdings and positions are not connected in this build."],
+ capital:["Capital Protection","Risk calculator module is not yet implemented in this clean test build."],
+ backtest:["Backtesting","Backtesting beyond historical opening-gap statistics is not implemented yet."],
+ settings:["FYERS Settings","FYERS authorization status is shown above. Credentials stay server-side; order placement remains disabled."],
+ logs:["Logs","Operational logs are available through the service dashboard; in-app log viewer is not implemented yet."],
+ journalRules:["Trade Journal & Rule Review","Paper-only journaling and rule-adherence analytics are not yet implemented."],
+ supplyDemand:["Supply & Demand Zones","Supply/demand zones require verified intraday candles and are not implemented yet."]
 };
 function el(tag, text, cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
 async function connectFyers(){
