@@ -28,7 +28,7 @@ const pages = {
  settings:["FYERS Settings","FYERS authorization status is shown above. Credentials stay server-side; order placement remains disabled."],
  logs:["Logs","Operational logs are available through the service dashboard; in-app log viewer is not implemented yet."],
  journalRules:["Trade Journal & Rule Review","Review paper-trade rule adherence, outcomes, and recurring mistakes from records saved in this browser."],
- supplyDemand:["Supply & Demand Zones","Supply/demand zones require verified intraday candles and are not implemented yet."]
+ supplyDemand:["Supply & Demand Zones","Historical pivot-based supply and demand areas are visual study aids, not validated trading signals. They require verified FYERS candles and do not update from live ticks yet."]
 };
 function el(tag, text, cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
 async function connectFyers(){
@@ -201,7 +201,7 @@ function svgNode(name,attrs={}){
 function renderCandleChart(key){
  const wrap=el("section",undefined,"candle-tool");
  wrap.append(el("h3",key==="charts"?"Verified candlestick chart":"Candlestick chart · FYERS history"));
- wrap.append(el("p","Historical FYERS OHLC candles only. This chart is not a live-tick chart or a trade signal."));
+ wrap.append(el("p","Verified FYERS historical OHLC candles. Supply/demand bands are historical pivot-based study areas; this is not yet a live-updating candle chart or a trade signal."));
  const form=el("form",undefined,"gap-form");
  const symbols=[
   ["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],
@@ -268,6 +268,25 @@ function renderCandleChart(key){
     label.textContent=val.toLocaleString("en-IN",{maximumFractionDigits:2});svg.append(label);
    }
    const step=plotW/shown.length,bodyW=Math.max(2,Math.min(9,step*.62));
+   // Historical pivot bands are study aids only, not validated trade signals.
+   const supply=[],demand=[];
+   for(let i=2;i<shown.length-2;i++){
+    const hi=Number(shown[i].high),lo=Number(shown[i].low);
+    const leftHigh=Math.max(...shown.slice(i-2,i).map(c=>Number(c.high)));
+    const rightHigh=Math.max(...shown.slice(i+1,i+3).map(c=>Number(c.high)));
+    const leftLow=Math.min(...shown.slice(i-2,i).map(c=>Number(c.low)));
+    const rightLow=Math.min(...shown.slice(i+1,i+3).map(c=>Number(c.low)));
+    if(hi>leftHigh&&hi>rightHigh)supply.push({top:hi,bottom:Math.max(Number(shown[i].open),Number(shown[i].close))});
+    if(lo<leftLow&&lo<rightLow)demand.push({top:Math.min(Number(shown[i].open),Number(shown[i].close)),bottom:lo});
+   }
+   for(const zone of supply.slice(-3)){
+    const yTop=y(zone.top),yBottom=y(zone.bottom);
+    if(yBottom>=top&&yTop<=top+plotH)svg.append(svgNode("rect",{x:left,y:Math.max(top,yTop),width:plotW,height:Math.max(2,Math.min(top+plotH,yBottom)-Math.max(top,yTop)),class:"zone-supply"}));
+   }
+   for(const zone of demand.slice(-3)){
+    const yTop=y(zone.top),yBottom=y(zone.bottom);
+    if(yBottom>=top&&yTop<=top+plotH)svg.append(svgNode("rect",{x:left,y:Math.max(top,yTop),width:plotW,height:Math.max(2,Math.min(top+plotH,yBottom)-Math.max(top,yTop)),class:"zone-demand"}));
+   }
    shown.forEach((c,i)=>{
     const x=left+step*(i+.5),o=Number(c.open),cl=Number(c.close),hi=Number(c.high),lo=Number(c.low),up=cl>=o;
     svg.append(svgNode("line",{x1:x,y1:y(hi),x2:x,y2:y(lo),class:up?"candle-up":"candle-down","stroke-width":1.2}));
@@ -287,7 +306,7 @@ function renderCandleChart(key){
   }catch(error){status.textContent=String(error?.message||"Verified candles unavailable.")+" No placeholder candles are displayed.";chartHost.replaceChildren();details.textContent="";}
   finally{submit.disabled=false;}
  });
- wrap.append(form,status,chartHost,details);
+ wrap.append(form,status,chartHost,details,el("p","Zone legend: Supply = historical swing-high area · Demand = historical swing-low area. Not live-updating or trade recommendations."));
  panel.append(wrap);
  if(sessionToken){
   status.textContent="Loading verified FYERS candles automatically…";
