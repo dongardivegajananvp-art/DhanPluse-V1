@@ -1166,7 +1166,7 @@ async function loadOptionChain() {
           return '<tr><td>' + displayNumber(ce.ltp) + '</td><td>' + displayNumber(ce.ltpchp) + '</td><td>' + displayNumber(ce.oi, 0) + '</td><td>' + displayNumber(ce.volume, 0) + '</td><td><b>' + displayNumber(strike, 0) + '</b></td><td>' + displayNumber(pe.ltp) + '</td><td>' + displayNumber(pe.ltpchp) + '</td><td>' + displayNumber(pe.oi, 0) + '</td><td>' + displayNumber(pe.volume, 0) + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
-    status.textContent = 'Verified FYERS option-chain response received at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + '. ' + strikes.length + ' strikes shown.';
+    status.textContent = 'FYERS option-chain response received at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + '. ' + strikes.length + ' strikes shown. Response time alone does not prove exchange-quote freshness; selected contracts are checked separately before a Sureshot setup.';
     logEvent('FYERS option-chain data received for ' + symbolEl.value + '.', 'info');
   } catch (error) {
     status.textContent = (error.message || 'Could not load option chain.') + ' Use FYERS Settings to reconnect if authentication expired.';
