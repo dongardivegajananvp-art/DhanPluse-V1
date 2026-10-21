@@ -399,125 +399,114 @@ app.get("/api/market/quotes", requireSession, (_req, res) => {
 let fnoUniverseCache = { fetchedAt: 0, data: null };
 let fnoUniversePromise = null;
 let stockQuoteCache = { fetchedAt: 0, data: null };
-async function getNseFnoEquityUniverse() {
-  if (fnoUniverseCache.data && Date.now() - fnoUniverseCache.fetchedAt < 6 * 60 * 60 * 1000) return fnoUniverseCache;
-  if (fnoUniversePromise) return fnoUniversePromise;
-  fnoUniversePromise = (async () => {
-  const fetchMaster = async url => {
-    const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(45000) });
-    if (!response.ok) throw new Error("FYERS symbol master HTTP " + response.status);
-    const data = await response.json();
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid FYERS symbol master format");
-    return data;
-  };
-  const [fo, cm] = await Promise.all([
-    fetchMaster("https://public.fyers.in/sym_details/NSE_FO_sym_master.json"),
-    fetchMaster("https://public.fyers.in/sym_details/NSE_CM_sym_master.json")
-  ]);
-  const derivatives = new Set();
-  for (const [ticker, item] of Object.entries(fo)) {
-    if (!item || Number(item.tradeStatus) === 0) continue;
-    const instrumentType = Number(item.exInstType);
-    const optionType = String(item.optType || "XX").toUpperCase();
-    const underlying = String(item.underSym || item.exSymName || "").trim().toUpperCase();
-    if ((instrumentType === 13 || instrumentType === 15) && underlying && (optionType === "XX" || optionType === "CE" || optionType === "PE")) derivatives.add(underlying);
-  }
-  const cashByName = new Map();
-  for (const [ticker, item] of Object.entries(cm)) {
-    if (!item || Number(item.tradeStatus) === 0 || !/^NSE:[A-Z0-9&._-]+-EQ$/.test(ticker)) continue;
-    // Match the underlying symbol to the actual NSE ticker, not the company display name (exSymName is a long company name).
-    const name = ticker.slice(4, -3).trim().toUpperCase();
-    cashByName.set(name, ticker);
-  }
-  const data = [...derivatives].map(name => ({ name, symbol: cashByName.get(name) })).filter(item => item.symbol).sort((a,b) => a.name.localeCompare(b.name));
-  if (data.length < 50) {
-    const typeCounts = {};
-    for (const item of Object.values(fo)) {
-      const type = String(item?.exInstType ?? "missing");
-      typeCounts[type] = (typeCounts[type] || 0) + 1;
-    }
-    const derivativeSamples = Object.entries(fo).filter(([, item]) => [13, 15].includes(Number(item?.exInstType))).slice(0, 5).map(([ticker, item]) => ({ ticker, exInstType: item?.exInstType, underSym: item?.underSym, exSymName: item?.exSymName, optType: item?.optType, tradeStatus: item?.tradeStatus }));
-    const cashSamples = Object.entries(cm).filter(([ticker]) => ticker.startsWith("NSE:") && ticker.includes("-EQ")).slice(0, 5).map(([ticker, item]) => ({ ticker, exSymName: item?.exSymName, tradeStatus: item?.tradeStatus }));
-    throw new Error("F&O symbol master match count " + data.length + "; diagnostics=" + JSON.stringify({ foEntries: Object.keys(fo).length, cmEntries: Object.keys(cm).length, typeCounts, derivativeSamples: derivativeSamples.slice(0, 2), cashSamples: cashSamples.slice(0, 2), derivativeUnderlyingCount: derivatives.size, cashNameCount: cashByName.size }) + "; refusing incomplete data.");
-  }
-  fnoUniverseCache = { fetchedAt: Date.now(), data };
-  return fnoUniverseCache;
-  })();
-  try { return await fnoUniversePromise; } finally { fnoUniversePromise = null; }
+let stockQuotePromise = null;
+let stockQuoteCooldown = { until: 0, backoffMs: 30000 };
+const STOCK_QUOTE_CACHE_MS = 30000;
+const STOCK_QUOTE_BATCH_SIZE = 50;
+const STOCK_QUOTE_BATCH_PAUSE_MS = 300;
+function stockQuoteRateLimitError() {
+  const now = Date.now();
+  const until = now + stockQuoteCooldown.backoffMs;
+  stockQuoteCooldown = { until, backoffMs: Math.min(stockQuoteCooldown.backoffMs * 2, 15 * 60 * 1000) };
+  const error = new Error("FYERS quote rate limit reached; retry after cooldown.");
+  error.statusCode = 429;
+  error.retryAfterSeconds = Math.ceil((until - now) / 1000);
+  return error;
 }
-
-// Public smoke-test endpoint exposes only non-sensitive symbol-master metadata.
-app.get("/api/market/fno-universe-check", async (_req, res) => {
-  res.set("Cache-Control", "no-store");
-  try {
-    const master = await getNseFnoEquityUniverse();
-    const names = new Set(master.data.map(item => item.name));
-    res.json({
-      ok: master.data.length >= 50,
-      source: "FYERS NSE_FO and NSE_CM symbol masters",
-      fetchedAt: new Date(master.fetchedAt).toISOString(),
-      count: master.data.length,
-      expectedSymbolsPresent: ["RELIANCE", "TCS", "INFY"].map(name => ({ name, present: names.has(name) })),
-      note: "Symbol-master discovery only; does not verify authenticated quotes or imply live market prices."
-    });
-  } catch (error) {
-    console.error("FYERS F&O symbol-master verification failed:", String(error?.message || error).slice(0, 180));
-    res.status(502).json({ ok: false, error: "Current FYERS F&O universe could not be verified.", detail: String(error?.message || "Symbol master unavailable").slice(0, 180) });
+async function loadVerifiedFnoStockQuotes() {
+  const master = await getNseFnoEquityUniverse();
+  const symbols = master.data.map(item => item.symbol);
+  const now = Date.now();
+  const data = [];
+  const missingSymbols = [];
+  // Sequential batches with a small pause avoid a burst of parallel quote requests.
+  for (let offset = 0; offset < symbols.length; offset += STOCK_QUOTE_BATCH_SIZE) {
+    if (offset > 0) await new Promise(resolve => setTimeout(resolve, STOCK_QUOTE_BATCH_PAUSE_MS));
+    const batch = symbols.slice(offset, offset + STOCK_QUOTE_BATCH_SIZE);
+    const url = new URL("https://api-t1.fyers.in/data/quotes");
+    url.searchParams.set("symbols", batch.join(","));
+    const response = await fetch(url, { headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 429) throw stockQuoteRateLimitError();
+    if (!response.ok || body.s !== "ok" || !Array.isArray(body.d)) {
+      const error = new Error(String(body.message || "Invalid quote response").slice(0, 160));
+      error.statusCode = response.status === 401 ? 401 : 502;
+      throw error;
+    }
+    const returned = new Set();
+    for (const item of body.d) {
+      if (!item || !batch.includes(item.n) || !item.v) continue;
+      returned.add(item.n);
+      const v = item.v;
+      const lp = Number(v.lp), tt = Number(v.tt), ch = Number(v.ch), chp = Number(v.chp);
+      const stamp = tt > 0 ? tt * 1000 : 0;
+      if (Number.isFinite(lp) && lp > 0 && Number.isFinite(chp) && stamp > 0 && Math.abs(now - stamp) <= 120000) {
+        data.push({ n: item.n, v: { lp, ch: Number.isFinite(ch) ? ch : null, chp, tt }, verified: true });
+      }
+    }
+    for (const symbol of batch) if (!returned.has(symbol) || !data.some(item => item.n === symbol)) missingSymbols.push(symbol);
   }
-});
-
-app.get("/api/market/fno-universe", requireSession, async (_req, res) => {
-  res.set("Cache-Control", "no-store");
-  try {
-    const master = await getNseFnoEquityUniverse();
-    res.json({ ok: true, source: "FYERS NSE_FO and NSE_CM symbol masters", fetchedAt: new Date(master.fetchedAt).toISOString(), count: master.data.length, data: master.data, note: "Universe is derived from current FYERS symbol masters; quotes are not implied by membership." });
-  } catch (error) {
-    res.status(502).json({ ok: false, error: "Current FYERS F&O universe could not be verified.", detail: String(error?.message || "Symbol master unavailable").slice(0, 180) });
+  if (!data.length) {
+    const error = new Error("No fresh exchange-timestamped F&O stock quotes. No stale prices shown.");
+    error.statusCode = 503;
+    error.universeCount = symbols.length;
+    throw error;
   }
-});
-
+  const result = {
+    ok: true, source: "FYERS quotes API", verified: true, fetchedAt: new Date().toISOString(),
+    freshnessLimitSeconds: 120, universe: "FYERS current NSE F&O equity symbol master",
+    universeCount: symbols.length, quotedCount: data.length, data, missingSymbols
+  };
+  stockQuoteCache = { fetchedAt: Date.now(), data: result };
+  stockQuoteCooldown = { until: 0, backoffMs: 30000 };
+  return result;
+}
 app.get("/api/market/stock-quotes", requireSession, async (_req, res) => {
   res.set("Cache-Control", "no-store");
-  if (!accessToken) return res.status(401).json({ok:false,error:"Connect FYERS first."});
-  if (stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < 15000) {
+  if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
+
+  // Reuse the last successful snapshot while its exchange timestamps remain fresh.
+  if (stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS) {
     const cache = stockQuoteCache.data;
     const fresh = cache.data.filter(item => Math.abs(Date.now() - Number(item.v.tt) * 1000) <= 120000);
-    if (fresh.length) return res.json({ ...cache, data: fresh, cached: true, fetchedAt: new Date(stockQuoteCache.fetchedAt).toISOString() });
+    if (fresh.length) return res.json({ ...cache, data: fresh, quotedCount: fresh.length, cached: true, fetchedAt: new Date(stockQuoteCache.fetchedAt).toISOString() });
   }
+
+  const remaining = stockQuoteCooldown.until - Date.now();
+  if (remaining > 0) {
+    res.set("Retry-After", String(Math.ceil(remaining / 1000)));
+    return res.status(429).json({
+      ok: false, error: "FYERS stock-quote cooldown active; no upstream request was sent.",
+      retryAfterSeconds: Math.ceil(remaining / 1000), partialQuotesDiscarded: true
+    });
+  }
+
+  // Collapse simultaneous browser refreshes into one upstream request sequence.
+  const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes());
   try {
-    const master = await getNseFnoEquityUniverse();
-    const symbols = master.data.map(item => item.symbol);
-    const now = Date.now();
-    const data = [];
-    const missingSymbols = [];
-    // Keep each request to 50 symbols; stop on an upstream rate limit rather than hiding it.
-    for (let offset = 0; offset < symbols.length; offset += 50) {
-      const batch = symbols.slice(offset, offset + 50);
-      const url = new URL("https://api-t1.fyers.in/data/quotes");
-      url.searchParams.set("symbols", batch.join(","));
-      const response = await fetch(url, { headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
-      const body = await response.json().catch(() => ({}));
-      if (response.status === 429) return res.status(429).json({ok:false,error:"FYERS quote rate limit reached while loading the F&O universe. Wait before retrying; partial results are not ranked.",partialQuotesDiscarded:true});
-      if (!response.ok || body.s !== "ok" || !Array.isArray(body.d)) return res.status(response.status === 401 ? 401 : 502).json({ok:false,error:"FYERS F&O quotes unavailable or unverified.",detail:String(body.message || "Invalid quote response").slice(0,160)});
-      const returned = new Set();
-      for (const item of body.d) {
-        if (!item || !batch.includes(item.n) || !item.v) continue;
-        returned.add(item.n);
-        const v = item.v;
-        const lp = Number(v.lp), tt = Number(v.tt), ch = Number(v.ch), chp = Number(v.chp);
-        const stamp = tt > 0 ? tt * 1000 : 0;
-        if (Number.isFinite(lp) && lp > 0 && Number.isFinite(chp) && stamp > 0 && Math.abs(now - stamp) <= 120000) data.push({n:item.n,v:{lp,ch:Number.isFinite(ch)?ch:null,chp,tt},verified:true});
-      }
-      for (const symbol of batch) if (!returned.has(symbol) || !data.some(item => item.n === symbol)) missingSymbols.push(symbol);
-    }
-    if (!data.length) return res.status(503).json({ok:false,error:"No fresh exchange-timestamped F&O stock quotes. No stale prices shown.",marketOpenDataRequired:true,universeCount:symbols.length});
-    const result = {ok:true,source:"FYERS quotes API",verified:true,fetchedAt:new Date().toISOString(),freshnessLimitSeconds:120,universe:"FYERS current NSE F&O equity symbol master",universeCount:symbols.length,quotedCount:data.length,data,missingSymbols};
-    stockQuoteCache = { fetchedAt: Date.now(), data: result };
+    const result = await request;
     return res.json(result);
   } catch (error) {
-    return res.status(502).json({ok:false,error:"FYERS F&O quotes could not be verified.",detail:String(error?.message||"network error").slice(0,160)});
+    const status = Number(error.statusCode) || 502;
+    if (status === 429) {
+      const retry = Math.max(1, Number(error.retryAfterSeconds) || Math.ceil((stockQuoteCooldown.until - Date.now()) / 1000));
+      res.set("Retry-After", String(retry));
+      return res.status(429).json({
+        ok: false, error: "FYERS quote rate limit reached while loading the F&O universe. Partial results were discarded.",
+        retryAfterSeconds: retry, partialQuotesDiscarded: true
+      });
+    }
+    return res.status(status).json({
+      ok: false,
+      error: status === 401 ? "FYERS session expired; reconnect." : status === 503 ? error.message : "FYERS F&O quotes could not be verified.",
+      ...(error.universeCount ? { universeCount: error.universeCount } : {}),
+      detail: String(error.message || "network error").slice(0, 160)
+    });
+  } finally {
+    if (stockQuotePromise === request) stockQuotePromise = null;
   }
 });
+
 app.get("/api/fyers/options-chain", requireSession, async (req, res) => {
   res.set("Cache-Control", "no-store");
   const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
