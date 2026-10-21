@@ -14,16 +14,16 @@
   function ema(values,period){const out=Array(values.length).fill(null);if(values.length<period)return out;let seed=values.slice(0,period).reduce((a,b)=>a+b,0)/period;out[period-1]=seed;const alpha=2/(period+1);for(let i=period;i<values.length;i++){seed=values[i]*alpha+seed*(1-alpha);out[i]=seed;}return out;}
   function runBacktest(candles,stopPct,rr,cost,qty){const closes=candles.map(c=>Number(c[4])),fast=ema(closes,5),slow=ema(closes,20),trades=[];let position=null;
     for(let i=20;i<candles.length-1;i++){
-      const c=candles[i],next=candles[i+1],high=Number(c[2]),low=Number(c[3]),openNext=Number(next[1]);
-      if(position){let exit=null,reason='';if(position.side==='LONG'){if(low<=position.stop){exit=position.stop;reason='STOP';}else if(high>=position.target){exit=position.target;reason='TARGET';}}else{if(high>=position.stop){exit=position.stop;reason='STOP';}else if(low<=position.target){exit=position.target;reason='TARGET';}}
+      const c=candles[i],next=candles[i+1],open=Number(c[1]),high=Number(c[2]),low=Number(c[3]),openNext=Number(next[1]);
+      if(position){let exit=null,reason='';if(position.side==='LONG'){if(low<=position.stop){exit=open<position.stop?open:position.stop;reason='STOP'+(open<position.stop?' (GAP)':'');}else if(high>=position.target){exit=position.target;reason='TARGET';}}else{if(high>=position.stop){exit=open>position.stop?open:position.stop;reason='STOP'+(open>position.stop?' (GAP)':'');}else if(low<=position.target){exit=position.target;reason='TARGET';}}
         if(exit!==null){const gross=(position.side==='LONG'?exit-position.entry:position.entry-exit)*qty;const net=gross-cost*2*qty;trades.push({...position,exit,exitTime:Number(c[0]),reason,net});position=null;}
       }
       if(!position&&fast[i-1]!==null&&slow[i-1]!==null&&fast[i]!==null&&slow[i]!==null){let side=null;if(fast[i-1]<=slow[i-1]&&fast[i]>slow[i])side='LONG';else if(fast[i-1]>=slow[i-1]&&fast[i]<slow[i])side='SHORT';if(side){const entry=openNext,dist=entry*stopPct/100;position={side,entry,entryTime:Number(next[0]),stop:side==='LONG'?entry-dist:entry+dist,target:side==='LONG'?entry+dist*rr:entry-dist*rr,risk:dist*qty};}}
     }
     if(position){
-      const last=candles[candles.length-1],high=Number(last[2]),low=Number(last[3]);let exit=null,reason='';
-      if(position.side==='LONG'){if(low<=position.stop){exit=position.stop;reason='STOP';}else if(high>=position.target){exit=position.target;reason='TARGET';}}
-      else{if(high>=position.stop){exit=position.stop;reason='STOP';}else if(low<=position.target){exit=position.target;reason='TARGET';}}
+      const last=candles[candles.length-1],open=Number(last[1]),high=Number(last[2]),low=Number(last[3]);let exit=null,reason='';
+      if(position.side==='LONG'){if(low<=position.stop){exit=open<position.stop?open:position.stop;reason='STOP'+(open<position.stop?' (GAP)':'');}else if(high>=position.target){exit=position.target;reason='TARGET';}}
+      else{if(high>=position.stop){exit=open>position.stop?open:position.stop;reason='STOP'+(open>position.stop?' (GAP)':'');}else if(low<=position.target){exit=position.target;reason='TARGET';}}
       if(exit===null){exit=Number(last[4]);reason='END OF DATA';}
       trades.push({...position,exit,exitTime:Number(last[0]),reason,net:(position.side==='LONG'?exit-position.entry:position.entry-exit)*qty-cost*2*qty});
     }
