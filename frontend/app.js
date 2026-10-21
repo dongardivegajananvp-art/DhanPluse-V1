@@ -661,6 +661,52 @@ function renderLogs(){
  if(sessionToken)load();
 }
 
+
+function renderSignalGate(){
+ panel.replaceChildren(el("h2","Sureshot CE/PE · No-Trade Gate"),el("p","This module deliberately does not call a setup “Sureshot.” It checks readiness and blocks trade candidates until every required live-data and risk condition is verifiable."));
+ const form=el("form",undefined,"gap-form"),label=el("label","Underlying"),symbol=document.createElement("select");
+ [["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],...supportedStockSymbols].forEach(([v,n])=>{const o=el("option",n);o.value=v;symbol.append(o);});label.append(symbol);form.append(label);
+ const run=el("button","Validate setup prerequisites");run.type="submit";form.append(run);
+ const status=el("p","Connect FYERS before validating prerequisites."),out=el("div",undefined,"gap-result");
+ const gates=[
+  ["Fresh underlying quote","A verified, exchange-timestamped quote must be available."],
+  ["Verified candles","At least 22 valid FYERS candles for context."],
+  ["Verified option chain","Selected expiry, CE/PE premium, volume and OI must be present and fresh."],
+  ["Supply/demand context","Historical zones are study aids only; levels require independent validation."],
+  ["Risk/reward","Planned reward must be at least twice planned risk after entry/stop/target are defined."],
+  ["No-trade filters","Reject stale data, missing quotes, cooldown, poor liquidity and unclear stop placement."]
+ ];
+ function renderGates(results){out.replaceChildren();gates.forEach(([name,desc],i)=>{const row=el("article",undefined,"quote-card");row.append(el("strong",(results?.[i]?"✓ ":"⛔ ")+name),el("p",desc),el("small",results?.[i]?"Prerequisite check passed.":"Not verified — candidate blocked."));out.append(row);});out.append(el("p","No entry, target, stop-loss, option strike recommendation or trade signal is emitted by this gate. A checklist pass alone is not a trade recommendation.","risk-note"));}
+ form.addEventListener("submit",async ev=>{ev.preventDefault();run.disabled=true;status.textContent="Checking fresh quote and candle availability…";renderGates(null);
+  if(!sessionToken){status.textContent="Connect FYERS first; setup remains blocked.";run.disabled=false;return;}
+  let quoteOK=false,candleOK=false;
+  try{
+   const q=await fetch(API_BASE+"/api/market/quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}}),qd=await q.json();
+   if(q.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Reconnect.");}
+   quoteOK=q.ok&&qd.ok===true&&Array.isArray(qd.data)&&qd.data.some(x=>x.verified===true&&Number(x.ltp)>0&&Number.isFinite(Date.parse(x.updatedAt))&&Math.abs(Date.now()-Date.parse(x.updatedAt))<=120000);
+   const now=new Date(),from=new Date(Date.now()-7*86400000),fmt=d=>{const z=new Date(d.getTime()-d.getTimezoneOffset()*60000);return z.toISOString().slice(0,10);};
+   const params=new URLSearchParams({symbol:symbol.value,resolution:"5",from:fmt(from),to:fmt(now)});
+   const cr=await fetch(API_BASE+"/api/market/candles?"+params,{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}}),cd=await cr.json();
+   if(cr.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Reconnect.");}
+   candleOK=cr.ok&&cd.ok===true&&Array.isArray(cd.data)&&cd.data.filter(x=>x.verified===true&&x.source==="FYERS"&&Number.isFinite(Date.parse(x.timestamp))&&[x.open,x.high,x.low,x.close].every(v=>Number.isFinite(Number(v))&&Number(v)>0)).length>=22;
+   renderGates([quoteOK,candleOK,false,false,false,false]);
+   status.textContent="Prerequisite check finished. "+(quoteOK&&candleOK?"Underlying quote and candle history are available; option/risk checks still block a signal.":"Required live quote or candles missing/stale; no-trade gate remains active.");
+  }catch(e){status.textContent=String(e.message||e)+" No trade signal generated.";renderGates(null);}finally{run.disabled=false;}
+ });
+ panel.append(form,status,out);renderGates(null);
+}
+function renderUnconnectedDataModule(key,title,description){
+ panel.replaceChildren(el("h2",title),el("p",description));
+ const state=el("article",undefined,"quote-card");
+ state.append(el("strong","Data integration not verified"),el("p","This tab will not display guessed numbers or claim a broker/source connection that is not configured and tested."));
+ const next=key==="fii"?"FII/DII flow requires a reliable official/exchange data source and publication timestamp.":key==="activity"?"Market activity requires verified breadth/volume data across a sufficiently broad symbol universe.":"Broker holdings and positions require a verified broker portfolio endpoint and authenticated read-only permissions.";
+ state.append(el("p",next));panel.append(state);
+ const actions=el("div",undefined,"gap-form");
+ const links=key==="holdings"?[["Open Paper Journal","journal"],["Open Capital Protection","capital"]]:key==="fii"?[["Open verified charts","charts"],["Open Option Chain","options"]]:[["Open Stock Explorer","explorer"],["Open Gainers & Losers","movers"]];
+ links.forEach(([label,target])=>{const b=el("button",label);b.type="button";b.addEventListener("click",()=>document.querySelector('[data-tab="'+target+'"]')?.click());actions.append(b);});
+ panel.append(actions);
+}
+
 function renderPage(key){
  if(candleRefreshTimer){clearInterval(candleRefreshTimer);candleRefreshTimer=null;}
  const [title,description]=pages[key]||["Module","Status unavailable."];
@@ -679,6 +725,11 @@ function renderPage(key){
  if(key==="journalRules"){renderJournalRules();return;}
  if(key==="technical"){renderTechnicalIndicators();return;}
  if(key==="options"){renderOptionChain();return;}
+ if(key==="signals"){renderSignalGate();return;}
+ if(key==="fii"){renderUnconnectedDataModule(key,"FII/DII Flow",pages.fii[1]);return;}
+ if(key==="activity"){renderUnconnectedDataModule(key,"Market Activity",pages.activity[1]);return;}
+ if(key==="holdings"){renderUnconnectedDataModule(key,"Holdings & Positions",pages.holdings[1]);return;}
+ if(key==="supplyDemand"){panel.append(el("h2","Supply & Demand Zones"),el("p","Historical pivot-based supply/demand overlays on verified candles; visual study only, not a signal."));renderCandleChart("charts");return;}
  panel.append(el("h2",title),el("p",description));
  if(key==="charts"){renderCandleChart(key);return;}
  if(["dashboard","nifty","banknifty"].includes(key))renderQuotePanel(key);
