@@ -12,7 +12,7 @@ const pages = {
  scanners:["Scanners","Scanners remain blocked until quotes, candles, and option data are verified."],
  journal:["Paper Journal","Paper trading only. Record entry, stop, target, rule adherence, and outcome."],
  activity:["Market Activity","Market-wide activity feed is not implemented yet. No unverified activity is displayed."],
- charts:["Charts & Patterns","Candlestick charting and pattern detection are not implemented in this clean test build."],
+ charts:["Charts & Patterns","Historical FYERS candlestick charts are available for supported symbols and intervals. Pattern detection is still blocked pending validation."],
  movers:["Gainers & Losers","Verified all-F&O gainers and losers are not connected yet."],
  technical:["Technical Indicators","Technical indicators are blocked until verified intraday candles are available."],
  signals:["Sureshot CE/PE","No trade signal is generated in this build. Entry, stop-loss, target and minimum 1:2 risk/reward require verified data."],
