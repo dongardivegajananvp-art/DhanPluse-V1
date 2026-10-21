@@ -401,7 +401,7 @@ let stockQuoteCache = { fetchedAt: 0, data: null };
 async function getNseFnoEquityUniverse() {
   if (fnoUniverseCache.data && Date.now() - fnoUniverseCache.fetchedAt < 6 * 60 * 60 * 1000) return fnoUniverseCache;
   const fetchMaster = async url => {
-    const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(15000) });
+    const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(45000) });
     if (!response.ok) throw new Error("FYERS symbol master HTTP " + response.status);
     const data = await response.json();
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid FYERS symbol master format");
