@@ -844,18 +844,26 @@ async function loadAdvancedScanner() {
             candleChecked.push({...x,pattern:'Verified candles unavailable; pattern not assessed.',candleVerified:false});
           }else{
             const candleError=validateOhlcCandles(cj.data,'5');
-            if(candleError)candleChecked.push({...x,pattern:candleError+' Pattern not assessed.',candleVerified:false});
-            else candleChecked.push({...x,pattern:summarizeCandles(cj.data),candleVerified:true});
+            if(candleError)candleChecked.push({...x,pattern:candleError+' Pattern not assessed.',candleVerified:false,breakoutConfirmed:false});
+            else {
+              const candles=cj.data;
+              const last=candles[candles.length-1];
+              const prior=candles.slice(Math.max(0,candles.length-21),candles.length-1);
+              const priorHigh=prior.length?Math.max(...prior.map(row=>Number(row[2]))):Infinity;
+              const breakoutConfirmed=Number(last[4])>priorHigh&&Number(last[4])>Number(last[1]);
+              candleChecked.push({...x,pattern:breakoutConfirmed?'Confirmed 5-minute close above prior '+prior.length+' candle highs.': 'No confirmed breakout: latest close did not clear prior candle highs with a bullish close.',candleVerified:true,breakoutConfirmed});
+            }
           }
         }catch{
           candleChecked.push({...x,pattern:'Candle request failed; pattern not assessed.',candleVerified:false});
         }
         await new Promise(resolve=>setTimeout(resolve,350));
       }
-      sorted=candleChecked;
+      const verifiedBreakouts=candleChecked.filter(x=>x.candleVerified&&x.breakoutConfirmed).sort((a,b)=>Number(b.changePct)-Number(a.changePct)).slice(0,8);
+      sorted=verifiedBreakouts;
     }
     table.innerHTML=sorted.length?'<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>Research note</th></tr></thead><tbody>'+sorted.map(x=>'<tr><td><b>'+escapeHtml(x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+'</b></td><td>₹'+formatPrice(x.price)+'</td><td class="'+(x.changePct>=0?'positive-text':'negative-text')+'">'+(x.changePct>0?'+':'')+Number(x.changePct).toFixed(2)+'%</td><td>'+escapeHtml(currentTab==='Breakout Scanner'?(x.pattern||'No candle pattern assessed.'):currentTab==='Momentum Scanner'?'Ranked by absolute verified percentage change; volume/traded value unavailable in this quote response.':'High percentage movement only; option-chain liquidity and risk are not yet verified.')+'</td></tr>').join('')+'</tbody></table>':'<div class="chart-empty">No qualifying rows in this verified snapshot.</div>';
-    status.textContent='Fresh exchange-timestamped FYERS snapshot '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · '+rows.length+' fresh symbols eligible. '+(currentTab==='Breakout Scanner'?'5-minute OHLC checks are shown per symbol; rows with missing candles are explicitly marked, and patterns are not trade confirmations.':currentTab==='Momentum Scanner'?'Ranked by percentage change only; volume/traded value is not verified here.':'Ranked by percentage change only; option liquidity and strike selection are not yet verified.');
+    status.textContent='Fresh exchange-timestamped FYERS snapshot '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+' · '+rows.length+' fresh symbols eligible. '+(currentTab==='Breakout Scanner'?'Only symbols with verified 5-minute candles and a bullish close above the prior 20-candle high are shown; this is a technical breakout screen, not an option entry signal.':currentTab==='Momentum Scanner'?'Ranked by percentage change only; volume/traded value is not verified here.':'Ranked by percentage change only; option liquidity and strike selection are not yet verified.');
     logEvent(currentTab+' refreshed from verified FYERS quotes.','info');
   } catch(error) {
     status.textContent=(error.message||'Snapshot unavailable.')+' No demo prices shown.';
