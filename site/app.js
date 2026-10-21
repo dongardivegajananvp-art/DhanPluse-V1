@@ -389,11 +389,22 @@ async function loadStockExplorerQuotes() {
     renderStockExplorerResults();
     const count = Number(result.receivedSymbols ?? stockExplorerMoverRows.length);
     const requested = Number(result.requestedSymbols ?? count);
-    status.textContent = 'Verified FYERS snapshot received at ' +
-      new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') +
-      ' · ' + count + ' of ' + requested + ' configured symbols returned.' +
-      (result.partial ? ' · ' + Math.max(0, requested - count) + ' symbols missing/unavailable; see Logs / retry.' : '');
-    logEvent('Stock Explorer FYERS snapshot received (' + count + '/' + requested + ' symbols).', result.partial ? 'warn' : 'info');
+    const sourceLabel = result.universe === 'FYERS-NSE-FO-symbol-master'
+      ? 'FYERS NSE F&O master'
+      : 'configured fallback universe';
+    const quoteRows = Array.isArray(result.data) ? result.data : [];
+    const liveCount = quoteRows.filter(row => row.priceStatus === 'LIVE_QUOTE').length;
+    const lastKnownCount = quoteRows.filter(row => row.priceStatus === 'LAST_KNOWN_PRICE').length;
+    const staleCount = quoteRows.filter(row => row.priceStatus === 'STALE_QUOTE' || row.priceStatus === 'TIME_UNVERIFIED').length;
+    const missing = Array.isArray(result.failedSymbols) ? result.failedSymbols : [];
+    status.textContent = 'FYERS snapshot ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') +
+      ' · Universe: ' + sourceLabel + ' · Quotes: ' + count + '/' + requested +
+      ' · Live: ' + liveCount + ' · Last-known: ' + lastKnownCount + ' · Stale/time-unverified: ' + staleCount +
+      (result.partial ? ' · INCOMPLETE coverage; missing/unavailable: ' + missing.length +
+        (missing.length ? ' (' + missing.slice(0, 8).join(', ') + (missing.length > 8 ? ', …' : '') + ')' : '') : ' · Quote coverage complete for returned universe');
+    logEvent('Stock Explorer FYERS snapshot (' + count + '/' + requested + '; ' + sourceLabel +
+      '; live=' + liveCount + '; last-known=' + lastKnownCount + '; stale/unverified=' + staleCount +
+      '; missing=' + missing.length + ').', result.partial ? 'warn' : 'info');
   } catch (error) {
     status.textContent = 'Equity quote request failed: ' + (error.message || 'FYERS snapshot unavailable.') +
       ' Tap Refresh equity quotes to retry. No prices were fabricated.';
