@@ -34,3 +34,13 @@ test("rejects unverified, invalid, or duplicate candles", () => {
     { timestamp: "2026-10-19T09:15:00Z", open: 101, high: 102, low: 99, close: 100, verified: true }
   ]));
 });
+
+test("validates real ISO calendar dates, including leap days", async () => {
+  const { isValidIsoDate } = await import("../src/gap-analysis.js");
+  assert.equal(isValidIsoDate("2024-02-29"), true);
+  assert.equal(isValidIsoDate("2026-10-21"), true);
+  assert.equal(isValidIsoDate("2026-02-29"), false);
+  assert.equal(isValidIsoDate("2026-02-31"), false);
+  assert.equal(isValidIsoDate("2026-13-01"), false);
+  assert.equal(isValidIsoDate("2026-1-01"), false);
+});
