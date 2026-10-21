@@ -154,7 +154,70 @@ function renderJournalRules(){
  else{const list=el("div",undefined,"gap-result");for(const t of notFollowed.slice(0,100)){const item=el("article",undefined,"journal-item");item.append(el("h3",t.symbol+" · "+t.side+" · "+t.followed.toUpperCase()),el("p","Entry ₹"+t.entry+" · SL ₹"+t.stop+" · Target ₹"+t.target),el("p",t.notes||"No note was recorded; add a reason in your next journal entry."));list.append(item);}panel.append(list);}
  panel.append(el("p","Limitations: this summary cannot establish strategy profitability from a small sample and does not include brokerage, taxes, slippage, quantity, or market context."));
 }
-async function renderLiveQuotes(key){
+async function renderOptionChain(){
+ panel.replaceChildren(el("h2","Option Chain & Open Interest"),el("p","Read-only FYERS option-chain data. Missing OI/volume blocks analysis; this page does not create trade signals or place orders."));
+ const form=el("form",undefined,"gap-form");
+ const symbols=[["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],["NSE:RELIANCE-EQ","RELIANCE"],["NSE:TCS-EQ","TCS"],["NSE:INFY-EQ","INFY"],["NSE:HDFCBANK-EQ","HDFCBANK"],["NSE:ICICIBANK-EQ","ICICIBANK"],["NSE:SBIN-EQ","SBIN"],["NSE:ITC-EQ","ITC"],["NSE:LT-EQ","LT"],["NSE:AXISBANK-EQ","AXISBANK"],["NSE:BAJFINANCE-EQ","BAJFINANCE"]];
+ const symbolLabel=el("label","Underlying");
+ const symbol=document.createElement("select");symbol.name="symbol";
+ for(const [value,title] of symbols){const option=el("option",title);option.value=value;symbol.append(option);}
+ symbolLabel.append(symbol);form.append(symbolLabel);
+ const countLabel=el("label","Strikes each side of ATM");
+ const count=document.createElement("select");count.name="strikecount";
+ for(const n of [5,10,15,20,25,50]){const option=el("option",String(n));option.value=String(n);if(n===10)option.selected=true;count.append(option);}
+ countLabel.append(count);form.append(countLabel);
+ const expiryLabel=el("label","Expiry");
+ const expiry=document.createElement("select");expiry.name="timestamp";
+ const nearest=el("option","Nearest available expiry");nearest.value="";expiry.append(nearest);
+ expiryLabel.append(expiry);form.append(expiryLabel);
+ const submit=el("button","Load verified option chain");submit.type="submit";form.append(submit);
+ const status=el("p","Connect FYERS to load option-chain data.");
+ const summary=el("div",undefined,"gap-result");
+ const host=el("div",undefined,"option-chain-table-wrap");
+ form.addEventListener("submit",async event=>{
+  event.preventDefault();
+  if(!sessionToken){status.textContent="Connect FYERS first. No demo option data is shown.";host.replaceChildren();summary.replaceChildren();return;}
+  submit.disabled=true;status.textContent="Requesting option chain from FYERS…";host.replaceChildren();summary.replaceChildren();
+  const q=new URLSearchParams({symbol:symbol.value,strikecount:count.value,greeks:"1"});
+  if(expiry.value)q.set("timestamp",expiry.value);
+  try{
+   const r=await fetch(API_BASE+"/api/fyers/options-chain?"+q.toString(),{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
+   const result=await r.json();
+   if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS dashboard session expired. Connect FYERS again.");}
+   if(!r.ok||!result.ok||!Array.isArray(result.data)||!result.data.length)throw new Error(result.detail||result.error||"Verified option-chain data unavailable.");
+   const prior=expiry.value;
+   expiry.replaceChildren();const exps=Array.isArray(result.expiryData)?result.expiryData:[];
+   for(const item of exps){if(!item||!/^\d{10}$/.test(String(item.expiry))||typeof item.date!=="string")continue;const option=el("option",item.date);option.value=String(item.expiry);expiry.append(option);}
+   if(!expiry.options.length){const option=el("option","Expiry unavailable");option.value="";expiry.append(option);}
+   if(prior&&Array.from(expiry.options).some(o=>o.value===prior))expiry.value=prior;
+   else if(!prior&&expiry.options.length>1)expiry.value=expiry.options[1].value;
+   summary.append(el("h3",result.symbol+" · Underlying ₹"+Number(result.underlyingLtp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})));
+   summary.append(el("p","Source: "+result.source+" · Retrieved: "+new Date(result.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})));
+   summary.append(el("p","Total call OI: "+(result.callOi===null?"Unavailable":Number(result.callOi).toLocaleString("en-IN"))+" · Total put OI: "+(result.putOi===null?"Unavailable":Number(result.putOi).toLocaleString("en-IN"))));
+   summary.append(el("p",result.dataComplete?"OI and volume fields passed completeness checks. No trade signal is generated here.":"Data incomplete: "+result.warning+" Trade analysis must remain blocked.","risk-note"));
+   const byStrike=new Map();
+   for(const leg of result.data){if(leg.verified!==true||!Number.isFinite(Number(leg.strike))||!["CE","PE"].includes(leg.type))continue;const row=byStrike.get(Number(leg.strike))||{};row[leg.type]=leg;byStrike.set(Number(leg.strike),row);}
+   const table=document.createElement("table");table.className="option-chain-table";
+   const head=document.createElement("thead"),hr=document.createElement("tr");
+   for(const title of ["Strike","CE LTP","CE OI","CE OI Δ","CE Volume","PE LTP","PE OI","PE OI Δ","PE Volume"]){hr.append(el("th",title));}
+   head.append(hr);table.append(head);
+   const body=document.createElement("tbody");
+   const fmt=v=>v===null||v===undefined||!Number.isFinite(Number(v))?"—":Number(v).toLocaleString("en-IN",{maximumFractionDigits:2});
+   for(const [strike,pair] of [...byStrike.entries()].sort((a,b)=>a[0]-b[0])){
+    const tr=document.createElement("tr");tr.append(el("td",fmt(strike)));
+    for(const type of ["CE","PE"]){const leg=pair[type];for(const field of ["ltp","oi","oiChange","volume"]){tr.append(el("td",leg?fmt(leg[field]):"—"));}}
+    body.append(tr);
+   }
+   table.append(body);host.append(table);
+   status.textContent="FYERS option chain loaded · "+byStrike.size+" strikes · "+(result.signalsAllowed?"required OI/volume present":"incomplete data — analysis blocked");
+  }catch(error){status.textContent=String(error?.message||"Option-chain data unavailable.")+" No placeholder option data is displayed.";host.replaceChildren();summary.replaceChildren();}
+  finally{submit.disabled=false;}
+ });
+ for(const control of [symbol,count,expiry])control.addEventListener("change",()=>{if(sessionToken&&control===expiry&&expiry.value==="")return;if(sessionToken)form.requestSubmit();});
+ panel.append(form,status,summary,host);
+ if(sessionToken)form.requestSubmit();
+}
+function renderLiveQuotes(key){
  const target=document.querySelector("#liveQuotePanel");
  if(!target)return;
  target.replaceChildren(el("h3","Verified index quotes"));
@@ -339,6 +402,7 @@ function renderPage(key){
  if(key==="capital"){renderCapital();return;}
  if(key==="journal"){renderJournal();return;}
  if(key==="journalRules"){renderJournalRules();return;}
+ if(key==="options"){renderOptionChain();return;}
  panel.append(el("h2",title),el("p",description));
  if(key==="charts"){renderCandleChart(key);return;}
  if(["dashboard","nifty","banknifty"].includes(key))renderQuotePanel(key);
