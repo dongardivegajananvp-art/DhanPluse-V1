@@ -3,10 +3,10 @@ const panel = document.querySelector("#panel");
 const sessionKey = "dhanpulseGapSession";
 let sessionToken = sessionStorage.getItem(sessionKey) || "";
 const pages = {
- dashboard:["Dashboard","Gap analysis now supports authenticated FYERS daily candles on this branch. Live streaming, full Stock Explorer, and scanners are not implemented here."],
+ dashboard:["Dashboard","Verified FYERS streaming quotes are displayed for NIFTY and BANKNIFTY. Historical gap analysis is available; full Stock Explorer, candlesticks, and scanners remain incomplete."],
  explorer:["Stock Explorer","The complete F&O quote universe is not connected in this branch. No prices are fabricated."],
- nifty:["NIFTY","Historical gap analysis supports NSE:NIFTY50-INDEX. Live streaming and candlestick charting are not yet connected."],
- banknifty:["BANKNIFTY","Historical gap analysis supports NSE:NIFTYBANK-INDEX. Live streaming and candlestick charting are not yet connected."],
+ nifty:["NIFTY","Verified FYERS index quotes are displayed below. Historical gap analysis supports NSE:NIFTY50-INDEX; candlestick charting is not yet connected."],
+ banknifty:["BANKNIFTY","Verified FYERS index quotes are displayed below. Historical gap analysis supports NSE:NIFTYBANK-INDEX; candlestick charting is not yet connected."],
  gap:["Gap-Up / Gap-Down","Load verified FYERS daily candles and calculate descriptive historical gap-fill statistics."],
  options:["Option Chain & OI","Option-chain data is not connected in this branch. Do not use this page for trade decisions."],
  scanners:["Scanners","Scanners remain blocked until quotes, candles, and option data are verified."],
@@ -23,7 +23,7 @@ const pages = {
  watchlist:["Watchlist","Watchlist quotes are not connected yet. Prices will not be simulated."],
  alerts:["Price Alerts","Price alerts are not active in this build."],
  holdings:["Holdings & Positions","Broker holdings and positions are not connected in this build."],
- capital:["Capital Protection","Risk calculator module is not yet implemented in this clean test build."],
+ capital:["Capital Protection","Position-sizing calculator is available for manually entered planned prices. It is not a live signal or broker order."],
  backtest:["Backtesting","Backtesting beyond historical opening-gap statistics is not implemented yet."],
  settings:["FYERS Settings","FYERS authorization status is shown above. Credentials stay server-side; order placement remains disabled."],
  logs:["Logs","Operational logs are available through the service dashboard; in-app log viewer is not implemented yet."],
