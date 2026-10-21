@@ -620,6 +620,47 @@ function renderBacktest(){
  });panel.append(form,status,out);
 }
 
+
+async function renderSettings(){
+ panel.replaceChildren(el("h2","FYERS Settings & Diagnostics"),el("p","Read-only connection diagnostics. Credentials are never displayed here; order placement stays disabled."));
+ const btn=el("button","Refresh connection diagnostics");btn.type="button";
+ const status=el("p","Checking backend status…"),host=el("div",undefined,"gap-result");
+ btn.addEventListener("click",load);panel.append(btn,status,host);
+ async function load(){btn.disabled=true;status.textContent="Checking backend…";host.replaceChildren();try{
+  const r=await fetch(API_BASE+"/api/status",{cache:"no-store"}),s=await r.json();if(!r.ok)throw new Error("Status request failed (HTTP "+r.status+").");
+  const counts=s.acceptedTickCounts||{},times=s.lastAcceptedTickAtBySymbol||{};
+  const rows=[
+   ["Backend",s.backend||"unknown"],["FYERS authentication",s.fyers||"not connected"],["Market socket",s.marketSocketConnected?"connected":"not connected"],
+   ["Live data",s.liveData||"waiting"],["Order placement",s.orderPlacement||"disabled"],
+   ["NIFTY accepted fresh ticks",String(counts["NSE:NIFTY50-INDEX"]||0)],["NIFTY last accepted tick",times["NSE:NIFTY50-INDEX"]||"none in current process"],
+   ["BANKNIFTY accepted fresh ticks",String(counts["NSE:NIFTYBANK-INDEX"]||0)],["BANKNIFTY last accepted tick",times["NSE:NIFTYBANK-INDEX"]||"none in current process"],
+   ["Authenticated at",s.authenticatedAt||"not authenticated"],["Last complete live snapshot",s.lastTickAt||"unavailable"]
+  ];
+  const table=document.createElement("table");table.className="option-chain-table";const body=document.createElement("tbody");
+  rows.forEach(([k,v])=>{const tr=document.createElement("tr");tr.append(el("th",k),el("td",v));body.append(tr);});table.append(body);host.append(table);
+  host.append(el("p","A connected socket is not proof of fresh data. Tick counters increase only after valid prices and fresh exchange timestamps pass backend checks.","risk-note"));
+  status.textContent="Status retrieved "+new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+".";
+ }catch(e){status.textContent=String(e.message||e);}finally{btn.disabled=false;}}
+ load();
+}
+function renderLogs(){
+ panel.replaceChildren(el("h2","DhanPulse Operational Logs"),el("p","Recent sanitized diagnostics from this backend process. Logs reset on backend redeploy; this is not a permanent audit trail."));
+ const btn=el("button","Refresh diagnostics");btn.type="button";
+ const status=el("p","Connect FYERS to view authenticated diagnostics."),host=el("div",undefined,"option-chain-table-wrap");
+ btn.addEventListener("click",load);panel.append(btn,status,host);
+ async function load(){if(!sessionToken){status.textContent="Connect FYERS first to view diagnostics.";return;}btn.disabled=true;status.textContent="Loading diagnostics…";host.replaceChildren();try{
+  const r=await fetch(API_BASE+"/api/diagnostics",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}}),data=await r.json();
+  if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Connect again.");}
+  if(!r.ok||data.ok!==true||!Array.isArray(data.entries))throw new Error(data.error||"Diagnostics unavailable.");
+  if(!data.entries.length){status.textContent="No diagnostics recorded in this backend process yet. Reconnect FYERS to create fresh stream events.";return;}
+  const table=document.createElement("table");table.className="option-chain-table";const head=document.createElement("thead"),hr=document.createElement("tr");
+  ["Time (IST)","Level","Event","Details"].forEach(x=>hr.append(el("th",x)));head.append(hr);table.append(head);const body=document.createElement("tbody");
+  data.entries.forEach(item=>{const tr=document.createElement("tr");const detail=Object.entries(item).filter(([k])=>!["timestamp","level","event"].includes(k)).map(([k,v])=>k+": "+(typeof v==="object"?JSON.stringify(v):String(v))).join(" · ");[item.timestamp?new Date(item.timestamp).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"}):"—",item.level||"info",item.event||"event",detail||"—"].forEach(v=>tr.append(el("td",v)));body.append(tr);});
+  table.append(body);host.append(table);status.textContent=data.entries.length+" recent diagnostic event(s) · fetched "+new Date(data.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+".";
+ }catch(e){status.textContent=String(e.message||e)+" No fabricated logs displayed.";}finally{btn.disabled=false;}}
+ if(sessionToken)load();
+}
+
 function renderPage(key){
  if(candleRefreshTimer){clearInterval(candleRefreshTimer);candleRefreshTimer=null;}
  const [title,description]=pages[key]||["Module","Status unavailable."];
@@ -629,6 +670,8 @@ function renderPage(key){
  if(key==="watchlist"){renderWatchlist();return;}
  if(key==="alerts"){renderAlerts();return;}
  if(key==="backtest"){renderBacktest();return;}
+ if(key==="settings"){renderSettings();return;}
+ if(key==="logs"){renderLogs();return;}
  if(key==="movers"){renderMovers();return;}
  if(["breakout","momentum","zerohero"].includes(key)){renderScanner(key);return;}
  if(key==="capital"){renderCapital();return;}
