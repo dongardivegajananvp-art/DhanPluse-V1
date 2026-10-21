@@ -9,7 +9,7 @@ const pages = {
  nifty:["NIFTY","Verified FYERS index quotes and historical candlestick charts are supported. Live tick candles are available only while fresh FYERS ticks are received; stale data blocks the chart."],
  banknifty:["BANKNIFTY","Verified FYERS index quotes and historical candlestick charts are supported. Live tick candles are available only while fresh FYERS ticks are received; stale data blocks the chart."],
  gap:["Gap-Up / Gap-Down","Load verified FYERS daily candles and calculate descriptive historical gap-fill statistics."],
- options:["Option Chain & OI","Option-chain data is not connected in this branch. Do not use this page for trade decisions."],
+ options:["Option Chain & OI","Read-only FYERS option-chain viewer for supported indices and stocks. Missing OI or volume blocks analysis; no trade signal is generated."],
  scanners:["Scanners","Scanners remain blocked until quotes, candles, and option data are verified."],
  journal:["Paper Journal","Paper trading only. Record entry, stop, target, rule adherence, and outcome."],
  activity:["Market Activity","Market-wide activity feed is not implemented yet. No unverified activity is displayed."],
