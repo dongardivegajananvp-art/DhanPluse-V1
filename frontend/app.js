@@ -165,6 +165,7 @@ async function renderLiveQuotes(key){
  try{
   const r=await fetch(API_BASE+"/api/market/quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
   const data=await r.json();
+  if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS dashboard session expired. Connect FYERS again.");}
   if(!r.ok||!Array.isArray(data.data))throw new Error(data.detail||data.error||"Fresh verified quotes are not available.");
   const wanted=key==="nifty"?["NSE:NIFTY50-INDEX"]:key==="banknifty"?["NSE:NIFTYBANK-INDEX"]:["NSE:NIFTY50-INDEX","NSE:NIFTYBANK-INDEX"];
   const rows=data.data.filter(item=>wanted.includes(item.n));
