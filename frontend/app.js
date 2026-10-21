@@ -571,6 +571,55 @@ function renderScanner(key){
  });panel.append(form,status,out);
 }
 
+
+function renderAlerts(){
+ const storageKey="dhanpulsePriceAlerts";let rules=[];
+ try{rules=JSON.parse(localStorage.getItem(storageKey)||"[]");if(!Array.isArray(rules))rules=[];}catch{rules=[];}
+ panel.replaceChildren(el("h2","Price Alerts"),el("p","Create browser-local price or daily-change thresholds for the supported stock subset. Alert checks are manual when you press Check now; this page does not run in the background or send notifications when closed."));
+ const form=el("form",undefined,"gap-form"),symbolLabel=el("label","Supported symbol"),symbol=document.createElement("select");
+ supportedStockSymbols.forEach(([v,n])=>{const o=el("option",n);o.value=v;symbol.append(o);});symbolLabel.append(symbol);form.append(symbolLabel);
+ const typeLabel=el("label","Alert type"),type=document.createElement("select");
+ [["priceAbove","Price rises above (₹)"],["priceBelow","Price falls below (₹)"],["changeAbove","Change % above"],["changeBelow","Change % below"]].forEach(([v,n])=>{const o=el("option",n);o.value=v;type.append(o);});typeLabel.append(type);form.append(typeLabel);
+ const valueLabel=el("label","Threshold"),value=document.createElement("input");value.type="number";value.min="0.01";value.step="any";value.required=true;valueLabel.append(value);form.append(valueLabel);
+ const add=el("button","Save alert rule");add.type="submit";form.append(add);
+ const check=el("button","Check alerts against fresh FYERS quotes");check.type="button";
+ const status=el("p","Rules are stored only in this browser."),host=el("div",undefined,"gap-result");
+ function renderRules(){host.replaceChildren();if(!rules.length){host.append(el("p","No alert rules saved."));return;}rules.forEach(rule=>{const row=el("article",undefined,"quote-card"),name=supportedStockSymbols.find(x=>x[0]===rule.symbol)?.[1]||rule.symbol;row.append(el("strong",name),el("p",rule.label+" "+rule.value+(rule.type.startsWith("change")?"%":" ₹")),el("small",rule.lastStatus||"Not checked yet"));const del=el("button","Delete");del.type="button";del.addEventListener("click",()=>{rules=rules.filter(x=>x.id!==rule.id);localStorage.setItem(storageKey,JSON.stringify(rules));renderRules();});row.append(del);host.append(row);});}
+ form.addEventListener("submit",ev=>{ev.preventDefault();const n=Number(value.value);if(!Number.isFinite(n)||n<=0){status.textContent="Enter a positive threshold.";return;}const labels={priceAbove:"Price rises above",priceBelow:"Price falls below",changeAbove:"Change % above",changeBelow:"Change % below"};rules.push({id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),symbol:symbol.value,type:type.value,value:n,label:labels[type.value],createdAt:new Date().toISOString()});localStorage.setItem(storageKey,JSON.stringify(rules));status.textContent="Alert rule saved locally.";renderRules();});
+ check.addEventListener("click",async()=>{check.disabled=true;status.textContent="Checking current FYERS quotes…";try{const result=await fetchStockQuotes();let fired=0;rules=rules.map(rule=>{const row=result.rows.find(x=>x.n===rule.symbol);if(!row)return {...rule,lastStatus:"No fresh quote; not evaluated."};const price=Number(row.v.lp),change=Number(row.v.chp);const hit=rule.type==="priceAbove"?price>=rule.value:rule.type==="priceBelow"?price<=rule.value:rule.type==="changeAbove"?change>=rule.value:change<=-rule.value;if(hit)fired++;return {...rule,lastStatus:(hit?"TRIGGERED":"Not triggered")+" · LTP ₹"+price.toFixed(2)+" · change "+change.toFixed(2)+"% · "+new Date(Number(row.v.tt)*1000).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})};});localStorage.setItem(storageKey,JSON.stringify(rules));status.textContent=fired+" rule(s) triggered from "+result.rows.length+" fresh verified quote(s). This is an on-screen check only.";renderRules();}catch(e){status.textContent=String(e.message||e)+" Alerts were not evaluated on stale data.";}finally{check.disabled=false;}});
+ panel.append(form,check,status,host);renderRules();
+}
+function renderBacktest(){
+ panel.replaceChildren(el("h2","Historical Breakout Backtest"),el("p","A transparent educational backtest on one supported symbol using verified historical FYERS candles. This is not the full scanner or proof of future performance. Uses close above the prior 20-bar high, next-bar open entry, 1% stop and 2% target; if stop and target are both touched in one candle, stop is assumed first."));
+ const form=el("form",undefined,"gap-form"),symLabel=el("label","Underlying"),sym=document.createElement("select");
+ supportedStockSymbols.forEach(([v,n])=>{const o=el("option",n);o.value=v;sym.append(o);});symLabel.append(sym);form.append(symLabel);
+ const resLabel=el("label","Interval"),res=document.createElement("select");[["5","5 minutes"],["15","15 minutes"],["30","30 minutes"],["D","Daily"]].forEach(([v,n])=>{const o=el("option",n);o.value=v;res.append(o);});resLabel.append(res);form.append(resLabel);
+ const run=el("button","Run historical backtest");run.type="submit";form.append(run);
+ const status=el("p","Connect FYERS to run the backtest."),out=el("div",undefined,"gap-result");
+ form.addEventListener("submit",async ev=>{ev.preventDefault();if(!sessionToken){status.textContent="Connect FYERS first.";return;}run.disabled=true;status.textContent="Loading historical candles from FYERS…";out.replaceChildren();
+  const now=new Date(),days=res.value==="D"?350:25,from=new Date(Date.now()-days*86400000),fmt=d=>{const z=new Date(d.getTime()-d.getTimezoneOffset()*60000);return z.toISOString().slice(0,10);};
+  const q=new URLSearchParams({symbol:sym.value,resolution:res.value,from:fmt(from),to:fmt(now)});
+  try{const response=await fetch(API_BASE+"/api/market/candles?"+q.toString(),{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}}),data=await response.json();if(response.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);}if(response.status===429)throw new Error("FYERS historical-data cooldown active. Wait before retrying.");if(!response.ok||data.ok!==true||!Array.isArray(data.data))throw new Error(data.detail||data.error||"Historical data unavailable.");
+   const bars=data.data.filter(c=>c.verified===true&&c.source==="FYERS"&&Number.isFinite(Date.parse(c.timestamp))&&[c.open,c.high,c.low,c.close].every(v=>safeNumber(v)>0)&&Number(c.high)>=Math.max(Number(c.open),Number(c.low),Number(c.close))&&Number(c.low)<=Math.min(Number(c.open),Number(c.high),Number(c.close))).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
+   if(bars.length<25)throw new Error("At least 25 valid candles are required; "+bars.length+" passed validation.");
+   let trades=[],position=null;
+   for(let i=20;i<bars.length;i++){const b=bars[i],close=Number(b.close),high20=Math.max(...bars.slice(i-20,i).map(x=>Number(x.high)));
+    if(position){const hi=Number(b.high),lo=Number(b.low);let exit=null,reason="";if(lo<=position.stop){exit=position.stop;reason="stop (conservative intrabar assumption)";}else if(hi>=position.target){exit=position.target;reason="target";}else if(i-position.entryIndex>=5){exit=close;reason="time exit";}if(exit!==null){trades.push({entry:position.entry,exit,ret:(exit/position.entry-1)*100,reason});position=null;}}
+    if(!position&&close>high20&&i+1<bars.length){const entry=Number(bars[i+1].open);if(entry>0)position={entry,stop:entry*.99,target:entry*1.02,entryIndex:i+1};}
+   }
+   if(position){const exit=Number(bars[bars.length-1].close);trades.push({entry:position.entry,exit,ret:(exit/position.entry-1)*100,reason:"end of sample"});}
+   const wins=trades.filter(t=>t.ret>0).length,losses=trades.filter(t=>t.ret<=0).length,net=trades.reduce((sum,t)=>sum+t.ret,0),grossWin=trades.filter(t=>t.ret>0).reduce((sum,t)=>sum+t.ret,0),grossLoss=Math.abs(trades.filter(t=>t.ret<0).reduce((sum,t)=>sum+t.ret,0));
+   out.append(el("h3",sym.options[sym.selectedIndex].text+" · "+trades.length+" closed sample trade(s)"));
+   out.append(el("p","Verified candles: "+bars.length+" · Source: "+data.source+" · Range: "+fmt(new Date(bars[0].timestamp))+" to "+fmt(new Date(bars[bars.length-1].timestamp))));
+   out.append(el("p","Wins: "+wins+" · Losses/breakeven: "+losses+" · Win rate: "+(trades.length?(wins/trades.length*100).toFixed(1)+"%":"—")));
+   out.append(el("p","Sum of individual trade returns (not compounded): "+(net>=0?"+":"")+net.toFixed(2)+"% · Gross profit factor: "+(grossLoss? (grossWin/grossLoss).toFixed(2):grossWin?"No losing trades in sample":"—")));
+   const table=document.createElement("table");table.className="option-chain-table";const thead=document.createElement("thead"),hr=document.createElement("tr");["#","Entry","Exit","Return %","Exit reason"].forEach(x=>hr.append(el("th",x)));thead.append(hr);table.append(thead);const body=document.createElement("tbody");
+   trades.slice(-30).forEach((t,i)=>{const tr=document.createElement("tr");[String(Math.max(0,trades.length-30)+i+1),t.entry.toFixed(2),t.exit.toFixed(2),(t.ret>=0?"+":"")+t.ret.toFixed(2),t.reason].forEach(x=>tr.append(el("td",x)));body.append(tr);});table.append(body);out.append(table);
+   out.append(el("p","Limitations: no brokerage/taxes/slippage, gaps, liquidity, option premiums, intrabar path certainty, or parameter optimization. This simple long-only rule is a research baseline, not a trading recommendation.","risk-note"));status.textContent="Backtest completed on verified historical candles; interpret cautiously.";
+  }catch(e){status.textContent=String(e.message||e)+" No simulated candles or results were used.";out.replaceChildren();}finally{run.disabled=false;}
+ });panel.append(form,status,out);
+}
+
 function renderPage(key){
  if(candleRefreshTimer){clearInterval(candleRefreshTimer);candleRefreshTimer=null;}
  const [title,description]=pages[key]||["Module","Status unavailable."];
@@ -578,6 +627,8 @@ function renderPage(key){
  if(key==="gap"){renderGap();return;}
  if(key==="explorer"){renderStockExplorer();return;}
  if(key==="watchlist"){renderWatchlist();return;}
+ if(key==="alerts"){renderAlerts();return;}
+ if(key==="backtest"){renderBacktest();return;}
  if(key==="movers"){renderMovers();return;}
  if(["breakout","momentum","zerohero"].includes(key)){renderScanner(key);return;}
  if(key==="capital"){renderCapital();return;}
