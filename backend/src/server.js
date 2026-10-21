@@ -425,7 +425,8 @@ async function getNseFnoEquityUniverse() {
   const cashByName = new Map();
   for (const [ticker, item] of Object.entries(cm)) {
     if (!item || Number(item.tradeStatus) === 0 || !/^NSE:[A-Z0-9&._-]+-EQ$/.test(ticker)) continue;
-    const name = String(item.exSymName || ticker.slice(4, -3)).trim().toUpperCase();
+    // Match the underlying symbol to the actual NSE ticker, not the company display name (exSymName is a long company name).
+    const name = ticker.slice(4, -3).trim().toUpperCase();
     cashByName.set(name, ticker);
   }
   const data = [...derivatives].map(name => ({ name, symbol: cashByName.get(name) })).filter(item => item.symbol).sort((a,b) => a.name.localeCompare(b.name));
