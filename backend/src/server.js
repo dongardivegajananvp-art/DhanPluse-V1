@@ -145,11 +145,16 @@ app.get("/api/gap-analysis/history", requireSession, async (req, res) => {
   try {
     const bars = await fyersHistory(symbol, from, to);
     if (bars.length < 2) return res.status(422).json({ ok: false, error: "FYERS returned fewer than two daily candles; gap analysis is unavailable.", candleCount: bars.length });
-    const summary = summarizeHistoricalGaps(bars, { minAbsGapPct: minGapPct });
     const latest = bars.at(-1);
     const previous = bars.at(-2);
     const latestGap = analyzeOpeningGap({ previousClose: previous.close, todayOpen: latest.open });
-    res.set("Cache-Control", "no-store").json({ ok: true, symbol, source: "FYERS historical daily candles", fetchedAt: new Date().toISOString(), range: { from, to }, candleCount: bars.length, latestSession: { timestamp: latest.timestamp, previousClose: previous.close, open: latest.open, high: latest.high, low: latest.low, close: latest.close, volume: latest.volume, gap: latestGap }, historical: summary, warning: "Daily candles can show gap size and intraday fill; they do not prove FII/DII/operator intent or predict the next session. Use only complete verified data." });
+    // Never count the current IST session as a completed historical fill observation:
+    // its high/low can still change while the market is open.
+    const todayIst = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const completedBars = bars.filter(bar => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(bar.timestamp)) < todayIst);
+    if (completedBars.length < 2) return res.status(422).json({ ok: false, error: "At least two completed daily sessions are required for historical gap-fill statistics.", candleCount: bars.length, completedCandleCount: completedBars.length, latestSession: { timestamp: latest.timestamp, gap: latestGap } });
+    const summary = summarizeHistoricalGaps(completedBars, { minAbsGapPct: minGapPct });
+    res.set("Cache-Control", "no-store").json({ ok: true, symbol, source: "FYERS historical daily candles", fetchedAt: new Date().toISOString(), range: { from, to }, candleCount: bars.length, completedCandleCount: completedBars.length, latestSession: { timestamp: latest.timestamp, previousClose: previous.close, open: latest.open, high: latest.high, low: latest.low, close: latest.close, volume: latest.volume, gap: latestGap, note: "Latest session is shown separately and is not counted as a completed historical gap-fill observation when it is today's session." }, historical: summary, warning: "Historical fill statistics exclude today's session to avoid treating an unfinished daily candle as complete. Daily candles do not prove FII/DII/operator intent or predict the next session." });
   } catch (error) {
     const status = Number(error.statusCode) || (String(error.message).startsWith("Invalid FYERS") ? 502 : 502);
     res.status(status).json({ ok: false, error: status === 429 ? "FYERS historical data rate limit; retry after cooldown." : status === 401 ? "FYERS session expired; reconnect." : "Gap analysis could not be verified.", detail: String(error.message || "Unknown upstream error").slice(0, 220) });
