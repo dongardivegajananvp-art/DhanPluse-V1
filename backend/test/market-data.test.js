@@ -66,6 +66,18 @@ test("normalizes underlying aliases and excludes inactive cash symbols", () => {
   assert.deepEqual(buildFnoEquityUniverse(fo, cm), [{ symbol: "NSE:M&M-EQ", underlying: "M&M" }]);
 });
 
+test("excludes inactive derivative rows when FYERS tradeStatus is a string", () => {
+  const cm = {
+    "NSE:LIVE-EQ": { exSymbol: "LIVE", tradeStatus: 1 },
+    "NSE:OLD-EQ": { exSymbol: "OLD", tradeStatus: 1 }
+  };
+  const fo = {
+    "NSE:LIVE26OCTFUT": { underSym: "LIVE", exInstType: 13, tradeStatus: 1 },
+    "NSE:OLD26OCTFUT": { underSym: "OLD", exInstType: 13, tradeStatus: "0" }
+  };
+  assert.deepEqual(buildFnoEquityUniverse(fo, cm), [{ symbol: "NSE:LIVE-EQ", underlying: "LIVE" }]);
+});
+
 test("invalid FYERS symbol masters fail closed", () => {
   assert.throws(() => buildFnoEquityUniverse(null, {}), /invalid_fyers_symbol_master/);
 });
