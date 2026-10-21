@@ -673,7 +673,8 @@ async function loadMovers() {
           Number(item.quoteAgeSeconds) < 0 || Number(item.quoteAgeSeconds) > 180 ||
           !item.priceAsOf) return false;
       const tradedAt = Date.parse(item.priceAsOf);
-      return Number.isFinite(tradedAt) && tradedAt <= Date.now();
+      const actualAgeSeconds = (Date.now() - tradedAt) / 1000;
+      return Number.isFinite(tradedAt) && actualAgeSeconds >= 0 && actualAgeSeconds <= 180;
     });
     if (rows.length !== requested) {
       throw new Error('FRESHNESS CHECK FAILED — only ' + rows.length + ' of ' + requested + ' quotes passed validation. Ranking blocked.');
