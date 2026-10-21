@@ -648,29 +648,51 @@ async function loadMovers() {
   const button = document.querySelector('#refreshMoversBtn');
   if (!status || !gainers || !losers) return;
   if (button) button.disabled = true;
-  status.textContent = 'Requesting a verified stock-quote snapshot from FYERS…';
+  status.textContent = 'Requesting a complete, fresh FYERS quote snapshot…';
   try {
     const response = await fetch(BACKEND_URL + '/api/market/movers', { headers: { Accept: 'application/json' }, cache: 'no-store' });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
       throw new Error(result.error || result.detail || 'FYERS market-mover snapshot unavailable.');
     }
-    const rows = result.data.filter(item => Number.isFinite(Number(item.price)) && Number(item.price) > 0 && Number.isFinite(Number(item.changePct)));
+    if (result.marketSession !== 'OPEN') {
+      throw new Error('MARKET CLOSED — current gainers/losers are unavailable. Last-known prices must not be ranked as live movers.');
+    }
+    const requested = Number(result.requestedSymbols);
+    const received = Number(result.receivedSymbols);
+    if (result.partial === true || !Number.isFinite(requested) || requested < 1 ||
+        !Number.isFinite(received) || received !== requested ||
+        (Array.isArray(result.failedSymbols) && result.failedSymbols.length > 0)) {
+      throw new Error('INCOMPLETE F&O COVERAGE — ranking blocked until every requested symbol has a quote.');
+    }
+    const rows = result.data.filter(item => {
+      if (!item || item.priceStatus !== 'LIVE_QUOTE' ||
+          !Number.isFinite(Number(item.price)) || Number(item.price) <= 0 ||
+          !Number.isFinite(Number(item.changePct)) ||
+          !Number.isFinite(Number(item.quoteAgeSeconds)) ||
+          Number(item.quoteAgeSeconds) < 0 || Number(item.quoteAgeSeconds) > 180 ||
+          !item.priceAsOf) return false;
+      const tradedAt = Date.parse(item.priceAsOf);
+      return Number.isFinite(tradedAt) && tradedAt <= Date.now();
+    });
+    if (rows.length !== requested) {
+      throw new Error('FRESHNESS CHECK FAILED — only ' + rows.length + ' of ' + requested + ' quotes passed validation. Ranking blocked.');
+    }
     const table = list => !list.length
-      ? '<div class="chart-empty">FYERS returned no valid rows for this group.</div>'
-      : '<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th></tr></thead><tbody>' +
-        list.map(item => '<tr><td><b>' + escapeHtml(item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')) + '</b></td><td>' + formatPrice(item.price) + '</td><td class="' + (item.changePct >= 0 ? 'positive-text' : 'negative-text') + '">' + (item.changePct > 0 ? '+' : '') + item.changePct.toFixed(2) + '%</td></tr>').join('') +
+      ? '<div class="chart-empty">No verified rows for this group.</div>'
+      : '<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>Quote age</th></tr></thead><tbody>' +
+        list.map(item => '<tr><td><b>' + escapeHtml(item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')) + '</b></td><td>' + formatPrice(item.price) + '</td><td class="' + (item.changePct >= 0 ? 'positive-text' : 'negative-text') + '">' + (item.changePct > 0 ? '+' : '') + item.changePct.toFixed(2) + '%</td><td>' + Math.floor(Number(item.quoteAgeSeconds)) + 's</td></tr>').join('') +
         '</tbody></table>';
     const sorted = rows.slice().sort((a, b) => b.changePct - a.changePct);
     gainers.innerHTML = table(sorted.filter(item => item.changePct > 0).slice(0, 10));
     losers.innerHTML = table(sorted.filter(item => item.changePct < 0).slice(-10).reverse());
-    status.textContent = 'FYERS snapshot received at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + ' · ' + rows.length + ' valid symbols.';
-    logEvent('FYERS gainers/losers snapshot received (' + rows.length + ' symbols).', 'info');
+    status.textContent = 'COMPLETE FRESH FYERS snapshot · ' + rows.length + '/' + requested + ' quotes verified · received ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + '.';
+    logEvent('FYERS gainers/losers ranking accepted only after full-coverage and freshness validation (' + rows.length + '/' + requested + ').', 'info');
   } catch (error) {
-    gainers.innerHTML = '<div class="chart-empty">No verified mover data available. No values have been fabricated.</div>';
-    losers.innerHTML = '<div class="chart-empty">No verified mover data available. No values have been fabricated.</div>';
-    status.textContent = (error.message || 'Could not load movers.') + ' Reconnect FYERS if authentication expired.';
-    logEvent('FYERS market-mover request failed.', 'warn');
+    gainers.innerHTML = '<div class="chart-empty">Ranking blocked. No verified current mover list is available; no values have been fabricated.</div>';
+    losers.innerHTML = '<div class="chart-empty">Ranking blocked. No verified current mover list is available; no values have been fabricated.</div>';
+    status.textContent = (error.message || 'Could not load movers.');
+    logEvent('FYERS market-mover ranking blocked: ' + (error.message || 'unknown validation failure'), 'warn');
   } finally {
     if (button) button.disabled = false;
   }
