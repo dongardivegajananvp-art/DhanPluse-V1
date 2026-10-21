@@ -103,4 +103,4 @@ async function refreshStatus(){
   document.querySelector("#backendStatus").textContent="Unreachable";document.querySelector("#fyersStatus").textContent="Not verified";document.querySelector("#feedStatus").textContent="Unavailable";document.querySelector("#connection").textContent="Backend unavailable";
  }
 }
-await handleAuthCallback();await refreshStatus();renderPage("dashboard");setInterval(refreshStatus,10000);
+(async()=>{await handleAuthCallback();await refreshStatus();renderPage("dashboard");setInterval(refreshStatus,10000);})();
