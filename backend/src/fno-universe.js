@@ -14,7 +14,7 @@ export function buildFnoEquityUniverse(foMaster, cmMaster) {
   const cashByToken = new Map();
   const cashByAlias = new Map();
   for (const [ticker, item] of Object.entries(cmMaster)) {
-    if (!ticker.startsWith("NSE:") || !/-EQ$/.test(ticker) || item?.tradeStatus === 0) continue;
+    if (!ticker.startsWith("NSE:") || !/-EQ$/.test(ticker) || Number(item?.tradeStatus) === 0) continue;
     const tickerName = /^NSE:(.+)-EQ$/.exec(ticker)?.[1];
     if (!tickerName) continue;
     const aliases = [tickerName, item?.exSymbol, item?.exSymName, item?.symTicker, item?.underSym, item?.symDetails];
