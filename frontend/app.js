@@ -261,7 +261,7 @@ function renderCandleChart(key){
    if(response.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);}
    if(!response.ok||!result.ok||!Array.isArray(result.data)||!result.data.length)throw new Error(result.detail||result.error||"No verified candles returned.");
    const expectedSource=source==="live"?"FYERS websocket ticks":"FYERS";
-   const candles=result.data.filter(c=>c.verified===true&&c.source===expectedSource&&c.source!=="");&&Number.isFinite(Date.parse(c.timestamp))&&[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))&&Number(v)>0)&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)<=Math.min(Number(c.open),Number(c.close),Number(c.high)));
+   const candles=result.data.filter(c=>c.verified===true&&c.source===expectedSource&&Number.isFinite(Date.parse(c.timestamp))&&[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))&&Number(v)>0)&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)<=Math.min(Number(c.open),Number(c.close),Number(c.high)));
    if(!candles.length)throw new Error("Returned candles failed OHLC/source validation; chart blocked.");
    const shown=candles.slice(-100);
    const width=900,height=360,left=64,right=20,top=20,bottom=48,plotW=width-left-right,plotH=height-top-bottom;
