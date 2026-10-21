@@ -37,7 +37,7 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const rateLimits = new Map();
 
 function epochSeconds(value) {
-  if (typeof value === "number" || (typeof value === "string" && /^\\d+(?:\\.\\d+)?$/.test(value))) {
+  if (typeof value === "number" || (typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value))) {
     const n = Number(value);
     if (!Number.isFinite(n) || n <= 0) return null;
     return Math.floor(n > 1e12 ? n / 1000 : n);
