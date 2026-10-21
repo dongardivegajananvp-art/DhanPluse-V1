@@ -697,17 +697,17 @@ app.get('/api/market/movers', async (_req, res) => {
           if (!moversSymbols.includes(symbol) || (item.s && item.s !== 'ok') ||
               !Number.isFinite(price) || price <= 0) return null;
           received.add(symbol);
-          const quoteAgeSeconds = tradedAtEpoch
-            ? Math.max(0, Math.floor(Date.now() / 1000) - tradedAtEpoch)
+          const rawQuoteAgeSeconds = tradedAtEpoch
+            ? Math.floor(Date.now() / 1000) - tradedAtEpoch
             : null;
+          const quoteAgeSeconds = rawQuoteAgeSeconds === null ? null : Math.max(0, rawQuoteAgeSeconds);
           // A successful HTTP response is not proof that the underlying quote is fresh.
-          // Only exchange-timestamped quotes within three minutes during the NSE session
-          // are eligible to be called live; old or timestamp-less values stay visibly qualified.
+          // Missing, future-dated, or old exchange timestamps must never be called live.
           const priceStatus = !marketOpen
             ? 'LAST_KNOWN_PRICE'
-            : (!tradedAtEpoch
+            : (!tradedAtEpoch || rawQuoteAgeSeconds < 0
               ? 'TIME_UNVERIFIED'
-              : (quoteAgeSeconds <= 180 ? 'LIVE_QUOTE' : 'STALE_QUOTE'));
+              : (rawQuoteAgeSeconds <= 180 ? 'LIVE_QUOTE' : 'STALE_QUOTE'));
           return {
             symbol, price,
             change: Number.isFinite(change) ? change : null,
