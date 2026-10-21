@@ -20,6 +20,29 @@ let marketSocket = null;
 let streamConnected = false;
 let streamError = "";
 const latestTicks = new Map();
+const liveCandleIntervals = [1, 5, 15, 30, 60];
+const liveCandles = new Map();
+function recordLiveCandles(symbol, ltp, exchangeTime) {
+  const stampMs = exchangeTime * 1000;
+  for (const minutes of liveCandleIntervals) {
+    const bucketMs = Math.floor(stampMs / (minutes * 60000)) * minutes * 60000;
+    const key = symbol + "|" + minutes;
+    let rows = liveCandles.get(key) || [];
+    let candle = rows.find(row => row.bucketMs === bucketMs);
+    if (!candle) {
+      candle = { bucketMs, timestamp: new Date(bucketMs).toISOString(), open: ltp, high: ltp, low: ltp, close: ltp, source: "FYERS websocket ticks", verified: true };
+      rows.push(candle);
+      rows.sort((a, b) => a.bucketMs - b.bucketMs);
+      if (rows.length > 300) rows = rows.slice(-300);
+      liveCandles.set(key, rows);
+    } else {
+      candle.high = Math.max(candle.high, ltp);
+      candle.low = Math.min(candle.low, ltp);
+      candle.close = ltp;
+    }
+  }
+}
+
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGIN || "").split(",").map(x => x.trim()).filter(Boolean));
 if (redirectUri) { try { allowedOrigins.add(new URL(redirectUri).origin); } catch {} }
 app.use(cors({ origin(origin, callback) {
@@ -66,6 +89,7 @@ function parseTick(raw) {
       chp: Number.isFinite(Number(item.chp ?? item.v?.chp)) ? Number(item.chp ?? item.v?.chp) : null,
       updatedAt: new Date(exchangeTime * 1000).toISOString()
     });
+    recordLiveCandles(symbol, ltp, exchangeTime);
   }
 }
 
@@ -291,6 +315,19 @@ app.get("/api/market/quotes", requireSession, (_req, res) => {
     detail: streamConnected ? "Socket connected, but both index symbols do not yet have fresh exchange-timestamped ticks." : (streamError || "FYERS market socket is reconnecting."),
     marketSocketConnected: streamConnected, retryAfterSeconds: 5
   });
+});
+app.get("/api/market/live-candles", requireSession, (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
+  const resolution = Number(req.query.resolution || 5);
+  if (!allowedSymbols.includes(symbol)) return res.status(400).json({ ok: false, error: "Live tick candles are currently enabled only for NIFTY and BANKNIFTY." });
+  if (!liveCandleIntervals.includes(resolution)) return res.status(400).json({ ok: false, error: "Live candle resolution must be 1, 5, 15, 30, or 60 minutes." });
+  const now = Date.now();
+  const rows = (liveCandles.get(symbol + "|" + resolution) || []).filter(row => now - row.bucketMs <= 24 * 60 * 60 * 1000);
+  if (!rows.length) return res.status(503).json({ ok: false, error: "No verified live tick candles have been collected yet.", detail: "Connect FYERS and wait for fresh exchange-timestamped ticks. Historical candles are available through /api/market/candles." });
+  const latest = rows[rows.length - 1];
+  if (now - Date.parse(latest.timestamp) > 120000) return res.status(503).json({ ok: false, error: "Live tick candle is stale; live analysis blocked.", lastCandleAt: latest.timestamp });
+  res.json({ ok: true, symbol, resolution, source: "FYERS websocket ticks", fetchedAt: new Date().toISOString(), count: rows.length, volumeAvailable: false, data: rows.map(({ bucketMs, ...row }) => row) });
 });
 app.get("/api/market/candles", requireSession, async (req, res) => {
   const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
