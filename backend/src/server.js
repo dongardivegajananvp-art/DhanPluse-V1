@@ -326,7 +326,8 @@ app.get("/api/market/live-candles", requireSession, (req, res) => {
   const rows = (liveCandles.get(symbol + "|" + resolution) || []).filter(row => now - row.bucketMs <= 24 * 60 * 60 * 1000);
   if (!rows.length) return res.status(503).json({ ok: false, error: "No verified live tick candles have been collected yet.", detail: "Connect FYERS and wait for fresh exchange-timestamped ticks. Historical candles are available through /api/market/candles." });
   const latest = rows[rows.length - 1];
-  if (now - Date.parse(latest.timestamp) > 120000) return res.status(503).json({ ok: false, error: "Live tick candle is stale; live analysis blocked.", lastCandleAt: latest.timestamp });
+  const tick = latestTicks.get(symbol);
+  if (!tick || now - Date.parse(tick.updatedAt) > 120000 || Date.parse(tick.updatedAt) > now + 30000) return res.status(503).json({ ok: false, error: "Live tick candle is stale; live analysis blocked.", lastTickAt: tick ? tick.updatedAt : null, lastCandleAt: latest.timestamp });
   res.json({ ok: true, symbol, resolution, source: "FYERS websocket ticks", fetchedAt: new Date().toISOString(), count: rows.length, volumeAvailable: false, data: rows.map(({ bucketMs, ...row }) => row) });
 });
 app.get("/api/market/candles", requireSession, async (req, res) => {
