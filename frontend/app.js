@@ -253,6 +253,41 @@ function renderLiveQuotes(key){
   target.append(el("p",String(error?.message||"Verified quotes unavailable.")+" No placeholder price is displayed."));
  }
 }
+async function renderStockExplorer(){
+ const box=el("section",undefined,"stock-explorer");
+ box.append(el("p","Loading fresh FYERS quotes for the supported stock subset…"));
+ panel.append(box);
+ if(!sessionToken){box.replaceChildren(el("p","Connect FYERS to load verified stock quotes. No sample prices are shown."));return;}
+ const refresh=el("button","Refresh verified quotes");refresh.type="button";
+ const status=el("p","Quotes must have exchange timestamps within 120 seconds.");
+ const tableHost=el("div",undefined,"option-chain-table-wrap");
+ const table=document.createElement("table");table.className="option-chain-table";
+ const head=document.createElement("thead"),hr=document.createElement("tr");
+ for(const name of ["Symbol","LTP (₹)","Change (₹)","Change %","Exchange time (IST)"]){const th=el("th",name);hr.append(th);}
+ head.append(hr);table.append(head);const tbody=document.createElement("tbody");table.append(tbody);tableHost.append(table);
+ box.replaceChildren(el("h3","Verified stock quotes · supported subset"),el("p","This is not yet the complete NSE F&O universe. Rows are shown only when FYERS returns a fresh, valid exchange timestamp."),refresh,status,tableHost);
+ async function load(){
+  refresh.disabled=true;status.textContent="Requesting fresh FYERS quotes…";tbody.replaceChildren();
+  try{
+   const r=await fetch(API_BASE+"/api/market/stock-quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
+   const data=await r.json();
+   if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Connect FYERS again.");}
+   if(!r.ok||!Array.isArray(data.data))throw new Error(data.error||"Fresh verified quotes unavailable.");
+   const rows=data.data.slice().sort((x,y)=>Number(y.v.chp)-Number(x.v.chp));
+   for(const item of rows){
+    const tr=document.createElement("tr");
+    const symbol=item.n.replace("NSE:","").replace("-EQ","");
+    const stamp=new Date(Number(item.v.tt)*1000);
+    const vals=[symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),Number(item.v.ch).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(Number(item.v.chp)>=0?"+":"")+Number(item.v.chp).toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})];
+    vals.forEach((v,i)=>{const td=el("td",v);if(i===3)td.style.color=Number(item.v.chp)>=0?"#63f0cb":"#ff718c";tr.append(td);});
+    tbody.append(tr);
+   }
+   status.textContent="Source: FYERS quotes API · "+rows.length+" fresh verified quote(s) · fetched "+new Date(data.fetchedAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST"+(data.missingSymbols?.length?(" · missing/stale: "+data.missingSymbols.map(x=>x.replace("NSE:","").replace("-EQ","")).join(", ")):"");
+  }catch(err){status.textContent=String(err?.message||"Verified quotes unavailable.")+" No stale or placeholder prices are shown.";}
+  finally{refresh.disabled=false;}
+ }
+ refresh.addEventListener("click",load);await load();
+}
 function renderQuotePanel(key){
  const box=el("section",undefined,"live-quotes");
  box.id="liveQuotePanel";
@@ -401,6 +436,7 @@ function renderPage(key){
  const [title,description]=pages[key]||["Module","Status unavailable."];
  panel.replaceChildren();
  if(key==="gap"){renderGap();return;}
+ if(key==="explorer"){renderStockExplorer();return;}
  if(key==="capital"){renderCapital();return;}
  if(key==="journal"){renderJournal();return;}
  if(key==="journalRules"){renderJournalRules();return;}
