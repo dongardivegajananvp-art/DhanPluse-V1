@@ -681,9 +681,12 @@ function renderSignalGate(){
   if(!sessionToken){status.textContent="Connect FYERS first; setup remains blocked.";run.disabled=false;return;}
   let quoteOK=false,candleOK=false;
   try{
-   const q=await fetch(API_BASE+"/api/market/quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}}),qd=await q.json();
+   const quoteEndpoint=symbol.value.startsWith("NSE:NIFTY")||symbol.value==="NSE:NIFTYBANK-INDEX"?"/api/market/quotes":"/api/market/stock-quotes";
+   const q=await fetch(API_BASE+quoteEndpoint,{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}}),qd=await q.json();
    if(q.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Reconnect.");}
-   quoteOK=q.ok&&qd.ok===true&&Array.isArray(qd.data)&&qd.data.some(x=>x.verified===true&&Number(x.ltp)>0&&Number.isFinite(Date.parse(x.updatedAt))&&Math.abs(Date.now()-Date.parse(x.updatedAt))<=120000);
+   const selectedQuote=(qd.data||[]).find(x=>x.n===symbol.value);
+   const quoteTime=Number(selectedQuote?.v?.tt)*1000;
+   quoteOK=q.ok&&qd.ok===true&&selectedQuote?.verified===true&&Number(selectedQuote?.v?.lp)>0&&quoteTime>0&&Math.abs(Date.now()-quoteTime)<=120000;
    const now=new Date(),from=new Date(Date.now()-7*86400000),fmt=d=>{const z=new Date(d.getTime()-d.getTimezoneOffset()*60000);return z.toISOString().slice(0,10);};
    const params=new URLSearchParams({symbol:symbol.value,resolution:"5",from:fmt(from),to:fmt(now)});
    const cr=await fetch(API_BASE+"/api/market/candles?"+params,{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}}),cd=await cr.json();
