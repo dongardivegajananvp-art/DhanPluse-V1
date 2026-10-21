@@ -535,10 +535,27 @@ async function loadMarketActivity() {
 }
 
 function dashboardMarkup() {
+  const chartSymbols = [
+    { symbol: 'NSE:NIFTY50-INDEX', name: 'NIFTY 50' },
+    { symbol: 'NSE:NIFTYBANK-INDEX', name: 'BANK NIFTY' },
+    ...stockExplorerMoverRows.map(row => ({
+      symbol: row.symbol,
+      name: row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')
+    }))
+  ];
+  const seenChartSymbols = new Set();
+  const chartSymbolOptions = chartSymbols.filter(item => {
+    if (!item.symbol || seenChartSymbols.has(item.symbol)) return false;
+    seenChartSymbols.add(item.symbol);
+    return true;
+  }).map(item => '<option value="' + escapeHtml(item.symbol) + '">' + escapeHtml(item.name) + '</option>').join('');
+  const chartUniverseNote = stockExplorerMoverRows.length
+    ? 'Symbol list includes ' + stockExplorerMoverRows.length + ' equities from the latest FYERS Stock Explorer snapshot.'
+    : 'Index candles are available here. Open Stock Explorer and refresh verified FYERS quotes to populate the F&O equity symbol list.';
   return '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
     '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
-    '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option><option value="NSE:RELIANCE-EQ">RELIANCE</option><option value="NSE:HDFCBANK-EQ">HDFC BANK</option><option value="NSE:ICICIBANK-EQ">ICICI BANK</option><option value="NSE:SBIN-EQ">SBI</option><option value="NSE:INFY-EQ">INFOSYS</option><option value="NSE:TCS-EQ">TCS</option></select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
-    '<div id="dashboardCandleStatus" class="hint">Choose a symbol and load verified historical candles.</div><div id="dashboardChart"><div class="chart-empty">Candlesticks have not been loaded yet.</div></div>' +
+    '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol">' + chartSymbolOptions + '</select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
+    '<div id="dashboardCandleStatus" class="hint">Choose a symbol and load verified historical candles. ' + escapeHtml(chartUniverseNote) + '</div><div id="dashboardChart"><div class="chart-empty">Candlesticks have not been loaded yet.</div></div>' +
     '<div class="chart-foot"><span id="chartSampleCount">Historical FYERS candles</span><span>OHLC · READ ONLY</span></div></article>' +
     '<div class="console-grid console-grid-2"><article class="console-section"><h4>Connection monitor</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend</span><b id="dashBackend">CHECKING</b></div><div class="data-row"><span>FYERS quote stream</span><b id="dashFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div></article><article class="console-section"><h4>Console modules</h4><div class="module-links"><button data-jump="Technical Indicators">Technical indicators</button><button data-jump="Option Chain">Option chain &amp; OI</button><button data-jump="Alerts">Price alerts</button><button data-jump="Holdings">Holdings &amp; positions</button></div></article></div>';
 }
