@@ -280,7 +280,8 @@ async function renderStockExplorer(){
     const tr=document.createElement("tr");
     const symbol=item.n.replace("NSE:","").replace("-EQ","");
     const stamp=new Date(Number(item.v.tt)*1000);
-    const vals=[symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),Number(item.v.ch).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(Number(item.v.chp)>=0?"+":"")+Number(item.v.chp).toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})];
+    const change=safeNumber(item.v.ch);
+    const vals=[symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),change===null?"—":change.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(Number(item.v.chp)>=0?"+":"")+Number(item.v.chp).toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})];
     vals.forEach((v,i)=>{const td=el("td",v);if(i===3)td.style.color=Number(item.v.chp)>=0?"#63f0cb":"#ff718c";tr.append(td);});
     tbody.append(tr);
   }
@@ -517,7 +518,7 @@ async function fetchStockQuotes(){
  if(!r.ok)throw new Error(data.detail||data.error||"Verified stock quotes unavailable.");
  const rows=verifiedQuoteRows(data);
  if(!rows.length)throw new Error("No supported stock quote has a fresh exchange timestamp. Results blocked.");
- return {rows, fetchedAt:data.fetchedAt, missingSymbols:Array.isArray(data.missingSymbols)?data.missingSymbols:[]};
+ return {rows, fetchedAt:data.fetchedAt, universeCount:Number.isFinite(Number(data.universeCount))?Number(data.universeCount):data.data.length, missingSymbols:Array.isArray(data.missingSymbols)?data.missingSymbols:[]};
 }
 function renderMovers(){
  panel.replaceChildren(el("h2","Verified NSE F&O Gainers & Losers"),el("p","Ranks current NSE F&O equities using the FYERS symbol master and fresh quotes. Quotes older than 120 seconds are rejected; rate-limited partial batches are not ranked."));
