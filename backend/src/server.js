@@ -15,7 +15,7 @@ const redirectUri = process.env.FYERS_REDIRECT_URI || "";
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGIN || "").split(",").map(x => x.trim()).filter(Boolean));
 if (redirectUri) { try { allowedOrigins.add(new URL(redirectUri).origin); } catch {} }
 app.use(cors({ origin(origin, callback) {
-  if (!origin || !allowedOrigins.size || allowedOrigins.has(origin)) return callback(null, true);
+  if (!origin || allowedOrigins.has(origin)) return callback(null, true);
   return callback(new Error("origin_not_allowed"));
 }}));
 
