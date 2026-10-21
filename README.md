@@ -8,17 +8,19 @@ A clean, verification-first rebuild of DhanPulse for Indian-market research usin
 - FYERS credentials stay server-side; never commit secrets.
 - Order placement remains disabled.
 - Candles must come from validated OHLC data; no synthetic candles or placeholder prices.
-- Rate limits use shared server-side cooldowns and bounded polling.
+- Rate limits use server-side cooldowns and bounded requests.
 - A feature is complete only after API, UI, and failure-state tests pass.
 
-## Architecture
-- `backend/`: API, FYERS authentication/session, market-data normalization, shared rate limiting.
-- `frontend/`: responsive single-page UI, API client, data freshness state, chart and feature modules.
-- `tests/`: unit and integration tests for data validation and failure handling.
-- `docs/`: architecture, acceptance criteria, deployment checklist.
+## Current branch status
+The `clean-rebuild` branch contains:
+- Server-side FYERS OAuth exchange with a one-time state and expiring dashboard session.
+- Historical daily-candle fetch and OHLCV validation for a first set of gap-analysis symbols.
+- Gap direction/size calculation and historical session gap-fill statistics.
+- A frontend flow for FYERS login and historical gap analysis.
 
-## Current status
-Scaffold only. No live market-data integration is claimed until the FYERS connection and returned quotes/candles are independently verified.
+It does **not** yet contain a live quote socket, full F&O Stock Explorer, general candlestick chart UI, option chain, or working scanners. Those features must not be implied by a healthy backend. No deployment has been triggered from this branch.
 
-## Local development
-Requirements: Node.js 20+. Install dependencies in each app only after its package manifest is present. Keep secrets in environment variables and never commit `.env` files.
+## Run locally
+Requirements: Node.js 20+. Configure environment variables from `backend/.env.example` in the backend process, install dependencies with `npm install` in `backend/`, then run `npm test` and `npm start`. Serve `frontend/` from a local static server and set `window.DHANPULSE_API_BASE` to the backend URL when not using the default `http://localhost:10000`.
+
+The `FYERS_REDIRECT_URI` must exactly match the redirect URI registered in the FYERS developer app and must point to the frontend page that handles the callback. Set `ALLOWED_ORIGIN` to the exact frontend origin. Keep all credentials in the deployment secret store, not in source files.
