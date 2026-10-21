@@ -357,6 +357,44 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
 // Index quotes are served from the authenticated FYERS WebSocket only.
 // Never fall back to REST polling here: the dashboard polls this route frequently,
 // and REST fallback caused repeated HTTP 429s while the socket was reconnecting.
+// Last-known index quotes are read-only and never treated as fresh ticks.
+app.get('/api/market/last-known-quotes', (req, res) => {
+  const rows = allowedSymbols.map(symbol => latestTicks.get(symbol)).filter(tick =>
+    tick && Number.isFinite(Number(tick.ltp)) && Number(tick.ltp) > 0 &&
+    Number.isFinite(Date.parse(tick.updatedAt))
+  );
+  if (rows.length !== allowedSymbols.length) {
+    return res.status(503).json({
+      ok: false,
+      error: 'No complete last-known FYERS index snapshot is available.',
+      availableSymbols: rows.map(tick => tick.symbol),
+      requiredSymbols: allowedSymbols
+    });
+  }
+  const newestTickAt = Math.max(...rows.map(tick => Date.parse(tick.updatedAt)));
+  const oldestTickAt = Math.min(...rows.map(tick => Date.parse(tick.updatedAt)));
+  const now = Date.now();
+  const marketOpen = nseRegularSessionNow();
+  res.set('Cache-Control', 'no-store');
+  return res.json({
+    ok: true,
+    source: 'last-known',
+    streamConnected: false,
+    marketOpen,
+    fetchedAt: new Date(newestTickAt).toISOString(),
+    quoteAgeSeconds: Math.max(0, Math.floor((now - oldestTickAt) / 1000)),
+    data: rows.map(tick => ({
+      n: tick.symbol,
+      v: {
+        lp: Number(tick.ltp),
+        tt: epochSeconds(tick.updatedAt),
+        ...(tick.ch === null || tick.ch === undefined ? {} : { ch: tick.ch }),
+        ...(tick.chp === null || tick.chp === undefined ? {} : { chp: tick.chp })
+      }
+    }))
+  });
+});
+
 app.get('/api/market/quotes', async (_req, res) => {
   if (!accessToken) {
     return res.status(401).json({ ok: false, error: 'Connect FYERS first.' });
