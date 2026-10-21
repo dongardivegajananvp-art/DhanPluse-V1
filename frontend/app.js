@@ -313,7 +313,6 @@ function renderCandleChart(key){
    const last=shown[shown.length-1];
    details.textContent="Source: "+result.source+" · "+candles.length+" valid candles returned; showing latest "+shown.length+" · Last candle close ₹"+Number(last.close).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})+" · Candle time "+new Date(last.timestamp).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" · Fetched "+new Date(result.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+(source==="live"?" · Volume unavailable (not fabricated).":".");
    status.textContent=symbol+" · "+(interval==="D"?"daily":interval+"-minute")+" candles · "+(source==="live"?"Live FYERS tick aggregation":"Verified FYERS historical data");
-   status.textContent=symbol+" · "+(interval==="D"?"daily":interval+"-minute")+" candles · Verified FYERS historical data";
   }catch(error){status.textContent=String(error?.message||"Verified candles unavailable.")+" No placeholder candles are displayed.";chartHost.replaceChildren();details.textContent="";}
   finally{submit.disabled=false;}
  });
