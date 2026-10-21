@@ -216,14 +216,14 @@ function requireSession(req, res, next) {
   return next();
 }
 
-async function fyersHistory(symbol, from, to) {
+async function fyersHistory(symbol, from, to, resolution = "D") {
   if (!accessToken) { const e = new Error("Connect FYERS first."); e.statusCode = 401; throw e; }
-  const key = "history";
+  const key = "history:" + resolution;
   const limit = rateLimits.get(key) || { until: 0, backoffMs: 60000 };
   if (Date.now() < limit.until) { const e = new Error("FYERS historical-data cooldown active; wait before retrying."); e.statusCode = 429; throw e; }
   const url = new URL("https://api-t1.fyers.in/data/history");
   url.searchParams.set("symbol", symbol);
-  url.searchParams.set("resolution", "D");
+  url.searchParams.set("resolution", resolution);
   url.searchParams.set("date_format", "1");
   url.searchParams.set("range_from", from);
   url.searchParams.set("range_to", to);
@@ -292,7 +292,43 @@ app.get("/api/market/quotes", requireSession, (_req, res) => {
     marketSocketConnected: streamConnected, retryAfterSeconds: 5
   });
 });
-app.get("/api/market/candles", (_req, res) => res.status(503).json({ error: "live_candle_route_not_implemented", message: "Use authenticated daily history through /api/gap-analysis/history for the verified gap-analysis release.", data: [] }));
+app.get("/api/market/candles", requireSession, async (req, res) => {
+  const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
+  const resolution = String(req.query.resolution || "5");
+  const from = String(req.query.from || "");
+  const to = String(req.query.to || "");
+  const allowedSymbolsForCandles = new Set([
+    "NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX",
+    "NSE:RELIANCE-EQ", "NSE:TCS-EQ", "NSE:INFY-EQ",
+    "NSE:HDFCBANK-EQ", "NSE:ICICIBANK-EQ", "NSE:SBIN-EQ",
+    "NSE:ITC-EQ", "NSE:LT-EQ", "NSE:AXISBANK-EQ", "NSE:BAJFINANCE-EQ"
+  ]);
+  const datePattern = /^\\d{4}-\\d{2}-\\d{2}$/;
+  const isRealDate = value => datePattern.test(value) && Number.isFinite(Date.parse(value + "T00:00:00Z")) && new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
+  const allowedResolutions = new Set(["1", "2", "3", "5", "10", "15", "20", "30", "60", "D"]);
+  if (!allowedSymbolsForCandles.has(symbol)) return res.status(400).json({ ok: false, error: "Unsupported symbol for this verified candle release." });
+  if (!allowedResolutions.has(resolution)) return res.status(400).json({ ok: false, error: "Resolution must be a supported FYERS interval: 1, 2, 3, 5, 10, 15, 20, 30, 60, or D." });
+  if (!isRealDate(from) || !isRealDate(to) || from > to) return res.status(400).json({ ok: false, error: "Provide valid from/to dates in YYYY-MM-DD format." });
+  const days = (Date.parse(to + "T00:00:00Z") - Date.parse(from + "T00:00:00Z")) / 86400000;
+  const maxDays = resolution === "D" ? 365 : 30;
+  if (days > maxDays) return res.status(400).json({ ok: false, error: "Date range exceeds " + maxDays + " days for this candle interval." });
+  try {
+    const candles = await fyersHistory(symbol, from, to, resolution);
+    if (!candles.length) return res.status(422).json({ ok: false, error: "FYERS returned no candles for this symbol and interval.", data: [] });
+    res.set("Cache-Control", "no-store").json({
+      ok: true, symbol, resolution, source: "FYERS historical candles",
+      fetchedAt: new Date().toISOString(), count: candles.length,
+      data: candles.map(c => ({ timestamp: c.timestamp, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume, verified: true, source: "FYERS" }))
+    });
+  } catch (error) {
+    const status = Number(error.statusCode) || 502;
+    res.status(status).json({
+      ok: false,
+      error: status === 429 ? "FYERS historical data rate limit; retry after cooldown." : status === 401 ? "FYERS session expired; reconnect." : "Candles could not be verified.",
+      detail: String(error.message || "Unknown upstream error").slice(0, 220), data: []
+    });
+  }
+});
 app.all("/api/orders/*", (_req, res) => res.status(403).json({ error: "Order placement is disabled during testing." }));
 app.use((err, _req, res, _next) => {
   if (err?.message === "origin_not_allowed") return res.status(403).json({ error: "origin_not_allowed" });
