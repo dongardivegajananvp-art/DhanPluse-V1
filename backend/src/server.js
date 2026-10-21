@@ -162,7 +162,7 @@ function liveSnapshot() {
   };
 }
 
-app.get("/", (_req, res) => res.json({ service: "DhanPulse clean backend", version: "0.2.0", status: "online", endpoints: ["/health", "/api/status", "/api/fyers/auth/start", "/api/fyers/auth/exchange", "/api/market/quotes", "/api/market/candles", "/api/market/live-candles", "/api/gap-analysis/history"], orderPlacement: "disabled" }));
+app.get("/", (_req, res) => res.json({ service: "DhanPulse clean backend", version: "0.2.0", status: "online", endpoints: ["/health", "/api/status", "/api/fyers/auth/start", "/api/fyers/auth/exchange", "/api/market/quotes", "/api/market/candles", "/api/market/live-candles", "/api/fyers/options-chain", "/api/gap-analysis/history"], orderPlacement: "disabled" }));
 app.get("/health", (_req, res) => {
   const snapshot = liveSnapshot();
   res.set("Cache-Control", "no-store").json({
