@@ -101,9 +101,44 @@ function renderGap(){
  });
  panel.append(form,output);
 }
+function renderCapital(){
+ panel.replaceChildren(el("h2","Capital Protection Calculator"),el("p","Risk-sizing calculator only. Enter your own planned prices; these are not live market quotes or trade recommendations."));
+ const form=el("form",undefined,"gap-form");
+ const fields=[
+  ["capital","Trading capital (₹)","1000","number"],
+  ["riskPct","Maximum risk per trade (%)","1","number"],
+  ["entry","Planned entry price (₹)","","number"],
+  ["stop","Planned stop-loss price (₹)","","number"],
+  ["target","Planned target price (₹)","","number"]
+ ];
+ for(const [name,label,value,type] of fields){const wrap=el("label",label);const input=document.createElement("input");input.name=name;input.type=type;input.value=value;input.required=true;input.min="0";input.step="any";if(name==="riskPct"){input.min="0.1";input.max="2";input.step="0.1";}wrap.append(input);form.append(wrap);}
+ const btn=el("button","Calculate position size");btn.type="submit";form.append(btn);
+ const out=el("div",undefined,"gap-result");out.setAttribute("aria-live","polite");
+ form.addEventListener("submit",ev=>{ev.preventDefault();const v=Object.fromEntries(fields.map(([n])=>[n,Number(form.elements[n].value)]));out.replaceChildren();if(!Object.values(v).every(Number.isFinite)||v.capital<=0||v.riskPct<=0||v.entry<=0||v.stop<=0||v.target<=0||v.entry===v.stop||((v.target-v.entry)*(v.entry-v.stop)<=0)){out.append(el("p","Check inputs: for a long plan target must be above entry and stop below entry; for a short plan target must be below entry and stop above entry.","risk-note"));return;}
+ const riskPerUnit=Math.abs(v.entry-v.stop),rewardPerUnit=Math.abs(v.target-v.entry),riskCash=v.capital*v.riskPct/100,qty=Math.floor(riskCash/riskPerUnit),rr=rewardPerUnit/riskPerUnit;
+ out.append(el("h3","Planned position sizing"),el("p","Max planned risk: ₹"+riskCash.toFixed(2)),el("p","Risk per unit: ₹"+riskPerUnit.toFixed(2)),el("p","Maximum quantity by risk: "+qty),el("p","Estimated target reward at that quantity: ₹"+(rewardPerUnit*qty).toFixed(2)),el("p","Planned risk/reward: 1:"+rr.toFixed(2)),el("p","This excludes brokerage, taxes, slippage, lot-size constraints and gaps. Verify all prices independently before use.","risk-note"));if(qty<1)out.append(el("p","Risk budget is smaller than the risk on one unit. Skip or reduce risk; do not force a trade.","risk-note"));if(rr<2)out.append(el("p","This plan is below the preferred minimum 1:2 risk/reward threshold.","risk-note"));
+ });
+ panel.append(form,out);
+}
+function readPaperTrades(){try{return JSON.parse(localStorage.getItem("dhanpulsePaperTrades")||"[]");}catch{return [];}}
+function renderJournal(){
+ panel.replaceChildren(el("h2","Paper Journal"),el("p","Paper trades only. Records stay in this browser on this device; they are not sent to FYERS."));
+ const form=el("form",undefined,"gap-form");
+ const fields=[["symbol","Symbol / setup","NIFTY"],["side","Side","LONG"],["entry","Entry price",""],["stop","Stop-loss price",""],["target","Target price",""],["exit","Exit price (optional)",""],["notes","Rule adherence / notes",""]];
+ for(const [name,label,value] of fields){const wrap=el("label",label);const input=name==="notes"?document.createElement("textarea"):document.createElement("input");input.name=name;input.value=value;input.required=!["exit","notes"].includes(name);if(name==="side"){input.type="text";input.value="LONG";input.placeholder="LONG or SHORT";}else if(name!=="notes"){input.type="number";input.min="0";input.step="any";}wrap.append(input);form.append(wrap);}
+ const ruleWrap=el("label","Did you follow your written rules?");const rule=document.createElement("select");rule.name="followed";for(const [v,t] of [["yes","Yes"],["no","No"],["partial","Partly"]]){const o=el("option",t);o.value=v;rule.append(o);}ruleWrap.append(rule);form.append(ruleWrap);
+ const btn=el("button","Save paper trade");btn.type="submit";form.append(btn);
+ const out=el("div",undefined,"gap-result");
+ form.addEventListener("submit",ev=>{ev.preventDefault();const side=form.elements.side.value.trim().toUpperCase();const entry=Number(form.elements.entry.value),stop=Number(form.elements.stop.value),target=Number(form.elements.target.value),exitValue=form.elements.exit.value===""?null:Number(form.elements.exit.value);if(!["LONG","SHORT"].includes(side)||![entry,stop,target].every(x=>Number.isFinite(x)&&x>0)||entry===stop||(side==="LONG"&&(stop>=entry||target<=entry))||(side==="SHORT"&&(stop<=entry||target>=entry))||(exitValue!==null&&(!Number.isFinite(exitValue)||exitValue<=0))){out.replaceChildren(el("p","Invalid setup. Use LONG/SHORT with a stop and target on the correct sides of entry.","risk-note"));return;}const trade={id:Date.now(),createdAt:new Date().toISOString(),symbol:form.elements.symbol.value.trim()||"Unspecified",side,entry,stop,target,exit:exitValue,followed:form.elements.followed.value,notes:form.elements.notes.value.trim()};const rows=readPaperTrades();rows.unshift(trade);try{localStorage.setItem("dhanpulsePaperTrades",JSON.stringify(rows));form.reset();renderJournal();}catch{out.replaceChildren(el("p","Could not save locally. Check browser storage settings.","risk-note"));}});
+ panel.append(form,out,el("h3","Saved paper trades"));
+ const rows=readPaperTrades();if(!rows.length)panel.append(el("p","No paper trades recorded yet."));else{const list=el("div",undefined,"gap-result");for(const t of rows.slice(0,100)){const box=el("article",undefined,"journal-item");box.append(el("h3",t.symbol+" · "+t.side),el("p","Entry ₹"+t.entry+" · SL ₹"+t.stop+" · Target ₹"+t.target+(t.exit===null?"":" · Exit ₹"+t.exit)),el("p","Rule adherence: "+t.followed+" · "+new Date(t.createdAt).toLocaleString()),el("p",t.notes||"No notes"));const del=el("button","Delete record");del.type="button";del.addEventListener("click",()=>{localStorage.setItem("dhanpulsePaperTrades",JSON.stringify(readPaperTrades().filter(x=>x.id!==t.id)));renderJournal();});box.append(del);list.append(box);}panel.append(list);}
+}
 function renderPage(key){
- const [title,description]=pages[key];panel.replaceChildren();
+ const [title,description]=pages[key]||["Module","Status unavailable."];
+ panel.replaceChildren();
  if(key==="gap"){renderGap();return;}
+ if(key==="capital"){renderCapital();return;}
+ if(key==="journal"){renderJournal();return;}
  panel.append(el("h2",title),el("p",description));
  if(key==="dashboard"){const b=el("button","Open Gap-Up / Gap-Down Analysis");b.addEventListener("click",()=>{document.querySelector('[data-tab="gap"]').click();});panel.append(b);}
 }
