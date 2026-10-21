@@ -527,10 +527,31 @@ async function loadMarketActivity() {
     if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
       throw new Error(result.detail || result.error || 'Verified FYERS snapshot unavailable.');
     }
-    const rows = result.data.filter(row => row && typeof row.symbol === 'string' &&
-      Number.isFinite(Number(row.price)) && Number(row.price) > 0);
-    if (!rows.length) throw new Error('FYERS returned no valid quote rows.');
-    const changes = rows.map(row => Number(row.changePct)).filter(Number.isFinite);
+    if (result.marketSession !== 'OPEN') {
+      throw new Error('MARKET CLOSED — current breadth and movers are unavailable. Last-known prices are not ranked as live activity.');
+    }
+    const requested = Number(result.requestedSymbols);
+    const received = Number(result.receivedSymbols);
+    if (result.partial === true || !Number.isFinite(requested) || requested < 1 ||
+        !Number.isFinite(received) || received !== requested ||
+        (Array.isArray(result.failedSymbols) && result.failedSymbols.length > 0)) {
+      throw new Error('INCOMPLETE QUOTE COVERAGE — market activity is blocked until every requested symbol is returned.');
+    }
+    const rows = result.data.filter(row => {
+      if (!row || typeof row.symbol !== 'string' || row.priceStatus !== 'LIVE_QUOTE' ||
+          !Number.isFinite(Number(row.price)) || Number(row.price) <= 0 ||
+          !Number.isFinite(Number(row.changePct)) ||
+          !Number.isFinite(Number(row.quoteAgeSeconds)) ||
+          Number(row.quoteAgeSeconds) < 0 || Number(row.quoteAgeSeconds) > 180 ||
+          !row.priceAsOf) return false;
+      const tradedAt = Date.parse(row.priceAsOf);
+      const ageSeconds = (Date.now() - tradedAt) / 1000;
+      return Number.isFinite(tradedAt) && ageSeconds >= 0 && ageSeconds <= 180;
+    });
+    if (rows.length !== requested) {
+      throw new Error('FRESHNESS CHECK FAILED — only ' + rows.length + ' of ' + requested + ' quotes passed validation. Breadth and rankings blocked.');
+    }
+    const changes = rows.map(row => Number(row.changePct));
     const advancers = changes.filter(value => value > 0).length;
     const decliners = changes.filter(value => value < 0).length;
     const unchanged = rows.length - advancers - decliners;
@@ -539,25 +560,28 @@ async function loadMarketActivity() {
     set('activityAdvancers', advancers);
     set('activityDecliners', decliners);
     set('activityUnchanged', unchanged);
-    const sorted = rows.filter(row => Number.isFinite(Number(row.changePct)))
-      .sort((a, b) => Number(b.changePct) - Number(a.changePct));
+    const sorted = rows.slice().sort((a, b) => Number(b.changePct) - Number(a.changePct));
     const movers = [...sorted.slice(0, 5), ...sorted.slice(-5).reverse()];
     table.innerHTML = movers.length
-      ? '<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th></tr></thead><tbody>' +
+      ? '<table class="console-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change %</th><th>Quote age</th></tr></thead><tbody>' +
         movers.map(row => '<tr><td>' + escapeHtml(row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')) +
           '</td><td>' + formatPrice(Number(row.price)) + '</td><td class="' +
           (Number(row.changePct) > 0 ? 'positive-text' : Number(row.changePct) < 0 ? 'negative-text' : '') + '">' +
-          (Number(row.changePct) > 0 ? '+' : '') + Number(row.changePct).toFixed(2) + '%</td></tr>').join('') +
+          (Number(row.changePct) > 0 ? '+' : '') + Number(row.changePct).toFixed(2) + '%</td><td>' +
+          Math.floor(Number(row.quoteAgeSeconds)) + 's</td></tr>').join('') +
         '</tbody></table>'
-      : '<div class="chart-empty">Change percentage was not returned.</div>';
-    status.textContent = 'Verified FYERS snapshot at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') +
-      ' · ' + rows.length + ' of ' + Number(result.requestedSymbols ?? rows.length) + ' selected symbols returned.' +
-      (result.partial ? ' Partial snapshot: some symbols were unavailable.' : '');
-    logEvent('Market Activity snapshot received (' + rows.length + ' verified quote rows).', result.partial ? 'warn' : 'info');
+      : '<div class="chart-empty">No complete verified quote set was returned.</div>';
+    status.textContent = 'COMPLETE FRESH FYERS snapshot · ' + rows.length + '/' + requested +
+      ' quotes passed exchange-timestamp checks · received ' +
+      new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + '.';
+    logEvent('Market Activity accepted only a complete fresh FYERS snapshot (' + rows.length + '/' + requested + ').', 'info');
   } catch (error) {
-    status.textContent = (error.message || 'Market snapshot unavailable.') + ' Connect FYERS or retry. No figures were fabricated.';
-    table.innerHTML = '<div class="chart-empty">Verified market breadth is unavailable.</div>';
-    logEvent('Market Activity snapshot failed: ' + (error.message || 'unknown error'), 'warn');
+    ['activityTotal', 'activityAdvancers', 'activityDecliners', 'activityUnchanged'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.textContent = '—';
+    });
+    status.textContent = (error.message || 'Market snapshot unavailable.') + ' No live breadth or ranking is shown unless the complete fresh quote set passes validation.';
+    table.innerHTML = '<div class="chart-empty">Market activity blocked. Complete, fresh exchange-timestamped quotes are required.</div>';
+    logEvent('Market Activity snapshot blocked: ' + (error.message || 'unknown validation failure'), 'warn');
   } finally {
     if (button) button.disabled = false;
   }
