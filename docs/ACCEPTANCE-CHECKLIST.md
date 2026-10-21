@@ -27,7 +27,7 @@
 - [ ] Every navigation item opens a real page/module, not only a changed heading.
 - [ ] Loading, empty, stale, disconnected, rate-limited, and server-error states are tested.
 - [ ] Mobile and desktop layouts are checked.
-- [ ] Build and automated tests pass before deployment.
+- [x] Backend automated tests pass before deployment (14 tests passed, 0 failed in test-service logs on 2026-10-21). Frontend/device and production smoke tests remain pending.
 - [ ] Production smoke test verifies actual API responses and current asset version.
 
 ## Safety
