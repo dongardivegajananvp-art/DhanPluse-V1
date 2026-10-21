@@ -288,6 +288,48 @@ async function renderStockExplorer(){
  }
  refresh.addEventListener("click",load);await load();
 }
+function renderTechnicalIndicators(){
+ panel.replaceChildren(el("h2","Technical Indicators"),el("p","Indicators are calculated locally from verified FYERS historical candles only. This is descriptive analysis, not a trade signal. Missing or invalid candles block results."));
+ if(!sessionToken){panel.append(el("p","Connect FYERS first to calculate indicators from authenticated historical candles."));return;}
+ const form=el("form",undefined,"gap-form");
+ const symbolLabel=el("label","Symbol"),symbol=document.createElement("select");symbol.name="symbol";
+ for(const [value,title] of [["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],["NSE:RELIANCE-EQ","RELIANCE"],["NSE:TCS-EQ","TCS"],["NSE:INFY-EQ","INFY"],["NSE:HDFCBANK-EQ","HDFCBANK"],["NSE:ICICIBANK-EQ","ICICIBANK"],["NSE:SBIN-EQ","SBIN"],["NSE:ITC-EQ","ITC"],["NSE:LT-EQ","LT"],["NSE:AXISBANK-EQ","AXISBANK"],["NSE:BAJFINANCE-EQ","BAJFINANCE"]]){const o=el("option",title);o.value=value;symbol.append(o);}
+ symbolLabel.append(symbol);form.append(symbolLabel);
+ const intervalLabel=el("label","Candle interval"),interval=document.createElement("select");interval.name="resolution";
+ for(const [v,t] of [["5","5 minutes"],["15","15 minutes"],["30","30 minutes"],["60","1 hour"],["D","Daily"]]){const o=el("option",t);o.value=v;interval.append(o);}
+ intervalLabel.append(interval);form.append(intervalLabel);
+ const btn=el("button","Calculate verified indicators");btn.type="submit";form.append(btn);
+ const status=el("p","Ready to request verified candles."),out=el("div",undefined,"gap-result");out.setAttribute("aria-live","polite");
+ form.addEventListener("submit",async ev=>{
+  ev.preventDefault();btn.disabled=true;status.textContent="Loading verified FYERS candles…";out.replaceChildren();
+  const today=istDateString(new Date()),days=interval.value==="D"?120:14,from=istDateString(new Date(Date.now()-days*86400000));
+  const q=new URLSearchParams({symbol:symbol.value,resolution:interval.value,from,to:today});
+  try{
+   const r=await fetch(API_BASE+"/api/market/candles?"+q,{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
+   const d=await r.json();if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("Session expired. Connect FYERS again.");}
+   if(!r.ok||!d.ok||!Array.isArray(d.data))throw new Error(d.error||d.detail||"Verified candles unavailable.");
+   const rows=d.data.filter(c=>c.verified===true&&c.source==="FYERS"&&Number.isFinite(Date.parse(c.timestamp))&&[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))&&Number(v)>0)&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)<=Math.min(Number(c.open),Number(c.close),Number(c.high))).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
+   const closes=rows.map(c=>Number(c.close));
+   if(closes.length<20)throw new Error("Only "+closes.length+" valid candles; at least 20 are required. Indicators blocked.");
+   const sma20=closes.slice(-20).reduce((a,b)=>a+b,0)/20;
+   const changes=closes.slice(1).map((v,i)=>v-closes[i]);
+   const recent=changes.slice(-14),gains=recent.reduce((a,v)=>a+Math.max(v,0),0)/14,losses=recent.reduce((a,v)=>a+Math.max(-v,0),0)/14;
+   const rsi=losses===0?(gains===0?50:100):100-(100/(1+gains/losses));
+   const last=closes[closes.length-1],previous=closes[closes.length-2];
+   out.append(el("h3",symbol.options[symbol.selectedIndex].text+" · Verified indicator snapshot"));
+   out.append(el("p","Last candle close: ₹"+last.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})+" · Candle time: "+new Date(rows[rows.length-1].timestamp).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})));
+   out.append(el("p","SMA 20: "+sma20.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})+" · Close is "+(last>sma20?"above":last<sma20?"below":"at")+" SMA 20."));
+   out.append(el("p","RSI 14 (simple average gain/loss): "+rsi.toFixed(2)+(rsi>=70?" · traditionally overbought zone":rsi<=30?" · traditionally oversold zone":" · between 30 and 70")));
+   out.append(el("p","Latest candle close change: "+(last-previous>=0?"+":"")+(last-previous).toFixed(2)));
+   out.append(el("p","Source: "+d.source+" · Valid candles used: "+rows.length+" · Fetched: "+new Date(d.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+". RSI uses a simple 14-period average, not Wilder smoothing; this is not a buy/sell recommendation."));
+   status.textContent="Indicators calculated from verified historical candles.";
+  }catch(err){status.textContent=String(err.message||err);out.replaceChildren(el("p","No indicator result shown because the data check failed.","risk-note"));}
+  finally{btn.disabled=false;}
+ });
+ panel.append(form,status,out);
+ form.requestSubmit();
+}
+
 function renderQuotePanel(key){
  const box=el("section",undefined,"live-quotes");
  box.id="liveQuotePanel";
@@ -440,6 +482,7 @@ function renderPage(key){
  if(key==="capital"){renderCapital();return;}
  if(key==="journal"){renderJournal();return;}
  if(key==="journalRules"){renderJournalRules();return;}
+ if(key==="technical"){renderTechnicalIndicators();return;}
  if(key==="options"){renderOptionChain();return;}
  panel.append(el("h2",title),el("p",description));
  if(key==="charts"){renderCandleChart(key);return;}
