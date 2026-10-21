@@ -334,7 +334,7 @@ app.get("/api/market/stock-quotes", requireSession, async (_req, res) => {
     const body = await response.json().catch(()=>({}));
     if (response.status===429) return res.status(429).json({ok:false,error:"FYERS quote rate limit reached. Wait before retrying."});
     if (!response.ok || body.s!=="ok" || !Array.isArray(body.d)) return res.status(response.status===401?401:502).json({ok:false,error:"FYERS stock quotes unavailable or unverified.",detail:String(body.message||"Invalid quote response").slice(0,160)});
-    const data = body.d.filter(item => item && symbols.includes(item.n) && item.s==="ok" && item.v)
+    const data = body.d.filter(item => item && symbols.includes(item.n) && item.v)
       .map(item => {
         const v=item.v;
         const lp=Number(v.lp), tt=Number(v.tt), ch=Number(v.ch), chp=Number(v.chp);
