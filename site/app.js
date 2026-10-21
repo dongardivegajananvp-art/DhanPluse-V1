@@ -375,6 +375,7 @@ function stockExplorerMarkup() {
 }
 
 let stockExplorerRequestRunning = false;
+let stockExplorerCanRank = false;
 
 async function loadStockExplorerQuotes() {
   if (stockExplorerRequestRunning || currentTab !== 'Stock Explorer') return;
@@ -396,9 +397,20 @@ async function loadStockExplorerQuotes() {
       row && typeof row.symbol === 'string' &&
       Number.isFinite(Number(row.price)) && Number(row.price) > 0
     );
-    renderStockExplorerResults();
     const count = Number(result.receivedSymbols ?? stockExplorerMoverRows.length);
     const requested = Number(result.requestedSymbols ?? count);
+    const missingSymbols = Array.isArray(result.failedSymbols) ? result.failedSymbols : [];
+    const allRowsFresh = stockExplorerMoverRows.length === requested && stockExplorerMoverRows.every(row => {
+      if (row.priceStatus !== 'LIVE_QUOTE' || !Number.isFinite(Number(row.changePct)) ||
+          !Number.isFinite(Number(row.quoteAgeSeconds)) || Number(row.quoteAgeSeconds) < 0 ||
+          Number(row.quoteAgeSeconds) > 180 || !row.priceAsOf) return false;
+      const tradedAt = Date.parse(row.priceAsOf);
+      const ageSeconds = (Date.now() - tradedAt) / 1000;
+      return Number.isFinite(tradedAt) && ageSeconds >= 0 && ageSeconds <= 180;
+    });
+    stockExplorerCanRank = result.marketSession === 'OPEN' && result.partial !== true &&
+      requested > 0 && count === requested && missingSymbols.length === 0 && allRowsFresh;
+    renderStockExplorerResults();
     const sourceLabel = result.universe === 'FYERS-NSE-FO-symbol-master'
       ? 'FYERS NSE F&O master'
       : 'configured fallback universe';
@@ -411,7 +423,8 @@ async function loadStockExplorerQuotes() {
       ' · Universe: ' + sourceLabel + ' · Quotes: ' + count + '/' + requested +
       ' · Live: ' + liveCount + ' · Last-known: ' + lastKnownCount + ' · Stale/time-unverified: ' + staleCount +
       (result.partial ? ' · INCOMPLETE coverage; missing/unavailable: ' + missing.length +
-        (missing.length ? ' (' + missing.slice(0, 8).join(', ') + (missing.length > 8 ? ', …' : '') + ')' : '') : ' · Quote coverage complete for returned universe');
+        (missing.length ? ' (' + missing.slice(0, 8).join(', ') + (missing.length > 8 ? ', …' : '') + ')' : '') : ' · Quote coverage complete for returned universe') +
+      (stockExplorerCanRank ? ' · FULL LIVE RANKING VERIFIED' : ' · NOT A FULL LIVE RANKING; showing available quotes without ranking');
     logEvent('Stock Explorer FYERS snapshot (' + count + '/' + requested + '; ' + sourceLabel +
       '; live=' + liveCount + '; last-known=' + lastKnownCount + '; stale/unverified=' + staleCount +
       '; missing=' + missing.length + ').', result.partial ? 'warn' : 'info');
@@ -437,11 +450,14 @@ function renderStockExplorerResults() {
   // Use the backend's current FYERS NSE F&O master snapshot, not a short hard-coded
   // stock list. Rank equity rows by verified percent change before showing indices.
   const dynamicRows=stockExplorerMoverRows.map(x=>({symbol:x.symbol,name:x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''),kind:'equity',tab:'Gainers & Losers',note:'Verified FYERS quote snapshot',price:Number(x.price),changePct:x.changePct==null?null:Number(x.changePct)}));
-  dynamicRows.sort((a,b)=>{
-    const av=Number.isFinite(a.changePct)?a.changePct:-Infinity;
-    const bv=Number.isFinite(b.changePct)?b.changePct:-Infinity;
-    return bv-av;
-  });
+  // Do not present a partial or after-hours snapshot as a full-universe live ranking.
+  if(stockExplorerCanRank){
+    dynamicRows.sort((a,b)=>{
+      const av=Number.isFinite(a.changePct)?a.changePct:-Infinity;
+      const bv=Number.isFinite(b.changePct)?b.changePct:-Infinity;
+      return bv-av;
+    });
+  }
   const combined=[...dynamicRows,...universe];
   const rows=combined.filter(x=>(category==='all'||x.kind===category)&&(!q||(x.symbol+' '+x.name).toLowerCase().includes(q)));
   host.innerHTML=rows.length?rows.map(x=>{
