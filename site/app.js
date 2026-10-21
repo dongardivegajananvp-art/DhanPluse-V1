@@ -51,7 +51,6 @@ let watchlistSymbols = loadWatchlistSymbols();
 let stockExplorerFetchStarted = false;
 let appLogs = [];
 let alerts = loadAlerts();
-let paperTrades = loadPaperTrades();
 
 SYMBOLS.forEach(item => { historyBySymbol[item.symbol] = []; });
 
