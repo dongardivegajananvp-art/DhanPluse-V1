@@ -521,23 +521,47 @@ async function fetchStockQuotes(){
  return {rows, fetchedAt:data.fetchedAt, universeCount:Number.isFinite(Number(data.universeCount))?Number(data.universeCount):data.data.length, missingSymbols:Array.isArray(data.missingSymbols)?data.missingSymbols:[]};
 }
 function renderMovers(){
- panel.replaceChildren(el("h2","Verified NSE F&O Gainers & Losers"),el("p","Ranks current NSE F&O equities using the FYERS symbol master and fresh quotes. Quotes older than 120 seconds are rejected; rate-limited partial batches are not ranked."));
- const btn=el("button","Refresh verified movers");btn.type="button";
- const status=el("p","Connect FYERS to load current quotes."),host=el("div",undefined,"option-chain-table-wrap");
- btn.addEventListener("click",load);panel.append(btn,status,host);
- async function load(){btn.disabled=true;status.textContent="Requesting FYERS quotes…";host.replaceChildren();try{
-  const result=await fetchStockQuotes(),rows=result.rows.slice().sort((a,b)=>Number(b.v.chp)-Number(a.v.chp));
-  const table=document.createElement("table");table.className="option-chain-table";
-  const thead=document.createElement("thead"),hr=document.createElement("tr");
-  ["Rank","Symbol","LTP (₹)","Change (₹)","Change %","Exchange time (IST)"].forEach(x=>hr.append(el("th",x)));thead.append(hr);table.append(thead);
-  const body=document.createElement("tbody");
-  rows.forEach((item,i)=>{const tr=document.createElement("tr"),stamp=new Date(Number(item.v.tt)*1000),symbol=item.n.replace("NSE:","").replace("-EQ","");
-   [String(i+1),symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),safeNumber(item.v.ch)===null?"—":Number(item.v.ch).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(Number(item.v.chp)>=0?"+":"")+Number(item.v.chp).toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})].forEach((v,j)=>{const td=el("td",v);if(j===4)td.style.color=Number(item.v.chp)>=0?"#63f0cb":"#ff718c";tr.append(td);});body.append(tr);});
-  table.append(body);host.append(table);status.textContent="FYERS F&O universe · "+rows.length+" fresh verified quote(s) of "+(result.universeCount||rows.length)+" symbols · fetched "+new Date(result.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" · missing/stale symbols omitted.";
- }catch(e){status.textContent=String(e.message||e)+" No stale prices shown.";}finally{btn.disabled=false;}}
- if(sessionToken)load();
+  panel.replaceChildren(el("h2","Verified NSE F&O Gainers & Losers"),el("p","Ranks current NSE F&O equities using the FYERS symbol master and fresh quotes. Quotes older than 120 seconds are rejected; rate-limited partial batches are not ranked."));
+  const controls=el("div",undefined,"gap-form");
+  const rankLabel=el("label","Rank by ");
+  const rank=document.createElement("select");rank.setAttribute("aria-label","Rank F&O movers");
+  for(const [value,label] of [["gainers","Top gainers (% change)"],["losers","Top losers (% change)"],["movement","Largest absolute move (%)"]]){const option=el("option",label);option.value=value;rank.append(option);}
+  rankLabel.append(rank);controls.append(rankLabel);
+  const btn=el("button","Refresh verified movers");btn.type="button";
+  const status=el("p","Connect FYERS to load current quotes."),host=el("div",undefined,"option-chain-table-wrap");
+  btn.addEventListener("click",load);rank.addEventListener("change",paint);panel.append(controls,btn,status,host);
+  let currentRows=[],currentMeta=null;
+  function paint(){
+   host.replaceChildren();
+   if(!currentRows.length)return;
+   const rows=currentRows.slice().sort((a,b)=>{
+    const av=Number(a.v.chp),bv=Number(b.v.chp);
+    if(rank.value==="losers")return av-bv;
+    if(rank.value==="movement")return Math.abs(bv)-Math.abs(av);
+    return bv-av;
+   });
+   const table=document.createElement("table");table.className="option-chain-table";
+   const thead=document.createElement("thead"),hr=document.createElement("tr");
+   ["Rank","Symbol","LTP (₹)","Change (₹)","Change %","Exchange time (IST)"].forEach(x=>hr.append(el("th",x)));thead.append(hr);table.append(thead);
+   const body=document.createElement("tbody");
+   rows.forEach((item,i)=>{
+    const tr=document.createElement("tr"),stamp=new Date(Number(item.v.tt)*1000),symbol=item.n.replace("NSE:","").replace("-EQ","");
+    const change=safeNumber(item.v.ch),pct=Number(item.v.chp);
+    [String(i+1),symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),change===null?"—":change.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(pct>=0?"+":"")+pct.toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})].forEach((v,j)=>{const td=el("td",v);if(j===4)td.style.color=pct>=0?"#63f0cb":"#ff718c";tr.append(td);});
+    body.append(tr);
+   });
+   table.append(body);host.append(table);
+   status.textContent="FYERS F&O universe · "+rows.length+" fresh verified quote(s) of "+(currentMeta.universeCount||rows.length)+" symbols · sorted by "+rank.options[rank.selectedIndex].text+" · fetched "+new Date(currentMeta.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" · missing/stale symbols omitted.";
+  }
+  async function load(){
+   btn.disabled=true;status.textContent="Requesting fresh FYERS quotes…";host.replaceChildren();currentRows=[];
+   try{currentMeta=await fetchStockQuotes();currentRows=currentMeta.rows;paint();}
+   catch(e){status.textContent=String(e.message||e)+" No stale prices shown.";}
+   finally{btn.disabled=false;}
+  }
+  if(sessionToken)load();
 }
-function renderWatchlist(){
+ function renderWatchlist(){
  panel.replaceChildren(el("h2","Watchlist"),el("p","Your personal watchlist is stored only in this browser. Prices are requested from FYERS and shown only when exchange timestamps are fresh."));
  const key="dhanpulseWatchlist";let selected;
  try{selected=JSON.parse(localStorage.getItem(key)||"[\"NSE:RELIANCE-EQ\",\"NSE:TCS-EQ\",\"NSE:INFY-EQ\",\"NSE:HDFCBANK-EQ\",\"NSE:SBIN-EQ\"]");if(!Array.isArray(selected))selected=[];}catch{selected=[];}
