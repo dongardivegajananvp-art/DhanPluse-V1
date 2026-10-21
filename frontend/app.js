@@ -1,4 +1,4 @@
-const API_BASE = window.DHANPULSE_API_BASE || "http://localhost:10000";
+const API_BASE = window.DHANPULSE_API_BASE || "https://dhanpulse-clean-test.onrender.com";
 const panel = document.querySelector("#panel");
 const sessionKey = "dhanpulseGapSession";
 let sessionToken = sessionStorage.getItem(sessionKey) || "";
@@ -6,7 +6,7 @@ const pages = {
  dashboard:["Dashboard","Gap analysis now supports authenticated FYERS daily candles on this branch. Live streaming, full Stock Explorer, and scanners are not implemented here."],
  explorer:["Stock Explorer","The complete F&O quote universe is not connected in this branch. No prices are fabricated."],
  nifty:["NIFTY","Historical gap analysis supports NSE:NIFTY50-INDEX. Live streaming and candlestick charting are not yet connected."],
- banknifty:["BANKNIFTY","Historical gap analysis supports NSE:NIFTYBANK-INDEX. Live streaming and candlestick charting are not yet connected."],
+ banknifty:["BANKNIFTY","Historical gap analysis supports NSE:NSE:NIFTYBANK-INDEX. Live streaming and candlestick charting are not yet connected."],
  gap:["Gap-Up / Gap-Down","Load verified FYERS daily candles and calculate descriptive historical gap-fill statistics."],
  options:["Option Chain & OI","Option-chain data is not connected in this branch. Do not use this page for trade decisions."],
  scanners:["Scanners","Scanners remain blocked until quotes, candles, and option data are verified."],
