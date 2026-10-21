@@ -53,6 +53,7 @@ app.use(cors({ origin(origin, callback) {
 }}));
 
 const startedAt = Date.now();
+let tickDiagnosticCounter = 0;
 let accessToken = "";
 let authenticatedAt = null;
 const pendingAuthStates = new Map();
@@ -149,12 +150,29 @@ function startMarketDataStream(token) {
     });
     socket.on("message", message => {
       if (marketSocket !== socket) return;
-      const before = latestTicks.size;
       parseTick(message);
-      if (latestTicks.size > before || latestTicks.size > 0) {
-        console.log("FYERS market tick received:", JSON.stringify(Array.isArray(message)
-          ? message.slice(0, 4).map(x => ({ symbol: x?.symbol || x?.n || null, hasLtp: x?.ltp != null || x?.lp != null || x?.v?.lp != null }))
-          : { symbol: message?.symbol || message?.n || null, hasLtp: message?.ltp != null || message?.lp != null || message?.v?.lp != null }));
+      // Sample raw timestamp metadata to diagnose SDK payload shape without logging credentials or full payloads.
+      tickDiagnosticCounter += 1;
+      if (tickDiagnosticCounter % 20 === 1) {
+        const queue = Array.isArray(message) ? [...message] : [message];
+        const samples = [];
+        while (queue.length && samples.length < 4) {
+          const item = queue.shift();
+          if (!item || typeof item !== "object") continue;
+          if (Array.isArray(item)) { queue.push(...item); continue; }
+          for (const key of ["data", "d", "values"]) if (item[key] && typeof item[key] === "object") queue.push(item[key]);
+          const v = item.v && typeof item.v === "object" ? item.v : {};
+          const symbol = item.symbol || item.n || v.symbol || v.n;
+          if (!allowedSymbols.includes(symbol)) continue;
+          const timeKeys = ["exch_feed_time", "last_traded_time", "ltt", "tt", "timestamp", "ts", "time"];
+          const timestamps = {};
+          for (const key of timeKeys) {
+            if (item[key] != null) timestamps[key] = String(item[key]).slice(0, 40);
+            else if (v[key] != null) timestamps["v." + key] = String(v[key]).slice(0, 40);
+          }
+          samples.push({ symbol, hasLtp: (item.ltp ?? item.lp ?? v.ltp ?? v.lp) != null, timestamps });
+        }
+        if (samples.length) console.log("FYERS tick timestamp diagnostic sample:", JSON.stringify(samples));
       }
     });
     socket.on("error", error => {
