@@ -24,6 +24,9 @@
     const tab = button.dataset.tab;
     const title = document.getElementById('pageTitle');
     window.setTimeout(function () {
+      // These workspaces are rendered by their dedicated scripts, not app.js.
+      // Do not replace their content with the generic navigation diagnostic.
+      if (['Trade Journal', 'Capital Protection', 'Backtesting'].includes(tab) && title && title.textContent === tab) return;
       const workspace = document.getElementById('mainWorkspaceContent');
       const workspaceHeading = workspace && workspace.querySelector('h2');
       if (title && title.textContent === tab && workspaceHeading && workspaceHeading.textContent === tab) return;
