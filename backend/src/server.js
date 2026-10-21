@@ -613,22 +613,24 @@ app.get("/api/market/candles", requireSession, async (req, res) => {
   const resolution = String(req.query.resolution || "5");
   const from = String(req.query.from || "");
   const to = String(req.query.to || "");
-  const allowedSymbolsForCandles = new Set([
-    "NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX",
-    "NSE:RELIANCE-EQ", "NSE:TCS-EQ", "NSE:INFY-EQ",
-    "NSE:HDFCBANK-EQ", "NSE:ICICIBANK-EQ", "NSE:SBIN-EQ",
-    "NSE:ITC-EQ", "NSE:LT-EQ", "NSE:AXISBANK-EQ", "NSE:BAJFINANCE-EQ"
-  ]);
+  const allowedIndexSymbols = new Set(["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX"]);
+  const equitySymbolFormat = /^NSE:[A-Z0-9&-]+-EQ$/;
   const datePattern = /^\d{4}-\d{2}-\d{2}$/;
   const isRealDate = value => datePattern.test(value) && Number.isFinite(Date.parse(value + "T00:00:00Z")) && new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
   const allowedResolutions = new Set(["1", "2", "3", "5", "10", "15", "20", "30", "60", "D"]);
-  if (!allowedSymbolsForCandles.has(symbol)) return res.status(400).json({ ok: false, error: "Unsupported symbol for this verified candle release." });
+  if (!allowedIndexSymbols.has(symbol) && !equitySymbolFormat.test(symbol)) return res.status(400).json({ ok: false, error: "Unsupported symbol format for verified candles." });
   if (!allowedResolutions.has(resolution)) return res.status(400).json({ ok: false, error: "Resolution must be a supported FYERS interval: 1, 2, 3, 5, 10, 15, 20, 30, 60, or D." });
   if (!isRealDate(from) || !isRealDate(to) || from > to) return res.status(400).json({ ok: false, error: "Provide valid from/to dates in YYYY-MM-DD format." });
   const days = (Date.parse(to + "T00:00:00Z") - Date.parse(from + "T00:00:00Z")) / 86400000;
   const maxDays = resolution === "D" ? 365 : 30;
   if (days > maxDays) return res.status(400).json({ ok: false, error: "Date range exceeds " + maxDays + " days for this candle interval." });
   try {
+    if (!allowedIndexSymbols.has(symbol)) {
+      const universe = await getNseFnoEquityUniverse();
+      if (!universe.data.some(item => item.symbol === symbol)) {
+        return res.status(400).json({ ok: false, error: "Symbol is not in the verified current NSE F&O equity universe." });
+      }
+    }
     const candles = await fyersHistory(symbol, from, to, resolution);
     if (!candles.length) return res.status(422).json({ ok: false, error: "FYERS returned no candles for this symbol and interval.", data: [] });
     res.set("Cache-Control", "no-store").json({
