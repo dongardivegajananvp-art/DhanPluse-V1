@@ -327,13 +327,17 @@ app.get("/api/fyers/options-chain", requireSession, async (req, res) => {
   if (!allowed.has(symbol)) return res.status(400).json({ok:false,error:"Unsupported underlying."});
   if (!Number.isInteger(count) || count < 1 || count > 50) return res.status(400).json({ok:false,error:"strikecount must be 1–50."});
   if (expiry && !/^\d{10}$/.test(expiry)) return res.status(400).json({ok:false,error:"Invalid expiry timestamp."});
+  const cooldownKey = "optionchain:" + symbol;
+  const cooldown = rateLimits.get(cooldownKey) || { until: 0, backoffMs: 30000 };
+  if (Date.now() < cooldown.until) return res.status(429).json({ok:false,error:"FYERS option-chain cooldown active.",retryAfterSeconds:Math.ceil((cooldown.until-Date.now())/1000)});
   const url = new URL("https://api-t1.fyers.in/data/options-chain-v3");
   url.searchParams.set("symbol",symbol);url.searchParams.set("strikecount",String(count));url.searchParams.set("greeks","1");
   if (expiry) url.searchParams.set("timestamp",expiry);
   try {
     const response = await fetch(url,{headers:{Authorization:appId+":"+accessToken,Accept:"application/json"},cache:"no-store",signal:AbortSignal.timeout(12000)});
     const body = await response.json().catch(()=>({}));
-    if (!response.ok || body.s!=="ok" || !Array.isArray(body.data?.optionsChain)) return res.status(response.status===401?401:response.status===429?429:502).json({ok:false,error:"FYERS option-chain data unavailable or unverified.",detail:String(body.message||"Invalid response").slice(0,160)});
+    if (response.status===429) { rateLimits.set(cooldownKey,{until:Date.now()+cooldown.backoffMs,backoffMs:Math.min(cooldown.backoffMs*2,900000)}); return res.status(429).json({ok:false,error:"FYERS rate limit reached for option chain; retry after cooldown."}); }
+    if (!response.ok || body.s!=="ok" || !Array.isArray(body.data?.optionsChain)) return res.status(response.status===401?401:502).json({ok:false,error:"FYERS option-chain data unavailable or unverified.",detail:String(body.message||"Invalid response").slice(0,160)});
     const underlying=body.data.optionsChain.find(x=>x&&x.option_type===""&&Number(x.strike_price)===-1);
     if (!underlying || !Number.isFinite(Number(underlying.ltp)) || Number(underlying.ltp)<=0) return res.status(502).json({ok:false,error:"Underlying quote missing; analysis blocked."});
     const legs=body.data.optionsChain.filter(x=>x&&(x.option_type==="CE"||x.option_type==="PE"));
@@ -341,6 +345,7 @@ app.get("/api/fyers/options-chain", requireSession, async (req, res) => {
     const data=legs.map(x=>({symbol:x.symbol,type:x.option_type,strike:Number(x.strike_price),ltp:Number(x.ltp),oi:x.oi!==null&&x.oi!==undefined&&x.oi!==""&&Number.isFinite(Number(x.oi))&&Number(x.oi)>=0?Number(x.oi):null,oiChange:x.oich!==null&&x.oich!==undefined&&x.oich!==""&&Number.isFinite(Number(x.oich))?Number(x.oich):null,volume:x.volume!==null&&x.volume!==undefined&&x.volume!==""&&Number.isFinite(Number(x.volume))&&Number(x.volume)>=0?Number(x.volume):null,verified:typeof x.symbol==="string"&&x.symbol.startsWith("NSE:")&&Number(x.strike_price)>0&&x.ltp!==null&&x.ltp!==undefined&&Number.isFinite(Number(x.ltp))&&Number(x.ltp)>=0}));
     if (data.some(x=>!x.verified)) return res.status(502).json({ok:false,error:"Option leg validation failed; chain blocked."});
     const complete=data.every(x=>x.oi!==null&&x.volume!==null);
+    rateLimits.delete(cooldownKey);
     res.json({ok:true,symbol,source:"FYERS option-chain API",fetchedAt:new Date().toISOString(),underlyingLtp:Number(underlying.ltp),expiryData:Array.isArray(body.data.expiryData)?body.data.expiryData:[],callOi:Number.isFinite(Number(body.data.callOi))?Number(body.data.callOi):null,putOi:Number.isFinite(Number(body.data.putOi))?Number(body.data.putOi):null,dataComplete:complete,signalsAllowed:complete,count:data.length,data,warning:complete?"FYERS option-chain data; verify freshness and liquidity before analysis.":"OI or volume missing on one or more legs; signals blocked."});
   } catch (error) { res.status(502).json({ok:false,error:"FYERS option-chain request failed; analysis blocked.",detail:String(error.message||"Network error").slice(0,160)}); }
 });
