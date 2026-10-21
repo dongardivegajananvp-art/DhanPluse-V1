@@ -429,8 +429,10 @@ async function loadStockExplorerQuotes() {
       '; live=' + liveCount + '; last-known=' + lastKnownCount + '; stale/unverified=' + staleCount +
       '; missing=' + missing.length + ').', result.partial ? 'warn' : 'info');
   } catch (error) {
+    stockExplorerCanRank = false;
+    renderStockExplorerResults();
     status.textContent = 'Equity quote request failed: ' + (error.message || 'FYERS snapshot unavailable.') +
-      ' Tap Refresh equity quotes to retry. No prices were fabricated.';
+      ' Tap Refresh equity quotes to retry. Any retained prices are not a current full-universe ranking. No prices were fabricated.';
     logEvent('Stock Explorer equity snapshot failed: ' + (error.message || 'unknown error'), 'warn');
   } finally {
     stockExplorerRequestRunning = false;
