@@ -1,0 +1,42 @@
+name: DhanPulse test smoke verification
+
+on:
+  push:
+    branches: [clean-rebuild]
+    paths:
+      - "backend/src/server.js"
+      - ".github/workflows/fno-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fno-symbol-master-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Wait for test backend deployment and verify live endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://dhanpulse-clean-test.onrender.com/api/market/fno-universe-check"
+          response=""
+          for attempt in $(seq 1 36); do
+            response="$(curl --connect-timeout 8 --max-time 20 --silent --show-error "$url" || true)"
+            if [ -n "$response" ] && python -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if d.get("ok") else 1)' "$response" 2>/dev/null; then
+              break
+            fi
+            echo "Attempt $attempt: test backend not ready or symbol master check failed; retrying in 10 seconds."
+            sleep 10
+          done
+          echo "$response"
+          python - "$response" <<'PY'
+          import json, sys
+          d = json.loads(sys.argv[1])
+          assert d.get("ok") is True, f"F&O universe check did not pass: {d}"
+          assert int(d.get("count", 0)) >= 50, f"Unexpectedly small F&O universe: {d.get('count')}"
+          missing = [x["name"] for x in d.get("expectedSymbolsPresent", []) if not x.get("present")]
+          assert not missing, f"Expected F&O equities missing from symbol master: {missing}"
+          print(f"PASS: {d['count']} F&O equity symbols; RELIANCE/TCS/INFY present; fetchedAt={d.get('fetchedAt')}")
+          PY
