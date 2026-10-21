@@ -219,7 +219,7 @@ async function renderOptionChain(){
  panel.append(form,status,summary,host);
  if(sessionToken)form.requestSubmit();
 }
-function renderLiveQuotes(key){
+async function renderLiveQuotes(key){
  const target=document.querySelector("#liveQuotePanel");
  if(!target)return;
  target.replaceChildren(el("h3","Verified index quotes"));
