@@ -20,6 +20,7 @@ let marketSocket = null;
 let streamConnected = false;
 let streamError = "";
 const latestTicks = new Map();
+const acceptedTickCounts = new Map();
 const liveCandleIntervals = [1, 5, 15, 30, 60];
 const liveCandles = new Map();
 function recordLiveCandles(symbol, ltp, exchangeTime) {
@@ -122,6 +123,7 @@ function parseTick(raw) {
       chp: rawChp != null && Number.isFinite(Number(rawChp)) ? Number(rawChp) : null,
       updatedAt: tickTime
     });
+    acceptedTickCounts.set(symbol, (acceptedTickCounts.get(symbol) || 0) + 1);
     recordLiveCandles(symbol, ltp, exchangeTime);
   }
 }
@@ -218,6 +220,8 @@ app.get("/health", (_req, res) => {
     fyersConfigured: Boolean(appId && appSecret && redirectUri),
     liveDataConnected: Boolean(streamConnected && snapshot),
     marketSocketConnected: streamConnected, lastTickAt: snapshot?.fetchedAt || null,
+    acceptedTickCounts: Object.fromEntries(acceptedTickCounts),
+    lastAcceptedTickAtBySymbol: Object.fromEntries([...latestTicks.entries()].map(([symbol, tick]) => [symbol, tick.updatedAt])),
     orderPlacement: "disabled"
   });
 });
@@ -229,6 +233,8 @@ app.get("/api/status", (_req, res) => res.set("Cache-Control", "no-store").json(
   liveData: streamConnected && liveSnapshot() ? "streaming" : "waiting-for-live-ticks",
   marketSocketConnected: streamConnected,
   lastTickAt: liveSnapshot()?.fetchedAt || null,
+  acceptedTickCounts: Object.fromEntries(acceptedTickCounts),
+  lastAcceptedTickAtBySymbol: Object.fromEntries([...latestTicks.entries()].map(([symbol, tick]) => [symbol, tick.updatedAt])),
   ...(streamError ? { marketDataMessage: streamError } : {}),
   orderPlacement: "disabled",
   note: "Live feed is reported only when both configured indices have valid, fresh exchange timestamps. Backend status alone is not proof of live data."
