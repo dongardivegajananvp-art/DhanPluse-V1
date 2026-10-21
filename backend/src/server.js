@@ -536,6 +536,14 @@ app.get('/api/market/candles', async (req, res) => {
     url.searchParams.set('cont_flag', '1');
     const result = await fyersReadOnlyGet(url);
     const candles = Array.isArray(result.candles) ? result.candles : [];
+    if (candles.length === 0) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(422).json({
+        ok: false,
+        error: 'FYERS returned no candles for the requested range; analysis blocked.',
+        detail: 'An empty history response is not a verified chart dataset.'
+      });
+    }
     const isValidCandle = row => {
       if (!Array.isArray(row) || row.length < 6 || !row.slice(0, 6).every(value => Number.isFinite(Number(value)))) return false;
       const [timestamp, open, high, low, close, volume] = row.map(Number);
