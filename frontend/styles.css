@@ -2,3 +2,12 @@
 .gap-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:18px}.gap-form label{display:flex;flex-direction:column;gap:7px;color:var(--muted);font-size:13px}.gap-form input:not([type=checkbox]){width:100%;padding:11px;border:1px solid var(--line);border-radius:9px;background:#0b1220;color:var(--text);font:inherit}.gap-form .check-label{flex-direction:row;align-items:center;grid-column:1/-1}.gap-form button{justify-self:start}.gap-result{margin-top:18px;padding:16px;border:1px solid var(--line);border-radius:12px;background:#0e1726}.gap-result h3{margin-top:0}.gap-result p{color:var(--muted)}.gap-result .risk-note{font-size:12px;border-top:1px solid var(--line);padding-top:12px}
 
 .gap-form select{width:100%;padding:11px;border:1px solid var(--line);border-radius:9px;background:#0b1220;color:var(--text);font:inherit}.gap-form button:disabled{opacity:.6;cursor:wait}header #connectFyers{margin-left:auto}header{flex-wrap:wrap}
+
+.candle-tool{margin-top:20px;padding-top:12px;border-top:1px solid var(--line)}
+.candle-chart-host{width:100%;overflow-x:auto;margin-top:12px;border:1px solid var(--line);border-radius:10px;background:#0b1220}
+.candle-chart-host svg{display:block;width:100%;min-width:600px;height:auto;max-height:440px}
+.chart-grid{stroke:#29384d;stroke-width:1;stroke-dasharray:3 4}
+.chart-axis{fill:#a3b1c5;font-size:11px}
+.candle-up{fill:#6ee7b7;stroke:#6ee7b7}
+.candle-down{fill:#fb7185;stroke:#fb7185}
+.candle-details{font-size:12px;overflow-wrap:anywhere}
