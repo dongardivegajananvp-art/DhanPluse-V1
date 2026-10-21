@@ -397,9 +397,12 @@ app.get("/api/market/quotes", requireSession, (_req, res) => {
   });
 });
 let fnoUniverseCache = { fetchedAt: 0, data: null };
+let fnoUniversePromise = null;
 let stockQuoteCache = { fetchedAt: 0, data: null };
 async function getNseFnoEquityUniverse() {
   if (fnoUniverseCache.data && Date.now() - fnoUniverseCache.fetchedAt < 6 * 60 * 60 * 1000) return fnoUniverseCache;
+  if (fnoUniversePromise) return fnoUniversePromise;
+  fnoUniversePromise = (async () => {
   const fetchMaster = async url => {
     const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(45000) });
     if (!response.ok) throw new Error("FYERS symbol master HTTP " + response.status);
@@ -439,6 +442,8 @@ async function getNseFnoEquityUniverse() {
   }
   fnoUniverseCache = { fetchedAt: Date.now(), data };
   return fnoUniverseCache;
+  })();
+  try { return await fnoUniversePromise; } finally { fnoUniversePromise = null; }
 }
 
 // Public smoke-test endpoint exposes only non-sensitive symbol-master metadata.
