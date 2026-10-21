@@ -27,7 +27,7 @@ const pages = {
  backtest:["Backtesting","Backtesting beyond historical opening-gap statistics is not implemented yet."],
  settings:["FYERS Settings","FYERS authorization status is shown above. Credentials stay server-side; order placement remains disabled."],
  logs:["Logs","Operational logs are available through the service dashboard; in-app log viewer is not implemented yet."],
- journalRules:["Trade Journal & Rule Review","Paper-only journaling and rule-adherence analytics are not yet implemented."],
+ journalRules:["Trade Journal & Rule Review","Review paper-trade rule adherence, outcomes, and recurring mistakes from records saved in this browser."],
  supplyDemand:["Supply & Demand Zones","Supply/demand zones require verified intraday candles and are not implemented yet."]
 };
 function el(tag, text, cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
@@ -133,12 +133,29 @@ function renderJournal(){
  panel.append(form,out,el("h3","Saved paper trades"));
  const rows=readPaperTrades();if(!rows.length)panel.append(el("p","No paper trades recorded yet."));else{const list=el("div",undefined,"gap-result");for(const t of rows.slice(0,100)){const box=el("article",undefined,"journal-item");box.append(el("h3",t.symbol+" · "+t.side),el("p","Entry ₹"+t.entry+" · SL ₹"+t.stop+" · Target ₹"+t.target+(t.exit===null?"":" · Exit ₹"+t.exit)),el("p","Rule adherence: "+t.followed+" · "+new Date(t.createdAt).toLocaleString()),el("p",t.notes||"No notes"));const del=el("button","Delete record");del.type="button";del.addEventListener("click",()=>{localStorage.setItem("dhanpulsePaperTrades",JSON.stringify(readPaperTrades().filter(x=>x.id!==t.id)));renderJournal();});box.append(del);list.append(box);}panel.append(list);}
 }
+function renderJournalRules(){
+ panel.replaceChildren(el("h2","Trade Journal & Rule Review"),el("p","Review uses only paper trades saved in this browser on this device. Results are descriptive, not a prediction; fees, slippage, and position size are not included."));
+ const rows=readPaperTrades();
+ if(!rows.length){panel.append(el("p","No saved paper trades yet. Record paper trades in Paper Journal first; this page will summarize them."));const b=el("button","Open Paper Journal");b.type="button";b.addEventListener("click",()=>document.querySelector('[data-tab="journal"]').click());panel.append(b);return;}
+ const completed=rows.filter(t=>Number.isFinite(Number(t.exit))&&Number(t.exit)>0);
+ const followed=rows.filter(t=>t.followed==="yes").length;
+ const notFollowed=rows.filter(t=>t.followed==="no"||t.followed==="partial");
+ const stats=el("div",undefined,"gap-result");
+ stats.append(el("p","Paper trades recorded: "+rows.length));
+ stats.append(el("p","Trades marked rules followed: "+followed+" / "+rows.length+" ("+(100*followed/rows.length).toFixed(1)+"%)"));
+ stats.append(el("p","Trades with an exit recorded: "+completed.length+" / "+rows.length));
+ if(completed.length){let totalR=0,wins=0;for(const t of completed){const risk=Math.abs(Number(t.entry)-Number(t.stop));const pnl=(t.side==="LONG"?Number(t.exit)-Number(t.entry):Number(t.entry)-Number(t.exit));const r=risk>0?pnl/risk:0;totalR+=r;if(pnl>0)wins++;}stats.append(el("p","Recorded outcomes: "+wins+" positive of "+completed.length+" closed trades; average result "+(totalR/completed.length).toFixed(2)+"R (before costs)."));}
+ panel.append(stats,el("h3","Rule-review flags"));
+ if(!notFollowed.length)panel.append(el("p","No trades are currently marked No or Partly. Keep recording honestly; this is not proof that every rule was followed."));
+ else{const list=el("div",undefined,"gap-result");for(const t of notFollowed.slice(0,100)){const item=el("article",undefined,"journal-item");item.append(el("h3",t.symbol+" · "+t.side+" · "+t.followed.toUpperCase()),el("p","Entry ₹"+t.entry+" · SL ₹"+t.stop+" · Target ₹"+t.target),el("p",t.notes||"No note was recorded; add a reason in your next journal entry."));list.append(item);}panel.append(list);}
+ panel.append(el("p","Limitations: this summary cannot establish strategy profitability from a small sample and does not include brokerage, taxes, slippage, quantity, or market context."));
+}
 function renderPage(key){
  const [title,description]=pages[key]||["Module","Status unavailable."];
  panel.replaceChildren();
  if(key==="gap"){renderGap();return;}
  if(key==="capital"){renderCapital();return;}
- if(key==="journal"){renderJournal();return;}
+ if(key==="journal"){renderJournal();return;}\n if(key==="journalRules"){renderJournalRules();return;}
  panel.append(el("h2",title),el("p",description));
  if(key==="dashboard"){const b=el("button","Open Gap-Up / Gap-Down Analysis");b.addEventListener("click",()=>{document.querySelector('[data-tab="gap"]').click();});panel.append(b);}
 }
