@@ -1,4 +1,7 @@
 import crypto from "node:crypto";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const { fyersDataSocket } = require("fyers-api-v3");
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -12,6 +15,11 @@ app.use(express.json({ limit: "32kb" }));
 const appId = process.env.FYERS_APP_ID || "";
 const appSecret = process.env.FYERS_APP_SECRET || "";
 const redirectUri = process.env.FYERS_REDIRECT_URI || "";
+const allowedSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX"];
+let marketSocket = null;
+let streamConnected = false;
+let streamError = "";
+const latestTicks = new Map();
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGIN || "").split(",").map(x => x.trim()).filter(Boolean));
 if (redirectUri) { try { allowedOrigins.add(new URL(redirectUri).origin); } catch {} }
 app.use(cors({ origin(origin, callback) {
@@ -28,17 +36,128 @@ const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const rateLimits = new Map();
 
+function epochSeconds(value) {
+  if (typeof value === "number" || (typeof value === "string" && /^\\d+(?:\\.\\d+)?$/.test(value))) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return Math.floor(n > 1e12 ? n / 1000 : n);
+  }
+  const parsed = Date.parse(String(value || ""));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed / 1000) : null;
+}
+
+function parseTick(raw) {
+  let parsed = raw;
+  if (typeof raw === "string") { try { parsed = JSON.parse(raw); } catch { return; } }
+  const messages = Array.isArray(parsed) ? parsed : [parsed];
+  for (const item of messages) {
+    if (!item || typeof item !== "object") continue;
+    const symbol = item.symbol || item.n;
+    const ltp = Number(item.ltp ?? item.lp ?? item.v?.lp);
+    if (!allowedSymbols.includes(symbol) || !Number.isFinite(ltp) || ltp <= 0) continue;
+    const exchangeTime = epochSeconds(item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt ?? item.v?.tt);
+    if (!exchangeTime) {
+      console.warn("FYERS index update ignored: missing exchange timestamp.", JSON.stringify({ symbol }));
+      continue;
+    }
+    latestTicks.set(symbol, {
+      symbol, ltp,
+      ch: Number.isFinite(Number(item.ch ?? item.v?.ch)) ? Number(item.ch ?? item.v?.ch) : null,
+      chp: Number.isFinite(Number(item.chp ?? item.v?.chp)) ? Number(item.chp ?? item.v?.chp) : null,
+      updatedAt: new Date(exchangeTime * 1000).toISOString()
+    });
+  }
+}
+
+function startMarketDataStream(token) {
+  streamError = "";
+  streamConnected = false;
+  latestTicks.clear();
+  try {
+    if (marketSocket) { try { marketSocket.close(); } catch {} marketSocket = null; }
+    const socket = fyersDataSocket.getInstance(`${appId}:${token}`, "", false);
+    marketSocket = socket;
+    socket.on("connect", () => {
+      if (marketSocket !== socket) return;
+      streamConnected = true;
+      streamError = "";
+      console.log("FYERS market socket connected; subscribing to configured index symbols.");
+      try {
+        socket.mode(socket.FullMode);
+        socket.subscribe(allowedSymbols);
+        console.log("FYERS market socket subscription request sent.");
+      } catch (error) {
+        streamError = "Could not subscribe to FYERS index symbols.";
+        console.error("FYERS market socket subscription failed:", String(error?.message || error).slice(0, 200));
+      }
+    });
+    socket.on("message", message => {
+      if (marketSocket !== socket) return;
+      const before = latestTicks.size;
+      parseTick(message);
+      if (latestTicks.size > before || latestTicks.size > 0) {
+        console.log("FYERS market tick received:", JSON.stringify(Array.isArray(message)
+          ? message.slice(0, 4).map(x => ({ symbol: x?.symbol || x?.n || null, hasLtp: x?.ltp != null || x?.lp != null || x?.v?.lp != null }))
+          : { symbol: message?.symbol || message?.n || null, hasLtp: message?.ltp != null || message?.lp != null || message?.v?.lp != null }));
+      }
+    });
+    socket.on("error", error => {
+      if (marketSocket !== socket) return;
+      streamError = "FYERS market data socket reported an error.";
+      console.error("FYERS market socket error:", String(error?.message || error).slice(0, 200));
+    });
+    socket.on("close", (code, reason) => {
+      if (marketSocket !== socket) return;
+      streamConnected = false;
+      console.warn("FYERS market socket closed:", JSON.stringify({ code: code ?? null, reason: reason == null ? null : String(reason).slice(0, 120) }));
+    });
+    socket.connect();
+    if (typeof socket.autoreconnect === "function") socket.autoreconnect(10);
+  } catch (error) {
+    streamConnected = false;
+    streamError = "Could not start the FYERS market data socket.";
+    console.error("FYERS market socket startup failed:", String(error?.message || error).slice(0, 200));
+  }
+}
+
+function liveSnapshot() {
+  const ticks = allowedSymbols.map(symbol => latestTicks.get(symbol));
+  if (ticks.some(tick => !tick)) return null;
+  const ages = ticks.map(tick => Date.now() - Date.parse(tick.updatedAt));
+  if (ages.some(age => !Number.isFinite(age) || age < -30000 || age > 120000)) return null;
+  return {
+    ok: true,
+    fetchedAt: new Date(Math.min(...ticks.map(tick => Date.parse(tick.updatedAt)))).toISOString(),
+    data: ticks.map(tick => ({ n: tick.symbol, v: {
+      lp: tick.ltp, tt: epochSeconds(tick.updatedAt),
+      ...(tick.ch === null ? {} : { ch: tick.ch }),
+      ...(tick.chp === null ? {} : { chp: tick.chp })
+    }}))
+  };
+}
+
 app.get("/", (_req, res) => res.json({ service: "DhanPulse clean backend", version: "0.2.0", status: "online", endpoints: ["/health", "/api/status", "/api/fyers/auth/start", "/api/fyers/auth/exchange", "/api/gap-analysis/history"], orderPlacement: "disabled" }));
-app.get("/health", (_req, res) => res.set("Cache-Control", "no-store").json({ backend: "online", uptimeSeconds: Math.floor((Date.now()-startedAt)/1000), orderPlacement: "disabled" }));
+app.get("/health", (_req, res) => {
+  const snapshot = liveSnapshot();
+  res.set("Cache-Control", "no-store").json({
+    backend: "online", uptimeSeconds: Math.floor((Date.now()-startedAt)/1000),
+    fyersConfigured: Boolean(appId && appSecret && redirectUri),
+    liveDataConnected: Boolean(streamConnected && snapshot),
+    marketSocketConnected: streamConnected, lastTickAt: snapshot?.fetchedAt || null,
+    orderPlacement: "disabled"
+  });
+});
 app.get("/api/status", (_req, res) => res.set("Cache-Control", "no-store").json({
   backend: "online",
   fyersConfigured: Boolean(appId && appSecret && redirectUri),
   fyers: accessToken ? "connected" : "not-connected",
   authenticatedAt,
-  liveData: "not-streaming",
-  marketSocketConnected: false,
+  liveData: streamConnected && liveSnapshot() ? "streaming" : "waiting-for-live-ticks",
+  marketSocketConnected: streamConnected,
+  lastTickAt: liveSnapshot()?.fetchedAt || null,
+  ...(streamError ? { marketDataMessage: streamError } : {}),
   orderPlacement: "disabled",
-  note: "This branch currently uses authenticated FYERS historical candles for gap analysis; it does not claim a live tick stream."
+  note: "Live feed is reported only when both configured indices have valid, fresh exchange timestamps. Backend status alone is not proof of live data."
 }));
 
 app.get("/api/fyers/auth/start", (_req, res) => {
@@ -76,6 +195,7 @@ app.post("/api/fyers/auth/exchange", async (req, res) => {
     if (!response.ok || data.s !== "ok" || !data.access_token) return res.status(401).json({ error: "FYERS authentication failed.", detail: String(data.message || data.error || "Please retry Connect FYERS.").slice(0, 180) });
     accessToken = data.access_token;
     authenticatedAt = new Date().toISOString();
+    startMarketDataStream(accessToken);
     dashboardSessions.clear();
     const dashboardSessionToken = crypto.randomBytes(32).toString("hex");
     dashboardSessions.set(dashboardSessionToken, { createdAt: Date.now() });
@@ -161,7 +281,17 @@ app.get("/api/gap-analysis/history", requireSession, async (req, res) => {
   }
 });
 
-app.get("/api/market/quotes", (_req, res) => res.status(503).json({ error: "live_quote_stream_not_connected", message: "This branch does not claim live streaming. No placeholder prices are returned.", data: [] }));
+app.get("/api/market/quotes", requireSession, (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
+  const snapshot = liveSnapshot();
+  if (snapshot) return res.json({ ...snapshot, source: "websocket", streamConnected });
+  return res.status(503).json({
+    ok: false, error: "Waiting for verified FYERS WebSocket ticks.",
+    detail: streamConnected ? "Socket connected, but both index symbols do not yet have fresh exchange-timestamped ticks." : (streamError || "FYERS market socket is reconnecting."),
+    marketSocketConnected: streamConnected, retryAfterSeconds: 5
+  });
+});
 app.get("/api/market/candles", (_req, res) => res.status(503).json({ error: "live_candle_route_not_implemented", message: "Use authenticated daily history through /api/gap-analysis/history for the verified gap-analysis release.", data: [] }));
 app.all("/api/orders/*", (_req, res) => res.status(403).json({ error: "Order placement is disabled during testing." }));
 app.use((err, _req, res, _next) => {
