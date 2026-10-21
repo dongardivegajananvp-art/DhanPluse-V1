@@ -232,7 +232,11 @@ function renderCandleChart(key){
  resolution.addEventListener("change",()=>{
   const daily=resolution.value==="D";
   form.elements.from.value=istDateString(new Date(Date.now()-(daily?60:7)*86400000));
+  if(sessionToken)form.requestSubmit();
  });
+ for(const control of form.querySelectorAll("select,input[type=date]")){
+  if(control!==resolution)control.addEventListener("change",()=>{if(sessionToken)form.requestSubmit();});
+ }
  form.addEventListener("submit",async event=>{
   event.preventDefault();
   const symbol=fixedSymbol||form.elements.symbol.value;
@@ -285,6 +289,12 @@ function renderCandleChart(key){
  });
  wrap.append(form,status,chartHost,details);
  panel.append(wrap);
+ if(sessionToken){
+  status.textContent="Loading verified FYERS candles automatically…";
+  form.requestSubmit();
+ }else{
+  status.textContent="Connect FYERS to automatically load verified historical candles. No placeholder data is shown.";
+ }
 }
 
 function renderPage(key){
