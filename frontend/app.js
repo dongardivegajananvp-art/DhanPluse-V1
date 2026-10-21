@@ -444,6 +444,7 @@ function renderPage(key){
  panel.append(el("h2",title),el("p",description));
  if(key==="charts"){renderCandleChart(key);return;}
  if(["dashboard","nifty","banknifty"].includes(key))renderQuotePanel(key);
+ if(key==="dashboard")renderCandleChart("charts");
  if(["nifty","banknifty"].includes(key))renderCandleChart(key);
  if(key==="dashboard"){const b=el("button","Open Gap-Up / Gap-Down Analysis");b.addEventListener("click",()=>{document.querySelector('[data-tab="gap"]').click();});panel.append(b);}
 }
