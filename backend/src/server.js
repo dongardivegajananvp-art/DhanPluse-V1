@@ -219,7 +219,7 @@ function liveSnapshot() {
   return {
     ok: true,
     fetchedAt: new Date(Math.min(...ticks.map(tick => Date.parse(tick.updatedAt)))).toISOString(),
-    data: ticks.map(tick => ({ n: tick.symbol, v: {
+    data: ticks.map(tick => ({ n: tick.symbol, verified: true, v: {
       lp: tick.ltp, tt: epochSeconds(tick.updatedAt),
       ...(tick.ch === null ? {} : { ch: tick.ch }),
       ...(tick.chp === null ? {} : { chp: tick.chp })
