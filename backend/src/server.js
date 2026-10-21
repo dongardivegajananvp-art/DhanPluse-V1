@@ -128,16 +128,14 @@ function startMarketDataStream(token) {
       const before = latestTicks.size;
       parseTick(message);
       const after = latestTicks.size;
-      if (after > before || after > 0) {
+      // Log only when a new valid index symbol is first accepted for this
+      // connection. Logging every market tick (and every control frame after
+      // the first tick) floods Render logs without helping diagnose freshness.
+      if (after > before) {
         const summary = Array.isArray(message)
           ? message.slice(0, 5).map(x => ({ symbol: x?.symbol || x?.n || null, type: x?.type || null, hasLtp: x?.ltp != null || x?.lp != null || x?.v?.lp != null }))
           : { symbol: message?.symbol || message?.n || null, type: message?.type || null, hasLtp: message?.ltp != null || message?.lp != null || message?.v?.lp != null };
-        console.log('FYERS market tick received:', JSON.stringify(summary));
-      } else {
-        const shape = message && typeof message === 'object'
-          ? { keys: Object.keys(message).slice(0, 20), type: message.type || null, symbol: message.symbol || message.n || null }
-          : { messageType: typeof message };
-        console.log('FYERS socket message not parsed as an index tick:', JSON.stringify(shape));
+        console.log('FYERS valid index tick first seen on connection:', JSON.stringify(summary));
       }
     });
 
