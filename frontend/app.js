@@ -274,7 +274,7 @@ async function renderStockExplorer(){
    const r=await fetch(API_BASE+"/api/market/stock-quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
    const data=await r.json();
    if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Connect FYERS again.");}
-   if(!r.ok||!Array.isArray(data.data))throw new Error(data.error||"Fresh verified quotes unavailable.");
+   if(!r.ok||!Array.isArray(data.data))throw new Error([data.error,data.detail,data.retryAfterSeconds?("Retry in "+data.retryAfterSeconds+" seconds."):null].filter(Boolean).join(" · ")||"Fresh verified quotes unavailable.");
    const rows=data.data.slice().sort((x,y)=>Number(y.v.chp)-Number(x.v.chp));
    for(const item of rows){
     const tr=document.createElement("tr");
