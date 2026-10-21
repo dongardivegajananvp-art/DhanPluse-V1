@@ -326,12 +326,20 @@ async function loadDashboardCandles() {
     const candleError=validateOhlcCandles(result.data,resolution.value);
     if(candleError)throw new Error(candleError);
     chart.innerHTML=candleSvg(result.data);
+    const mainChart=document.querySelector('#mainTabChart');
+    if(mainChart)mainChart.innerHTML=candleSvg(result.data);
+    const mainNote=document.querySelector('#mainViewNote');
+    if(mainNote)mainNote.textContent='Verified FYERS historical OHLC · '+result.data.length+' candles · '+resolution.value+' timeframe. No synthetic candles.';
     if(count)count.textContent=result.data.length+' verified candles';
     status.textContent=result.data.length+' verified candles · '+symbol.value+' · '+resolution.value+' timeframe · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
     logEvent('Dashboard candlestick chart loaded ('+result.data.length+' verified candles for '+symbol.value+').','info');
   } catch(error) {
     const message=error.message||'Historical candles unavailable.';
     chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
+    const mainChart=document.querySelector('#mainTabChart');
+    if(mainChart)mainChart.innerHTML='<div class="chart-empty">Candlestick chart unavailable: '+escapeHtml(message)+'. No candle values were fabricated.</div>';
+    const mainNote=document.querySelector('#mainViewNote');
+    if(mainNote)mainNote.textContent='Verified OHLC candles are unavailable right now; no substitute line chart or fabricated candle values are shown.';
     status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
     logEvent('Dashboard candlestick chart failed: '+message,'warn');
   } finally {
@@ -1161,7 +1169,7 @@ function render(tab) {
   const mainPanel = document.querySelector('#mainWorkspaceContent');
   if (mainPanel) {
     const symbol = tab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
-    mainPanel.innerHTML = '<div class="main-view-heading"><span class="eyebrow">DHANPULSE WORKSPACE</span><h2>' + escapeHtml(tab) + '</h2><p>' + escapeHtml(descriptions[tab][1]) + '</p></div><div class="main-chart-wrap"><div class="main-chart-title"><span>' + escapeHtml(tab === 'BANKNIFTY' ? 'BANK NIFTY' : 'NIFTY 50') + ' · RECENT PRICE CHART</span><span class="tag">VERIFIED DATA ONLY</span></div><div id="mainTabChart">' + svgChart(symbol, 230) + '</div></div><p class="main-view-note" id="mainViewNote">Chart draws from verified FYERS data received by this session. Historical candles appear in Charts & Patterns after the API returns them.</p><button class="primary" id="mainPanelAction">' + (tab === 'FYERS Settings' ? 'Connect FYERS' : tab === 'Charts & Patterns' ? 'Load historical candles' : tab === 'Technical Indicators' ? 'Refresh indicators' : 'Refresh live data') + '</button>';
+    mainPanel.innerHTML = '<div class="main-view-heading"><span class="eyebrow">DHANPULSE WORKSPACE</span><h2>' + escapeHtml(tab) + '</h2><p>' + escapeHtml(descriptions[tab][1]) + '</p></div><div class="main-chart-wrap"><div class="main-chart-title"><span>' + escapeHtml(tab === 'BANKNIFTY' ? 'BANK NIFTY' : 'NIFTY 50') + ' · VERIFIED OHLC CANDLESTICKS</span><span class="tag">FYERS HISTORICAL DATA</span></div><div id="mainTabChart"><div class="chart-empty">Loading verified FYERS OHLC candlesticks…</div></div></div><p class="main-view-note" id="mainViewNote">Candlesticks use verified historical FYERS OHLC data. If candles are unavailable, the chart will say so rather than inventing prices.</p><button class="primary" id="mainPanelAction">' + (tab === 'FYERS Settings' ? 'Connect FYERS' : tab === 'Charts & Patterns' ? 'Load historical candles' : tab === 'Technical Indicators' ? 'Refresh indicators' : 'Refresh live data') + '</button>';
     const action = document.querySelector('#mainPanelAction');
     if (action) action.addEventListener('click', () => {
       if (currentTab === 'FYERS Settings') startFyersLogin();
