@@ -261,13 +261,30 @@ async function renderStockExplorer(){
  panel.append(box);
  if(!sessionToken){box.replaceChildren(el("p","Connect FYERS to load verified stock quotes. No sample prices are shown."));return;}
  const refresh=el("button","Refresh verified quotes");refresh.type="button";
+ const sortLabel=el("label","Rank quotes by ");
+ const sort=document.createElement("select");sort.setAttribute("aria-label","Rank verified F&O quotes");
+ for(const [v,t] of [["gainers","Top gainers (% change)"],["losers","Top losers (% change)"],["movement","Largest absolute move (%)"]]){const o=el("option",t);o.value=v;sort.append(o);}
+ sortLabel.append(sort);
  const status=el("p","Quotes must have exchange timestamps within 120 seconds.");
  const tableHost=el("div",undefined,"option-chain-table-wrap");
  const table=document.createElement("table");table.className="option-chain-table";
  const head=document.createElement("thead"),hr=document.createElement("tr");
  for(const name of ["Symbol","LTP (₹)","Change (₹)","Change %","Exchange time (IST)"]){const th=el("th",name);hr.append(th);}
  head.append(hr);table.append(head);const tbody=document.createElement("tbody");table.append(tbody);tableHost.append(table);
- box.replaceChildren(el("h3","Verified NSE F&O equity quotes"),el("p","Universe source: current FYERS NSE_FO + NSE_CM symbol masters. Only quotes with valid exchange timestamps within 120 seconds are displayed. If FYERS rate-limits a batch, partial rankings are discarded."),refresh,status,tableHost);
+ box.replaceChildren(el("h3","Verified NSE F&O equity quotes"),el("p","Universe source: current FYERS NSE_FO + NSE_CM symbol masters. Only quotes with valid exchange timestamps within 120 seconds are displayed. If FYERS rate-limits a batch, partial rankings are discarded."),sortLabel,refresh,status,tableHost);
+ let verifiedRows=[];
+ function paintRows(){
+  tbody.replaceChildren();
+  const rows=verifiedRows.slice().sort((x,y)=>sort.value==="losers"?Number(x.v.chp)-Number(y.v.chp):sort.value==="movement"?Math.abs(Number(y.v.chp))-Math.abs(Number(x.v.chp)):Number(y.v.chp)-Number(x.v.chp));
+  for(const item of rows){
+    const tr=document.createElement("tr");
+    const symbol=item.n.replace("NSE:","").replace("-EQ","");
+    const stamp=new Date(Number(item.v.tt)*1000);
+    const vals=[symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),Number(item.v.ch).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(Number(item.v.chp)>=0?"+":"")+Number(item.v.chp).toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})];
+    vals.forEach((v,i)=>{const td=el("td",v);if(i===3)td.style.color=Number(item.v.chp)>=0?"#63f0cb":"#ff718c";tr.append(td);});
+    tbody.append(tr);
+  }
+ }
  async function load(){
   refresh.disabled=true;status.textContent="Requesting fresh FYERS quotes…";tbody.replaceChildren();
   try{
@@ -275,19 +292,13 @@ async function renderStockExplorer(){
    const data=await r.json();
    if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Connect FYERS again.");}
    if(!r.ok||!Array.isArray(data.data))throw new Error([data.error,data.detail,data.retryAfterSeconds?("Retry in "+data.retryAfterSeconds+" seconds."):null].filter(Boolean).join(" · ")||"Fresh verified quotes unavailable.");
-   const rows=data.data.slice().sort((x,y)=>Number(y.v.chp)-Number(x.v.chp));
-   for(const item of rows){
-    const tr=document.createElement("tr");
-    const symbol=item.n.replace("NSE:","").replace("-EQ","");
-    const stamp=new Date(Number(item.v.tt)*1000);
-    const vals=[symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),Number(item.v.ch).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(Number(item.v.chp)>=0?"+":"")+Number(item.v.chp).toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})];
-    vals.forEach((v,i)=>{const td=el("td",v);if(i===3)td.style.color=Number(item.v.chp)>=0?"#63f0cb":"#ff718c";tr.append(td);});
-    tbody.append(tr);
-   }
-   status.textContent="Source: FYERS quotes API · "+rows.length+" fresh verified quote(s) of "+(data.universeCount||rows.length)+" F&O symbols · fetched "+new Date(data.fetchedAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST · missing/stale symbols omitted.";
-  }catch(err){status.textContent=String(err?.message||"Verified quotes unavailable.")+" No stale or placeholder prices are shown.";}
+   verifiedRows=data.data.filter(item=>item&&item.v&&Number(item.v.lp)>0&&Number.isFinite(Number(item.v.chp))&&Number.isFinite(Number(item.v.ch))&&Number(item.v.tt)>0);
+   paintRows();
+   status.textContent="Source: FYERS quotes API · "+verifiedRows.length+" fresh verified quote(s) of "+(data.universeCount||verifiedRows.length)+" F&O symbols · sorted by "+sort.options[sort.selectedIndex].text+" · fetched "+new Date(data.fetchedAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST · missing/stale symbols omitted.";
+  }catch(err){verifiedRows=[];tbody.replaceChildren();status.textContent=String(err?.message||"Verified quotes unavailable.")+" No stale or placeholder prices are shown.";}
   finally{refresh.disabled=false;}
  }
+ sort.addEventListener("change",paintRows);
  refresh.addEventListener("click",load);await load();
 }
 function renderTechnicalIndicators(){
