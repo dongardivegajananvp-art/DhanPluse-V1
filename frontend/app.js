@@ -73,7 +73,7 @@ function renderGap(){
    const latest=data.latestSession, gap=latest.gap;
    output.append(el("h3",gap.direction.toUpperCase()+" · "+(gap.gapPct>0?"+":"")+gap.gapPct.toFixed(2)+"%"));
    output.append(el("p","Latest candle: "+latest.timestamp.slice(0,10)+" · Previous close ₹"+latest.previousClose+" · Open ₹"+latest.open+" · High ₹"+latest.high+" · Low ₹"+latest.low+" · Close ₹"+latest.close));
-   output.append(el("p","Verified daily candles: "+data.candleCount+" · Gaps in selected sample: "+data.historical.sampleSize+" · Filled: "+data.historical.filledCount+" · Not filled: "+data.historical.unfilledCount));
+   output.append(el("p","Daily candles received: "+data.candleCount+" · Completed sessions used: "+data.completedCandleCount+" · Gaps in backtest sample: "+data.historical.sampleSize+" · Filled: "+data.historical.filledCount+" · Not filled: "+data.historical.unfilledCount));
    output.append(el("p",data.historical.fillRatePct===null?"No gaps matched the selected threshold.":"Historical gap-fill rate: "+data.historical.fillRatePct.toFixed(2)+"% (descriptive sample only)"));
    output.append(el("p","Data source: "+data.source+" · fetched "+data.fetchedAt));
    output.append(el("p",data.warning,"risk-note"));
