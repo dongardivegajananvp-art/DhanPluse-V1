@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101827"><title>DhanPulse — Clean Rebuild</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<header><div class="brand"><span class="mark">DP</span><div><strong>DhanPulse</strong><small>Clean Rebuild · FYERS</small></div></div><div id="connection" class="pill">Checking backend…</div></header>
+<main>
+<section class="intro"><p class="eyebrow">VERIFICATION FIRST</p><h1>Market data you can verify.</h1><p>No demo prices. No fabricated candles. No signal when the required data is missing or stale.</p></section>
+<section class="status-grid">
+<article><span>Backend</span><strong id="backendStatus">Checking…</strong></article>
+<article><span>FYERS authentication</span><strong id="fyersStatus">Not verified</strong></article>
+<article><span>Live market feed</span><strong id="feedStatus">Waiting</strong></article>
+<article><span>Order placement</span><strong>Disabled</strong></article>
+</section>
+<nav id="tabs" aria-label="Market modules">
+<button class="active" data-tab="dashboard">Dashboard</button><button data-tab="explorer">Stock Explorer</button><button data-tab="nifty">NIFTY</button><button data-tab="banknifty">BANKNIFTY</button><button data-tab="options">Option Chain & OI</button><button data-tab="scanners">Scanners</button><button data-tab="journal">Paper Journal</button>
+</nav>
+<section id="panel" class="panel" aria-live="polite"><h2>Dashboard</h2><p>Waiting for a verified market-data provider. No prices are being invented.</p></section>
+<p class="footnote">Status is not proof of a live tick. A fresh, valid FYERS exchange timestamp is required before live data is shown.</p>
+</main><script src="./app.js"></script>
+</body></html>
