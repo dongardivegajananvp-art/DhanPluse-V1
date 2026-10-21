@@ -1401,11 +1401,14 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
     latestQuotes[item.symbol] = next;
     const history = historyBySymbol[item.symbol];
     const last = history.length ? history[history.length - 1] : null;
-    if (!last || last.price !== next.price) {
-      history.push({ price: next.price, time: next.receivedAt });
-      if (history.length > 180) history.splice(0, history.length - 180);
+    // Last-known display values are never samples for indicators or alert triggers.
+    if (source !== 'last-known') {
+      if (!last || last.price !== next.price) {
+        history.push({ price: next.price, time: next.receivedAt });
+        if (history.length > 180) history.splice(0, history.length - 180);
+      }
+      if (old && old.price !== next.price) checkAlerts(item.symbol, next.price);
     }
-    if (old && old.price !== next.price) checkAlerts(item.symbol, next.price);
   });
   const metrics = document.querySelectorAll('.metrics .metric');
   SYMBOLS.forEach((item, index) => {
