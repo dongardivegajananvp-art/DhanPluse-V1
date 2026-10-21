@@ -651,7 +651,10 @@ async function refreshStatus(){
   const s=await r.json();
   document.querySelector("#backendStatus").textContent=s.backend||"Unknown";
   document.querySelector("#fyersStatus").textContent=s.fyers||"Not verified";
-  document.querySelector("#feedStatus").textContent=s.liveData||"Waiting";
+  const accepted=s.acceptedTickCounts||{};
+  const tickTotal=Object.values(accepted).reduce((sum,value)=>sum+(Number(value)||0),0);
+  const perIndex=["NSE:NIFTY50-INDEX","NSE:NIFTYBANK-INDEX"].map(symbol=>(symbol==="NSE:NIFTY50-INDEX"?"NIFTY":"BANKNIFTY")+" "+(Number(accepted[symbol])||0)).join(" · ");
+  document.querySelector("#feedStatus").textContent=(s.liveData||"Waiting")+(tickTotal?" · accepted "+perIndex:"");
   document.querySelector("#connection").textContent=s.fyers==="connected"?(s.liveData==="streaming"?"FYERS authenticated · verified feed streaming":"FYERS authenticated · waiting for fresh verified ticks"):s.backend==="online"?"Backend online · FYERS not connected":"Backend status unavailable";
   const active=document.querySelector("#tabs button.active")?.dataset.tab;
   if(["dashboard","nifty","banknifty"].includes(active)&&document.querySelector("#liveQuotePanel"))void renderLiveQuotes(active);
