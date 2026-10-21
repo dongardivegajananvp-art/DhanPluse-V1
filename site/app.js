@@ -850,8 +850,10 @@ async function loadAdvancedScanner() {
               const last=candles[candles.length-1];
               const prior=candles.slice(Math.max(0,candles.length-21),candles.length-1);
               const priorHigh=prior.length?Math.max(...prior.map(row=>Number(row[2]))):Infinity;
-              const breakoutConfirmed=Number(last[4])>priorHigh&&Number(last[4])>Number(last[1]);
-              candleChecked.push({...x,pattern:breakoutConfirmed?'Confirmed 5-minute close above prior '+prior.length+' candle highs.': 'No confirmed breakout: latest close did not clear prior candle highs with a bullish close.',candleVerified:true,breakoutConfirmed});
+              const lastCandleClosed=Number(last[0])*1000+5*60*1000<=Date.now();
+              const breakoutConfirmed=lastCandleClosed&&Number(last[4])>priorHigh&&Number(last[4])>Number(last[1]);
+              const breakoutReason=!lastCandleClosed?'Latest 5-minute candle is still forming; confirmation withheld.':breakoutConfirmed?'Confirmed closed 5-minute candle above prior '+prior.length+' candle highs.':'No confirmed breakout: latest closed candle did not clear prior candle highs with a bullish close.';
+              candleChecked.push({...x,pattern:breakoutReason,candleVerified:true,breakoutConfirmed});
             }
           }
         }catch{
