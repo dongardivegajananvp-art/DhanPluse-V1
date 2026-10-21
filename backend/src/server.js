@@ -346,7 +346,7 @@ app.get("/api/fyers/options-chain", requireSession, async (req, res) => {
     if (data.some(x=>!x.verified)) return res.status(502).json({ok:false,error:"Option leg validation failed; chain blocked."});
     const complete=data.every(x=>x.oi!==null&&x.volume!==null);
     rateLimits.delete(cooldownKey);
-    res.json({ok:true,symbol,source:"FYERS option-chain API",fetchedAt:new Date().toISOString(),underlyingLtp:Number(underlying.ltp),expiryData:Array.isArray(body.data.expiryData)?body.data.expiryData:[],callOi:Number.isFinite(Number(body.data.callOi))?Number(body.data.callOi):null,putOi:Number.isFinite(Number(body.data.putOi))?Number(body.data.putOi):null,dataComplete:complete,signalsAllowed:complete,count:data.length,data,warning:complete?"FYERS option-chain data; verify freshness and liquidity before analysis.":"OI or volume missing on one or more legs; signals blocked."});
+    res.json({ok:true,symbol,source:"FYERS option-chain API",fetchedAt:new Date().toISOString(),underlyingLtp:Number(underlying.ltp),expiryData:Array.isArray(body.data.expiryData)?body.data.expiryData:[],callOi:Number.isFinite(Number(body.data.callOi))?Number(body.data.callOi):null,putOi:Number.isFinite(Number(body.data.putOi))?Number(body.data.putOi):null,dataComplete:complete,signalsAllowed:false,count:data.length,data,warning:complete?"OI and volume fields are present, but exchange-time freshness and liquidity are not independently validated; display only and keep signals blocked.":"OI or volume missing on one or more legs; display only and keep signals blocked."});
   } catch (error) { res.status(502).json({ok:false,error:"FYERS option-chain request failed; analysis blocked.",detail:String(error.message||"Network error").slice(0,160)}); }
 });
 
