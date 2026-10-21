@@ -6,8 +6,8 @@ let candleRefreshTimer = null;
 const pages = {
  dashboard:["Dashboard","Verified FYERS streaming quotes are displayed for NIFTY and BANKNIFTY. Historical gap analysis is available; full Stock Explorer, candlesticks, and scanners remain incomplete."],
  explorer:["Stock Explorer","The complete F&O quote universe is not connected in this branch. No prices are fabricated."],
- nifty:["NIFTY","Verified FYERS index quotes are displayed below. Historical gap analysis supports NSE:NIFTY50-INDEX; candlestick charting is not yet connected."],
- banknifty:["BANKNIFTY","Verified FYERS index quotes are displayed below. Historical gap analysis supports NSE:NIFTYBANK-INDEX; candlestick charting is not yet connected."],
+ nifty:["NIFTY","Verified FYERS index quotes and historical candlestick charts are supported. Live tick candles are available only while fresh FYERS ticks are received; stale data blocks the chart."],
+ banknifty:["BANKNIFTY","Verified FYERS index quotes and historical candlestick charts are supported. Live tick candles are available only while fresh FYERS ticks are received; stale data blocks the chart."],
  gap:["Gap-Up / Gap-Down","Load verified FYERS daily candles and calculate descriptive historical gap-fill statistics."],
  options:["Option Chain & OI","Option-chain data is not connected in this branch. Do not use this page for trade decisions."],
  scanners:["Scanners","Scanners remain blocked until quotes, candles, and option data are verified."],
