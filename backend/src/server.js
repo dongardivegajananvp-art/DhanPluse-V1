@@ -403,7 +403,7 @@ let stockQuotePromise = null;
 let stockQuoteCooldown = { until: 0, backoffMs: 30000 };
 const STOCK_QUOTE_CACHE_MS = 30000;
 const STOCK_QUOTE_BATCH_SIZE = 50;
-const STOCK_QUOTE_BATCH_PAUSE_MS = 300;
+const STOCK_QUOTE_BATCH_PAUSE_MS = 1200;
 function stockQuoteRateLimitError() {
   const now = Date.now();
   const until = now + stockQuoteCooldown.backoffMs;
@@ -427,10 +427,19 @@ async function loadVerifiedFnoStockQuotes() {
     url.searchParams.set("symbols", batch.join(","));
     const response = await fetch(url, { headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
     const body = await response.json().catch(() => ({}));
-    if (response.status === 429) throw stockQuoteRateLimitError();
+    if (response.status === 429) {
+      console.warn("FYERS stock quotes rate-limited:", JSON.stringify({ batchNumber: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1, batchSize: batch.length }));
+      throw stockQuoteRateLimitError();
+    }
     if (!response.ok || body.s !== "ok" || !Array.isArray(body.d)) {
-      const error = new Error(String(body.message || "Invalid quote response").slice(0, 160));
-      error.statusCode = response.status === 401 ? 401 : 502;
+      const reason = String(body.message || body.code || "Invalid quote response").slice(0, 160);
+      console.error("FYERS stock quote batch rejected:", JSON.stringify({
+        batchNumber: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1,
+        batchSize: batch.length, httpStatus: response.status,
+        responseStatus: body.s ?? null, reason
+      }));
+      const error = new Error(`FYERS quote batch ${Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1} failed (HTTP ${response.status}; ${reason}).`);
+      error.statusCode = response.status === 401 ? 401 : response.status === 429 ? 429 : 502;
       throw error;
     }
     const returned = new Set();
