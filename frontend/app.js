@@ -216,6 +216,10 @@ function renderCandleChart(key){
   for(const [value,title] of symbols){const option=el("option",title);option.value=value;select.append(option);}
   label.append(select);form.append(label);
  }
+ const sourceLabel=el("label","Data source");
+ const sourceSelect=document.createElement("select");sourceSelect.name="source";
+ for(const [value,title] of [["history","Historical FYERS OHLC"],["live","Live candles from FYERS ticks"]]){const option=el("option",title);option.value=value;sourceSelect.append(option);}
+ sourceLabel.append(sourceSelect);form.append(sourceLabel);
  const resolutionLabel=el("label","Candle interval");
  const resolution=document.createElement("select");resolution.name="resolution";
  for(const [value,title] of [["5","5 minutes"],["15","15 minutes"],["30","30 minutes"],["60","1 hour"],["D","Daily"]]){const option=el("option",title);option.value=value;resolution.append(option);}
@@ -229,6 +233,7 @@ function renderCandleChart(key){
  const status=el("p","Choose an interval and load historical candles.");
  const chartHost=el("div",undefined,"candle-chart-host");
  const details=el("p",undefined,"candle-details");
+ sourceSelect.addEventListener("change",()=>{if(sourceSelect.value==="live"){if(fixedSymbol===null){status.textContent="Live tick candles are supported on NIFTY/BANKNIFTY tabs only.";return;}if(resolution.value==="D")resolution.value="5";}if(sessionToken)form.requestSubmit();});
  resolution.addEventListener("change",()=>{
   const daily=resolution.value==="D";
   form.elements.from.value=istDateString(new Date(Date.now()-(daily?60:7)*86400000));
@@ -241,17 +246,22 @@ function renderCandleChart(key){
   event.preventDefault();
   const symbol=fixedSymbol||form.elements.symbol.value;
   const interval=resolution.value;
+  const source=sourceSelect.value;
   const from=form.elements.from.value,to=form.elements.to.value;
+  if(source==="live"&&(!fixedSymbol||interval==="D")){status.textContent="Live tick candles are supported on NIFTY/BANKNIFTY with intraday intervals only.";chartHost.replaceChildren();details.textContent="";return;}
   if(!sessionToken){status.textContent="Connect FYERS first. No candle data is shown without an authenticated session.";chartHost.replaceChildren();details.textContent="";return;}
   if(!from||!to||from>to){status.textContent="Choose a valid date range.";return;}
   submit.disabled=true;status.textContent="Requesting verified FYERS candles…";chartHost.replaceChildren();details.textContent="";
-  const query=new URLSearchParams({symbol,resolution:interval,from,to});
+  const query=new URLSearchParams({symbol,resolution:interval});
+  if(source==="history"){query.set("from",from);query.set("to",to);}
+  const endpoint=source==="live"?"/api/market/live-candles":"/api/market/candles";
   try{
-   const response=await fetch(API_BASE+"/api/market/candles?"+query.toString(),{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
+   const response=await fetch(API_BASE+endpoint+"?"+query.toString(),{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
    const result=await response.json();
    if(response.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);}
    if(!response.ok||!result.ok||!Array.isArray(result.data)||!result.data.length)throw new Error(result.detail||result.error||"No verified candles returned.");
-   const candles=result.data.filter(c=>c.verified===true&&c.source==="FYERS"&&Number.isFinite(Date.parse(c.timestamp))&&[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))&&Number(v)>0)&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)<=Math.min(Number(c.open),Number(c.close),Number(c.high)));
+   const expectedSource=source==="live"?"FYERS websocket ticks":"FYERS";
+   const candles=result.data.filter(c=>c.verified===true&&c.source===expectedSource&&c.source!=="");&&Number.isFinite(Date.parse(c.timestamp))&&[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))&&Number(v)>0)&&Number(c.high)>=Math.max(Number(c.open),Number(c.close),Number(c.low))&&Number(c.low)<=Math.min(Number(c.open),Number(c.close),Number(c.high)));
    if(!candles.length)throw new Error("Returned candles failed OHLC/source validation; chart blocked.");
    const shown=candles.slice(-100);
    const width=900,height=360,left=64,right=20,top=20,bottom=48,plotW=width-left-right,plotH=height-top-bottom;
@@ -301,7 +311,8 @@ function renderCandleChart(key){
    }
    chartHost.append(svg);
    const last=shown[shown.length-1];
-   details.textContent="Source: "+result.source+" · "+candles.length+" valid candles returned; showing latest "+shown.length+" · Last candle close ₹"+Number(last.close).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})+" · Exchange candle time "+new Date(last.timestamp).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" · Fetched "+new Date(result.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+".";
+   details.textContent="Source: "+result.source+" · "+candles.length+" valid candles returned; showing latest "+shown.length+" · Last candle close ₹"+Number(last.close).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})+" · Candle time "+new Date(last.timestamp).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+" · Fetched "+new Date(result.fetchedAt).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})+(source==="live"?" · Volume unavailable (not fabricated).":".");
+   status.textContent=symbol+" · "+(interval==="D"?"daily":interval+"-minute")+" candles · "+(source==="live"?"Live FYERS tick aggregation":"Verified FYERS historical data");
    status.textContent=symbol+" · "+(interval==="D"?"daily":interval+"-minute")+" candles · Verified FYERS historical data";
   }catch(error){status.textContent=String(error?.message||"Verified candles unavailable.")+" No placeholder candles are displayed.";chartHost.replaceChildren();details.textContent="";}
   finally{submit.disabled=false;}
