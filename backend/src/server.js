@@ -44,6 +44,8 @@ function recordLiveCandles(symbol, ltp, exchangeTime) {
 }
 
 const allowedOrigins = new Set((process.env.ALLOWED_ORIGIN || "").split(",").map(x => x.trim()).filter(Boolean));
+// Explicitly permit the isolated test UI; production origins remain controlled by ALLOWED_ORIGIN.
+allowedOrigins.add("https://dhanpulse-clean-test-ui.onrender.com");
 if (redirectUri) { try { allowedOrigins.add(new URL(redirectUri).origin); } catch {} }
 app.use(cors({ origin(origin, callback) {
   if (!origin || allowedOrigins.has(origin)) return callback(null, true);
