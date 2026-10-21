@@ -74,22 +74,52 @@ function epochSeconds(value) {
 function parseTick(raw) {
   let parsed = raw;
   if (typeof raw === "string") { try { parsed = JSON.parse(raw); } catch { return; } }
-  const messages = Array.isArray(parsed) ? parsed : [parsed];
-  for (const item of messages) {
+  // SDK versions can deliver one index tick, a list, or a small wrapper around the tick.
+  const queue = Array.isArray(parsed) ? [...parsed] : [parsed];
+  const messages = [];
+  while (queue.length) {
+    const item = queue.shift();
     if (!item || typeof item !== "object") continue;
-    const symbol = item.symbol || item.n;
-    const ltp = Number(item.ltp ?? item.lp ?? item.v?.lp);
-    if (!allowedSymbols.includes(symbol) || !Number.isFinite(ltp) || ltp <= 0) continue;
-    const exchangeTime = epochSeconds(item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt ?? item.v?.tt);
-    if (!exchangeTime) {
-      console.warn("FYERS index update ignored: missing exchange timestamp.", JSON.stringify({ symbol }));
+    if (Array.isArray(item)) { queue.push(...item); continue; }
+    // Only unwrap common data containers; keep the original object as a candidate too.
+    for (const key of ["data", "d", "values"]) {
+      if (item[key] && typeof item[key] === "object") queue.push(item[key]);
+    }
+    messages.push(item);
+  }
+  for (const item of messages) {
+    const value = item.v && typeof item.v === "object" ? item.v : {};
+    const symbol = item.symbol || item.n || value.symbol || value.n;
+    if (!allowedSymbols.includes(symbol)) continue;
+    const rawLtp = item.ltp ?? item.lp ?? value.ltp ?? value.lp;
+    const ltp = Number(rawLtp);
+    if (rawLtp == null || !Number.isFinite(ltp) || ltp <= 0) {
+      console.warn("FYERS index update ignored: invalid LTP.", JSON.stringify({ symbol, hasLtp: rawLtp != null }));
       continue;
     }
+    const rawExchangeTime = item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt ??
+      item.timestamp ?? item.ts ?? item.time ?? value.exch_feed_time ?? value.last_traded_time ??
+      value.ltt ?? value.tt ?? value.timestamp ?? value.ts ?? value.time;
+    const exchangeTime = epochSeconds(rawExchangeTime);
+    if (!exchangeTime) {
+      console.warn("FYERS index update ignored: missing exchange timestamp.", JSON.stringify({
+        symbol, timestampKeys: Object.keys(item).filter(k => /time|timestamp|^tt$|^ts$/i.test(k)).slice(0, 10)
+      }));
+      continue;
+    }
+    const tickTime = new Date(exchangeTime * 1000).toISOString();
+    const ageMs = Date.now() - Date.parse(tickTime);
+    if (!Number.isFinite(ageMs) || ageMs < -30000 || ageMs > 120000) {
+      console.warn("FYERS index update ignored: exchange timestamp outside freshness window.", JSON.stringify({ symbol, ageMs }));
+      continue;
+    }
+    const rawCh = item.ch ?? value.ch;
+    const rawChp = item.chp ?? value.chp;
     latestTicks.set(symbol, {
       symbol, ltp,
-      ch: Number.isFinite(Number(item.ch ?? item.v?.ch)) ? Number(item.ch ?? item.v?.ch) : null,
-      chp: Number.isFinite(Number(item.chp ?? item.v?.chp)) ? Number(item.chp ?? item.v?.chp) : null,
-      updatedAt: new Date(exchangeTime * 1000).toISOString()
+      ch: rawCh != null && Number.isFinite(Number(rawCh)) ? Number(rawCh) : null,
+      chp: rawChp != null && Number.isFinite(Number(rawChp)) ? Number(rawChp) : null,
+      updatedAt: tickTime
     });
     recordLiveCandles(symbol, ltp, exchangeTime);
   }
