@@ -1308,6 +1308,17 @@ function renderLogs() {
 
 function render(tab) {
   if (!descriptions[tab]) return;
+  if (['Trade Journal','Capital Protection','Backtesting'].includes(tab)) {
+    currentTab = tab;
+    ['.welcome','.metrics','.grid'].forEach(selector => { const section=document.querySelector(selector); if(section) section.style.display='none'; });
+    title.textContent=tab; panelTitle.textContent=descriptions[tab][0]; featureTitle.textContent=tab; featureDesc.textContent=descriptions[tab][1];
+    nav.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button.dataset.tab===tab));
+    const mainPanel=document.querySelector('#mainWorkspaceContent');
+    if(mainPanel) mainPanel.innerHTML='<div class="main-view-heading"><span class="eyebrow">DHANPULSE WORKSPACE</span><h2>'+escapeHtml(tab)+'</h2><p>'+escapeHtml(descriptions[tab][1])+'</p></div><p class="hint">Use the dedicated '+escapeHtml(tab)+' panel below. No live order placement is available.</p>';
+    featureContent.innerHTML='<article class="console-section"><div class="chart-empty">Loading dedicated '+escapeHtml(tab)+' tool…</div></article>';
+    window.setTimeout(()=>{ if(currentTab!==tab)return; const hasPanel=featureContent.querySelector('#dpJournalForm, #dpRiskForm, #dpBtForm'); if(!hasPanel) featureContent.innerHTML='<article class="console-section"><h4>'+escapeHtml(tab)+' unavailable</h4><p class="hint">The dedicated tool did not initialize. Reload the page after the latest frontend is published. No simulated success is shown.</p></article>'; },1500);
+    return;
+  }
   currentTab = tab;
   const dashboardMode = tab === 'Dashboard';
   ['.welcome', '.metrics', '.grid'].forEach(selector => {
