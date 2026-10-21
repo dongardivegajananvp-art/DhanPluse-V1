@@ -21,6 +21,11 @@ let streamConnected = false;
 let streamError = "";
 const latestTicks = new Map();
 const acceptedTickCounts = new Map();
+const diagnostics = [];
+function recordDiagnostic(level, event, detail = {}) {
+  diagnostics.push({ timestamp: new Date().toISOString(), level, event, ...detail });
+  if (diagnostics.length > 200) diagnostics.splice(0, diagnostics.length - 200);
+}
 const liveCandleIntervals = [1, 5, 15, 30, 60];
 const liveCandles = new Map();
 function recordLiveCandles(symbol, ltp, exchangeTime) {
@@ -123,7 +128,9 @@ function parseTick(raw) {
       chp: rawChp != null && Number.isFinite(Number(rawChp)) ? Number(rawChp) : null,
       updatedAt: tickTime
     });
-    acceptedTickCounts.set(symbol, (acceptedTickCounts.get(symbol) || 0) + 1);
+    const acceptedCount = (acceptedTickCounts.get(symbol) || 0) + 1;
+    acceptedTickCounts.set(symbol, acceptedCount);
+    if (acceptedCount === 1 || acceptedCount % 50 === 0) recordDiagnostic("info", "fresh_tick_accepted", { symbol, acceptedCount, exchangeTime: tickTime });
     recordLiveCandles(symbol, ltp, exchangeTime);
   }
 }
@@ -141,10 +148,12 @@ function startMarketDataStream(token) {
       streamConnected = true;
       streamError = "";
       console.log("FYERS market socket connected; subscribing to configured index symbols.");
+      recordDiagnostic("info", "socket_connected", { symbols: allowedSymbols });
       try {
         socket.mode(socket.FullMode);
         socket.subscribe(allowedSymbols);
         console.log("FYERS market socket subscription request sent.");
+        recordDiagnostic("info", "subscription_requested", { symbols: allowedSymbols });
       } catch (error) {
         streamError = "Could not subscribe to FYERS index symbols.";
         console.error("FYERS market socket subscription failed:", String(error?.message || error).slice(0, 200));
@@ -180,11 +189,13 @@ function startMarketDataStream(token) {
     socket.on("error", error => {
       if (marketSocket !== socket) return;
       streamError = "FYERS market data socket reported an error.";
+      recordDiagnostic("error", "socket_error", { message: String(error?.message || error).slice(0, 160) });
       console.error("FYERS market socket error:", String(error?.message || error).slice(0, 200));
     });
     socket.on("close", (code, reason) => {
       if (marketSocket !== socket) return;
       streamConnected = false;
+      recordDiagnostic("warn", "socket_closed", { code: code ?? null, reason: reason == null ? null : String(reason).slice(0, 120) });
       console.warn("FYERS market socket closed:", JSON.stringify({ code: code ?? null, reason: reason == null ? null : String(reason).slice(0, 120) }));
     });
     socket.connect();
@@ -225,6 +236,14 @@ app.get("/health", (_req, res) => {
     orderPlacement: "disabled"
   });
 });
+app.get("/api/diagnostics", requireSession, (_req, res) => {
+  res.set("Cache-Control", "no-store").json({
+    ok: true, source: "DhanPulse backend diagnostics", fetchedAt: new Date().toISOString(),
+    entries: diagnostics.slice(-100).reverse(),
+    orderPlacement: "disabled"
+  });
+});
+
 app.get("/api/status", (_req, res) => res.set("Cache-Control", "no-store").json({
   backend: "online",
   fyersConfigured: Boolean(appId && appSecret && redirectUri),
@@ -275,6 +294,7 @@ app.post("/api/fyers/auth/exchange", async (req, res) => {
     if (!response.ok || data.s !== "ok" || !data.access_token) return res.status(401).json({ error: "FYERS authentication failed.", detail: String(data.message || data.error || "Please retry Connect FYERS.").slice(0, 180) });
     accessToken = data.access_token;
     authenticatedAt = new Date().toISOString();
+    recordDiagnostic("info", "fyers_authentication_succeeded", { authenticatedAt });
     startMarketDataStream(accessToken);
     dashboardSessions.clear();
     const dashboardSessionToken = crypto.randomBytes(32).toString("hex");
