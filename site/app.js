@@ -1423,7 +1423,10 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
         : change === null ? 'FYERS live quote received' : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)');
     }
   });
-  if (source === 'websocket-recent' || streamConnected === false) {
+  if (source === 'last-known') {
+    setStatus(isRegularMarketSession() ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
+    setConnection('Last-known FYERS prices · fresh ticks unavailable', true);
+  } else if (source === 'websocket-recent' || streamConnected === false) {
     setStatus('LIVE DATA STALE');
     setConnection('Stream reconnecting · last verified prices', true);
   } else {
@@ -1643,6 +1646,20 @@ async function fetchLiveQuotes() {
       return;
     }
     if (!response.ok || data.ok !== true || !Array.isArray(data.data)) {
+      if (response.status === 503) {
+        // A last-known snapshot is display-only; stale values never enable signals.
+        try {
+          const lastResponse = await fetch(BACKEND_URL + '/api/market/last-known-quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+          const lastData = await lastResponse.json().catch(() => ({}));
+          if (lastResponse.ok && lastData.ok === true && lastData.source === 'last-known' && Array.isArray(lastData.data) &&
+              updateQuoteCards(lastData.data, lastData.fetchedAt, 'last-known', false)) {
+            quotePollDelay = 15000;
+            setStatus(lastData.marketOpen ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
+            showMessage('Showing last-known FYERS index prices from ' + new Date(lastData.fetchedAt).toLocaleString('en-IN') + '. These are not live ticks; signals remain blocked until fresh data returns.');
+            return;
+          }
+        } catch {}
+      }
       if (response.status === 401) {
         latestQuotes = {};
         setStatus('FYERS LOGIN REQUIRED');
