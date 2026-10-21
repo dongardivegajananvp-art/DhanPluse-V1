@@ -4,7 +4,7 @@ const sessionKey = "dhanpulseGapSession";
 let sessionToken = sessionStorage.getItem(sessionKey) || "";
 let candleRefreshTimer = null;
 const pages = {
- dashboard:["Dashboard","Verified FYERS streaming quotes are displayed for NIFTY and BANKNIFTY. Historical gap analysis is available; full Stock Explorer, candlesticks, and scanners remain incomplete."],
+ dashboard:["Dashboard","Verified FYERS streaming quotes are displayed for NIFTY and BANKNIFTY when exchange timestamps are fresh. Historical FYERS candlesticks and gap analysis are available. Full NSE F&O coverage and complete breakout, momentum, and Zero-to-Hero scanners are still incomplete; missing or stale data must block signals."],
  explorer:["Stock Explorer","The complete F&O quote universe is not connected in this branch. No prices are fabricated."],
  nifty:["NIFTY","Verified FYERS index quotes and historical candlestick charts are supported. Live tick candles are available only while fresh FYERS ticks are received; stale data blocks the chart."],
  banknifty:["BANKNIFTY","Verified FYERS index quotes and historical candlestick charts are supported. Live tick candles are available only while fresh FYERS ticks are received; stale data blocks the chart."],
