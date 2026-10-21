@@ -11,3 +11,5 @@
 .candle-up{fill:#6ee7b7;stroke:#6ee7b7}
 .candle-down{fill:#fb7185;stroke:#fb7185}
 .candle-details{font-size:12px;overflow-wrap:anywhere}
+
+.zone-supply{fill:#fb7185;fill-opacity:.13;stroke:#fb7185;stroke-opacity:.55;stroke-width:1;stroke-dasharray:5 3;pointer-events:none}.zone-demand{fill:#6ee7b7;fill-opacity:.13;stroke:#6ee7b7;stroke-opacity:.55;stroke-width:1;stroke-dasharray:5 3;pointer-events:none}
