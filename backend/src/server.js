@@ -413,7 +413,7 @@ async function getNseFnoEquityUniverse() {
   ]);
   const derivatives = new Set();
   for (const [ticker, item] of Object.entries(fo)) {
-    if (!item || item.tradeStatus === 0) continue;
+    if (!item || Number(item.tradeStatus) === 0) continue;
     const instrumentType = Number(item.exInstType);
     const optionType = String(item.optType || "XX").toUpperCase();
     const underlying = String(item.underSym || item.exSymName || "").trim().toUpperCase();
@@ -421,7 +421,7 @@ async function getNseFnoEquityUniverse() {
   }
   const cashByName = new Map();
   for (const [ticker, item] of Object.entries(cm)) {
-    if (!item || item.tradeStatus === 0 || !/^NSE:[A-Z0-9&._-]+-EQ$/.test(ticker)) continue;
+    if (!item || Number(item.tradeStatus) === 0 || !/^NSE:[A-Z0-9&._-]+-EQ$/.test(ticker)) continue;
     const name = String(item.exSymName || ticker.slice(4, -3)).trim().toUpperCase();
     cashByName.set(name, ticker);
   }
@@ -430,6 +430,26 @@ async function getNseFnoEquityUniverse() {
   fnoUniverseCache = { fetchedAt: Date.now(), data };
   return fnoUniverseCache;
 }
+
+// Public smoke-test endpoint exposes only non-sensitive symbol-master metadata.
+app.get("/api/market/fno-universe-check", async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    const master = await getNseFnoEquityUniverse();
+    const names = new Set(master.data.map(item => item.name));
+    res.json({
+      ok: master.data.length >= 50,
+      source: "FYERS NSE_FO and NSE_CM symbol masters",
+      fetchedAt: new Date(master.fetchedAt).toISOString(),
+      count: master.data.length,
+      expectedSymbolsPresent: ["RELIANCE", "TCS", "INFY"].map(name => ({ name, present: names.has(name) })),
+      note: "Symbol-master discovery only; does not verify authenticated quotes or imply live market prices."
+    });
+  } catch (error) {
+    console.error("FYERS F&O symbol-master verification failed:", String(error?.message || error).slice(0, 180));
+    res.status(502).json({ ok: false, error: "Current FYERS F&O universe could not be verified.", detail: String(error?.message || "Symbol master unavailable").slice(0, 180) });
+  }
+});
 
 app.get("/api/market/fno-universe", requireSession, async (_req, res) => {
   res.set("Cache-Control", "no-store");
