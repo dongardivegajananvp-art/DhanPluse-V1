@@ -186,8 +186,10 @@ function epochSeconds(value) {
 function liveSnapshot() {
   const ticks = allowedSymbols.map(symbol => latestTicks.get(symbol));
   if (ticks.some(tick => !tick)) return null;
-  const newestTickAge = Date.now() - Math.min(...ticks.map(tick => Date.parse(tick.updatedAt)));
-  if (!Number.isFinite(newestTickAge) || newestTickAge > 120000) return null;
+  const now = Date.now();
+  const tickAges = ticks.map(tick => now - Date.parse(tick.updatedAt));
+  // Every index timestamp must be plausible: reject both stale and future-dated ticks.
+  if (tickAges.some(age => !Number.isFinite(age) || age < 0 || age > 120000)) return null;
 
   return {
     ok: true,
