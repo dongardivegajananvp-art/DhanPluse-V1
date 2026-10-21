@@ -769,6 +769,8 @@ async function refreshStatus(){
   const s=await r.json();
   document.querySelector("#backendStatus").textContent=s.backend||"Unknown";
   document.querySelector("#fyersStatus").textContent=s.fyers||"Not verified";
+  const session=s.marketSession;
+  document.querySelector("#marketSessionStatus").textContent=session?(session.isRegularHours?"Scheduled NSE hours":"Outside scheduled NSE hours")+" · "+(session.localTime||"IST")+" IST · holiday calendar not checked":"Session status unavailable";
   const accepted=s.acceptedTickCounts||{};
   const tickTotal=Object.values(accepted).reduce((sum,value)=>sum+(Number(value)||0),0);
   const perIndex=["NSE:NIFTY50-INDEX","NSE:NIFTYBANK-INDEX"].map(symbol=>(symbol==="NSE:NIFTY50-INDEX"?"NIFTY":"BANKNIFTY")+" "+(Number(accepted[symbol])||0)).join(" · ");
@@ -777,7 +779,7 @@ async function refreshStatus(){
   const active=document.querySelector("#tabs button.active")?.dataset.tab;
   if(["dashboard","nifty","banknifty"].includes(active)&&document.querySelector("#liveQuotePanel"))void renderLiveQuotes(active);
  }catch{
-  document.querySelector("#backendStatus").textContent="Unreachable";document.querySelector("#fyersStatus").textContent="Not verified";document.querySelector("#feedStatus").textContent="Unavailable";document.querySelector("#connection").textContent="Backend unavailable";
+  document.querySelector("#backendStatus").textContent="Unreachable";document.querySelector("#fyersStatus").textContent="Not verified";document.querySelector("#feedStatus").textContent="Unavailable";document.querySelector("#marketSessionStatus").textContent="Unavailable";document.querySelector("#connection").textContent="Backend unavailable";
  }
 }
 (async()=>{await handleAuthCallback();await refreshStatus();renderPage("dashboard");setInterval(refreshStatus,10000);})();
