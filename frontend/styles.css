@@ -101,3 +101,6 @@ button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid 
 @media(min-width:1100px){.intro{padding:36px 42px}.status-grid article{padding:22px 23px}.panel{padding:32px}}
 @media(max-width:800px){main{padding:22px 15px 34px}.intro{padding:26px 23px;border-radius:19px}.status-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.status-grid article{padding:16px}.panel{padding:20px;border-radius:16px}header{padding:11px 15px;gap:10px}}
 @media(max-width:440px){main{padding:16px 10px 28px}.intro{padding:23px 18px}.intro h1{font-size:34px}.intro p:last-child{font-size:13px}.status-grid article{padding:13px}.status-grid strong{font-size:14px}#connection{font-size:10px;padding:5px 8px}.panel{padding:16px}}
+
+/* Five independent health signals; responsive on narrow screens. */
+.status-grid{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
