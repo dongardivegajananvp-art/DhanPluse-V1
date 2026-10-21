@@ -1576,7 +1576,7 @@ function updateDynamicPanel() {
     if (mini) mini.innerHTML = svgChart(item.symbol, 80);
   });
   const mainTabChart = document.querySelector('#mainTabChart');
-  if (mainTabChart && currentTab !== 'Charts & Patterns') {
+  if (mainTabChart && currentTab !== 'Charts & Patterns' && !mainTabChart.querySelector('.candle-chart')) {
     const activeSymbol = currentTab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
     mainTabChart.innerHTML = svgChart(activeSymbol, 230);
   }
