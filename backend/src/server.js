@@ -51,9 +51,20 @@ let marketSocket = null;
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
+const lastTickDiagnosticAt = new Map();
+const lastRejectedDiagnosticAt = new Map();
+const SOCKET_DIAGNOSTIC_LOG_INTERVAL_MS = 15_000;
 let restQuoteCache = null;
 let restQuoteFetchedAt = 0;
 let restQuoteInFlight = null;
+
+function shouldLogSocketDiagnostic(store, symbol) {
+  const now = Date.now();
+  const last = store.get(symbol) || 0;
+  if (now - last < SOCKET_DIAGNOSTIC_LOG_INTERVAL_MS) return false;
+  store.set(symbol, now);
+  return true;
+}
 
 function parseTick(raw) {
   let parsed = raw;
@@ -77,7 +88,9 @@ function parseTick(raw) {
       item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt
     );
     if (!exchangeTime) {
-      console.warn('FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
+      if (shouldLogSocketDiagnostic(lastRejectedDiagnosticAt, symbol)) {
+        console.warn('FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
+      }
       continue;
     }
 
@@ -135,13 +148,20 @@ function startMarketDataStream(token) {
       const frames = Array.isArray(parsedMessage) ? parsedMessage : [parsedMessage];
       const acceptedCount = parseTick(parsedMessage);
       if (acceptedCount > 0) {
-        const summary = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n)).slice(0, 5).map(x => ({
-          symbol: x.symbol || x.n,
-          exchangeTimestampPresent: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt))
-        }));
-        console.log('FYERS verified index tick accepted:', JSON.stringify({ acceptedCount, ticks: summary }));
+        const summary = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n))
+          .filter(x => shouldLogSocketDiagnostic(lastTickDiagnosticAt, x.symbol || x.n))
+          .slice(0, 5)
+          .map(x => ({
+            symbol: x.symbol || x.n,
+            exchangeTimestampPresent: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt))
+          }));
+        // Keep logs useful during reconnect diagnosis without writing every tick.
+        if (summary.length) {
+          console.log('FYERS verified index tick accepted:', JSON.stringify({ acceptedCount, ticks: summary }));
+        }
       } else {
-        const indexLike = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n));
+        const indexLike = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n))
+          .filter(x => shouldLogSocketDiagnostic(lastRejectedDiagnosticAt, x.symbol || x.n));
         if (indexLike.length) {
           console.warn('FYERS index frame rejected by tick validation:', JSON.stringify(indexLike.slice(0, 5).map(x => ({
             symbol: x.symbol || x.n,
