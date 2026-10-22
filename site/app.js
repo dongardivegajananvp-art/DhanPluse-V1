@@ -1,5 +1,5 @@
 
-const BACKEND_URL = 'https://dhanpluse-v1.onrender.com';
+const BACKEND_URL = 'https://dhanpulse-clean-test.onrender.com';
 // The FYERS access token stays on the backend. This opaque session token only
 // authorizes this browser session to read protected dashboard APIs.
 const nativeFetch = window.fetch.bind(window);
@@ -326,6 +326,12 @@ async function loadDashboardCandles() {
   const count=document.querySelector('#chartSampleCount');
   const button=document.querySelector('#dashboardCandlesBtn');
   if(!symbol||!resolution||!chart||!status||dashboardCandleRequestRunning)return;
+  if (!sessionStorage.getItem('dhanpulse-dashboard-session-v1')) {
+    status.textContent='Connect FYERS to load verified historical candles.';
+    chart.innerHTML='<div class="chart-empty">Connect FYERS to load verified historical candles. No candle values are fabricated.</div>';
+    if(count)count.textContent='0 verified candles';
+    return;
+  }
   dashboardCandleRequestRunning=true;
   if(button)button.disabled=true;
   status.textContent='Requesting verified FYERS historical candles…';
@@ -1922,6 +1928,7 @@ async function exchangeAuthCode() {
     setBackendStatus('ONLINE');
     logEvent('FYERS authentication succeeded; checking live quotes.', 'info');
     showMessage('FYERS authentication succeeded. Verifying live quotes…');
+    await loadDashboardCandles();
     await fetchLiveQuotes();
   } catch (error) {
     setStatus('FYERS AUTH FAILED');
