@@ -686,6 +686,7 @@ async function loadWatchlistQuotes() {
     const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
     const result=await response.json().catch(()=>({}));
     if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.detail||result.error||'FYERS equity snapshot unavailable.');
+    if(result.marketSession!=='OPEN')throw new Error('MARKET CLOSED — live equity quotes are unavailable; last-known prices are not presented as live watchlist data.');
     watchlistEquityRows=result.data.filter(row=>row&&typeof row.symbol==='string'&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
     watchlistEquityRows.fetchedAt=result.fetchedAt||new Date().toISOString();
     if(select){
@@ -881,6 +882,7 @@ async function loadSureshotStockUniverse() {
     const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
     const result=await response.json().catch(()=>({}));
     if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||'Verified stock universe unavailable.');
+    if(result.marketSession!=='OPEN')throw new Error('MARKET CLOSED — verified live stock choices will refresh during the next regular session.');
     const previous=select.value;
     const indexOptions=Array.from(select.options).filter(option=>!option.value.endsWith('-EQ'));
     const stockRows=result.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
