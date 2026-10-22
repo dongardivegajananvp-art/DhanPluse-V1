@@ -5,6 +5,7 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './gap-analysis.js';
+import { assertCompleteMoverSnapshot } from './movers-validation.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -839,6 +840,13 @@ app.get('/api/market/movers', async (_req, res) => {
             priceStatus
           };
         }).filter(Boolean);
+        assertCompleteMoverSnapshot({
+          requestedSymbols: moversSymbols,
+          rows,
+          failedBatches,
+          receivedSymbols: received,
+          rateLimitError: batchRateLimitError
+        });
         if (!rows.length) {
           if (batchRateLimitError) throw batchRateLimitError;
           throw new Error('FYERS returned no valid verified equity quote rows.');
