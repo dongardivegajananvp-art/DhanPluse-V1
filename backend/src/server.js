@@ -776,10 +776,19 @@ app.get("/api/fyers/option-quote", requireSession, async (req, res) => {
 app.get("/api/fyers/options-chain", requireSession, async (req, res) => {
   res.set("Cache-Control", "no-store");
   const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
-  const allowed = new Set(["NSE:NIFTY50-INDEX","NSE:NIFTYBANK-INDEX","NSE:RELIANCE-EQ","NSE:TCS-EQ","NSE:INFY-EQ","NSE:HDFCBANK-EQ","NSE:ICICIBANK-EQ","NSE:SBIN-EQ","NSE:ITC-EQ","NSE:LT-EQ","NSE:AXISBANK-EQ","NSE:BAJFINANCE-EQ"]);
+  const allowedIndexSymbols = new Set(["NSE:NIFTY50-INDEX","NSE:NIFTYBANK-INDEX"]);
+  const equitySymbolFormat = /^NSE:[A-Z0-9&-]+-EQ$/;
   const count = Number(req.query.strikecount ?? 10);
   const expiry = String(req.query.timestamp ?? "");
-  if (!allowed.has(symbol)) return res.status(400).json({ok:false,error:"Unsupported underlying."});
+  if (!allowedIndexSymbols.has(symbol) && !equitySymbolFormat.test(symbol)) return res.status(400).json({ok:false,error:"Unsupported underlying."});
+  if (equitySymbolFormat.test(symbol)) {
+    try {
+      const universe = await getNseFnoEquityUniverse();
+      if (!universe.data.some(item => item.symbol === symbol)) return res.status(400).json({ok:false,error:"Underlying is not in the verified current NSE F&O equity universe."});
+    } catch (error) {
+      return res.status(503).json({ok:false,error:"Current NSE F&O universe could not be verified; option-chain request blocked.",detail:String(error.message||"Symbol master unavailable").slice(0,160)});
+    }
+  }
   if (!Number.isInteger(count) || count < 1 || count > 50) return res.status(400).json({ok:false,error:"strikecount must be 1–50."});
   if (expiry && !/^\d{10}$/.test(expiry)) return res.status(400).json({ok:false,error:"Invalid expiry timestamp."});
   const cooldownKey = "optionchain:" + symbol;
