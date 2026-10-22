@@ -668,6 +668,105 @@ app.get("/api/market/movers", requireSession, async (_req, res) => {
   }
 });
 
+// Read-only last-known index snapshot. It is display-only and never enables signals.
+app.get("/api/market/last-known-quotes", requireSession, (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const rows = allowedSymbols.map(symbol => {
+    const tick = latestTicks.get(symbol);
+    if (!tick || !Number.isFinite(Number(tick.ltp)) || Number(tick.ltp) <= 0 ||
+        !Number.isFinite(Date.parse(tick.updatedAt))) return null;
+    return { n: tick.symbol, verified: true, v: {
+      lp: tick.ltp, tt: epochSeconds(tick.updatedAt),
+      ...(tick.ch === null ? {} : { ch: tick.ch }),
+      ...(tick.chp === null ? {} : { chp: tick.chp })
+    }};
+  });
+  if (rows.some(row => !row)) {
+    return res.status(503).json({
+      ok: false, source: "last-known", error: "No complete last-known index snapshot is available.",
+      data: [], marketOpen: getNseSessionWindow().isRegularHours
+    });
+  }
+  const data = rows;
+  const fetchedAt = new Date(Math.min(...data.map(row => Number(row.v.tt) * 1000))).toISOString();
+  return res.json({
+    ok: true, source: "last-known", fetchedAt, data,
+    marketOpen: getNseSessionWindow().isRegularHours,
+    signalsAllowed: false,
+    note: "Last-known prices are display-only; live signals require fresh connected WebSocket ticks."
+  });
+});
+
+async function fetchReadOnlyAccountEndpoint(path, res) {
+  if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
+  try {
+    const response = await fetch("https://api-t1.fyers.in/api/v3/" + path, {
+      headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" },
+      cache: "no-store", signal: AbortSignal.timeout(12000)
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.s !== "ok") {
+      const status = response.status === 401 || body.code === -16 ? 401 : response.status === 429 ? 429 : 502;
+      if (status === 429) res.set("Retry-After", response.headers.get("retry-after") || "30");
+      return res.status(status).json({
+        ok: false,
+        error: status === 401 ? "FYERS session expired; reconnect." : status === 429 ? "FYERS account API rate limit; retry after cooldown." : "Verified FYERS account data unavailable.",
+        detail: String(body.message || body.error || "Invalid account response").slice(0, 160)
+      });
+    }
+    return res.json({ ok: true, source: "FYERS read-only account API", fetchedAt: new Date().toISOString(), data: body });
+  } catch (error) {
+    return res.status(502).json({ ok: false, error: "FYERS account endpoint could not be verified.", detail: String(error.message || "Network error").slice(0, 160) });
+  }
+}
+app.get("/api/fyers/holdings", requireSession, (_req, res) => fetchReadOnlyAccountEndpoint("holdings", res));
+app.get("/api/fyers/positions", requireSession, (_req, res) => fetchReadOnlyAccountEndpoint("positions", res));
+
+// Fetch one specific option contract. No signal is issued unless the independent quote
+// has a fresh exchange timestamp and a valid bid/ask spread.
+app.get("/api/fyers/option-quote", requireSession, async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const symbol = String(req.query.symbol || "");
+  if (symbol.length > 80 || !/^NSE:[A-Z0-9&-]+\d[A-Z0-9&-]*(?:CE|PE)$/.test(symbol)) {
+    return res.status(400).json({ ok: false, error: "A valid NSE option-contract symbol is required." });
+  }
+  if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
+  try {
+    const url = new URL("https://api-t1.fyers.in/data/quotes");
+    url.searchParams.set("symbols", symbol);
+    const response = await fetch(url, {
+      headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" },
+      cache: "no-store", signal: AbortSignal.timeout(10000)
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 429) {
+      return res.status(429).json({ ok: false, error: "FYERS option quote rate limit; no signal issued.", retryAfterSeconds: Math.max(30, Number(response.headers.get("retry-after")) || 30) });
+    }
+    if (!response.ok || body.s !== "ok" || !Array.isArray(body.d)) {
+      return res.status(response.status === 401 || body.code === -16 ? 401 : 502).json({
+        ok: false, error: "FYERS option quote unavailable; no signal issued.",
+        detail: String(body.message || body.code || "Invalid quote response").slice(0, 160)
+      });
+    }
+    const found = body.d.find(item => item && item.n === symbol && item.v);
+    const value = found?.v;
+    const ltp = Number(value?.lp), bid = Number(value?.bid), ask = Number(value?.ask);
+    const tt = Number(value?.tt);
+    const quoteTimeMs = tt > 0 ? (tt < 1e12 ? tt * 1000 : tt) : NaN;
+    const ageMs = Date.now() - quoteTimeMs;
+    if (!Number.isFinite(ltp) || ltp <= 0 || !Number.isFinite(bid) || bid <= 0 ||
+        !Number.isFinite(ask) || ask < bid || !Number.isFinite(ageMs) || ageMs < -5000 || ageMs > 15000) {
+      return res.status(503).json({ ok: false, error: "Option quote is incomplete, stale, or has an invalid spread; no signal issued." });
+    }
+    return res.json({
+      ok: true, source: "FYERS quotes API", fetchedAt: new Date().toISOString(),
+      quote: { symbol, ltp, bid, ask, quoteTimeMs, quoteAgeMs: ageMs, verified: true }
+    });
+  } catch (error) {
+    return res.status(502).json({ ok: false, error: "FYERS option quote request failed; no signal issued.", detail: String(error.message || "Network error").slice(0, 160) });
+  }
+});
+
 app.get("/api/fyers/options-chain", requireSession, async (req, res) => {
   res.set("Cache-Control", "no-store");
   const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
