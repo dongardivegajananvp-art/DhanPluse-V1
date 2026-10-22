@@ -58,9 +58,10 @@ let restQuoteInFlight = null;
 function parseTick(raw) {
   let parsed = raw;
   if (typeof raw === 'string') {
-    try { parsed = JSON.parse(raw); } catch { return; }
+    try { parsed = JSON.parse(raw); } catch { return 0; }
   }
   const messages = Array.isArray(parsed) ? parsed : [parsed];
+  let acceptedCount = 0;
 
   for (const item of messages) {
     if (!item || typeof item !== 'object') continue;
@@ -88,7 +89,9 @@ function parseTick(raw) {
       updatedAt: new Date(exchangeTime * 1000).toISOString(),
       receivedAt: new Date().toISOString()
     });
+    acceptedCount += 1;
   }
+  return acceptedCount;
 }
 
 function startMarketDataStream(token) {
@@ -125,19 +128,30 @@ function startMarketDataStream(token) {
 
     socket.on('message', message => {
       if (marketSocket !== socket) return;
-      const before = latestTicks.size;
-      parseTick(message);
-      const after = latestTicks.size;
-      if (after > before || after > 0) {
+      const acceptedCount = parseTick(message);
+      if (acceptedCount > 0) {
         const summary = Array.isArray(message)
-          ? message.slice(0, 5).map(x => ({ symbol: x?.symbol || x?.n || null, type: x?.type || null, hasLtp: x?.ltp != null || x?.lp != null || x?.v?.lp != null }))
-          : { symbol: message?.symbol || message?.n || null, type: message?.type || null, hasLtp: message?.ltp != null || message?.lp != null || message?.v?.lp != null };
-        console.log('FYERS market tick received:', JSON.stringify(summary));
+          ? message.filter(x => allowedSymbols.includes(x?.symbol || x?.n)).slice(0, 5).map(x => ({
+              symbol: x?.symbol || x?.n,
+              exchangeTimestampPresent: Boolean(epochSeconds(x?.exch_feed_time ?? x?.last_traded_time ?? x?.ltt ?? x?.tt))
+            }))
+          : {
+              symbol: message?.symbol || message?.n || null,
+              exchangeTimestampPresent: Boolean(epochSeconds(message?.exch_feed_time ?? message?.last_traded_time ?? message?.ltt ?? message?.tt))
+            };
+        console.log('FYERS verified index tick accepted:', JSON.stringify({ acceptedCount, ticks: summary }));
       } else {
-        const shape = message && typeof message === 'object'
-          ? { keys: Object.keys(message).slice(0, 20), type: message.type || null, symbol: message.symbol || message.n || null }
-          : { messageType: typeof message };
-        console.log('FYERS socket message not parsed as an index tick:', JSON.stringify(shape));
+        const parsed = typeof message === 'string' ? (() => { try { return JSON.parse(message); } catch { return null; } })() : message;
+        const frames = Array.isArray(parsed) ? parsed : [parsed];
+        const indexLike = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n));
+        if (indexLike.length) {
+          console.warn('FYERS index frame rejected by tick validation:', JSON.stringify(indexLike.slice(0, 5).map(x => ({
+            symbol: x.symbol || x.n,
+            type: x.type || null,
+            hasLtp: x.ltp != null || x.lp != null || x.v?.lp != null,
+            hasExchangeTimestamp: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt))
+          }))));
+        }
       }
     });
 
@@ -157,8 +171,10 @@ function startMarketDataStream(token) {
       }));
     });
 
-    socket.connect();
+    // Configure reconnection before opening the socket so the SDK can
+    // attach its retry handler before any early disconnect event.
     if (typeof socket.autoreconnect === 'function') socket.autoreconnect(10);
+    socket.connect();
   } catch (error) {
     streamConnected = false;
     streamError = 'Could not start the FYERS market data socket.';
