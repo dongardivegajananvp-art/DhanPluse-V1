@@ -231,7 +231,7 @@ function liveSnapshot() {
   };
 }
 
-app.get("/", (_req, res) => res.json({ service: "DhanPulse clean backend", version: "0.2.0", status: "online", endpoints: ["/health", "/api/status", "/api/fyers/auth/start", "/api/fyers/auth/exchange", "/api/market/quotes", "/api/market/candles", "/api/market/live-candles", "/api/fyers/options-chain", "/api/gap-analysis/history"], orderPlacement: "disabled" }));
+app.get("/", (_req, res) => res.json({ service: "DhanPulse clean backend", version: "0.2.0", status: "online", endpoints: ["/health", "/api/status", "/api/diagnostics", "/api/fyers/auth/start", "/api/fyers/auth/exchange", "/api/fyers/holdings", "/api/fyers/positions", "/api/fyers/option-quote", "/api/fyers/options-chain", "/api/market/quotes", "/api/market/last-known-quotes", "/api/market/fno-universe", "/api/market/stock-quotes", "/api/market/movers", "/api/market/live-candles", "/api/market/candles", "/api/gap-analysis/history"], orderPlacement: "disabled" }));
 app.get("/health", (_req, res) => {
   const snapshot = liveSnapshot();
   res.set("Cache-Control", "no-store").json({
@@ -731,6 +731,9 @@ app.get("/api/fyers/option-quote", requireSession, async (req, res) => {
     return res.status(400).json({ ok: false, error: "A valid NSE option-contract symbol is required." });
   }
   if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
+  const cooldownKey = "optionquote:" + symbol;
+  const cooldown = rateLimits.get(cooldownKey) || { until: 0, backoffMs: 30000 };
+  if (Date.now() < cooldown.until) return res.status(429).json({ ok: false, error: "FYERS option quote cooldown active; no signal issued.", retryAfterSeconds: Math.ceil((cooldown.until - Date.now()) / 1000) });
   try {
     const url = new URL("https://api-t1.fyers.in/data/quotes");
     url.searchParams.set("symbols", symbol);
@@ -740,7 +743,9 @@ app.get("/api/fyers/option-quote", requireSession, async (req, res) => {
     });
     const body = await response.json().catch(() => ({}));
     if (response.status === 429) {
-      return res.status(429).json({ ok: false, error: "FYERS option quote rate limit; no signal issued.", retryAfterSeconds: Math.max(30, Number(response.headers.get("retry-after")) || 30) });
+      const retryAfterSeconds = Math.max(30, Number(response.headers.get("retry-after")) || cooldown.backoffMs / 1000);
+      rateLimits.set(cooldownKey, { until: Date.now() + retryAfterSeconds * 1000, backoffMs: Math.min(cooldown.backoffMs * 2, 900000) });
+      return res.status(429).json({ ok: false, error: "FYERS option quote rate limit; no signal issued.", retryAfterSeconds });
     }
     if (!response.ok || body.s !== "ok" || !Array.isArray(body.d)) {
       return res.status(response.status === 401 || body.code === -16 ? 401 : 502).json({
@@ -758,6 +763,7 @@ app.get("/api/fyers/option-quote", requireSession, async (req, res) => {
         !Number.isFinite(ask) || ask < bid || !Number.isFinite(ageMs) || ageMs < -5000 || ageMs > 15000) {
       return res.status(503).json({ ok: false, error: "Option quote is incomplete, stale, or has an invalid spread; no signal issued." });
     }
+    rateLimits.delete(cooldownKey);
     return res.json({
       ok: true, source: "FYERS quotes API", fetchedAt: new Date().toISOString(),
       quote: { symbol, ltp, bid, ask, quoteTimeMs, quoteAgeMs: ageMs, verified: true }
