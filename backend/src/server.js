@@ -8,6 +8,7 @@ import cors from "cors";
 import { analyzeOpeningGap, summarizeHistoricalGaps } from "./gap-analysis.js";
 import { getNseSessionWindow } from "./market-data.js";
 import { buildFnoEquityUniverse } from "./fno-universe.js";
+import { normalizeInstitutionalFlow } from "./institutional-flow.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -231,7 +232,7 @@ function liveSnapshot() {
   };
 }
 
-app.get("/", (_req, res) => res.json({ service: "DhanPulse clean backend", version: "0.2.0", status: "online", endpoints: ["/health", "/api/status", "/api/diagnostics", "/api/fyers/auth/start", "/api/fyers/auth/exchange", "/api/fyers/holdings", "/api/fyers/positions", "/api/fyers/option-quote", "/api/fyers/options-chain", "/api/market/quotes", "/api/market/last-known-quotes", "/api/market/fno-universe", "/api/market/stock-quotes", "/api/market/movers", "/api/market/live-candles", "/api/market/candles", "/api/gap-analysis/history"], orderPlacement: "disabled" }));
+app.get("/", (_req, res) => res.json({ service: "DhanPulse clean backend", version: "0.2.0", status: "online", endpoints: ["/health", "/api/status", "/api/diagnostics", "/api/fyers/auth/start", "/api/fyers/auth/exchange", "/api/fyers/holdings", "/api/fyers/positions", "/api/fyers/option-quote", "/api/fyers/options-chain", "/api/market/quotes", "/api/market/last-known-quotes", "/api/market/fno-universe", "/api/market/stock-quotes", "/api/market/movers", "/api/market/institutional-flow", "/api/market/live-candles", "/api/market/candles", "/api/gap-analysis/history"], orderPlacement: "disabled" }));
 app.get("/health", (_req, res) => {
   const snapshot = liveSnapshot();
   res.set("Cache-Control", "no-store").json({
@@ -388,6 +389,54 @@ app.get("/api/gap-analysis/history", requireSession, async (req, res) => {
   } catch (error) {
     const status = Number(error.statusCode) || (String(error.message).startsWith("Invalid FYERS") ? 502 : 502);
     res.status(status).json({ ok: false, error: status === 429 ? "FYERS historical data rate limit; retry after cooldown." : status === 401 ? "FYERS session expired; reconnect." : "Gap analysis could not be verified.", detail: String(error.message || "Unknown upstream error").slice(0, 220) });
+  }
+});
+
+let institutionalFlowCache = null;
+let institutionalFlowCacheAt = 0;
+let institutionalFlowInFlight = null;
+const INSTITUTIONAL_FLOW_CACHE_MS = 10 * 60 * 1000;
+
+app.get("/api/market/institutional-flow", async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (institutionalFlowCache && Date.now() - institutionalFlowCacheAt < INSTITUTIONAL_FLOW_CACHE_MS) {
+    return res.json({ ...institutionalFlowCache, cacheAgeSeconds: Math.floor((Date.now() - institutionalFlowCacheAt) / 1000) });
+  }
+  if (institutionalFlowInFlight) {
+    try { return res.json(await institutionalFlowInFlight); }
+    catch { return res.status(502).json({ ok: false, error: "Official NSE institutional flow is temporarily unavailable; figures withheld.", signalsAllowed: false }); }
+  }
+  institutionalFlowInFlight = (async () => {
+    const response = await fetch("https://www.nseindia.com/api/fiidiiTradeReact", {
+      headers: {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+        "Referer": "https://www.nseindia.com/reports/fii-dii",
+        "Accept-Language": "en-IN,en;q=0.9"
+      },
+      signal: AbortSignal.timeout(12000)
+    }).then(async response => {
+      if (!response.ok) throw new Error("nse_official_endpoint_http_" + response.status);
+      return normalizeInstitutionalFlow(await response.json(), new Date().toISOString());
+    });
+    return response;
+  })();
+  try {
+    const result = await institutionalFlowInFlight;
+    institutionalFlowCache = result;
+    institutionalFlowCacheAt = Date.now();
+    return res.json({ ...result, cacheAgeSeconds: 0 });
+  } catch (error) {
+    recordDiagnostic("warn", "institutional_flow_unavailable", { reason: String(error.message || "source_error").slice(0, 120) });
+    return res.status(502).json({
+      ok: false,
+      source: "NSE India official FII/FPI & DII report",
+      sourceUrl: "https://www.nseindia.com/reports/fii-dii",
+      error: "Official NSE data could not be verified. Figures withheld; open the official report directly.",
+      signalsAllowed: false
+    });
+  } finally {
+    institutionalFlowInFlight = null;
   }
 });
 
