@@ -1249,8 +1249,37 @@ async function loadOptionChain() {
     if (!response.ok || result.ok !== true || !result.data) {
       throw new Error(result.error || result.detail || 'Option-chain response unavailable.');
     }
-    const data = result.data;
-    const chainCheck = validateOptionChainPayload(data);
+    // Backend's current safe contract is a normalized array with no per-leg bid/ask
+    // timestamps. Render it as display-only data; never treat it as signal-eligible.
+    const backendNormalized = Array.isArray(result.data);
+    const data = backendNormalized ? {
+      optionsChain: result.data.map(row => ({
+        symbol: row.symbol, option_type: row.type, strike_price: row.strike,
+        ltp: row.ltp, ltpchp: row.ltpchp, oi: row.oi, volume: row.volume,
+        verified: row.verified === true
+      })),
+      underlying_price: result.underlyingLtp,
+      expiryData: result.expiryData,
+      callOi: result.callOi,
+      putOi: result.putOi
+    } : result.data;
+    let chainCheck;
+    if (backendNormalized) {
+      const validRows = data.optionsChain.filter(row =>
+        row.verified === true && ['CE','PE'].includes(String(row.option_type).toUpperCase()) &&
+        Number.isFinite(Number(row.strike_price)) && Number(row.strike_price) > 0 &&
+        Number.isFinite(Number(row.ltp)) && Number(row.ltp) > 0 &&
+        Number.isFinite(Number(row.oi)) && Number(row.oi) >= 0 &&
+        Number.isFinite(Number(row.volume)) && Number(row.volume) >= 0
+      ).map(row => ({ ...row, option_type: String(row.option_type).toUpperCase(),
+        strike_price: Number(row.strike_price), ltp: Number(row.ltp),
+        oi: Number(row.oi), volume: Number(row.volume), spreadPct: null }));
+      chainCheck = validRows.length ? { spot: Number(data.underlying_price), chain: validRows } :
+        'FYERS returned no option legs passing display validation.';
+      if (!Number.isFinite(chainCheck.spot) || chainCheck.spot <= 0) chainCheck = 'Verified underlying LTP is missing; option-chain analysis withheld.';
+    } else {
+      chainCheck = validateOptionChainPayload(data);
+    }
     if (typeof chainCheck === 'string') throw new Error(chainCheck);
     const expiries = Array.isArray(data.expiryData) ? data.expiryData : [];
     const selectedBefore = expiryEl.value;
@@ -1288,7 +1317,9 @@ async function loadOptionChain() {
           return '<tr><td>' + displayNumber(ce.ltp) + '</td><td>' + displayNumber(ce.ltpchp) + '</td><td>' + displayNumber(ce.oi, 0) + '</td><td>' + displayNumber(ce.volume, 0) + '</td><td><b>' + displayNumber(strike, 0) + '</b></td><td>' + displayNumber(pe.ltp) + '</td><td>' + displayNumber(pe.ltpchp) + '</td><td>' + displayNumber(pe.oi, 0) + '</td><td>' + displayNumber(pe.volume, 0) + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
-    status.textContent = 'FYERS option-chain response received at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + '. ' + strikes.length + ' strikes shown. Response time alone does not prove exchange-quote freshness; selected contracts are checked separately before a Sureshot setup.';
+    status.textContent = backendNormalized
+      ? 'DISPLAY ONLY · FYERS response received at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + '. ' + strikes.length + ' strikes shown. Exchange-time freshness and bid/ask are not verified; Sureshot signals remain blocked.'
+      : 'FYERS option-chain response received at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + '. ' + strikes.length + ' strikes shown. Response time alone does not prove exchange-quote freshness; selected contracts are checked separately before a Sureshot setup.';
     logEvent('FYERS option-chain data received for ' + symbolEl.value + '.', 'info');
   } catch (error) {
     status.textContent = (error.message || 'Could not load option chain.') + ' Use FYERS Settings to reconnect if authentication expired.';
