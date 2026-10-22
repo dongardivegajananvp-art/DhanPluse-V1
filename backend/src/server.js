@@ -52,16 +52,28 @@ let marketSocket = null;
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
+const lastTickDiagnosticAt = new Map();
+const lastRejectedDiagnosticAt = new Map();
+const SOCKET_DIAGNOSTIC_LOG_INTERVAL_MS = 15_000;
 let restQuoteCache = null;
 let restQuoteFetchedAt = 0;
 let restQuoteInFlight = null;
 
+function shouldLogSocketDiagnostic(store, symbol) {
+  const now = Date.now();
+  const last = store.get(symbol) || 0;
+  if (now - last < SOCKET_DIAGNOSTIC_LOG_INTERVAL_MS) return false;
+  store.set(symbol, now);
+  return true;
+}
+
 function parseTick(raw) {
   let parsed = raw;
   if (typeof raw === 'string') {
-    try { parsed = JSON.parse(raw); } catch { return; }
+    try { parsed = JSON.parse(raw); } catch { return 0; }
   }
   const messages = Array.isArray(parsed) ? parsed : [parsed];
+  let acceptedCount = 0;
 
   for (const item of messages) {
     if (!item || typeof item !== 'object') continue;
@@ -77,7 +89,9 @@ function parseTick(raw) {
       item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt
     );
     if (!exchangeTime) {
-      console.warn('FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
+      if (shouldLogSocketDiagnostic(lastRejectedDiagnosticAt, symbol)) {
+        console.warn('FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
+      }
       continue;
     }
 
@@ -89,7 +103,9 @@ function parseTick(raw) {
       updatedAt: new Date(exchangeTime * 1000).toISOString(),
       receivedAt: new Date().toISOString()
     });
+    acceptedCount += 1;
   }
+  return acceptedCount;
 }
 
 function startMarketDataStream(token) {
@@ -126,19 +142,35 @@ function startMarketDataStream(token) {
 
     socket.on('message', message => {
       if (marketSocket !== socket) return;
-      const before = latestTicks.size;
-      parseTick(message);
-      const after = latestTicks.size;
-      if (after > before || after > 0) {
-        const summary = Array.isArray(message)
-          ? message.slice(0, 5).map(x => ({ symbol: x?.symbol || x?.n || null, type: x?.type || null, hasLtp: x?.ltp != null || x?.lp != null || x?.v?.lp != null }))
-          : { symbol: message?.symbol || message?.n || null, type: message?.type || null, hasLtp: message?.ltp != null || message?.lp != null || message?.v?.lp != null };
-        console.log('FYERS market tick received:', JSON.stringify(summary));
+      // Decode once so string-encoded JSON is diagnosed exactly like object frames.
+      const parsedMessage = typeof message === 'string'
+        ? (() => { try { return JSON.parse(message); } catch { return null; } })()
+        : message;
+      const frames = Array.isArray(parsedMessage) ? parsedMessage : [parsedMessage];
+      const acceptedCount = parseTick(parsedMessage);
+      if (acceptedCount > 0) {
+        const summary = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n))
+          .filter(x => shouldLogSocketDiagnostic(lastTickDiagnosticAt, x.symbol || x.n))
+          .slice(0, 5)
+          .map(x => ({
+            symbol: x.symbol || x.n,
+            exchangeTimestampPresent: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt))
+          }));
+        // Keep logs useful during reconnect diagnosis without writing every tick.
+        if (summary.length) {
+          console.log('FYERS verified index tick accepted:', JSON.stringify({ acceptedCount, ticks: summary }));
+        }
       } else {
-        const shape = message && typeof message === 'object'
-          ? { keys: Object.keys(message).slice(0, 20), type: message.type || null, symbol: message.symbol || message.n || null }
-          : { messageType: typeof message };
-        console.log('FYERS socket message not parsed as an index tick:', JSON.stringify(shape));
+        const indexLike = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n))
+          .filter(x => shouldLogSocketDiagnostic(lastRejectedDiagnosticAt, x.symbol || x.n));
+        if (indexLike.length) {
+          console.warn('FYERS index frame rejected by tick validation:', JSON.stringify(indexLike.slice(0, 5).map(x => ({
+            symbol: x.symbol || x.n,
+            type: x.type || null,
+            hasLtp: x.ltp != null || x.lp != null || x.v?.lp != null,
+            hasExchangeTimestamp: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt))
+          }))));
+        }
       }
     });
 
@@ -158,8 +190,10 @@ function startMarketDataStream(token) {
       }));
     });
 
-    socket.connect();
+    // Configure reconnection before opening the socket so the SDK can
+    // attach its retry handler before any early disconnect event.
     if (typeof socket.autoreconnect === 'function') socket.autoreconnect(10);
+    socket.connect();
   } catch (error) {
     streamConnected = false;
     streamError = 'Could not start the FYERS market data socket.';
@@ -523,9 +557,7 @@ app.get('/api/market/candles', async (req, res) => {
   const rangeTo = String(req.query.to || today);
   if (!allowed.has(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported candle symbol.' });
   if (!allowedResolutions.has(resolution)) return res.status(400).json({ ok: false, error: 'Unsupported candle resolution.' });
-  if (!isValidIsoDate(rangeFrom) || !isValidIsoDate(rangeTo) || rangeFrom > rangeTo || rangeTo > today) {
-    return res.status(400).json({ ok: false, error: 'Use real calendar dates in YYYY-MM-DD format, ending no later than today (IST).' });
-  }
+  if (!isValidIsoDate(rangeFrom) || !isValidIsoDate(rangeTo) || rangeFrom > rangeTo || rangeTo > today) return res.status(400).json({ ok: false, error: 'Use real calendar dates in YYYY-MM-DD format, ending no later than today (IST).' });
   const spanDays = (Date.parse(rangeTo + 'T00:00:00Z') - Date.parse(rangeFrom + 'T00:00:00Z')) / 86400000;
   if (!Number.isFinite(spanDays) || spanDays > (resolution === 'D' ? 365 : 30)) return res.status(400).json({ ok: false, error: 'Requested candle range is too large.' });
   try {
@@ -578,7 +610,6 @@ app.get('/api/market/candles', async (req, res) => {
     return res.status(error.statusCode || 502).json({ ok: false, error: error.statusCode === 401 ? 'Connect FYERS to load historical candles.' : 'FYERS historical-candle request failed.', detail: String(error.message || 'Upstream request failed.').slice(0, 220) });
   }
 });
-
 
 app.get('/api/gap-analysis/history', requireDashboardSession, async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
@@ -642,6 +673,7 @@ app.get('/api/gap-analysis/history', requireDashboardSession, async (req, res) =
   }
 });
 
+
 const MOVERS_CACHE_TTL_MS = 60000;
 const MOVERS_BATCH_SIZE = 50;
 let moversSnapshotCache = null;
@@ -682,12 +714,12 @@ async function refreshMoversUniverse() {
       const cashSymbols = new Map();
       for (const [ticker, item] of Object.entries(cmMaster)) {
         const match = /^NSE:([A-Z0-9&-]+)-EQ$/.exec(ticker);
-        if (match && item?.tradeStatus !== 0) cashSymbols.set(match[1], ticker);
+        if (match && item?.tradeStatus === 1) cashSymbols.set(match[1], ticker);
       }
 
       const underlyingSymbols = new Set();
       for (const [ticker, item] of Object.entries(foMaster)) {
-        if (!ticker.startsWith('NSE:') || item?.tradeStatus === 0) continue;
+        if (!ticker.startsWith('NSE:') || item?.tradeStatus !== 1) continue;
         const isOption = item?.optType === 'CE' || item?.optType === 'PE';
         const isFuture = /FUT$/.test(ticker);
         if (!isOption && !isFuture) continue;
