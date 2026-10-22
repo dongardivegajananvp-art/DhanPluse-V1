@@ -48,3 +48,6 @@ jobs:
       - name: Verify backend dependency graph
         working-directory: backend
         run: npm audit --omit=dev --audit-level=high
+      - name: Run backend unit tests
+        working-directory: backend
+        run: npm test
