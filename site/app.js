@@ -974,7 +974,13 @@ async function loadSureshotSetup() {
   }catch(error){
     cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">DATA / FILTER</span></div><p>'+escapeHtml(error.message||'Required verified data unavailable.')+'</p><p class="hint">No prices or signals were invented. Retry after confirming FYERS historical-data and option-chain access.</p></article>';
     status.textContent='No setup generated · '+(error.message||'Verified data unavailable.');
-    chart.innerHTML='<div class="chart-empty">Supply/demand chart unavailable until verified candles are returned.</div>';
+    // Preserve a valid candle/zones chart when only the option-chain or contract
+    // quote check fails. The chart is historical analysis, not permission to trade.
+    if(!chart.querySelector('svg')) chart.innerHTML='<div class="chart-empty">Supply/demand chart unavailable until verified candles are returned.</div>';
+    const blockedMessage=error.message||'Verified data unavailable.';
+    if(/option.chain exchange.timestamp validation is not complete|signalsAllowed|option.chain.*timestamp/i.test(blockedMessage)){
+      status.textContent='SIGNAL BLOCKED · Option-chain exchange timestamp not verified. Historical zones remain visible; no entry/target issued.';
+    }
     logEvent('Sureshot withheld signal because verified data or setup conditions were unavailable.','warn');
   }
 }
