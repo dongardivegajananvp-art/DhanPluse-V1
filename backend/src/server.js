@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import { assertCompleteMoverSnapshot } from './movers-validation.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -760,15 +761,14 @@ app.get('/api/market/movers', async (_req, res) => {
           if (batchRateLimitError) throw batchRateLimitError;
           throw new Error('FYERS returned no valid verified equity quote rows.');
         }
-        // A partial snapshot must never be used to rank gainers/losers or drive scanners.
-        // Keep the failure atomic even when some quote batches succeeded before a timeout/429.
-        if (batchRateLimitError) throw batchRateLimitError;
-        if (failedBatches.length > 0 || rows.length !== moversSymbols.length) {
-          const error = new Error('FYERS quote coverage incomplete; partial rankings are blocked.');
-          error.statusCode = 502;
-          error.failedSymbols = [...new Set([...moversSymbols.filter(symbol => !received.has(symbol)), ...failedBatches])];
-          throw error;
-        }
+        // Fail closed: incomplete batches or duplicate/missing symbols cannot feed rankings.
+        assertCompleteMoverSnapshot({
+          requestedSymbols: moversSymbols,
+          rows,
+          failedBatches,
+          receivedSymbols: received,
+          rateLimitError: batchRateLimitError
+        });
         return {
           ok: true, fetchedAt: quoteFetchedAt, marketSession: marketOpen ? 'OPEN' : 'CLOSED',
           universe: moversUniverseSource === 'FYERS_NSE_FO_SYMBOL_MASTER' ? 'FYERS-NSE-FO-symbol-master' : 'configured-NSE-F&O-equities-fallback',
