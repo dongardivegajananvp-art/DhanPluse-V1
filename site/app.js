@@ -933,6 +933,7 @@ async function loadSureshotSetup() {
     const optionResponse=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+new URLSearchParams({symbol,strikecount:'10'}),{headers:{Accept:'application/json'},cache:'no-store'});
     const optionResult=await optionResponse.json().catch(()=>({}));
     if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error(optionResult.error||optionResult.detail||'Verified option-chain data unavailable; no entry plan generated.');
+    if(optionResult.signalsAllowed!==true)throw new Error(optionResult.warning||'FYERS option-chain exchange-timestamp validation is not complete; no Sureshot signal is allowed.');
     const chainCheck=validateOptionChainPayload(optionResult.data);
     if(typeof chainCheck==='string')throw new Error(chainCheck);
     const chain=chainCheck.chain;
