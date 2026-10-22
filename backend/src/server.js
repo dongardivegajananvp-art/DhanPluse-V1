@@ -128,21 +128,19 @@ function startMarketDataStream(token) {
 
     socket.on('message', message => {
       if (marketSocket !== socket) return;
-      const acceptedCount = parseTick(message);
+      // Decode once so string-encoded JSON is diagnosed exactly like object frames.
+      const parsedMessage = typeof message === 'string'
+        ? (() => { try { return JSON.parse(message); } catch { return null; } })()
+        : message;
+      const frames = Array.isArray(parsedMessage) ? parsedMessage : [parsedMessage];
+      const acceptedCount = parseTick(parsedMessage);
       if (acceptedCount > 0) {
-        const summary = Array.isArray(message)
-          ? message.filter(x => allowedSymbols.includes(x?.symbol || x?.n)).slice(0, 5).map(x => ({
-              symbol: x?.symbol || x?.n,
-              exchangeTimestampPresent: Boolean(epochSeconds(x?.exch_feed_time ?? x?.last_traded_time ?? x?.ltt ?? x?.tt))
-            }))
-          : {
-              symbol: message?.symbol || message?.n || null,
-              exchangeTimestampPresent: Boolean(epochSeconds(message?.exch_feed_time ?? message?.last_traded_time ?? message?.ltt ?? message?.tt))
-            };
+        const summary = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n)).slice(0, 5).map(x => ({
+          symbol: x.symbol || x.n,
+          exchangeTimestampPresent: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt))
+        }));
         console.log('FYERS verified index tick accepted:', JSON.stringify({ acceptedCount, ticks: summary }));
       } else {
-        const parsed = typeof message === 'string' ? (() => { try { return JSON.parse(message); } catch { return null; } })() : message;
-        const frames = Array.isArray(parsed) ? parsed : [parsed];
         const indexLike = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n));
         if (indexLike.length) {
           console.warn('FYERS index frame rejected by tick validation:', JSON.stringify(indexLike.slice(0, 5).map(x => ({
