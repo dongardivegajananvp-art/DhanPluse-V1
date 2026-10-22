@@ -1400,7 +1400,8 @@ function render(tab) {
   const mainPanel = document.querySelector('#mainWorkspaceContent');
   if (mainPanel) {
     const symbol = tab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
-    mainPanel.innerHTML = '<div class="main-view-heading"><span class="eyebrow">DHANPULSE WORKSPACE</span><h2>' + escapeHtml(tab) + '</h2><p>' + escapeHtml(descriptions[tab][1]) + '</p></div><div class="main-chart-wrap"><div class="main-chart-title"><span>' + escapeHtml(tab === 'BANKNIFTY' ? 'BANK NIFTY' : 'NIFTY 50') + ' · VERIFIED OHLC CANDLESTICKS</span><span class="tag">FYERS HISTORICAL DATA</span></div><div id="mainTabChart"><div class="chart-empty">Loading verified FYERS OHLC candlesticks…</div></div></div><p class="main-view-note" id="mainViewNote">Candlesticks use verified historical FYERS OHLC data. If candles are unavailable, the chart will say so rather than inventing prices.</p><button class="primary" id="mainPanelAction">' + (tab === 'FYERS Settings' ? 'Connect FYERS' : tab === 'Charts & Patterns' ? 'Load historical candles' : tab === 'Technical Indicators' ? 'Refresh indicators' : 'Refresh live data') + '</button>';
+    const showsOhlc = tab === 'Charts & Patterns';
+    mainPanel.innerHTML = '<div class="main-view-heading"><span class="eyebrow">DHANPULSE WORKSPACE</span><h2>' + escapeHtml(tab) + '</h2><p>' + escapeHtml(descriptions[tab][1]) + '</p></div>' + (showsOhlc ? '<div class="main-chart-wrap"><div class="main-chart-title"><span>' + escapeHtml(tab === 'BANKNIFTY' ? 'BANK NIFTY' : 'NIFTY 50') + ' · HISTORICAL OHLC</span><span class="tag">FYERS SOURCE</span></div><div id="mainTabChart"><div class="chart-empty">Load verified historical candles to display OHLC candlesticks.</div></div></div><p class="main-view-note" id="mainViewNote">No candlestick values appear until a valid FYERS historical OHLC response is received.</p>' : '') + '<button class="primary" id="mainPanelAction">' + (tab === 'FYERS Settings' ? 'Connect FYERS' : tab === 'Charts & Patterns' ? 'Load historical candles' : tab === 'Technical Indicators' ? 'Refresh indicators' : 'Refresh live data') + '</button>';
     const action = document.querySelector('#mainPanelAction');
     if (action) action.addEventListener('click', () => {
       if (currentTab === 'FYERS Settings') startFyersLogin();
@@ -1700,9 +1701,8 @@ function updateDynamicPanel() {
     if (mini) mini.innerHTML = svgChart(item.symbol, 80);
   });
   const mainTabChart = document.querySelector('#mainTabChart');
-  if (mainTabChart && currentTab !== 'Charts & Patterns' && !mainTabChart.querySelector('.candle-chart')) {
-    const activeSymbol = currentTab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
-    mainTabChart.innerHTML = svgChart(activeSymbol, 230);
+  if (mainTabChart && !mainTabChart.querySelector('.candle-chart') && currentTab !== 'Charts & Patterns') {
+    mainTabChart.innerHTML = '<div class="chart-empty">Historical OHLC candles have not been loaded for this workspace.</div>';
   }
   const dashboardChart = document.querySelector('#dashboardChart');
   if (dashboardChart && !dashboardChart.querySelector('.candle-chart')) dashboardChart.innerHTML = '<div class="chart-empty">Load verified historical candles to display the candlestick chart.</div>';
