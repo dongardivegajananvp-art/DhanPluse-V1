@@ -57,6 +57,7 @@ SYMBOLS.forEach(item => { historyBySymbol[item.symbol] = []; });
 const descriptions = {
   'Stock Explorer': ['Stock explorer', 'Search supported NSE symbols and open research workspaces. Prices are shown only when verified FYERS quotes are returned.'],
   'Market Activity': ['Market activity', 'A research overview for market breadth, volatility, volume and institutional flow; unsupported data stays clearly unavailable.'],
+  'Gap-Up/Down': ['Gap-Up / Gap-Down', 'Daily opening gaps calculated from validated FYERS OHLC candles. Historical fill statistics are descriptive only.'],
   'Dashboard': ['Market overview', 'Live FYERS quotes, recent price movement, and console health.'],
   'NIFTY': ['NIFTY 50 workspace', 'Live index quote and recent received-price history.'],
   'BANKNIFTY': ['BANK NIFTY workspace', 'Live index quote and recent received-price history.'],
@@ -757,6 +758,72 @@ async function loadMovers() {
   }
 }
 
+
+function gapAnalysisMarkup() {
+  return '<div class="console-section"><div class="console-section-head"><div><h4>Verified opening gap monitor</h4><p>Previous daily close compared with the latest available daily open</p></div><span class="live-tag">FYERS · READ ONLY</span></div>' +
+    '<div class="option-controls"><label>Symbol<select id="gapSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option><option value="NSE:RELIANCE-EQ">RELIANCE</option><option value="NSE:TCS-EQ">TCS</option><option value="NSE:INFY-EQ">INFOSYS</option></select></label>' +
+    '<label>From (optional)<input id="gapFrom" type="date"></label><label>To (optional)<input id="gapTo" type="date"></label><label>Minimum gap %<select id="gapMinPct"><option value="0.3" selected>0.30%</option><option value="0.5">0.50%</option><option value="0.8">0.80%</option><option value="1.2">1.20%</option></select></label><button class="primary" id="loadGapAnalysisBtn">Load verified gaps</button></div>' +
+    '<div id="gapStatus" class="hint">No gap analysis loaded. Connect FYERS first; results appear only after daily candles pass OHLC validation.</div><div id="gapLatest" class="console-grid console-grid-2"><div class="chart-empty">Waiting for verified daily candles.</div></div>' +
+    '<div id="gapStats" class="console-grid console-grid-2"></div><div id="gapHistory" class="table-wrap"></div>' +
+    '<p class="hint">Gap-Up/Down is descriptive, not a trade signal. Historical fill rates do not predict the next session. No orders are placed; missing, stale/unverified, or invalid candles block the result.</p></div>';
+}
+
+async function loadGapAnalysis() {
+  if (currentTab !== 'Gap-Up/Down') return;
+  const status = document.querySelector('#gapStatus');
+  const latestBox = document.querySelector('#gapLatest');
+  const statsBox = document.querySelector('#gapStats');
+  const historyBox = document.querySelector('#gapHistory');
+  const button = document.querySelector('#loadGapAnalysisBtn');
+  const symbol = document.querySelector('#gapSymbol');
+  const from = document.querySelector('#gapFrom');
+  const to = document.querySelector('#gapTo');
+  const minGap = document.querySelector('#gapMinPct');
+  if (!status || !latestBox || !statsBox || !historyBox || !button || !symbol || !from || !to || !minGap) return;
+  button.disabled = true;
+  status.textContent = 'Requesting authenticated FYERS daily candles and validating OHLC…';
+  latestBox.innerHTML = '<div class="chart-empty">Checking latest session…</div>';
+  statsBox.innerHTML = '';
+  historyBox.innerHTML = '';
+  const params = new URLSearchParams({ symbol: symbol.value, minGapPct: minGap.value });
+  if (from.value) params.set('from', from.value);
+  if (to.value) params.set('to', to.value);
+  try {
+    const response = await fetch(BACKEND_URL + '/api/gap-analysis/history?' + params.toString(), { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !result.latestSession || !result.historical) {
+      throw new Error(result.error || result.detail || 'Verified gap analysis unavailable.');
+    }
+    const session = result.latestSession;
+    const gap = session.gap;
+    const direction = gap.direction === 'gap-up' ? 'GAP-UP' : gap.direction === 'gap-down' ? 'GAP-DOWN' : 'FLAT / NO GAP';
+    const sign = gap.gapPct > 0 ? '+' : '';
+    latestBox.innerHTML = '<article class="metric"><span>LATEST AVAILABLE SESSION</span><strong>' + escapeHtml(direction) + '</strong><small>' + escapeHtml(session.timestamp) + '</small></article>' +
+      '<article class="metric"><span>OPENING GAP</span><strong>' + sign + gap.gapPct.toFixed(2) + '%</strong><small>Previous close ' + formatPrice(session.previousClose) + ' · Open ' + formatPrice(session.open) + '</small></article>' +
+      '<article class="metric"><span>SESSION OHLC</span><strong>' + formatPrice(session.close) + '</strong><small>High ' + formatPrice(session.high) + ' · Low ' + formatPrice(session.low) + '</small></article>' +
+      '<article class="metric"><span>GAP CLASS</span><strong>' + escapeHtml(gap.size.toUpperCase()) + '</strong><small>No automatic trade signal</small></article>';
+    const historical = result.historical;
+    statsBox.innerHTML = '<article class="metric"><span>HISTORICAL GAP SAMPLE</span><strong>' + historical.sampleSize + '</strong><small>Threshold ≥ ' + historical.minAbsGapPct.toFixed(2) + '% · completed sessions only</small></article>' +
+      '<article class="metric"><span>HISTORICAL FILLED</span><strong>' + historical.filledCount + ' / ' + historical.sampleSize + '</strong><small>' + (historical.fillRatePct === null ? 'Not enough qualifying gaps' : historical.fillRatePct.toFixed(2) + '% descriptive fill rate') + '</small></article>' +
+      '<article class="metric"><span>UNFILLED GAPS</span><strong>' + historical.unfilledCount + '</strong><small>Historical sample; not a forecast</small></article>' +
+      '<article class="metric"><span>DATA COVERAGE</span><strong>' + result.completedCandleCount + '</strong><small>Completed daily candles · fetched ' + escapeHtml(new Date(result.fetchedAt).toLocaleString('en-IN')) + '</small></article>';
+    const records = Array.isArray(historical.records) ? historical.records.slice().reverse().slice(0, 20) : [];
+    historyBox.innerHTML = records.length ? '<table class="console-table"><thead><tr><th>Session</th><th>Direction</th><th>Gap %</th><th>Filled same day?</th></tr></thead><tbody>' +
+      records.map(row => '<tr><td>' + escapeHtml(row.timestamp) + '</td><td>' + escapeHtml(row.direction.toUpperCase()) + '</td><td class="' + (row.gapPct >= 0 ? 'positive-text' : 'negative-text') + '">' + (row.gapPct > 0 ? '+' : '') + row.gapPct.toFixed(2) + '%</td><td>' + (row.filled ? 'Yes' : 'No') + '</td></tr>').join('') + '</tbody></table>' :
+      '<div class="chart-empty">No historical gaps met the selected threshold in the verified sample.</div>';
+    status.textContent = 'VERIFIED FYERS DAILY CANDLES · ' + result.candleCount + ' returned · ' + result.completedCandleCount + ' completed sessions · range ' + result.range.from + ' to ' + result.range.to + '.';
+    logEvent('Gap analysis loaded from validated FYERS daily candles for ' + symbol.value + '.', 'info');
+  } catch (error) {
+    latestBox.innerHTML = '<div class="chart-empty">Gap result blocked. No verified result is available; no values have been fabricated.</div>';
+    statsBox.innerHTML = '';
+    historyBox.innerHTML = '';
+    status.textContent = error.message || 'Gap analysis unavailable.';
+    logEvent('Gap analysis blocked: ' + status.textContent, 'warn');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function advancedScannerMarkup(tab) {
   if (tab === 'FII/DII Flow') {
     return '<div class="console-section"><div class="console-section-head"><div><h4>Official institutional flow report</h4><p>Use the exchange-published report for the latest FII/FPI and DII net buy/sell values.</p></div><span class="live-tag">OFFICIAL SOURCE</span></div>' +
@@ -1319,6 +1386,7 @@ function render(tab) {
     window.setTimeout(()=>{ if(currentTab!==tab)return; const hasPanel=featureContent.querySelector('#dpJournalForm, #dpRiskForm, #dpBtForm'); if(!hasPanel) featureContent.innerHTML='<article class="console-section"><h4>'+escapeHtml(tab)+' unavailable</h4><p class="hint">The dedicated tool did not initialize. Reload the page after the latest frontend is published. No simulated success is shown.</p></article>'; },1500);
     return;
   }
+  currentTab = tab;
   const dashboardMode = tab === 'Dashboard';
   ['.welcome', '.metrics', '.grid'].forEach(selector => {
     const section = document.querySelector(selector);
@@ -1351,6 +1419,7 @@ function render(tab) {
   else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
   else if (tab === 'Stock Explorer') featureContent.innerHTML = stockExplorerMarkup();
   else if (tab === 'Market Activity') featureContent.innerHTML = marketActivityMarkup();
+  else if (tab === 'Gap-Up/Down') featureContent.innerHTML = gapAnalysisMarkup();
   else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','FII/DII Flow','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gainers & Losers') featureContent.innerHTML = moversMarkup();
   else if (tab === 'Option Chain') featureContent.innerHTML = optionChainMarkup();
@@ -1361,8 +1430,13 @@ function render(tab) {
   else if (tab === 'FYERS Settings') featureContent.innerHTML = settingsMarkup();
   else featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
   bindTabActions();
+  if (tab === 'Gap-Up/Down') {
+    const gapButton = document.querySelector('#loadGapAnalysisBtn');
+    if (gapButton) gapButton.onclick = loadGapAnalysis;
+  }
   updateDynamicPanel();
   if (tab === 'Market Activity') loadMarketActivity();
+  if (tab === 'Gap-Up/Down') loadGapAnalysis();
   if (tab === 'Technical Indicators') loadTechnicalIndicators();
   if (tab === 'Gainers & Losers') loadMovers();
   if (tab === 'Sureshot CE/PE') loadSureshotSetup();
