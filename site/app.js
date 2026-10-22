@@ -833,11 +833,11 @@ async function loadGapAnalysis() {
 
 function advancedScannerMarkup(tab) {
   if (tab === 'FII/DII Flow') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Official institutional flow report</h4><p>Use the exchange-published report for the latest FII/FPI and DII net buy/sell values.</p></div><span class="live-tag">OFFICIAL SOURCE</span></div>' +
-      '<p class="hint">The NSE report may show provisional figures that can change after confirmation. DhanPulse does not scrape or cache these values yet, so it will not display them as if they were independently verified.</p>' +
-      '<p><a class="primary" href="https://www.nseindia.com/reports/fii-dii" target="_blank" rel="noopener noreferrer">Open official NSE FII/DII report ↗</a></p>' +
-      '<p class="hint">For historical reports, use NSE All Reports. Compare the report date and segment before using any figure in analysis.</p>' +
-      '<p><a href="https://www.nseindia.com/all-reports" target="_blank" rel="noopener noreferrer">NSE All Reports ↗</a></p></div>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Official institutional flow report</h4><p>NSE provisional cash-market FII/FPI and DII buy/sell data</p></div><span class="live-tag">OFFICIAL NSE · READ ONLY</span></div>' +
+      '<div class="option-controls"><button class="primary" id="refreshInstitutionalFlowBtn">Fetch verified NSE data</button><a href="https://www.nseindia.com/reports/fii-dii" target="_blank" rel="noopener noreferrer">Open official NSE report ↗</a></div>' +
+      '<div id="institutionalFlowStatus" class="hint">No figures loaded. Fetching is allowed only when the official response passes date, numeric, category and net-value validation.</div>' +
+      '<div id="institutionalFlowRows" class="table-wrap"><div class="chart-empty">Waiting for official NSE data.</div></div>' +
+      '<p class="hint">Figures are provisional and may be revised. This module is context only: it does not create a trade signal. If NSE blocks or changes its response, values remain unavailable rather than being guessed.</p></div>';
   }
   if (tab === 'Sureshot CE/PE') {
     return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY CE/PE · OHLC zones + verified option chain</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50 · Index options</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><button class="primary" id="refreshSetupBtn">Analyse verified setup</button></div><div id="setupStatus" class="hint">A setup is shown only after verified OHLC candles and option-chain data are available. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
@@ -1493,6 +1493,38 @@ function render(tab) {
   if (tab === 'Logs') renderLogs();
 }
 
+async function loadInstitutionalFlow() {
+  if (currentTab !== 'FII/DII Flow') return;
+  const status = document.querySelector('#institutionalFlowStatus');
+  const box = document.querySelector('#institutionalFlowRows');
+  const button = document.querySelector('#refreshInstitutionalFlowBtn');
+  if (!status || !box || !button) return;
+  button.disabled = true;
+  status.textContent = 'Fetching official NSE FII/FPI and DII report; validating source date and arithmetic…';
+  box.innerHTML = '<div class="chart-empty">Waiting for official source validation.</div>';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/institutional-flow', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.rows) || result.rows.length !== 2 || result.signalsAllowed !== false) {
+      throw new Error(result.error || 'Official NSE institutional-flow data could not be verified.');
+    }
+    const rows = result.rows.map(row => {
+      const net = Number(row.netValue);
+      const netText = (net > 0 ? '+' : '') + net.toLocaleString('en-IN', { maximumFractionDigits: 2, minimumFractionDigits: 2 });
+      return '<tr><td>' + escapeHtml(row.category) + '</td><td>' + Number(row.buyValue).toLocaleString('en-IN', { maximumFractionDigits: 2 }) + '</td><td>' + Number(row.sellValue).toLocaleString('en-IN', { maximumFractionDigits: 2 }) + '</td><td><strong>' + netText + '</strong></td></tr>';
+    }).join('');
+    box.innerHTML = '<table><thead><tr><th>Participant</th><th>Buy (₹ cr)</th><th>Sell (₹ cr)</th><th>Net (₹ cr)</th></tr></thead><tbody>' + rows + '</tbody></table>';
+    status.textContent = 'Verified official NSE response · report date: ' + result.sourceDate + ' · fetched: ' + new Date(result.fetchedAt).toLocaleString('en-IN') + ' · ' + (result.provisional ? 'PROVISIONAL — subject to revision' : 'source status as published');
+    logEvent('Official NSE FII/DII data validated for ' + result.sourceDate + '; signal use remains disabled.', 'info');
+  } catch (error) {
+    status.textContent = (error.message || 'Official data unavailable') + ' No figures displayed. Open the NSE report directly if needed.';
+    box.innerHTML = '<div class="chart-empty">FII/DII values withheld — source unavailable or validation failed.</div>';
+    logEvent('FII/DII official source unavailable; figures withheld.', 'warn');
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function bindTabActions() {
   featureContent.querySelectorAll('[data-jump]').forEach(button => button.addEventListener('click', () => render(button.dataset.jump)));
   const stockSearch=document.querySelector('#stockSearch');
@@ -1555,6 +1587,9 @@ function bindTabActions() {
   if(loadCandlesBtn) loadCandlesBtn.addEventListener('click',loadCandles);
   const refreshMarketActivity = document.querySelector('#refreshMarketActivityBtn');
   if (refreshMarketActivity) refreshMarketActivity.addEventListener('click', loadMarketActivity);
+  const refreshInstitutionalFlowBtn = document.querySelector('#refreshInstitutionalFlowBtn');
+  if (refreshInstitutionalFlowBtn) refreshInstitutionalFlowBtn.addEventListener('click', loadInstitutionalFlow);
+  if (currentTab === 'FII/DII Flow') loadInstitutionalFlow();
   const refreshIndicators = document.querySelector('#refreshIndicatorsBtn');
   if (refreshIndicators) refreshIndicators.addEventListener('click', loadTechnicalIndicators);
   const refreshMovers = document.querySelector('#refreshMoversBtn');
