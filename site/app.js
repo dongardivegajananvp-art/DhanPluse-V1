@@ -1314,6 +1314,16 @@ function render(tab) {
     title.textContent=tab; panelTitle.textContent=descriptions[tab][0]; featureTitle.textContent=tab; featureDesc.textContent=descriptions[tab][1];
     nav.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button.dataset.tab===tab));
     const mainPanel=document.querySelector('#mainWorkspaceContent');
+    if(mainPanel) mainPanel.innerHTML='<div class="main-view-heading"><span class="eyebrow">DHANPULSE WORKSPACE</span><h2>'+escapeHtml(tab)+'</h2><p>'+escapeHtml(descriptions[tab][1])+'</p></div><p class="hint">Use the dedicated '+escapeHtml(tab)+' panel below. No live order placement is available.</p>';
+    featureContent.innerHTML='<article class="console-section"><div class="chart-empty">Loading dedicated '+escapeHtml(tab)+' tool…</div></article>';
+    window.setTimeout(()=>{ if(currentTab!==tab)return; const hasPanel=featureContent.querySelector('#dpJournalForm, #dpRiskForm, #dpBtForm'); if(!hasPanel) featureContent.innerHTML='<article class="console-section"><h4>'+escapeHtml(tab)+' unavailable</h4><p class="hint">The dedicated tool did not initialize. Reload the page after the latest frontend is published. No simulated success is shown.</p></article>'; },1500);
+    return;
+  }
+  currentTab = tab;
+    ['.welcome','.metrics','.grid'].forEach(selector => { const section=document.querySelector(selector); if(section) section.style.display='none'; });
+    title.textContent=tab; panelTitle.textContent=descriptions[tab][0]; featureTitle.textContent=tab; featureDesc.textContent=descriptions[tab][1];
+    nav.querySelectorAll('button').forEach(button=>button.classList.toggle('active',button.dataset.tab===tab));
+    const mainPanel=document.querySelector('#mainWorkspaceContent');
     if(mainPanel) mainPanel.innerHTML='<div class="main-view-heading"><span class="eyebrow">DHANPULSE WORKSPACE</span><h2>'+escapeHtml(tab)+'</h2><p>'+escapeHtml(descriptions[tab][1])+'</p></div><p class="hint">Read-only and paper-trading tools. No live orders are available.</p>';
     if (tab === 'Trade Journal') {
       featureContent.innerHTML='<article class="console-section"><div class="console-section-head"><div><h4>Paper trade journal</h4><p>Stored in this browser only; it is not sent to FYERS.</p></div><span class="live-tag">PAPER ONLY</span></div><form id="dpJournalForm" class="option-controls"><label>Symbol<input id="dpJSymbol" maxlength="40" required placeholder="NIFTY / BANKNIFTY / stock"></label><label>Side<select id="dpJSide"><option>Long / CE</option><option>Short / PE</option></select></label><label>Entry price<input id="dpJEntry" type="number" min="0.01" step="any" required></label><label>Stop loss<input id="dpJStop" type="number" min="0.01" step="any" required></label><label>Target<input id="dpJTarget" type="number" min="0.01" step="any" required></label><label>Outcome<select id="dpJOutcome"><option value="Open">Open / not reviewed</option><option value="Win">Win</option><option value="Loss">Loss</option><option value="Breakeven">Breakeven</option></select></label><label>Emotion / note<input id="dpJNote" maxlength="240" placeholder="Calm, rushed, revenge urge…"></label><label><span>Rules followed?</span><select id="dpJRules"><option value="yes">Yes</option><option value="no">No</option><option value="partial">Partly</option></select></label><button class="primary" type="submit">Save paper trade</button></form><div id="dpJournalStatus" class="hint" role="status">No paper trade saved yet.</div><div id="dpJournalRows" class="table-wrap"></div><p class="hint">This is browser-local storage. Clearing browser site data may remove entries; export/backup is not currently provided.</p></article>';
@@ -1356,7 +1366,7 @@ function render(tab) {
   const mainPanel = document.querySelector('#mainWorkspaceContent');
   if (mainPanel) {
     const symbol = tab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
-    const showsOhlc = ['Dashboard','NIFTY','BANKNIFTY','Charts & Patterns','Technical Indicators'].includes(tab);
+    const showsOhlc = tab === 'Charts & Patterns';
     mainPanel.innerHTML = '<div class="main-view-heading"><span class="eyebrow">DHANPULSE WORKSPACE</span><h2>' + escapeHtml(tab) + '</h2><p>' + escapeHtml(descriptions[tab][1]) + '</p></div>' + (showsOhlc ? '<div class="main-chart-wrap"><div class="main-chart-title"><span>' + escapeHtml(tab === 'BANKNIFTY' ? 'BANK NIFTY' : 'NIFTY 50') + ' · HISTORICAL OHLC</span><span class="tag">FYERS SOURCE</span></div><div id="mainTabChart"><div class="chart-empty">Load verified historical candles to display OHLC candlesticks.</div></div></div><p class="main-view-note" id="mainViewNote">No candlestick values appear until a valid FYERS historical OHLC response is received.</p>' : '') + '<button class="primary" id="mainPanelAction">' + (tab === 'FYERS Settings' ? 'Connect FYERS' : tab === 'Charts & Patterns' ? 'Load historical candles' : tab === 'Technical Indicators' ? 'Refresh indicators' : 'Refresh live data') + '</button>';
     const action = document.querySelector('#mainPanelAction');
     if (action) action.addEventListener('click', () => {
