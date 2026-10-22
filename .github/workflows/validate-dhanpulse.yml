@@ -28,6 +28,7 @@ jobs:
           node --check site/backtest.js
           node --check backend/src/server.js
           node --check backend/src/gap-analysis.js
+          node --check backend/src/movers-validation.js
           node --check site/sw.js
       - name: Validate PWA manifest and required assets
         run: |
