@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './gap-analysis.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -259,6 +260,7 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/health', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
   res.json({
     ok: true,
@@ -272,6 +274,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/api/status', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
   res.json({
     backend: 'online',
@@ -540,7 +543,6 @@ app.get('/api/market/candles', async (req, res) => {
   const allowed = new Set([...allowedSymbols, ...moversSymbols]);
   const resolution = String(req.query.resolution || '5');
   const allowedResolutions = new Set(['1', '3', '5', '15', '30', '60', 'D']);
-  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
   // FYERS candle dates are exchange-local calendar dates. Use IST rather than UTC
   // so the default range does not roll over at 00:00 UTC (05:30 IST).
   const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
@@ -555,7 +557,7 @@ app.get('/api/market/candles', async (req, res) => {
   const rangeTo = String(req.query.to || today);
   if (!allowed.has(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported candle symbol.' });
   if (!allowedResolutions.has(resolution)) return res.status(400).json({ ok: false, error: 'Unsupported candle resolution.' });
-  if (!datePattern.test(rangeFrom) || !datePattern.test(rangeTo) || rangeFrom > rangeTo) return res.status(400).json({ ok: false, error: 'Use valid YYYY-MM-DD date ranges.' });
+  if (!isValidIsoDate(rangeFrom) || !isValidIsoDate(rangeTo) || rangeFrom > rangeTo || rangeTo > today) return res.status(400).json({ ok: false, error: 'Use real calendar dates in YYYY-MM-DD format, ending no later than today (IST).' });
   const spanDays = (Date.parse(rangeTo + 'T00:00:00Z') - Date.parse(rangeFrom + 'T00:00:00Z')) / 86400000;
   if (!Number.isFinite(spanDays) || spanDays > (resolution === 'D' ? 365 : 30)) return res.status(400).json({ ok: false, error: 'Requested candle range is too large.' });
   try {
@@ -568,6 +570,14 @@ app.get('/api/market/candles', async (req, res) => {
     url.searchParams.set('cont_flag', '1');
     const result = await fyersReadOnlyGet(url);
     const candles = Array.isArray(result.candles) ? result.candles : [];
+    if (candles.length === 0) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(422).json({
+        ok: false,
+        error: 'FYERS returned no candles for the requested range; analysis blocked.',
+        detail: 'An empty history response is not a verified chart dataset.'
+      });
+    }
     const isValidCandle = row => {
       if (!Array.isArray(row) || row.length < 6 || !row.slice(0, 6).every(value => Number.isFinite(Number(value)))) return false;
       const [timestamp, open, high, low, close, volume] = row.map(Number);
@@ -584,12 +594,85 @@ app.get('/api/market/candles', async (req, res) => {
         invalidCandleCount
       });
     }
+    for (let i = 1; i < candles.length; i++) {
+      if (Number(candles[i][0]) <= Number(candles[i - 1][0])) {
+        res.set('Cache-Control', 'no-store');
+        return res.status(502).json({
+          ok: false,
+          error: 'FYERS candle timestamps are duplicate or non-increasing; analysis blocked.',
+          detail: 'No partial candle set was returned because timestamp order must be verified.'
+        });
+      }
+    }
     res.set('Cache-Control', 'no-store');
     return res.json({ ok: true, symbol, resolution, from: rangeFrom, to: rangeTo, fetchedAt: new Date().toISOString(), data: candles });
   } catch (error) {
     return res.status(error.statusCode || 502).json({ ok: false, error: error.statusCode === 401 ? 'Connect FYERS to load historical candles.' : 'FYERS historical-candle request failed.', detail: String(error.message || 'Upstream request failed.').slice(0, 220) });
   }
 });
+
+app.get('/api/gap-analysis/history', requireDashboardSession, async (req, res) => {
+  const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
+  const allowed = new Set(['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'NSE:RELIANCE-EQ', 'NSE:TCS-EQ', 'NSE:INFY-EQ']);
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const istNow = new Date(Date.now() + 330 * 60 * 1000);
+  const today = istNow.toISOString().slice(0, 10);
+  const defaultFrom = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate() - 119)).toISOString().slice(0, 10);
+  const from = String(req.query.from || defaultFrom);
+  const to = String(req.query.to || today);
+  const minGapPct = Number(req.query.minGapPct ?? 0.3);
+  if (!allowed.has(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported symbol for verified gap analysis.' });
+  if (!isValidIsoDate(from) || !isValidIsoDate(to) || from > to || to > today) return res.status(400).json({ ok: false, error: 'Use real calendar dates in YYYY-MM-DD format, ending no later than today (IST).' });
+  const spanDays = (Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 86400000;
+  if (!Number.isFinite(spanDays) || spanDays > 365) return res.status(400).json({ ok: false, error: 'Gap-analysis range must be 365 days or less.' });
+  if (!Number.isFinite(minGapPct) || minGapPct < 0 || minGapPct > 20) return res.status(400).json({ ok: false, error: 'Minimum gap must be between 0 and 20%.' });
+  try {
+    const url = new URL('https://api-t1.fyers.in/data/history');
+    url.searchParams.set('symbol', symbol);
+    url.searchParams.set('resolution', 'D');
+    url.searchParams.set('date_format', '1');
+    url.searchParams.set('range_from', from);
+    url.searchParams.set('range_to', to);
+    url.searchParams.set('cont_flag', '1');
+    const result = await fyersReadOnlyGet(url);
+    const raw = Array.isArray(result.candles) ? result.candles : [];
+    if (raw.some(row => !Array.isArray(row) || row.length < 6 || !row.slice(0, 6).every(value => Number.isFinite(Number(value))))) {
+      return res.status(502).json({ ok: false, error: 'FYERS returned incomplete daily candles; gap analysis blocked.' });
+    }
+    const bars = raw.map(row => {
+      const [timestamp, open, high, low, close, volume] = row.map(Number);
+      const valid = timestamp > 0 && open > 0 && high >= Math.max(open, low, close) && low > 0 && low <= Math.min(open, high, close) && close > 0 && volume >= 0;
+      return { timestamp: new Date(timestamp * 1000).toISOString(), open, high, low, close, volume, verified: valid };
+    });
+    if (bars.some(bar => !bar.verified)) return res.status(502).json({ ok: false, error: 'FYERS OHLC validation failed; no gap result returned.' });
+    bars.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+    if (bars.length < 2) return res.status(422).json({ ok: false, error: 'At least two verified daily candles are required.', candleCount: bars.length });
+    for (let i = 1; i < bars.length; i++) {
+      if (Date.parse(bars[i].timestamp) <= Date.parse(bars[i - 1].timestamp)) {
+        return res.status(502).json({ ok: false, error: 'Duplicate or non-increasing daily candle timestamps; gap analysis blocked.' });
+      }
+    }
+    const istDate = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
+    const completedBars = bars.filter(bar => istDate(bar.timestamp) < today);
+    const latest = bars.at(-1);
+    const previous = bars.at(-2);
+    const latestGap = analyzeOpeningGap({ previousClose: previous.close, todayOpen: latest.open });
+    if (completedBars.length < 2) return res.status(422).json({ ok: false, error: 'Two completed sessions are required for historical gap-fill statistics.', candleCount: bars.length, latestSession: { timestamp: latest.timestamp, gap: latestGap } });
+    const historical = summarizeHistoricalGaps(completedBars, { minAbsGapPct: minGapPct });
+    res.set('Cache-Control', 'no-store').json({
+      ok: true, symbol, source: 'FYERS historical daily candles', fetchedAt: new Date().toISOString(),
+      range: { from, to }, candleCount: bars.length, completedCandleCount: completedBars.length,
+      latestSession: { timestamp: latest.timestamp, previousClose: previous.close, open: latest.open, high: latest.high, low: latest.low, close: latest.close, gap: latestGap,
+        note: 'Latest session is shown separately. Historical fill statistics exclude the current IST session.' },
+      historical,
+      warning: 'Historical gap-fill rate is descriptive, not predictive. It does not create a trade signal or infer participant intent.'
+    });
+  } catch (error) {
+    const status = Number(error.statusCode) || 502;
+    return res.status(status).json({ ok: false, error: status === 429 ? 'FYERS historical-data cooldown active; wait before retrying.' : status === 401 ? 'FYERS session expired; reconnect.' : 'Gap analysis could not be verified.', detail: String(error.message || 'Historical data request failed.').slice(0, 220) });
+  }
+});
+
 
 const MOVERS_CACHE_TTL_MS = 60000;
 const MOVERS_BATCH_SIZE = 50;
