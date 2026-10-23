@@ -27,8 +27,20 @@ const allowedOrigins = new Set(
     .filter(Boolean)
 );
 
-// Allow the free GitHub Pages frontend origin as an explicit browser API client.
+// Explicitly allow the known DhanPulse browser frontends. The Render UI
+// and Netlify deploy-preview origins must be allowed to call the backend; an
+// origin mismatch otherwise looks like a network outage in browser fetch().
 allowedOrigins.add('https://dongardivegajananvp-art.github.io');
+allowedOrigins.add('https://splendid-gelato-9c2566.netlify.app');
+allowedOrigins.add('https://dhanpulse-clean-test-ui.onrender.com');
+allowedOrigins.add('https://dhanpulse-ultimate-session-test-ui.onrender.com');
+
+// Netlify assigns a numbered origin to each deploy preview of this same site.
+// Keep this constrained to the known Netlify site rather than allowing arbitrary
+// *.netlify.app origins.
+function isTrustedDhanPulsePreview(origin) {
+  return /^https:\/\/deploy-preview-\\d+--spectacular-gaufre-b5c029\\.netlify\\.app$/.test(origin);
+}
 
 if (redirectUri) {
   try {
@@ -38,7 +50,7 @@ if (redirectUri) {
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+    if (!origin || allowedOrigins.has(origin) || isTrustedDhanPulsePreview(origin)) return callback(null, true);
     return callback(new Error('Origin not allowed'));
   }
 }));
