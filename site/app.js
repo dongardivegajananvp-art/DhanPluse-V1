@@ -353,12 +353,26 @@ async function loadDashboardCandles() {
     logEvent('Dashboard candlestick chart loaded ('+result.data.length+' verified candles for '+symbol.value+').','info');
   } catch(error) {
     const message=error.message||'Historical candles unavailable.';
-    chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
+    const sessionExpired=/Dashboard session missing or expired|FYERS session expired|Reconnect FYERS/i.test(message);
     const mainChart=document.querySelector('#mainTabChart');
-    if(mainChart)mainChart.innerHTML='<div class="chart-empty">Candlestick chart unavailable: '+escapeHtml(message)+'. No candle values were fabricated.</div>';
     const mainNote=document.querySelector('#mainViewNote');
-    if(mainNote)mainNote.textContent='Verified OHLC candles are unavailable right now; no substitute line chart or fabricated candle values are shown.';
-    status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
+    if(sessionExpired) {
+      // A browser can retain an opaque session after the backend has restarted.
+      // Discard that unusable token and offer a fresh OAuth flow; never invent candles.
+      sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
+      const recovery='<div class="chart-empty"><strong>FYERS dashboard session expired.</strong><p>Reconnect FYERS to securely renew the session before loading historical candles.</p><button type="button" class="primary" id="dashboardReconnectBtn">Reconnect FYERS</button></div>';
+      chart.innerHTML=recovery;
+      if(mainChart)mainChart.innerHTML=recovery;
+      document.querySelector('#dashboardReconnectBtn')?.addEventListener('click',startFyersLogin);
+      status.textContent='FYERS session expired. Reconnect FYERS to load verified candles.';
+      if(mainNote)mainNote.textContent='Historical candles are withheld until a fresh FYERS dashboard session is established.';
+      setFyersStatus('SESSION EXPIRED');
+    } else {
+      chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
+      if(mainChart)mainChart.innerHTML='<div class="chart-empty">Candlestick chart unavailable: '+escapeHtml(message)+'. No candle values were fabricated.</div>';
+      if(mainNote)mainNote.textContent='Verified OHLC candles are unavailable right now; no substitute line chart or fabricated candle values are shown.';
+      status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
+    }
     logEvent('Dashboard candlestick chart failed: '+message,'warn');
   } finally {
     dashboardCandleRequestRunning=false;
