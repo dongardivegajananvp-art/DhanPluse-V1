@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './gap-analysis.js';
 import { assertCompleteMoverSnapshot } from './movers-validation.js';
+import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -59,6 +60,7 @@ const SOCKET_DIAGNOSTIC_LOG_INTERVAL_MS = 15_000;
 let restQuoteCache = null;
 let restQuoteFetchedAt = 0;
 let restQuoteInFlight = null;
+const fyersDataApiFetch = createFyersDataApiBudget();
 
 function shouldLogSocketDiagnostic(store, symbol) {
   const now = Date.now();
@@ -193,7 +195,7 @@ function startMarketDataStream(token) {
 
     // Configure reconnection before opening the socket so the SDK can
     // attach its retry handler before any early disconnect event.
-    if (typeof socket.autoreconnect === 'function') socket.autoreconnect(10);
+    if (typeof socket.autoreconnect === 'function') socket.autoreconnect(50);
     socket.connect();
   } catch (error) {
     streamConnected = false;
@@ -483,7 +485,7 @@ async function fyersReadOnlyGet(url) {
     error.statusCode = 429;
     throw error;
   }
-  const response = await fetch(url, {
+  const response = await fyersDataApiFetch(url, {
     method: 'GET',
     headers: { Authorization: appId + ':' + accessToken, Accept: 'application/json' },
     cache: 'no-store',
