@@ -1582,11 +1582,14 @@ function readLocalLastKnownQuotes() {
   }
 }
 
-function showLocalLastKnownQuotes(reason) {
+function showLocalLastKnownQuotes(reason, backendState, fyersState) {
   const saved = readLocalLastKnownQuotes();
   if (!saved || !updateQuoteCards(saved.data, saved.fetchedAt, 'local-last-known', false)) return false;
   const ageMinutes = Math.max(0, Math.floor((Date.now() - Date.parse(saved.fetchedAt)) / 60_000));
-  showMessage((reason || 'Backend snapshot unavailable.') + ' Showing browser-saved FYERS prices from ' +
+  setConnection(backendState === 'ONLINE' ? 'Saved verified prices · live quotes unavailable' : 'Saved verified prices · backend unavailable', true);
+  setBackendStatus(backendState || 'UNREACHABLE');
+  setFyersStatus(fyersState || 'NOT VERIFIED');
+  showMessage((reason || 'Backend snapshot unavailable.') + ' Showing browser-saved FYERS prices from '
     new Date(saved.fetchedAt).toLocaleString('en-IN') + ' (' + ageMinutes +
     ' minutes old). Display only — not live; all signals remain blocked.');
   return true;
@@ -1895,7 +1898,10 @@ async function fetchLiveQuotes() {
       // Respect upstream cooldowns (including Cloudflare 1015) instead of retrying
       // every 30 seconds while the provider is still blocking requests.
       quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, 15000), 6 * 60 * 60 * 1000);
-      if (showLocalLastKnownQuotes('FYERS rate limit/cooldown is active.')) return;
+      if (showLocalLastKnownQuotes('FYERS rate limit/cooldown is active.', 'ONLINE', 'CONNECTED')) {
+        setStatus('FYERS RATE LIMIT · LOCAL LAST-KNOWN');
+        return;
+      }
       setStatus('FYERS RATE LIMIT — WAITING');
       showMessage('FYERS rate limit is active. The dashboard is backing off and will not force REST quote polling.', true);
       return;
@@ -1914,7 +1920,7 @@ async function fetchLiveQuotes() {
             return;
           }
         } catch {}
-        if (showLocalLastKnownQuotes()) {
+        if (showLocalLastKnownQuotes('Live quote snapshot unavailable.', 'ONLINE', 'CONNECTED')) {
           quotePollDelay = QUOTE_POLL_MAX_MS;
           return;
         }
