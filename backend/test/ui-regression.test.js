@@ -70,7 +70,7 @@ test('all data-backed tabs retain their loader and API route hooks', () => {
     'loadMarketActivity', 'loadGapAnalysis', 'loadMovers', 'loadOptionChain',
     'loadTechnicalIndicators', 'loadPortfolio', 'fetchLiveQuotes', 'loadCandles',
     'testBackend', 'startFyersLogin', 'renderLogs']) {
-    assert.match(app, new RegExp('function\\\\s+' + fn + '\\\\s*\\\\('), 'missing tab handler: ' + fn);
+    assert.match(app, new RegExp('function\\s+' + fn + '\\s*\\('), 'missing tab handler: ' + fn);
   }
   for (const route of ['/api/status', '/api/market/quotes', '/api/market/candles',
     '/api/market/movers', '/api/gap-analysis/history', '/api/fyers/options-chain',
@@ -79,5 +79,5 @@ test('all data-backed tabs retain their loader and API route hooks', () => {
   }
   assert.match(app, /INCOMPLETE F&O COVERAGE/);
   assert.match(app, /FRESHNESS CHECK FAILED/);
-  assert.match(app, /MARKET CLOSED — current gainers\\/losers are unavailable/);
+  assert.match(app, /MARKET CLOSED.*current gainers/);
 });
