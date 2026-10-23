@@ -18,7 +18,7 @@ app.use(express.json({ limit: '32kb' }));
 const appId = process.env.FYERS_APP_ID || '';
 const appSecret = process.env.FYERS_APP_SECRET || '';
 const redirectUri = process.env.FYERS_REDIRECT_URI || '';
-const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX'];
+const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
 
 const allowedOrigins = new Set(
   (process.env.ALLOWED_ORIGIN || '')

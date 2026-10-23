@@ -34,7 +34,7 @@ Order placement is intentionally disabled. Never add credentials or access token
 
 1. Open DhanPulse and choose **FYERS Settings → Test backend**.
 2. Choose **Connect FYERS** and complete the FYERS authorization page.
-3. Confirm the dashboard receives both `NSE:NIFTY50-INDEX` and `NSE:NIFTYBANK-INDEX` with fresh exchange timestamps.
+3. Confirm the dashboard receives `NSE:NIFTY50-INDEX`, `NSE:NIFTYBANK-INDEX` and `BSE:SENSEX-INDEX` with fresh exchange timestamps.
 4. Confirm the UI reports live only while the quotes are fresh and the market is in regular session.
 5. Verify option chain, candles, movers, holdings and positions individually. Account endpoints require a valid authorized session and relevant FYERS permissions.
 

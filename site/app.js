@@ -21,7 +21,8 @@ const QUOTE_POLL_MS = 2000;
 const QUOTE_POLL_MAX_MS = 30000;
 const SYMBOLS = [
   { symbol: 'NSE:NIFTY50-INDEX', label: 'NIFTY 50', tab: 'NIFTY' },
-  { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'BANKNIFTY' }
+  { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'BANKNIFTY' },
+  { symbol: 'BSE:SENSEX-INDEX', label: 'SENSEX', tab: 'Dashboard' }
 ];
 
 const nav = document.querySelector('#nav');
@@ -118,7 +119,7 @@ function setStatus(message) {
   if (connectionDetail) connectionDetail.textContent = connected ? 'Live quotes verified from backend' : closedQuote ? 'Market closed · last quotes only' : 'Awaiting verified response';
   const welcomeCopy = document.querySelector('.welcome > div > p:last-child');
   if (welcomeCopy) welcomeCopy.textContent = connected
-    ? 'FYERS live market ticks are arriving for NIFTY 50 and BANK NIFTY.'
+    ? 'FYERS live market ticks are arriving for NIFTY 50, BANK NIFTY and SENSEX.'
     : closedQuote ? 'Indian market hours have ended. These are the latest quotes returned by FYERS, not a live-moving feed.'
     : 'Live quotes appear here only after the backend returns verified FYERS data.';
   const empty = document.querySelector('.empty');
@@ -127,7 +128,7 @@ function setStatus(message) {
     const copy = empty.querySelector('p');
     if (heading) heading.textContent = connected ? 'Live market feed connected' : 'Waiting for a verified FYERS quote';
     if (copy) copy.textContent = connected
-      ? 'The backend is returning fresh NIFTY 50 and BANK NIFTY quotes.'
+      ? 'The backend is returning fresh NIFTY 50, BANK NIFTY and SENSEX quotes.'
       : 'The console will display prices only after verified quote data is received.';
   }
 }
@@ -337,11 +338,12 @@ async function loadDashboardCandles() {
     if(!result.data.length)throw new Error('FYERS returned no historical candles for this symbol and timeframe.');
     const candleError=validateOhlcCandles(result.data,resolution.value);
     if(candleError)throw new Error(candleError);
-    chart.innerHTML=candleSvg(result.data);
+    const zoneChart=verifiedZoneChart(result.data);
+    chart.innerHTML=zoneChart;
     const mainChart=document.querySelector('#mainTabChart');
-    if(mainChart)mainChart.innerHTML=candleSvg(result.data);
+    if(mainChart)mainChart.innerHTML=zoneChart;
     const mainNote=document.querySelector('#mainViewNote');
-    if(mainNote)mainNote.textContent='Verified FYERS historical OHLC · '+result.data.length+' candles · '+resolution.value+' timeframe. No synthetic candles.';
+    if(mainNote)mainNote.textContent='Verified FYERS OHLC · '+result.data.length+' candles · '+resolution.value+' timeframe. Buying/demand and selling/supply zones are calculated from the returned candles; zones are withheld if there are too few valid candles.';
     if(count)count.textContent=result.data.length+' verified candles';
     status.textContent=result.data.length+' verified candles · '+symbol.value+' · '+resolution.value+' timeframe · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
     logEvent('Dashboard candlestick chart loaded ('+result.data.length+' verified candles for '+symbol.value+').','info');
@@ -593,6 +595,7 @@ function dashboardMarkup() {
   const chartSymbols = [
     { symbol: 'NSE:NIFTY50-INDEX', name: 'NIFTY 50' },
     { symbol: 'NSE:NIFTYBANK-INDEX', name: 'BANK NIFTY' },
+    { symbol: 'BSE:SENSEX-INDEX', name: 'SENSEX' },
     ...stockExplorerMoverRows.map(row => ({
       symbol: row.symbol,
       name: row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')
@@ -606,13 +609,13 @@ function dashboardMarkup() {
   }).map(item => '<option value="' + escapeHtml(item.symbol) + '">' + escapeHtml(item.name) + '</option>').join('');
   const chartUniverseNote = stockExplorerMoverRows.length
     ? 'Symbol list includes ' + stockExplorerMoverRows.length + ' equities from the latest FYERS Stock Explorer snapshot.'
-    : 'Index candles are available here. Open Stock Explorer and refresh verified FYERS quotes to populate the F&O equity symbol list.';
+    : 'NIFTY 50, BANK NIFTY and SENSEX candles are available here when verified FYERS historical data is returned.';
   return '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
     '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
     '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol">' + chartSymbolOptions + '</select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
     '<div id="dashboardCandleStatus" class="hint">Choose a symbol and load verified historical candles. ' + escapeHtml(chartUniverseNote) + '</div><div id="dashboardChart"><div class="chart-empty">Candlesticks have not been loaded yet.</div></div>' +
     '<div class="chart-foot"><span id="chartSampleCount">Historical FYERS candles</span><span>OHLC · READ ONLY</span></div></article>' +
-    '<div class="console-grid console-grid-2"><article class="console-section"><h4>Connection monitor</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend</span><b id="dashBackend">CHECKING</b></div><div class="data-row"><span>FYERS quote stream</span><b id="dashFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div></article><article class="console-section"><h4>Console modules</h4><div class="module-links"><button data-jump="Technical Indicators">Technical indicators</button><button data-jump="Option Chain">Option chain &amp; OI</button><button data-jump="Alerts">Price alerts</button><button data-jump="Holdings">Holdings &amp; positions</button></div></article></div>';
+    '<div class="console-grid console-grid-2"><article class="console-section"><h4>Connection monitor</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend</span><b id="dashBackend">CHECKING</b></div><div class="data-row"><span>FYERS quote stream</span><b id="dashFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div></article><article class="console-section"><h4>Console modules</h4><div class="module-links"><button data-jump="Sureshot CE/PE">Sureshot CE/PE</button><button data-jump="Charts &amp; Patterns">Charts &amp; Patterns</button><button data-jump="AI Signals">AI Signals</button><button data-jump="Holdings">Holdings &amp; positions</button></div></article></div>';
 }
 
 function focusedQuoteMarkup(symbol) {
@@ -839,7 +842,7 @@ function advancedScannerMarkup(tab) {
     return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
   }
   if (tab === 'Charts & Patterns') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Historical candle lab</h4><p>OHLC candles requested from authenticated FYERS history API</p></div><span class="live-tag">FYERS DATA</span></div><div class="option-controls"><label>Symbol<select id="patternSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option><option value="NSE:RELIANCE-EQ">RELIANCE</option><option value="NSE:HDFCBANK-EQ">HDFC BANK</option><option value="NSE:INFY-EQ">INFOSYS</option></select></label><label>Interval<select id="patternResolution"><option value="1">1 min</option><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><button class="primary" id="loadCandlesBtn">Load candles</button></div><div id="patternStatus" class="hint">Load verified historical candles to inspect OHLC movement.</div><div id="patternChart" class="pattern-chart"><div class="chart-empty">No candles loaded.</div></div><div id="patternSummary" class="hint">No pattern analysis yet.</div><div id="candleTable" class="table-wrap"></div></div><p class="hint">Pattern descriptions are heuristic and historical, not predictions or trade recommendations. Data availability depends on FYERS permissions.</p>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Historical candle lab</h4><p>OHLC candles requested from authenticated FYERS history API</p></div><span class="live-tag">FYERS DATA</span></div><div class="option-controls"><label>Symbol<select id="patternSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option><option value="NSE:RELIANCE-EQ">RELIANCE</option><option value="NSE:HDFCBANK-EQ">HDFC BANK</option><option value="NSE:INFY-EQ">INFOSYS</option><option value="BSE:SENSEX-INDEX">SENSEX</option></select></label><label>Interval<select id="patternResolution"><option value="D">Daily (1D)</option><option value="60">1 hour (1H)</option><option value="30">30 minutes (30M)</option><option value="15" selected>15 minutes (15M)</option></select></label><button class="primary" id="loadCandlesBtn">Load selected chart</button><button class="secondary" id="scanPatternsBtn">Scan top 5 verified movers</button></div><div id="patternScanResults"></div><div id="patternStatus" class="hint">Load verified historical candles to inspect OHLC movement.</div><div id="patternChart" class="pattern-chart"><div class="chart-empty">No candles loaded.</div></div><div id="patternSummary" class="hint">No pattern analysis yet.</div><div id="candleTable" class="table-wrap"></div></div><p class="hint">Pattern descriptions are heuristic and historical, not predictions or trade recommendations. Data availability depends on FYERS permissions.</p>';
   }
   const title = tab === 'Breakout Scanner' ? 'Breakout candidates to review' : tab === 'Momentum Scanner' ? 'Momentum leaders' : 'High-momentum candidates';
   const desc = tab === 'Breakout Scanner' ? 'Snapshot candidates only — confirm resistance, volume and candle close.' : tab === 'Momentum Scanner' ? 'Ranked by verified percentage change from the selected large-cap universe.' : 'Large percentage movers for research; not a “cheap option” guarantee.';
@@ -856,6 +859,12 @@ function sureshotZoneChart(candles, supply, demand) {
   const candlesSvg=rows.map((x,i)=>{const o=Number(x[1]),hh=Number(x[2]),ll=Number(x[3]),c=Number(x[4]),cx=pad+i*slot+slot/2,color=c>=o?'#61f2d2':'#ff8198',by=Math.min(y(o),y(c)),bh=Math.max(1,Math.abs(y(o)-y(c)));return '<line x1="'+cx+'" y1="'+y(hh)+'" x2="'+cx+'" y2="'+y(ll)+'" stroke="'+color+'" stroke-width="1.2"/><rect x="'+(cx-slot*.28)+'" y="'+by+'" width="'+Math.max(2,slot*.56)+'" height="'+bh+'" fill="'+color+'" rx="1"/>';}).join('');
   return '<svg class="live-chart candle-chart" viewBox="0 0 '+w+' '+h+'" role="img" aria-label="Verified FYERS candles with calculated supply and demand zones">'+bandSvg+candlesSvg+'<text x="'+pad+'" y="12" class="chart-label">HIGH '+formatPrice(hi)+'</text><text x="'+pad+'" y="'+(h-2)+'" class="chart-label">LOW '+formatPrice(lo)+'</text></svg>';
 }
+function verifiedZoneChart(candles) {
+  const zones = deriveSureshotZones(candles);
+  if (!zones) return '<div class="chart-empty">Candlestick chart with buying/demand and selling/supply zones requires at least 12 valid FYERS candles. No incomplete chart or fabricated zones shown.</div>';
+  return sureshotZoneChart(candles, zones.supply, zones.demand);
+}
+
 function deriveSureshotZones(candles) {
   if(!Array.isArray(candles)||candles.length<12) return null;
   const rows=candles.slice(-32,-1);
@@ -867,6 +876,76 @@ function deriveSureshotZones(candles) {
   const demandHigh=Math.min(Number(demandRow[1]),Number(demandRow[4]));
   return {supply:{low:Math.min(supplyLow,supplyHigh),high:supplyHigh},demand:{low:demandLow,high:Math.max(demandLow,demandHigh)}};
 }
+async function scanTopVerifiedPatterns() {
+  const status=document.querySelector('#patternStatus');
+  const results=document.querySelector('#patternScanResults');
+  const resolution=document.querySelector('#patternResolution')?.value||'15';
+  if(!status||!results)return;
+  status.textContent='Scanning up to 5 stocks from the verified movers snapshot. Requests are sequential to respect FYERS rate limits.';
+  results.innerHTML='<div class="chart-empty">Scanning verified candles…</div>';
+  try {
+    const moversResponse=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
+    const movers=await moversResponse.json().catch(()=>({}));
+    if(!moversResponse.ok||movers.ok!==true||!Array.isArray(movers.data))throw new Error(movers.error||'Verified movers are unavailable.');
+    const candidates=movers.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)&&Number.isFinite(Number(row.price))&&Number(row.price)>0).slice(0,5);
+    if(!candidates.length)throw new Error('No verified stock candidates were returned by the backend.');
+    const cards=[];
+    for(let i=0;i<candidates.length;i++){
+      if(i>0)await new Promise(resolve=>window.setTimeout(resolve,1300));
+      const row=candidates[i];
+      const query=new URLSearchParams({symbol:row.symbol,resolution});
+      const response=await fetch(BACKEND_URL+'/api/market/candles?'+query.toString(),{headers:{Accept:'application/json'},cache:'no-store'});
+      const data=await response.json().catch(()=>({}));
+      if(response.status===429||response.status===503)throw new Error('FYERS rate limit or cooldown is active. Scan stopped safely; retry later.');
+      if(!response.ok||data.ok!==true||!Array.isArray(data.data))continue;
+      const candles=data.data;
+      if(validateOhlcCandles(candles,resolution)||candles.length<12)continue;
+      const stamp=Number(candles[candles.length-1][0])*1000;
+      const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(stamp));
+      const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+      if(day!==today)continue;
+      const pattern=summarizeCandles(candles);
+      const zones=deriveSureshotZones(candles);
+      cards.push('<article class="console-section"><div class="console-section-head"><h4>'+escapeHtml(row.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''))+'</h4><span class="live-tag">TODAY · VERIFIED OHLC</span></div><div class="pattern-chart">'+verifiedZoneChart(candles)+'</div><p class="hint">'+escapeHtml(pattern)+'</p>'+(zones?'<p class="hint">Demand / buying zone: '+formatPrice(zones.demand.low)+' – '+formatPrice(zones.demand.high)+' · Supply / selling zone: '+formatPrice(zones.supply.low)+' – '+formatPrice(zones.supply.high)+'</p>':'<p class="hint">Zones withheld: insufficient valid candles.</p>')+'<p class="hint">Entry, stop loss and target are not auto-issued from a pattern label. Confirm breakout/retest and calculate risk/reward before any decision.</p></article>');
+    }
+    results.innerHTML=cards.length?'<div class="console-grid console-grid-2">'+cards.join('')+'</div>':'<div class="chart-empty">No same-day verified candles with enough valid rows were returned for these candidates. No older-session patterns were substituted.</div>';
+    status.textContent='Scan finished: '+cards.length+' of '+candidates.length+' candidates had enough verified candles dated today. This scans the first 5 backend movers only, not the complete NSE F&O universe.';
+  } catch(error) {
+    results.innerHTML='<div class="chart-empty">'+escapeHtml(error.message||'Pattern scan failed.')+'</div>';
+    status.textContent='Pattern scan incomplete; no unverified patterns displayed.';
+  }
+}
+
+async function loadPatternStockUniverse() {
+  const select=document.querySelector('#patternSymbol');
+  if(!select||select.dataset.universeLoaded==='true'||select.dataset.universeLoaded==='loading')return;
+  select.dataset.universeLoaded='loading';
+  try {
+    const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||'Verified stock list unavailable.');
+    const previous=select.value;
+    const fixed=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
+    const fixedOptions=Array.from(select.options).filter(option=>fixed.includes(option.value));
+    const rows=result.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
+    const options=rows.map(row=>{
+      const option=document.createElement('option');
+      option.value=row.symbol;
+      option.textContent=row.symbol.replace(/^NSE:/,'').replace(/-EQ$/,'')+' · verified quote universe';
+      return option;
+    });
+    select.replaceChildren(...fixedOptions,...options);
+    if(Array.from(select.options).some(option=>option.value===previous))select.value=previous;
+    select.dataset.universeLoaded='true';
+    const status=document.querySelector('#patternStatus');
+    if(status)status.textContent='Loaded '+rows.length+' symbols from the backend verified movers list. This is not guaranteed to be the complete NSE F&O universe; unavailable/stale symbols are not invented.';
+  } catch(error) {
+    select.dataset.universeLoaded='false';
+    const status=document.querySelector('#patternStatus');
+    if(status)status.textContent='Could not load the verified stock list: '+(error.message||'unknown error')+'. Choose an available index or configured symbol and retry.';
+  }
+}
+
 async function loadSureshotStockUniverse() {
   const select=document.querySelector('#setupSymbol');
   if(!select||select.dataset.universeLoaded==='true')return;
@@ -1414,19 +1493,11 @@ function render(tab) {
     });
   }
   if (tab === 'Dashboard') featureContent.innerHTML = dashboardMarkup();
-  else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
-  else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
-  else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
-  else if (tab === 'Stock Explorer') featureContent.innerHTML = stockExplorerMarkup();
-  else if (tab === 'Market Activity') featureContent.innerHTML = marketActivityMarkup();
   else if (tab === 'Gap-Up/Down') featureContent.innerHTML = gapAnalysisMarkup();
-  else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','FII/DII Flow','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
+  else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gainers & Losers') featureContent.innerHTML = moversMarkup();
-  else if (tab === 'Option Chain') featureContent.innerHTML = optionChainMarkup();
-  else if (tab === 'Technical Indicators') featureContent.innerHTML = indicatorsMarkup();
   else if (tab === 'AI Signals') featureContent.innerHTML = signalsMarkup();
   else if (tab === 'Holdings') featureContent.innerHTML = holdingsMarkup();
-  else if (tab === 'Alerts') featureContent.innerHTML = alertsMarkup();
   else if (tab === 'FYERS Settings') featureContent.innerHTML = settingsMarkup();
   else featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
   bindTabActions();
@@ -1435,8 +1506,9 @@ function render(tab) {
     if (gapButton) gapButton.onclick = loadGapAnalysis;
   }
   updateDynamicPanel();
-  if (tab === 'Market Activity') loadMarketActivity();
   if (tab === 'Gap-Up/Down') loadGapAnalysis();
+  if (tab === 'Charts & Patterns') loadPatternStockUniverse();
+  if (tab === 'Charts & Patterns') { const scan=document.querySelector('#scanPatternsBtn'); if(scan) scan.onclick=scanTopVerifiedPatterns; }
   if (tab === 'Technical Indicators') loadTechnicalIndicators();
   if (tab === 'Gainers & Losers') loadMovers();
   if (tab === 'Sureshot CE/PE') loadSureshotSetup();
@@ -1567,9 +1639,10 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
       }
     }
   });
-  if (!map[SYMBOLS[0].symbol] || !map[SYMBOLS[1].symbol]) return false;
+  if (!SYMBOLS.some(item => map[item.symbol])) return false;
   SYMBOLS.forEach(item => {
     const next = map[item.symbol];
+    if (!next) return; // Missing symbols stay unavailable; they must not hide other verified quotes.
     const old = latestQuotes[item.symbol];
     latestQuotes[item.symbol] = next;
     const history = historyBySymbol[item.symbol];
@@ -1678,7 +1751,11 @@ async function loadCandles() {
     const rows=result.data;
     const candleError=validateOhlcCandles(rows,re.value);
     if(candleError)throw new Error(candleError);
-    chart.innerHTML=candleSvg(rows);summary.textContent=summarizeCandles(rows);const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML=candleSvg(rows);const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='Historical OHLC candles returned by FYERS. '+rows.length+' candles loaded; chart is based on those candles.';
+    const latestCandleTime=Number(rows[rows.length-1][0])*1000;
+    const latestCandleDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(latestCandleTime));
+    const todayIndia=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    if(latestCandleDay!==todayIndia)throw new Error('No verified candles from the current India trading date are available. Previous-session candles are not presented as a current-session pattern; select a different symbol/timeframe or wait for the next session.');
+    chart.innerHTML=verifiedZoneChart(rows);summary.textContent=summarizeCandles(rows)+' Buying/demand and selling/supply zones are calculated only when at least 12 valid candles are available.';const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML=verifiedZoneChart(rows);const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='Historical OHLC candles returned by FYERS. '+rows.length+' candles loaded. Zones are calculated from verified candles; if insufficient, chart zones are withheld.';
     table.innerHTML=rows.length?'<table class="console-table"><thead><tr><th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody>'+rows.slice(-12).reverse().map(row=>'<tr><td>'+escapeHtml(new Date(Number(row[0])*1000).toLocaleString('en-IN'))+'</td>'+row.slice(1,6).map((v,i)=>'<td>'+displayNumber(v,i===4?0:2)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="chart-empty">FYERS returned no candles for this range.</div>';
     status.textContent='Verified FYERS history response · '+rows.length+' candles · '+re.value+' interval · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
     logEvent('Historical candles loaded for '+se.value+' ('+rows.length+').','info');
@@ -1845,7 +1922,7 @@ async function fetchLiveQuotes() {
         setFyersStatus('NOT CONNECTED');
         setConnection('Not connected', true);
         document.querySelectorAll('.metrics .metric').forEach((metric, index) => {
-          if (index === 1 || index === 2) {
+          if (index >= 1 && index <= 3) {
             const value = metric.querySelector('strong');
             const detail = metric.querySelector('small');
             if (value) { value.textContent = '—'; value.classList.add('muted'); }
@@ -1870,14 +1947,14 @@ async function fetchLiveQuotes() {
     quotePollDelay = QUOTE_POLL_MS;
     if (!updateQuoteCards(data.data, data.fetchedAt, data.source, data.streamConnected)) {
       setStatus('INCOMPLETE QUOTE RESPONSE');
-      showMessage('Both expected index quotes were not present. No new values were applied.', true);
+      showMessage('All expected index quotes were not present. No new values were applied.', true);
       logEvent('Quote response was incomplete.', 'warn');
       return;
     }
     if (data.source === 'websocket-recent' || data.streamConnected === false) {
       showMessage('Showing the last verified FYERS prices while the market socket reconnects. Signals remain blocked until fresh ticks resume.');
     } else {
-      showMessage('NIFTY and BANK NIFTY quotes received from the backend.');
+      showMessage('NIFTY, BANK NIFTY and SENSEX quotes received from the backend.');
     }
   } catch {
     setStatus('LIVE DATA UNAVAILABLE');
