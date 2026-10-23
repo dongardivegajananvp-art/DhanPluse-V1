@@ -53,6 +53,8 @@ test('signals require fresh connected FYERS websocket data and closed-market blo
   assert.match(app, /quote\.source !== 'websocket'.*quote\.streamConnected !== true/);
   assert.match(app, /quoteAgeMs\(quote\) > 15000/);
   assert.match(app, /all signals remain blocked/);
+  assert.match(app, /isRegularMarketSession\\(\\) && source === 'websocket'/, 'after-hours ticks must not feed alerts/indicators');
+  assert.match(app, /MARKET CLOSED · LAST KNOWN LTP/);
 });
 
 test('source keeps explicit no-order-placement language for paper tools', () => {
