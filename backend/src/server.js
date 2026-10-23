@@ -9,6 +9,9 @@ import { analyzeOpeningGap, summarizeHistoricalGaps } from "./gap-analysis.js";
 import { getNseSessionWindow } from "./market-data.js";
 import { buildFnoEquityUniverse } from "./fno-universe.js";
 import { normalizeInstitutionalFlow } from "./institutional-flow.js";
+import { createFyersDataApiBudget } from "./fyers-data-api-budget.js";
+
+const fetchWithFyersBudget = createFyersDataApiBudget();
 
 const app = express();
 app.disable("x-powered-by");
@@ -296,7 +299,7 @@ app.post("/api/fyers/auth/exchange", async (req, res) => {
   pendingAuthStates.delete(state);
   try {
     const appIdHash = crypto.createHash("sha256").update(`${appId}:${appSecret}`).digest("hex");
-    const response = await fetch("https://api-t1.fyers.in/api/v3/validate-authcode", {
+    const response = await fetchWithFyersBudget("https://api-t1.fyers.in/api/v3/validate-authcode", {
       method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ grant_type: "authorization_code", appIdHash, code }),
       signal: AbortSignal.timeout(12000)
@@ -339,7 +342,7 @@ async function fyersHistory(symbol, from, to, resolution = "D") {
   url.searchParams.set("range_from", from);
   url.searchParams.set("range_to", to);
   url.searchParams.set("cont_flag", "1");
-  const response = await fetch(url, { headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
+  const response = await fetchWithFyersBudget(url, { headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
   const responseText = await response.text();
   let data = {}; try { data = responseText ? JSON.parse(responseText) : {}; } catch {}
   if (response.status === 429) {
@@ -407,7 +410,7 @@ app.get("/api/market/institutional-flow", async (_req, res) => {
     catch { return res.status(502).json({ ok: false, error: "Official NSE institutional flow is temporarily unavailable; figures withheld.", signalsAllowed: false }); }
   }
   institutionalFlowInFlight = (async () => {
-    const response = await fetch("https://www.nseindia.com/api/fiidiiTradeReact", {
+    const response = await fetchWithFyersBudget("https://www.nseindia.com/api/fiidiiTradeReact", {
       headers: {
         "Accept": "application/json, text/plain, */*",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
@@ -464,8 +467,8 @@ async function getNseFnoEquityUniverse() {
   if (fnoUniversePromise) return fnoUniversePromise;
   fnoUniversePromise = (async () => {
     const [foResponse, cmResponse] = await Promise.all([
-      fetch("https://public.fyers.in/sym_details/NSE_FO_sym_master.json", { signal: AbortSignal.timeout(45000) }),
-      fetch("https://public.fyers.in/sym_details/NSE_CM_sym_master.json", { signal: AbortSignal.timeout(45000) })
+      fetchWithFyersBudget("https://public.fyers.in/sym_details/NSE_FO_sym_master.json", { signal: AbortSignal.timeout(45000) }),
+      fetchWithFyersBudget("https://public.fyers.in/sym_details/NSE_CM_sym_master.json", { signal: AbortSignal.timeout(45000) })
     ]);
     if (!foResponse.ok || !cmResponse.ok) throw new Error("FYERS NSE_FO/NSE_CM symbol master download failed.");
     const [foMaster, cmMaster] = await Promise.all([foResponse.json(), cmResponse.json()]);
@@ -522,7 +525,7 @@ async function loadVerifiedFnoStockQuotes() {
     const batch = symbols.slice(offset, offset + STOCK_QUOTE_BATCH_SIZE);
     const url = new URL("https://api-t1.fyers.in/data/quotes");
     url.searchParams.set("symbols", batch.join(","));
-    const response = await fetch(url, { headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
+    const response = await fetchWithFyersBudget(url, { headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
     const body = await response.json().catch(() => ({}));
     if (response.status === 429) {
       console.warn("FYERS stock quotes rate-limited:", JSON.stringify({ batchNumber: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1, batchSize: batch.length }));
@@ -749,7 +752,7 @@ app.get("/api/market/last-known-quotes", requireSession, (req, res) => {
 async function fetchReadOnlyAccountEndpoint(path, res) {
   if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
   try {
-    const response = await fetch("https://api-t1.fyers.in/api/v3/" + path, {
+    const response = await fetchWithFyersBudget("https://api-t1.fyers.in/api/v3/" + path, {
       headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" },
       cache: "no-store", signal: AbortSignal.timeout(12000)
     });
@@ -786,7 +789,7 @@ app.get("/api/fyers/option-quote", requireSession, async (req, res) => {
   try {
     const url = new URL("https://api-t1.fyers.in/data/quotes");
     url.searchParams.set("symbols", symbol);
-    const response = await fetch(url, {
+    const response = await fetchWithFyersBudget(url, {
       headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" },
       cache: "no-store", signal: AbortSignal.timeout(10000)
     });
@@ -847,7 +850,7 @@ app.get("/api/fyers/options-chain", requireSession, async (req, res) => {
   url.searchParams.set("symbol",symbol);url.searchParams.set("strikecount",String(count));url.searchParams.set("greeks","1");
   if (expiry) url.searchParams.set("timestamp",expiry);
   try {
-    const response = await fetch(url,{headers:{Authorization:appId+":"+accessToken,Accept:"application/json"},cache:"no-store",signal:AbortSignal.timeout(12000)});
+    const response = await fetchWithFyersBudget(url,{headers:{Authorization:appId+":"+accessToken,Accept:"application/json"},cache:"no-store",signal:AbortSignal.timeout(12000)});
     const body = await response.json().catch(()=>({}));
     if (response.status===429) { rateLimits.set(cooldownKey,{until:Date.now()+cooldown.backoffMs,backoffMs:Math.min(cooldown.backoffMs*2,900000)}); return res.status(429).json({ok:false,error:"FYERS rate limit reached for option chain; retry after cooldown."}); }
     if (!response.ok || body.s!=="ok" || !Array.isArray(body.data?.optionsChain)) return res.status(response.status===401?401:502).json({ok:false,error:"FYERS option-chain data unavailable or unverified.",detail:String(body.message||"Invalid response").slice(0,160)});
