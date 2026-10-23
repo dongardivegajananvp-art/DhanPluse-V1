@@ -328,7 +328,8 @@ async function loadDashboardCandles() {
   if(!symbol||!resolution||!chart||!status||dashboardCandleRequestRunning)return;
   if (!sessionStorage.getItem('dhanpulse-dashboard-session-v1')) {
     status.textContent='Connect FYERS to load verified historical candles.';
-    chart.innerHTML='<div class="chart-empty">Connect FYERS to load verified historical candles. No candle values are fabricated.</div>';
+    chart.innerHTML='<div class="chart-empty"><strong>FYERS connection required.</strong><p>Connect FYERS to load verified historical candles. No candle values are fabricated.</p><button type="button" class="primary dashboardReconnectBtn">Connect FYERS</button></div>';
+    chart.querySelector('.dashboardReconnectBtn')?.addEventListener('click',startFyersLogin);
     if(count)count.textContent='0 verified candles';
     return;
   }
@@ -360,10 +361,10 @@ async function loadDashboardCandles() {
       // A browser can retain an opaque session after the backend has restarted.
       // Discard that unusable token and offer a fresh OAuth flow; never invent candles.
       sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
-      const recovery='<div class="chart-empty"><strong>FYERS dashboard session expired.</strong><p>Reconnect FYERS to securely renew the session before loading historical candles.</p><button type="button" class="primary" id="dashboardReconnectBtn">Reconnect FYERS</button></div>';
+      const recovery='<div class="chart-empty"><strong>FYERS dashboard session expired.</strong><p>Reconnect FYERS to securely renew the session before loading historical candles.</p><button type="button" class="primary dashboardReconnectBtn">Reconnect FYERS</button></div>';
       chart.innerHTML=recovery;
       if(mainChart)mainChart.innerHTML=recovery;
-      document.querySelector('#dashboardReconnectBtn')?.addEventListener('click',startFyersLogin);
+      document.querySelectorAll('.dashboardReconnectBtn').forEach(reconnectButton => reconnectButton.addEventListener('click',startFyersLogin));
       status.textContent='FYERS session expired. Reconnect FYERS to load verified candles.';
       if(mainNote)mainNote.textContent='Historical candles are withheld until a fresh FYERS dashboard session is established.';
       setFyersStatus('SESSION EXPIRED');
