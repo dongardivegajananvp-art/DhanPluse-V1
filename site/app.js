@@ -21,7 +21,8 @@ const QUOTE_POLL_MS = 2000;
 const QUOTE_POLL_MAX_MS = 30000;
 const SYMBOLS = [
   { symbol: 'NSE:NIFTY50-INDEX', label: 'NIFTY 50', tab: 'NIFTY' },
-  { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'BANKNIFTY' }
+  { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'BANKNIFTY' },
+  { symbol: 'BSE:SENSEX-INDEX', label: 'SENSEX', tab: 'Dashboard' }
 ];
 
 const nav = document.querySelector('#nav');
@@ -118,7 +119,7 @@ function setStatus(message) {
   if (connectionDetail) connectionDetail.textContent = connected ? 'Live quotes verified from backend' : closedQuote ? 'Market closed · last quotes only' : 'Awaiting verified response';
   const welcomeCopy = document.querySelector('.welcome > div > p:last-child');
   if (welcomeCopy) welcomeCopy.textContent = connected
-    ? 'FYERS live market ticks are arriving for NIFTY 50 and BANK NIFTY.'
+    ? 'FYERS live market ticks are arriving for NIFTY 50, BANK NIFTY and SENSEX.'
     : closedQuote ? 'Indian market hours have ended. These are the latest quotes returned by FYERS, not a live-moving feed.'
     : 'Live quotes appear here only after the backend returns verified FYERS data.';
   const empty = document.querySelector('.empty');
@@ -127,7 +128,7 @@ function setStatus(message) {
     const copy = empty.querySelector('p');
     if (heading) heading.textContent = connected ? 'Live market feed connected' : 'Waiting for a verified FYERS quote';
     if (copy) copy.textContent = connected
-      ? 'The backend is returning fresh NIFTY 50 and BANK NIFTY quotes.'
+      ? 'The backend is returning fresh NIFTY 50, BANK NIFTY and SENSEX quotes.'
       : 'The console will display prices only after verified quote data is received.';
   }
 }
@@ -593,6 +594,7 @@ function dashboardMarkup() {
   const chartSymbols = [
     { symbol: 'NSE:NIFTY50-INDEX', name: 'NIFTY 50' },
     { symbol: 'NSE:NIFTYBANK-INDEX', name: 'BANK NIFTY' },
+    { symbol: 'BSE:SENSEX-INDEX', name: 'SENSEX' },
     ...stockExplorerMoverRows.map(row => ({
       symbol: row.symbol,
       name: row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')
@@ -606,7 +608,7 @@ function dashboardMarkup() {
   }).map(item => '<option value="' + escapeHtml(item.symbol) + '">' + escapeHtml(item.name) + '</option>').join('');
   const chartUniverseNote = stockExplorerMoverRows.length
     ? 'Symbol list includes ' + stockExplorerMoverRows.length + ' equities from the latest FYERS Stock Explorer snapshot.'
-    : 'Index candles are available here. Open Stock Explorer and refresh verified FYERS quotes to populate the F&O equity symbol list.';
+    : 'NIFTY 50, BANK NIFTY and SENSEX candles are available here when verified FYERS historical data is returned.';
   return '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
     '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
     '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol">' + chartSymbolOptions + '</select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
@@ -1414,19 +1416,11 @@ function render(tab) {
     });
   }
   if (tab === 'Dashboard') featureContent.innerHTML = dashboardMarkup();
-  else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
-  else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
-  else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
-  else if (tab === 'Stock Explorer') featureContent.innerHTML = stockExplorerMarkup();
-  else if (tab === 'Market Activity') featureContent.innerHTML = marketActivityMarkup();
   else if (tab === 'Gap-Up/Down') featureContent.innerHTML = gapAnalysisMarkup();
-  else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','FII/DII Flow','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
+  else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gainers & Losers') featureContent.innerHTML = moversMarkup();
-  else if (tab === 'Option Chain') featureContent.innerHTML = optionChainMarkup();
-  else if (tab === 'Technical Indicators') featureContent.innerHTML = indicatorsMarkup();
   else if (tab === 'AI Signals') featureContent.innerHTML = signalsMarkup();
   else if (tab === 'Holdings') featureContent.innerHTML = holdingsMarkup();
-  else if (tab === 'Alerts') featureContent.innerHTML = alertsMarkup();
   else if (tab === 'FYERS Settings') featureContent.innerHTML = settingsMarkup();
   else featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
   bindTabActions();
@@ -1435,7 +1429,6 @@ function render(tab) {
     if (gapButton) gapButton.onclick = loadGapAnalysis;
   }
   updateDynamicPanel();
-  if (tab === 'Market Activity') loadMarketActivity();
   if (tab === 'Gap-Up/Down') loadGapAnalysis();
   if (tab === 'Technical Indicators') loadTechnicalIndicators();
   if (tab === 'Gainers & Losers') loadMovers();
@@ -1567,7 +1560,7 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
       }
     }
   });
-  if (!map[SYMBOLS[0].symbol] || !map[SYMBOLS[1].symbol]) return false;
+  if (!SYMBOLS.every(item => map[item.symbol])) return false;
   SYMBOLS.forEach(item => {
     const next = map[item.symbol];
     const old = latestQuotes[item.symbol];
@@ -1845,7 +1838,7 @@ async function fetchLiveQuotes() {
         setFyersStatus('NOT CONNECTED');
         setConnection('Not connected', true);
         document.querySelectorAll('.metrics .metric').forEach((metric, index) => {
-          if (index === 1 || index === 2) {
+          if (index >= 1 && index <= 3) {
             const value = metric.querySelector('strong');
             const detail = metric.querySelector('small');
             if (value) { value.textContent = '—'; value.classList.add('muted'); }
@@ -1870,14 +1863,14 @@ async function fetchLiveQuotes() {
     quotePollDelay = QUOTE_POLL_MS;
     if (!updateQuoteCards(data.data, data.fetchedAt, data.source, data.streamConnected)) {
       setStatus('INCOMPLETE QUOTE RESPONSE');
-      showMessage('Both expected index quotes were not present. No new values were applied.', true);
+      showMessage('All expected index quotes were not present. No new values were applied.', true);
       logEvent('Quote response was incomplete.', 'warn');
       return;
     }
     if (data.source === 'websocket-recent' || data.streamConnected === false) {
       showMessage('Showing the last verified FYERS prices while the market socket reconnects. Signals remain blocked until fresh ticks resume.');
     } else {
-      showMessage('NIFTY and BANK NIFTY quotes received from the backend.');
+      showMessage('NIFTY, BANK NIFTY and SENSEX quotes received from the backend.');
     }
   } catch {
     setStatus('LIVE DATA UNAVAILABLE');
