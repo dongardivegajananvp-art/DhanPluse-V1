@@ -43,6 +43,9 @@ jobs:
           grep -q 'backtest.js' site/index.html
           test -s site/sw.js
           test -s site/dhanpulse-icon.svg
+          test "$(grep -o 'data-tab=' site/index.html | wc -l | tr -d ' ')" = "12"
+          grep -q 'BSE:SENSEX-INDEX' backend/src/server.js
+          grep -q 'Order placement' site/index.html
           grep -q 'publish = "site"' netlify.toml
       - name: Install backend dependencies
         working-directory: backend
