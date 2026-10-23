@@ -876,6 +876,36 @@ function deriveSureshotZones(candles) {
   const demandHigh=Math.min(Number(demandRow[1]),Number(demandRow[4]));
   return {supply:{low:Math.min(supplyLow,supplyHigh),high:supplyHigh},demand:{low:demandLow,high:Math.max(demandLow,demandHigh)}};
 }
+async function loadPatternStockUniverse() {
+  const select=document.querySelector('#patternSymbol');
+  if(!select||select.dataset.universeLoaded==='true'||select.dataset.universeLoaded==='loading')return;
+  select.dataset.universeLoaded='loading';
+  try {
+    const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||'Verified stock list unavailable.');
+    const previous=select.value;
+    const fixed=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
+    const fixedOptions=Array.from(select.options).filter(option=>fixed.includes(option.value));
+    const rows=result.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
+    const options=rows.map(row=>{
+      const option=document.createElement('option');
+      option.value=row.symbol;
+      option.textContent=row.symbol.replace(/^NSE:/,'').replace(/-EQ$/,'')+' · verified quote universe';
+      return option;
+    });
+    select.replaceChildren(...fixedOptions,...options);
+    if(Array.from(select.options).some(option=>option.value===previous))select.value=previous;
+    select.dataset.universeLoaded='true';
+    const status=document.querySelector('#patternStatus');
+    if(status)status.textContent='Loaded '+rows.length+' symbols from the backend verified movers list. This is not guaranteed to be the complete NSE F&O universe; unavailable/stale symbols are not invented.';
+  } catch(error) {
+    select.dataset.universeLoaded='false';
+    const status=document.querySelector('#patternStatus');
+    if(status)status.textContent='Could not load the verified stock list: '+(error.message||'unknown error')+'. Choose an available index or configured symbol and retry.';
+  }
+}
+
 async function loadSureshotStockUniverse() {
   const select=document.querySelector('#setupSymbol');
   if(!select||select.dataset.universeLoaded==='true')return;
@@ -1437,6 +1467,7 @@ function render(tab) {
   }
   updateDynamicPanel();
   if (tab === 'Gap-Up/Down') loadGapAnalysis();
+  if (tab === 'Charts & Patterns') loadPatternStockUniverse();
   if (tab === 'Technical Indicators') loadTechnicalIndicators();
   if (tab === 'Gainers & Losers') loadMovers();
   if (tab === 'Sureshot CE/PE') loadSureshotSetup();
@@ -1681,7 +1712,7 @@ async function loadCandles() {
     const latestCandleTime=Number(rows[rows.length-1][0])*1000;
     const latestCandleDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(latestCandleTime));
     const todayIndia=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-    if(latestCandleDay!==todayIndia)throw new Error('No verified candles from today are available. Old-session patterns are not shown as new today.');
+    if(latestCandleDay!==todayIndia)throw new Error('No verified candles from the current India trading date are available. Previous-session candles are not presented as today's pattern; select a different symbol/timeframe or wait for the next session.');
     chart.innerHTML=verifiedZoneChart(rows);summary.textContent=summarizeCandles(rows)+' Buying/demand and selling/supply zones are calculated only when at least 12 valid candles are available.';const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML=verifiedZoneChart(rows);const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='Historical OHLC candles returned by FYERS. '+rows.length+' candles loaded. Zones are calculated from verified candles; if insufficient, chart zones are withheld.';
     table.innerHTML=rows.length?'<table class="console-table"><thead><tr><th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody>'+rows.slice(-12).reverse().map(row=>'<tr><td>'+escapeHtml(new Date(Number(row[0])*1000).toLocaleString('en-IN'))+'</td>'+row.slice(1,6).map((v,i)=>'<td>'+displayNumber(v,i===4?0:2)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="chart-empty">FYERS returned no candles for this range.</div>';
     status.textContent='Verified FYERS history response · '+rows.length+' candles · '+re.value+' interval · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
