@@ -39,7 +39,11 @@ allowedOrigins.add('https://dhanpulse-ultimate-session-test-ui.onrender.com');
 // Keep this constrained to the known Netlify site rather than allowing arbitrary
 // *.netlify.app origins.
 function isTrustedDhanPulsePreview(origin) {
-  return new RegExp('^https://deploy-preview-[0-9]+--spectacular-gaufre-b5c029[.]netlify[.]app
+  const prefix = 'https://deploy-preview-';
+  const suffix = '--spectacular-gaufre-b5c029.netlify.app';
+  if (!origin.startsWith(prefix) || !origin.endsWith(suffix)) return false;
+  const buildNumber = origin.slice(prefix.length, -suffix.length);
+  return buildNumber.length > 0 && [...buildNumber].every(char => char >= '0' && char <= '9');
 }
 
 if (redirectUri) {
