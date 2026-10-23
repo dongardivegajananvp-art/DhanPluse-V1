@@ -326,6 +326,13 @@ async function loadDashboardCandles() {
   const count=document.querySelector('#chartSampleCount');
   const button=document.querySelector('#dashboardCandlesBtn');
   if(!symbol||!resolution||!chart||!status||dashboardCandleRequestRunning)return;
+  if (!sessionStorage.getItem('dhanpulse-dashboard-session-v1')) {
+    status.textContent='Connect FYERS to load verified historical candles.';
+    chart.innerHTML='<div class="chart-empty"><strong>FYERS connection required.</strong><p>Connect FYERS to load verified historical candles. No candle values are fabricated.</p><button type="button" class="primary dashboardReconnectBtn">Connect FYERS</button></div>';
+    chart.querySelector('.dashboardReconnectBtn')?.addEventListener('click',startFyersLogin);
+    if(count)count.textContent='0 verified candles';
+    return;
+  }
   dashboardCandleRequestRunning=true;
   if(button)button.disabled=true;
   status.textContent='Requesting verified FYERS historical candles…';
@@ -347,12 +354,26 @@ async function loadDashboardCandles() {
     logEvent('Dashboard candlestick chart loaded ('+result.data.length+' verified candles for '+symbol.value+').','info');
   } catch(error) {
     const message=error.message||'Historical candles unavailable.';
-    chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
+    const sessionExpired=/Dashboard session missing or expired|FYERS session expired|Reconnect FYERS/i.test(message);
     const mainChart=document.querySelector('#mainTabChart');
-    if(mainChart)mainChart.innerHTML='<div class="chart-empty">Candlestick chart unavailable: '+escapeHtml(message)+'. No candle values were fabricated.</div>';
     const mainNote=document.querySelector('#mainViewNote');
-    if(mainNote)mainNote.textContent='Verified OHLC candles are unavailable right now; no substitute line chart or fabricated candle values are shown.';
-    status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
+    if(sessionExpired) {
+      // A browser can retain an opaque session after the backend has restarted.
+      // Discard that unusable token and offer a fresh OAuth flow; never invent candles.
+      sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
+      const recovery='<div class="chart-empty"><strong>FYERS dashboard session expired.</strong><p>Reconnect FYERS to securely renew the session before loading historical candles.</p><button type="button" class="primary dashboardReconnectBtn">Reconnect FYERS</button></div>';
+      chart.innerHTML=recovery;
+      if(mainChart)mainChart.innerHTML=recovery;
+      document.querySelectorAll('.dashboardReconnectBtn').forEach(reconnectButton => reconnectButton.addEventListener('click',startFyersLogin));
+      status.textContent='FYERS session expired. Reconnect FYERS to load verified candles.';
+      if(mainNote)mainNote.textContent='Historical candles are withheld until a fresh FYERS dashboard session is established.';
+      setFyersStatus('SESSION EXPIRED');
+    } else {
+      chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
+      if(mainChart)mainChart.innerHTML='<div class="chart-empty">Candlestick chart unavailable: '+escapeHtml(message)+'. No candle values were fabricated.</div>';
+      if(mainNote)mainNote.textContent='Verified OHLC candles are unavailable right now; no substitute line chart or fabricated candle values are shown.';
+      status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
+    }
     logEvent('Dashboard candlestick chart failed: '+message,'warn');
   } finally {
     dashboardCandleRequestRunning=false;
@@ -696,7 +717,7 @@ async function loadWatchlistQuotes() {
 }
 
 function moversMarkup() {
-  return '<div class="movers-toolbar"><div><b>Selected NSE large-cap stocks</b><p>Snapshot requested from the authenticated FYERS Quotes API. This is not a full-market scan.</p></div><button class="primary" id="refreshMoversBtn">Refresh movers</button></div><div id="moversStatus" class="hint">Load a verified FYERS snapshot to rank gainers and losers.</div><div class="console-grid console-grid-2"><article class="console-section"><div class="console-section-head"><h4>Top gainers</h4><span class="signal-tone positive">UP</span></div><div id="gainersTable" class="table-wrap"><div class="chart-empty">No snapshot loaded.</div></div></article><article class="console-section"><div class="console-section-head"><h4>Top losers</h4><span class="signal-tone negative">DOWN</span></div><div id="losersTable" class="table-wrap"><div class="chart-empty">No snapshot loaded.</div></div></article></div><p class="hint">Percent change comes directly from FYERS quotes. Symbols without a valid price/change are omitted. Refresh is manual to avoid excessive API requests.</p>';
+  return '<div class="movers-toolbar"><div><b>NSE F&O universe · verified movers</b><p>Ranks are shown only when the full requested FYERS F&O quote snapshot passes coverage and exchange-timestamp freshness checks. This is not a prediction.</p></div><button class="primary" id="refreshMoversBtn">Refresh movers</button></div><div id="moversStatus" class="hint">Load a verified FYERS snapshot to rank gainers and losers.</div><div class="console-grid console-grid-2"><article class="console-section"><div class="console-section-head"><h4>Top gainers</h4><span class="signal-tone positive">UP</span></div><div id="gainersTable" class="table-wrap"><div class="chart-empty">No snapshot loaded.</div></div></article><article class="console-section"><div class="console-section-head"><h4>Top losers</h4><span class="signal-tone negative">DOWN</span></div><div id="losersTable" class="table-wrap"><div class="chart-empty">No snapshot loaded.</div></div></article></div><p class="hint">Percent change comes directly from FYERS quotes. Symbols without a valid price/change are omitted. Refresh is manual to avoid excessive API requests.</p>';
 }
 
 async function loadMovers() {
@@ -1544,6 +1565,36 @@ function bindTabActions() {
   }));
 }
 
+function readLocalLastKnownQuotes() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('dhanpulse-last-verified-index-quotes-v1') || 'null');
+    if (!saved || saved.version !== 1 || !Array.isArray(saved.data) || !Number.isFinite(Date.parse(saved.fetchedAt))) return null;
+    const required = SYMBOLS.map(item => item.symbol);
+    const bySymbol = new Map(saved.data.filter(item => item && item.n && item.v).map(item => [item.n, item]));
+    const data = required.map(symbol => bySymbol.get(symbol));
+    if (data.some(item => !item || !Number.isFinite(Number(item.v.lp)) || Number(item.v.lp) <= 0 ||
+        !Number.isFinite(Number(item.v.tt)) || Number(item.v.tt) <= 0)) return null;
+    const times = data.map(item => Number(item.v.tt) > 1e12 ? Number(item.v.tt) : Number(item.v.tt) * 1000);
+    if (times.some(time => !Number.isFinite(time) || time > Date.now() + 60_000)) return null;
+    return { data, fetchedAt: saved.fetchedAt };
+  } catch {
+    return null;
+  }
+}
+
+function showLocalLastKnownQuotes(reason, backendState, fyersState) {
+  const saved = readLocalLastKnownQuotes();
+  if (!saved || !updateQuoteCards(saved.data, saved.fetchedAt, 'local-last-known', false)) return false;
+  const ageMinutes = Math.max(0, Math.floor((Date.now() - Date.parse(saved.fetchedAt)) / 60_000));
+  setConnection(backendState === 'ONLINE' ? 'Saved verified prices · live quotes unavailable' : 'Saved verified prices · backend unavailable', true);
+  setBackendStatus(backendState || 'UNREACHABLE');
+  setFyersStatus(fyersState || 'NOT VERIFIED');
+  showMessage((reason || 'Backend snapshot unavailable.') + ' Showing browser-saved FYERS prices from ' +
+    new Date(saved.fetchedAt).toLocaleString('en-IN') + ' (' + ageMinutes +
+    ' minutes old). Display only — not live; all signals remain blocked.');
+  return true;
+}
+
 function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   if (!Array.isArray(quotes)) return false;
   const map = {};
@@ -1568,6 +1619,26 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
     }
   });
   if (!map[SYMBOLS[0].symbol] || !map[SYMBOLS[1].symbol]) return false;
+  // Cache only a complete two-index snapshot with exchange timestamps. The cache is
+  // display-only and is never accepted by signal validation as a live quote.
+  if (source !== 'local-last-known' && ['websocket', 'websocket-recent', 'last-known'].includes(source) &&
+      SYMBOLS.every(item => map[item.symbol].receivedAt > 0 && map[item.symbol].sourceTime)) {
+    try {
+      localStorage.setItem('dhanpulse-last-verified-index-quotes-v1', JSON.stringify({
+        version: 1,
+        fetchedAt: fetchedAt || new Date(Math.max(...SYMBOLS.map(item => map[item.symbol].receivedAt))).toISOString(),
+        data: SYMBOLS.map(item => ({
+          n: item.symbol,
+          v: {
+            lp: map[item.symbol].price,
+            tt: Math.floor(map[item.symbol].receivedAt / 1000),
+            ...(map[item.symbol].change === null ? {} : { ch: map[item.symbol].change }),
+            ...(map[item.symbol].changePct === null ? {} : { chp: map[item.symbol].changePct })
+          }
+        }))
+      }));
+    } catch {}
+  }
   SYMBOLS.forEach(item => {
     const next = map[item.symbol];
     const old = latestQuotes[item.symbol];
@@ -1576,7 +1647,7 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
     const last = history.length ? history[history.length - 1] : null;
     // Only fresh ticks from a connected WebSocket may feed indicators or trigger alerts.
     // Last-known and reconnecting snapshots are display-only, even if their timestamps look recent.
-    const verifiedLiveTick = source === 'websocket' && streamConnected === true &&
+    const verifiedLiveTick = isRegularMarketSession() && source === 'websocket' && streamConnected === true &&
       Number.isFinite(next.receivedAt) && next.receivedAt > 0 &&
       Date.now() - next.receivedAt >= 0 && Date.now() - next.receivedAt <= 15000;
     if (verifiedLiveTick) {
@@ -1603,8 +1674,16 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
         : change === null ? 'FYERS live quote received' : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)');
     }
   });
-  if (source === 'last-known') {
-    setStatus(isRegularMarketSession() ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
+  if (source === 'local-last-known') {
+    setStatus('LOCAL LAST-KNOWN · NOT LIVE');
+    setConnection('Saved verified prices · backend unavailable', true);
+    setFyersStatus('NOT VERIFIED');
+    setBackendStatus('UNREACHABLE');
+  } else if (!isRegularMarketSession()) {
+    setStatus('MARKET CLOSED · LAST KNOWN LTP');
+    setConnection('Last-known FYERS prices · market closed', true);
+  } else if (source === 'last-known') {
+    setStatus('LIVE DATA STALE · LAST KNOWN');
     setConnection('Last-known FYERS prices · fresh ticks unavailable', true);
   } else if (source === 'websocket-recent' || streamConnected === false) {
     setStatus('LIVE DATA STALE');
@@ -1819,7 +1898,13 @@ async function fetchLiveQuotes() {
     const data = await response.json().catch(() => ({}));
     if (response.status === 429) {
       const retrySeconds = Number(data.retryAfterSeconds) || 30;
-      quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, 15000), QUOTE_POLL_MAX_MS);
+      // Respect upstream cooldowns (including Cloudflare 1015) instead of retrying
+      // every 30 seconds while the provider is still blocking requests.
+      quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, 15000), 6 * 60 * 60 * 1000);
+      if (showLocalLastKnownQuotes('FYERS rate limit/cooldown is active.', 'ONLINE', 'CONNECTED')) {
+        setStatus('FYERS RATE LIMIT · LOCAL LAST-KNOWN');
+        return;
+      }
       setStatus('FYERS RATE LIMIT — WAITING');
       showMessage('FYERS rate limit is active. The dashboard is backing off and will not force REST quote polling.', true);
       return;
@@ -1838,6 +1923,10 @@ async function fetchLiveQuotes() {
             return;
           }
         } catch {}
+        if (showLocalLastKnownQuotes('Live quote snapshot unavailable.', 'ONLINE', 'CONNECTED')) {
+          quotePollDelay = QUOTE_POLL_MAX_MS;
+          return;
+        }
       }
       if (response.status === 401) {
         latestQuotes = {};
@@ -1880,6 +1969,10 @@ async function fetchLiveQuotes() {
       showMessage('NIFTY and BANK NIFTY quotes received from the backend.');
     }
   } catch {
+    if (showLocalLastKnownQuotes()) {
+      quotePollDelay = QUOTE_POLL_MAX_MS;
+      return;
+    }
     setStatus('LIVE DATA UNAVAILABLE');
     showMessage('Cannot reach the quote API. Retrying automatically.', true);
     logEvent('Quote API request failed; automatic retry scheduled.', 'error');
