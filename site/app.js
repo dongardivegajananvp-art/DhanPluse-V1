@@ -1589,7 +1589,7 @@ function showLocalLastKnownQuotes(reason, backendState, fyersState) {
   setConnection(backendState === 'ONLINE' ? 'Saved verified prices · live quotes unavailable' : 'Saved verified prices · backend unavailable', true);
   setBackendStatus(backendState || 'UNREACHABLE');
   setFyersStatus(fyersState || 'NOT VERIFIED');
-  showMessage((reason || 'Backend snapshot unavailable.') + ' Showing browser-saved FYERS prices from '
+  showMessage((reason || 'Backend snapshot unavailable.') + ' Showing browser-saved FYERS prices from ' +
     new Date(saved.fetchedAt).toLocaleString('en-IN') + ' (' + ageMinutes +
     ' minutes old). Display only — not live; all signals remain blocked.');
   return true;
