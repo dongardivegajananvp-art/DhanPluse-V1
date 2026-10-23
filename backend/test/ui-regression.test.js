@@ -81,3 +81,8 @@ test('all data-backed tabs retain their loader and API route hooks', () => {
   assert.match(app, /FRESHNESS CHECK FAILED/);
   assert.match(app, /MARKET CLOSED.*current gainers/);
 });
+
+test('gainers and losers UI describes the full verified F&O universe', () => {
+  assert.match(app, /NSE F&O universe · verified movers/);
+  assert.match(app, /full requested FYERS F&O quote snapshot/);
+});
