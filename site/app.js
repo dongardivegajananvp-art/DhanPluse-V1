@@ -1639,9 +1639,10 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
       }
     }
   });
-  if (!SYMBOLS.every(item => map[item.symbol])) return false;
+  if (!SYMBOLS.some(item => map[item.symbol])) return false;
   SYMBOLS.forEach(item => {
     const next = map[item.symbol];
+    if (!next) return; // Missing symbols stay unavailable; they must not hide other verified quotes.
     const old = latestQuotes[item.symbol];
     latestQuotes[item.symbol] = next;
     const history = historyBySymbol[item.symbol];
