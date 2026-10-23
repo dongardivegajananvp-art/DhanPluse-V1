@@ -1565,6 +1565,33 @@ function bindTabActions() {
   }));
 }
 
+function readLocalLastKnownQuotes() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('dhanpulse-last-verified-index-quotes-v1') || 'null');
+    if (!saved || saved.version !== 1 || !Array.isArray(saved.data) || !Number.isFinite(Date.parse(saved.fetchedAt))) return null;
+    const required = SYMBOLS.map(item => item.symbol);
+    const bySymbol = new Map(saved.data.filter(item => item && item.n && item.v).map(item => [item.n, item]));
+    const data = required.map(symbol => bySymbol.get(symbol));
+    if (data.some(item => !item || !Number.isFinite(Number(item.v.lp)) || Number(item.v.lp) <= 0 ||
+        !Number.isFinite(Number(item.v.tt)) || Number(item.v.tt) <= 0)) return null;
+    const times = data.map(item => Number(item.v.tt) > 1e12 ? Number(item.v.tt) : Number(item.v.tt) * 1000);
+    if (times.some(time => !Number.isFinite(time) || time > Date.now() + 60_000)) return null;
+    return { data, fetchedAt: saved.fetchedAt };
+  } catch {
+    return null;
+  }
+}
+
+function showLocalLastKnownQuotes() {
+  const saved = readLocalLastKnownQuotes();
+  if (!saved || !updateQuoteCards(saved.data, saved.fetchedAt, 'local-last-known', false)) return false;
+  const ageMinutes = Math.max(0, Math.floor((Date.now() - Date.parse(saved.fetchedAt)) / 60_000));
+  showMessage('Backend snapshot unavailable. Showing browser-saved FYERS prices from ' +
+    new Date(saved.fetchedAt).toLocaleString('en-IN') + ' (' + ageMinutes +
+    ' minutes old). Display only — not live; all signals remain blocked.');
+  return true;
+}
+
 function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   if (!Array.isArray(quotes)) return false;
   const map = {};
@@ -1589,6 +1616,26 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
     }
   });
   if (!map[SYMBOLS[0].symbol] || !map[SYMBOLS[1].symbol]) return false;
+  // Cache only a complete two-index snapshot with exchange timestamps. The cache is
+  // display-only and is never accepted by signal validation as a live quote.
+  if (source !== 'local-last-known' && ['websocket', 'websocket-recent', 'last-known'].includes(source) &&
+      SYMBOLS.every(item => map[item.symbol].receivedAt > 0 && map[item.symbol].sourceTime)) {
+    try {
+      localStorage.setItem('dhanpulse-last-verified-index-quotes-v1', JSON.stringify({
+        version: 1,
+        fetchedAt: fetchedAt || new Date(Math.max(...SYMBOLS.map(item => map[item.symbol].receivedAt))).toISOString(),
+        data: SYMBOLS.map(item => ({
+          n: item.symbol,
+          v: {
+            lp: map[item.symbol].price,
+            tt: Math.floor(map[item.symbol].receivedAt / 1000),
+            ...(map[item.symbol].change === null ? {} : { ch: map[item.symbol].change }),
+            ...(map[item.symbol].changePct === null ? {} : { chp: map[item.symbol].changePct })
+          }
+        }))
+      }));
+    } catch {}
+  }
   SYMBOLS.forEach(item => {
     const next = map[item.symbol];
     const old = latestQuotes[item.symbol];
@@ -1624,7 +1671,12 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
         : change === null ? 'FYERS live quote received' : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)');
     }
   });
-  if (source === 'last-known') {
+  if (source === 'local-last-known') {
+    setStatus('LOCAL LAST-KNOWN · NOT LIVE');
+    setConnection('Saved verified prices · backend unavailable', true);
+    setFyersStatus('NOT VERIFIED');
+    setBackendStatus('UNREACHABLE');
+  } else if (source === 'last-known') {
     setStatus(isRegularMarketSession() ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
     setConnection('Last-known FYERS prices · fresh ticks unavailable', true);
   } else if (source === 'websocket-recent' || streamConnected === false) {
@@ -1859,6 +1911,10 @@ async function fetchLiveQuotes() {
             return;
           }
         } catch {}
+        if (showLocalLastKnownQuotes()) {
+          quotePollDelay = QUOTE_POLL_MAX_MS;
+          return;
+        }
       }
       if (response.status === 401) {
         latestQuotes = {};
@@ -1901,6 +1957,10 @@ async function fetchLiveQuotes() {
       showMessage('NIFTY and BANK NIFTY quotes received from the backend.');
     }
   } catch {
+    if (showLocalLastKnownQuotes()) {
+      quotePollDelay = QUOTE_POLL_MAX_MS;
+      return;
+    }
     setStatus('LIVE DATA UNAVAILABLE');
     showMessage('Cannot reach the quote API. Retrying automatically.', true);
     logEvent('Quote API request failed; automatic retry scheduled.', 'error');
