@@ -1582,11 +1582,11 @@ function readLocalLastKnownQuotes() {
   }
 }
 
-function showLocalLastKnownQuotes() {
+function showLocalLastKnownQuotes(reason) {
   const saved = readLocalLastKnownQuotes();
   if (!saved || !updateQuoteCards(saved.data, saved.fetchedAt, 'local-last-known', false)) return false;
   const ageMinutes = Math.max(0, Math.floor((Date.now() - Date.parse(saved.fetchedAt)) / 60_000));
-  showMessage('Backend snapshot unavailable. Showing browser-saved FYERS prices from ' +
+  showMessage((reason || 'Backend snapshot unavailable.') + ' Showing browser-saved FYERS prices from ' +
     new Date(saved.fetchedAt).toLocaleString('en-IN') + ' (' + ageMinutes +
     ' minutes old). Display only — not live; all signals remain blocked.');
   return true;
@@ -1892,7 +1892,10 @@ async function fetchLiveQuotes() {
     const data = await response.json().catch(() => ({}));
     if (response.status === 429) {
       const retrySeconds = Number(data.retryAfterSeconds) || 30;
-      quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, 15000), QUOTE_POLL_MAX_MS);
+      // Respect upstream cooldowns (including Cloudflare 1015) instead of retrying
+      // every 30 seconds while the provider is still blocking requests.
+      quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, 15000), 6 * 60 * 60 * 1000);
+      if (showLocalLastKnownQuotes('FYERS rate limit/cooldown is active.')) return;
       setStatus('FYERS RATE LIMIT — WAITING');
       showMessage('FYERS rate limit is active. The dashboard is backing off and will not force REST quote polling.', true);
       return;
