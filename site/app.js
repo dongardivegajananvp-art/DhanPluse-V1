@@ -338,11 +338,12 @@ async function loadDashboardCandles() {
     if(!result.data.length)throw new Error('FYERS returned no historical candles for this symbol and timeframe.');
     const candleError=validateOhlcCandles(result.data,resolution.value);
     if(candleError)throw new Error(candleError);
-    chart.innerHTML=candleSvg(result.data);
+    const zoneChart=verifiedZoneChart(result.data);
+    chart.innerHTML=zoneChart;
     const mainChart=document.querySelector('#mainTabChart');
-    if(mainChart)mainChart.innerHTML=candleSvg(result.data);
+    if(mainChart)mainChart.innerHTML=zoneChart;
     const mainNote=document.querySelector('#mainViewNote');
-    if(mainNote)mainNote.textContent='Verified FYERS historical OHLC · '+result.data.length+' candles · '+resolution.value+' timeframe. No synthetic candles.';
+    if(mainNote)mainNote.textContent='Verified FYERS OHLC · '+result.data.length+' candles · '+resolution.value+' timeframe. Buying/demand and selling/supply zones are calculated from the returned candles; zones are withheld if there are too few valid candles.';
     if(count)count.textContent=result.data.length+' verified candles';
     status.textContent=result.data.length+' verified candles · '+symbol.value+' · '+resolution.value+' timeframe · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
     logEvent('Dashboard candlestick chart loaded ('+result.data.length+' verified candles for '+symbol.value+').','info');
@@ -858,6 +859,12 @@ function sureshotZoneChart(candles, supply, demand) {
   const candlesSvg=rows.map((x,i)=>{const o=Number(x[1]),hh=Number(x[2]),ll=Number(x[3]),c=Number(x[4]),cx=pad+i*slot+slot/2,color=c>=o?'#61f2d2':'#ff8198',by=Math.min(y(o),y(c)),bh=Math.max(1,Math.abs(y(o)-y(c)));return '<line x1="'+cx+'" y1="'+y(hh)+'" x2="'+cx+'" y2="'+y(ll)+'" stroke="'+color+'" stroke-width="1.2"/><rect x="'+(cx-slot*.28)+'" y="'+by+'" width="'+Math.max(2,slot*.56)+'" height="'+bh+'" fill="'+color+'" rx="1"/>';}).join('');
   return '<svg class="live-chart candle-chart" viewBox="0 0 '+w+' '+h+'" role="img" aria-label="Verified FYERS candles with calculated supply and demand zones">'+bandSvg+candlesSvg+'<text x="'+pad+'" y="12" class="chart-label">HIGH '+formatPrice(hi)+'</text><text x="'+pad+'" y="'+(h-2)+'" class="chart-label">LOW '+formatPrice(lo)+'</text></svg>';
 }
+function verifiedZoneChart(candles) {
+  const zones = deriveSureshotZones(candles);
+  if (!zones) return '<div class="chart-empty">Candlestick chart with buying/demand and selling/supply zones requires at least 12 valid FYERS candles. No incomplete chart or fabricated zones shown.</div>';
+  return sureshotZoneChart(candles, zones.supply, zones.demand);
+}
+
 function deriveSureshotZones(candles) {
   if(!Array.isArray(candles)||candles.length<12) return null;
   const rows=candles.slice(-32,-1);
@@ -1671,7 +1678,7 @@ async function loadCandles() {
     const rows=result.data;
     const candleError=validateOhlcCandles(rows,re.value);
     if(candleError)throw new Error(candleError);
-    chart.innerHTML=candleSvg(rows);summary.textContent=summarizeCandles(rows);const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML=candleSvg(rows);const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='Historical OHLC candles returned by FYERS. '+rows.length+' candles loaded; chart is based on those candles.';
+    chart.innerHTML=verifiedZoneChart(rows);summary.textContent=summarizeCandles(rows)+' Buying/demand and selling/supply zones are calculated only when at least 12 valid candles are available.';const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML=verifiedZoneChart(rows);const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='Historical OHLC candles returned by FYERS. '+rows.length+' candles loaded. Zones are calculated from verified candles; if insufficient, chart zones are withheld.';
     table.innerHTML=rows.length?'<table class="console-table"><thead><tr><th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody>'+rows.slice(-12).reverse().map(row=>'<tr><td>'+escapeHtml(new Date(Number(row[0])*1000).toLocaleString('en-IN'))+'</td>'+row.slice(1,6).map((v,i)=>'<td>'+displayNumber(v,i===4?0:2)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="chart-empty">FYERS returned no candles for this range.</div>';
     status.textContent='Verified FYERS history response · '+rows.length+' candles · '+re.value+' interval · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
     logEvent('Historical candles loaded for '+se.value+' ('+rows.length+').','info');
