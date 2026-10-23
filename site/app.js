@@ -1647,7 +1647,7 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
     const last = history.length ? history[history.length - 1] : null;
     // Only fresh ticks from a connected WebSocket may feed indicators or trigger alerts.
     // Last-known and reconnecting snapshots are display-only, even if their timestamps look recent.
-    const verifiedLiveTick = source === 'websocket' && streamConnected === true &&
+    const verifiedLiveTick = isRegularMarketSession() && source === 'websocket' && streamConnected === true &&
       Number.isFinite(next.receivedAt) && next.receivedAt > 0 &&
       Date.now() - next.receivedAt >= 0 && Date.now() - next.receivedAt <= 15000;
     if (verifiedLiveTick) {
@@ -1679,8 +1679,11 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
     setConnection('Saved verified prices · backend unavailable', true);
     setFyersStatus('NOT VERIFIED');
     setBackendStatus('UNREACHABLE');
+  } else if (!isRegularMarketSession()) {
+    setStatus('MARKET CLOSED · LAST KNOWN LTP');
+    setConnection('Last-known FYERS prices · market closed', true);
   } else if (source === 'last-known') {
-    setStatus(isRegularMarketSession() ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
+    setStatus('LIVE DATA STALE · LAST KNOWN');
     setConnection('Last-known FYERS prices · fresh ticks unavailable', true);
   } else if (source === 'websocket-recent' || streamConnected === false) {
     setStatus('LIVE DATA STALE');
