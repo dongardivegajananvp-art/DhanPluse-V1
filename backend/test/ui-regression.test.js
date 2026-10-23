@@ -57,6 +57,6 @@ test('signals require fresh connected FYERS websocket data and closed-market blo
 
 test('source keeps explicit no-order-placement language for paper tools', () => {
   assert.match(app, /No live order placement is available/);
-  assert.match(read('site/risk-calculator.js'), /never places orders/i);
+  assert.match(read('site/risk-calculator.js'), /does not place orders/i);
   assert.match(read('site/backtest.js'), /SIMULATION ONLY/);
 });
