@@ -28,7 +28,7 @@ if (renderStart < 0 || renderEnd < 0) throw new Error('Workspace render function
 const renderBlock = app.slice(renderStart, renderEnd);
 
 const requiredRenderRoutes = [
-  ['Dashboard', "tab === 'Dashboard') featureContent.innerHTML = dashboardMarkup()"],
+  ['Dashboard', "if (tab === 'Dashboard') { featureContent.innerHTML = dashboardMarkup()"],
   ['Stock Explorer', "tab === 'Stock Explorer') featureContent.innerHTML = stockExplorerMarkup()"],
   ['NIFTY', "tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol)"],
   ['BANKNIFTY', "tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol)"],
