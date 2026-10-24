@@ -288,19 +288,21 @@ async function renderStockExplorer(){
  let verifiedRows=[];
  function paintRows(){
   tbody.replaceChildren();
-  const rows=verifiedRows.slice().sort((x,y)=>sort.value==="losers"?Number(x.v.chp)-Number(y.v.chp):sort.value==="movement"?Math.abs(Number(y.v.chp))-Math.abs(Number(x.v.chp)):Number(y.v.chp)-Number(x.v.chp));
+  const rows=verifiedRows.slice().sort((x,y)=>lastKnownMode?x.n.localeCompare(y.n):sort.value==="losers"?Number(x.v.chp)-Number(y.v.chp):sort.value==="movement"?Math.abs(Number(y.v.chp))-Math.abs(Number(x.v.chp)):Number(y.v.chp)-Number(x.v.chp));
   for(const item of rows){
     const tr=document.createElement("tr");
     const symbol=item.n.replace("NSE:","").replace("-EQ","");
     const stamp=new Date(Number(item.v.tt)*1000);
     const change=safeNumber(item.v.ch);
-    const vals=[symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),change===null?"—":change.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),(Number(item.v.chp)>=0?"+":"")+Number(item.v.chp).toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})];
-    vals.forEach((v,i)=>{const td=el("td",v);if(i===3)td.style.color=Number(item.v.chp)>=0?"#63f0cb":"#ff718c";tr.append(td);});
+    const pct=item.v.chp==null?null:Number(item.v.chp);
+    const vals=[symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),change===null?"—":change.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),pct===null||!Number.isFinite(pct)?"—":(pct>=0?"+":"")+pct.toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})];
+    vals.forEach((v,i)=>{const td=el("td",v);if(i===3&&pct!==null&&Number.isFinite(pct))td.style.color=pct>=0?"#63f0cb":"#ff718c";tr.append(td);});
     tbody.append(tr);
   }
  }
+ let lastKnownMode=false;
  async function load(){
-  refresh.disabled=true;status.textContent="Requesting fresh FYERS quotes…";tbody.replaceChildren();
+  refresh.disabled=true;status.textContent="Requesting fresh FYERS quotes…";tbody.replaceChildren();verifiedRows=[];lastKnownMode=false;
   try{
    const r=await fetch(API_BASE+"/api/market/stock-quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
    const data=await r.json();
@@ -309,15 +311,27 @@ async function renderStockExplorer(){
    const nowMs=Date.now();
    verifiedRows=data.data.filter(item=>{
     if(!item||item.verified!==true||!item.v)return false;
-    const lp=Number(item.v.lp),ch=Number(item.v.ch),chp=Number(item.v.chp),stamp=Number(item.v.tt)*1000;
+    const lp=Number(item.v.lp),ch=item.v.ch==null?null:Number(item.v.ch),chp=item.v.chp==null?null:Number(item.v.chp),stamp=Number(item.v.tt)*1000;
     const age=nowMs-stamp;
-    return Number.isFinite(lp)&&lp>0&&Number.isFinite(ch)&&Number.isFinite(chp)&&stamp>0&&age>=-30000&&age<=120000;
+    return Number.isFinite(lp)&&lp>0&&(ch===null||Number.isFinite(ch))&&(chp===null||Number.isFinite(chp))&&stamp>0&&age>=-30000&&age<=120000;
    });
-   if(!verifiedRows.length)throw new Error("FYERS returned no quotes that passed the client-side 120-second freshness check. Wait for fresh data; no stale prices are shown.");
+   if(!verifiedRows.length)throw new Error("FYERS returned no fresh exchange-timestamped stock quotes.");
    paintRows();
-   status.textContent="Source: FYERS quotes API · "+verifiedRows.length+" fresh verified quote(s) of "+(data.universeCount||verifiedRows.length)+" F&O symbols · sorted by "+sort.options[sort.selectedIndex].text+" · fetched "+new Date(data.fetchedAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST · client-side freshness checked · missing/stale symbols omitted.";
-  }catch(err){verifiedRows=[];tbody.replaceChildren();status.textContent=String(err?.message||"Verified quotes unavailable.")+" No stale or placeholder prices are shown.";}
-  finally{refresh.disabled=false;}
+   status.textContent="Source: FYERS quotes API · "+verifiedRows.length+" fresh verified quote(s) of "+(data.universeCount||verifiedRows.length)+" F&O symbols · live view · fetched "+new Date(data.fetchedAt).toLocaleTimeString("en-IN",{timeZone:"Asia/Kolkata"})+" IST.";
+  }catch(err){
+   try{
+    const r=await fetch(API_BASE+"/api/market/last-known-stock-quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
+    const data=await r.json();
+    if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Connect FYERS again.");}
+    if(!Array.isArray(data.data)||!data.data.length)throw new Error(data.error||err.message||"Last-known stock prices unavailable.");
+    const nowMs=Date.now();
+    verifiedRows=data.data.filter(item=>item&&item.verified===true&&Number(item.price)>0&&Number.isFinite(Date.parse(item.priceAsOf))&&Date.parse(item.priceAsOf)<=nowMs+5000)
+      .map(item=>({n:item.symbol,verified:true,v:{lp:Number(item.price),ch:null,chp:item.changePct==null?null:Number(item.changePct),tt:Math.floor(Date.parse(item.priceAsOf)/1000)},quoteAgeSeconds:item.quoteAgeSeconds,stale:item.stale===true}));
+    if(!verifiedRows.length)throw new Error("No last-known stock quote passed source-price and timestamp validation.");
+    lastKnownMode=true;paintRows();
+    status.textContent="MARKET CLOSED / LAST-KNOWN LTP · "+verifiedRows.length+" actual FYERS quotes of "+(data.universeCount||verifiedRows.length)+" F&O stocks · "+verifiedRows.filter(x=>x.stale).length+" older than 120 seconds · display only; no live ranking or signals."+ (data.partial?" Coverage incomplete; "+(data.missingCount||0)+" symbols unavailable.":" Full symbol coverage returned.");
+   }catch(lastErr){verifiedRows=[];tbody.replaceChildren();status.textContent=String(lastErr?.message||err?.message||"Verified quotes unavailable.")+" No fabricated prices are shown.";}
+  }finally{refresh.disabled=false;}
  }
  sort.addEventListener("change",paintRows);
  refresh.addEventListener("click",load);await load();
