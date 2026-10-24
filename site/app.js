@@ -1030,35 +1030,50 @@ async function loadSureshotSetup() {
     if(!Number.isFinite(fetchedAt)||Date.now()-fetchedAt>15000||fetchedAt>Date.now()+5000)throw new Error('Option-chain snapshot timestamp is stale or invalid; no signal.');
     const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
     const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
-    const type=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
+    const confirmedType=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
     const atmIndex=atm===null?-1:strikes.indexOf(atm);
     const nearbyStrikes=new Set(atmIndex<0?[]:strikes.slice(Math.max(0,atmIndex-2),Math.min(strikes.length,atmIndex+3)));
-    const legCandidates=type?chain.filter(x=>nearbyStrikes.has(Number(x.strike_price))&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0):[];
-    // Prefer the most actively traded verified contract among the five nearest strikes,
-    // then use OI, spread, and ATM distance as deterministic tie-breakers.
-    legCandidates.sort((a,b)=>b.volume-a.volume||b.oi-a.oi||a.spreadPct-b.spreadPct||Math.abs(a.strike_price-spot)-Math.abs(b.strike_price-spot));
-    const leg=legCandidates[0]||null;
-    if(!type||!leg){
-      cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(reason)+'</p><p class="hint">No entry/target is issued without a confirmed breakout and a verified matching option premium.</p></article>';
-      status.textContent='NO TRADE · '+reason+' Option chain was verified; no actionable setup passed all filters.';
-      logEvent('Sureshot filtered setup: '+reason,'info');return;
+    const setupCards=[];
+    const quoteWarnings=[];
+    for(const type of ['CE','PE']){
+      if(type!==confirmedType){
+        const sideReason=!isRegularMarketSession()
+          ?'Market session is closed; historical candles cannot authorize a live entry.'
+          :confirmedType
+            ?'The verified underlying candles confirm '+confirmedType+', not '+type+'. Opposite-side entry withheld.'
+            :'No confirmed '+type+' breakout from the verified supply/demand zones.';
+        setupCards.push('<article class="console-section"><div class="console-section-head"><h4>'+type+' · NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(sideReason)+'</p><p class="hint">No entry, stop-loss or target is issued without independent directional confirmation.</p></article>');
+        continue;
+      }
+      const legCandidates=chain.filter(x=>nearbyStrikes.has(Number(x.strike_price))&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0);
+      legCandidates.sort((a,b)=>b.volume-a.volume||b.oi-a.oi||a.spreadPct-b.spreadPct||Math.abs(a.strike_price-spot)-Math.abs(b.strike_price-spot));
+      const leg=legCandidates[0]||null;
+      if(!leg){
+        setupCards.push('<article class="console-section"><div class="console-section-head"><h4>'+type+' · NO TRADE</h4><span class="signal-tone neutral">NO CONTRACT</span></div><p>No nearby '+type+' contract passed verified premium, liquidity, OI and spread filters.</p></article>');
+        continue;
+      }
+      try{
+        const quoteResponse=await fetch(BACKEND_URL+'/api/fyers/option-quote?'+new URLSearchParams({symbol:leg.symbol}),{headers:{Accept:'application/json'},cache:'no-store'});
+        const quoteResult=await quoteResponse.json().catch(()=>({}));
+        if(!quoteResponse.ok||quoteResult.ok!==true||!quoteResult.quote)throw new Error(quoteResult.error||quoteResult.detail||'No independently verified fresh quote.');
+        const freshQuote=quoteResult.quote;
+        const quoteTimeMs=Number(freshQuote.quoteTimeMs),quoteAgeMs=Date.now()-quoteTimeMs;
+        if(!Number.isFinite(quoteTimeMs)||quoteAgeMs < -5000||quoteAgeMs > 15000)throw new Error('Contract quote is stale or timestamped in the future.');
+        const freshBid=Number(freshQuote.bid),freshAsk=Number(freshQuote.ask),freshLtp=Number(freshQuote.ltp);
+        if(![freshBid,freshAsk,freshLtp].every(Number.isFinite)||freshBid<=0||freshAsk<freshBid||freshLtp<=0)throw new Error('Contract bid/ask/LTP is invalid.');
+        const freshSpreadPct=((freshAsk-freshBid)/((freshAsk+freshBid)/2))*100;
+        if(freshSpreadPct>5)throw new Error('Contract spread exceeds 5%.');
+        const entry=freshAsk,stop=entry*0.90,target=entry+(entry-stop)*2,rr=(target-entry)/(entry-stop);
+        const expiry=/^\d{9,12}$/.test(String(leg.expiry))?new Date(Number(leg.expiry)*1000).toLocaleDateString('en-IN'):leg.expiry;
+        setupCards.push('<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+Number(leg.strike_price)+' strike</h4><span class="signal-tone positive">'+bias+'</span></div><strong class="console-price">₹'+formatPrice(entry)+'</strong><div class="data-row"><span>Entry reference (ask)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (−10% premium)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (+20% premium)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : '+rr.toFixed(2)+'</b></div><div class="data-row"><span>Quote age</span><b>'+Math.max(0,quoteAgeMs/1000).toFixed(1)+' sec</b></div><div class="data-row"><span>Bid / Ask · Spread</span><b>₹'+formatPrice(freshBid)+' / ₹'+formatPrice(freshAsk)+' · '+freshSpreadPct.toFixed(2)+'%</b></div><div class="data-row"><span>Expiry · OI / Volume</span><b>'+escapeHtml(expiry)+' · '+displayNumber(leg.oi,0)+' / '+displayNumber(leg.volume,0)+'</b></div><p class="hint">Underlying confirmation: '+escapeHtml(reason)+'. Ask-side reference; −10% premium stop is a mechanical placeholder, not a technical invalidation level. No order placed.</p></article>');
+      }catch(quoteError){
+        quoteWarnings.push(type+': '+(quoteError.message||'verified contract quote unavailable'));
+        setupCards.push('<article class="console-section"><div class="console-section-head"><h4>'+type+' · NO TRADE</h4><span class="signal-tone neutral">QUOTE FILTER</span></div><p>'+escapeHtml(quoteError.message||'Verified fresh quote unavailable.')+'</p></article>');
+      }
     }
-    const quoteResponse=await fetch(BACKEND_URL+'/api/fyers/option-quote?'+new URLSearchParams({symbol:leg.symbol}),{headers:{Accept:'application/json'},cache:'no-store'});
-    const quoteResult=await quoteResponse.json().catch(()=>({}));
-    if(!quoteResponse.ok||quoteResult.ok!==true||!quoteResult.quote)throw new Error(quoteResult.error||quoteResult.detail||'Selected option contract has no independently verified fresh quote; no signal.');
-    const freshQuote=quoteResult.quote;
-    const quoteTimeMs=Number(freshQuote.quoteTimeMs),quoteAgeMs=Date.now()-quoteTimeMs;
-    if(!Number.isFinite(quoteTimeMs)||quoteAgeMs < -5000||quoteAgeMs > 15000)throw new Error('Selected option contract quote is stale or timestamped in the future; no signal.');
-    const freshBid=Number(freshQuote.bid),freshAsk=Number(freshQuote.ask),freshLtp=Number(freshQuote.ltp);
-    if(![freshBid,freshAsk,freshLtp].every(Number.isFinite)||freshBid<=0||freshAsk<freshBid||freshLtp<=0)throw new Error('Selected option contract bid/ask/LTP is invalid; no signal.');
-    const freshSpreadPct=((freshAsk-freshBid)/((freshAsk+freshBid)/2))*100;
-    if(freshSpreadPct>5)throw new Error('Selected option contract spread exceeds 5%; no trade.');
-    const entry=freshAsk,stop=entry*0.90,target=entry+(entry-stop)*2,rr=(target-entry)/(entry-stop);
-    const oi=displayNumber(leg.oi,0);
-    const volume=displayNumber(leg.volume,0);
-    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+Number(leg.strike_price)+' strike</h4><span class="signal-tone positive">'+bias+'</span></div><strong class="console-price">₹'+formatPrice(entry)+'</strong><div class="data-row"><span>Entry reference (ask-side premium)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (−10%)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (+20%)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : '+rr.toFixed(2)+'</b></div><div class="data-row"><span>Verified contract quote age</span><b>'+Math.max(0,quoteAgeMs/1000).toFixed(1)+' sec</b></div><div class="data-row"><span>Bid / Ask</span><b>₹'+formatPrice(freshBid)+' / ₹'+formatPrice(freshAsk)+'</b></div><div class="data-row"><span>Spread</span><b>'+freshSpreadPct.toFixed(2)+'%</b></div><div class="data-row"><span>Expiry</span><b>'+escapeHtml(/^\d{9,12}$/.test(String(leg.expiry))?new Date(Number(leg.expiry)*1000).toLocaleDateString('en-IN'):leg.expiry)+'</b></div><div class="data-row"><span>OI / Volume</span><b>'+oi+' / '+volume+'</b></div><p class="hint">Underlying confirmation: '+escapeHtml(reason)+' · Selected contract bid/ask/LTP verified independently via FYERS Quotes API. Spread, liquidity, expiry and slippage can change outcomes.</p></article>';
-    status.textContent='Candidate only · FYERS candles and option chain verified at '+new Date(optionResult.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+'. Not a guaranteed signal; no order placed.';
-    logEvent('Sureshot candidate built from verified OHLC zone and option-chain data.','info');
+    cards.innerHTML=setupCards.join('');
+    status.textContent='CE and PE evaluated independently · Underlying: '+bias+' · '+(quoteWarnings.length?'Some contract quotes were blocked; see side-specific cards. ':'')+'Candidate only; no order placed.';
+    logEvent('Sureshot evaluated CE and PE independently using verified underlying candles and contract quote checks.','info');
   }catch(error){
     cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">DATA / FILTER</span></div><p>'+escapeHtml(error.message||'Required verified data unavailable.')+'</p><p class="hint">No prices or signals were invented. Retry after confirming FYERS historical-data and option-chain access.</p></article>';
     status.textContent='No setup generated · '+(error.message||'Verified data unavailable.');
