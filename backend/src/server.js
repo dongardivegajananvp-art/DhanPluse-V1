@@ -240,7 +240,6 @@ function liveSnapshot() {
   const ticks = allowedSymbols.map(symbol => latestTicks.get(symbol));
   if (ticks.some(tick => !tick)) return null;
   const now = Date.now();
-  const tickAges = ticks.map(tick => now - Date.parse(tick.updatedAt));
   // Every index timestamp must be plausible: reject both stale and future-dated ticks.
   if (ticks.some(tick => quoteTimestampStatus(Date.parse(tick.updatedAt) / 1000, now, 15) !== 'FRESH')) return null;
 
