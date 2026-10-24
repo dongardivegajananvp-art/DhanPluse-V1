@@ -35,10 +35,11 @@ During 09:00–15:30 IST, every tab must show verified fresh data or an explicit
 10. Automated tests plus live-session test pass before marking complete. Merge alone does not prove live stability/OAuth success.
 
 ## Known gaps to resolve
-- Existing frontend mixes 15-second checks with 180-second equity/scanner windows.
-- Some scanner views use selected large-caps, not full NSE F&O universe.
+- Static policy and unit tests do not replace browser/mobile end-to-end checks across all 24 tabs.
+- Full NSE F&O symbol-master coverage and rate-limit recovery must be verified during a regular market session.
+- Option-chain display intentionally blocks unless FYERS returns an explicit verifiable exchange timestamp; verify the provider response or keep the module unavailable.
 - FII/DII source is not verified; keep unavailable until connected.
 - OAuth redirect mismatch and repeated WebSocket disconnects require end-to-end verification.
-- Every tab needs API, stale-data, partial-coverage and regression tests.
+- Historical candle freshness, account endpoint errors, post-close labels and every derived-signal gate still require regression and live-session checks.
 
-This policy locks the requirement; it does not claim current deployment already complies.
+This policy locks the requirement; it does not claim current production deployment already complies.
