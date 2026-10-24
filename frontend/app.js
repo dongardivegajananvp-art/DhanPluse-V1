@@ -157,7 +157,7 @@ function renderJournalRules(){
 async function renderOptionChain(){
  panel.replaceChildren(el("h2","Option Chain & Open Interest"),el("p","Read-only FYERS option-chain data. Missing OI/volume blocks analysis; this page does not create trade signals or place orders."));
  const form=el("form",undefined,"gap-form");
- const symbols=[["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],["NSE:RELIANCE-EQ","RELIANCE"],["NSE:TCS-EQ","TCS"],["NSE:INFY-EQ","INFY"],["NSE:HDFCBANK-EQ","HDFCBANK"],["NSE:ICICIBANK-EQ","ICICIBANK"],["NSE:SBIN-EQ","SBIN"],["NSE:ITC-EQ","ITC"],["NSE:LT-EQ","LT"],["NSE:AXISBANK-EQ","AXISBANK"],["NSE:BAJFINANCE-EQ","BAJFINANCE"]];
+ const symbols=[["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],["BSE:SENSEX-INDEX","SENSEX"],["NSE:RELIANCE-EQ","RELIANCE"],["NSE:TCS-EQ","TCS"],["NSE:INFY-EQ","INFY"],["NSE:HDFCBANK-EQ","HDFCBANK"],["NSE:ICICIBANK-EQ","ICICIBANK"],["NSE:SBIN-EQ","SBIN"],["NSE:ITC-EQ","ITC"],["NSE:LT-EQ","LT"],["NSE:AXISBANK-EQ","AXISBANK"],["NSE:BAJFINANCE-EQ","BAJFINANCE"]];
  const symbolLabel=el("label","Underlying");
  const symbol=document.createElement("select");symbol.name="symbol";
  for(const [value,title] of symbols){const option=el("option",title);option.value=value;symbol.append(option);}
@@ -396,7 +396,7 @@ function svgNode(name,attrs={}){
 function renderCandleChart(key){
  const wrap=el("section",undefined,"candle-tool");
  wrap.append(el("h3",key==="charts"?"Verified candlestick chart":"Candlestick chart · FYERS history"));
- wrap.append(el("p","Historical mode uses verified FYERS OHLC. Live mode aggregates received FYERS ticks into provisional OHLC bars; it does not reconstruct missed ticks or supply volume. Supply/demand bands are historical pivot-based study areas, not trade signals."));
+ wrap.append(el("p","Historical mode uses verified FYERS OHLC for NIFTY, BANKNIFTY, SENSEX and the full NSE F&O universe. Live mode aggregates received FYERS ticks for subscribed indices and eligible F&O equities; it does not reconstruct missed ticks or supply volume. Supply/demand bands are study areas, not trade signals."));
  const form=el("form",undefined,"gap-form");
  const symbols=[
   ["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],
@@ -418,7 +418,7 @@ function renderCandleChart(key){
      if(!ok||data.ok!==true||!Array.isArray(data.data)||!data.data.length)throw new Error("Verified F&O symbol list unavailable.");
      if(!document.body.contains(wrap)||!symbolSelect)return;
      const selected=symbolSelect.value;
-     const options=[["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],...data.data.map(item=>[item.symbol,item.underlying])];
+     const options=[["NSE:NIFTY50-INDEX","NIFTY"],["NSE:NIFTYBANK-INDEX","BANKNIFTY"],["BSE:SENSEX-INDEX","SENSEX"],...data.data.map(item=>[item.symbol,item.underlying])];
      symbolSelect.replaceChildren();
      for(const [value,title] of options){const option=el("option",title);option.value=value;symbolSelect.append(option);}
      if(options.some(([value])=>value===selected))symbolSelect.value=selected;
@@ -444,7 +444,7 @@ function renderCandleChart(key){
  const status=el("p","Choose an interval and load historical candles.");
  const chartHost=el("div",undefined,"candle-chart-host");
  const details=el("p",undefined,"candle-details");
- sourceSelect.addEventListener("change",()=>{if(candleRefreshTimer){clearInterval(candleRefreshTimer);candleRefreshTimer=null;}if(sourceSelect.value==="live"){if(fixedSymbol===null){status.textContent="Live tick candles are supported on NIFTY/BANKNIFTY tabs only.";return;}if(resolution.value==="D")resolution.value="5";if(sessionToken){form.requestSubmit();candleRefreshTimer=setInterval(()=>{if(document.body.contains(wrap)&&sourceSelect.value==="live"&&!submit.disabled)form.requestSubmit();},15000);}}else if(sessionToken)form.requestSubmit();});
+ sourceSelect.addEventListener("change",()=>{if(candleRefreshTimer){clearInterval(candleRefreshTimer);candleRefreshTimer=null;}if(sourceSelect.value==="live"){if(resolution.value==="D"){status.textContent="Live tick candles require an intraday interval.";return;}if(resolution.value==="D")resolution.value="5";if(sessionToken){form.requestSubmit();candleRefreshTimer=setInterval(()=>{if(document.body.contains(wrap)&&sourceSelect.value==="live"&&!submit.disabled)form.requestSubmit();},15000);}}else if(sessionToken)form.requestSubmit();});
  resolution.addEventListener("change",()=>{
   const daily=resolution.value==="D";
   form.elements.from.value=istDateString(new Date(Date.now()-(daily?60:7)*86400000));
@@ -459,7 +459,7 @@ function renderCandleChart(key){
   const interval=resolution.value;
   const source=sourceSelect.value;
   const from=form.elements.from.value,to=form.elements.to.value;
-  if(source==="live"&&(!fixedSymbol||interval==="D")){status.textContent="Live tick candles are supported on NIFTY/BANKNIFTY with intraday intervals only.";chartHost.replaceChildren();details.textContent="";return;}
+  if(source==="live"&&interval==="D"){status.textContent="Live tick candles require an intraday interval.";chartHost.replaceChildren();details.textContent="";return;}
   if(!sessionToken){status.textContent="Connect FYERS first. No candle data is shown without an authenticated session.";chartHost.replaceChildren();details.textContent="";return;}
   if(!from||!to||from>to){status.textContent="Choose a valid date range.";return;}
   submit.disabled=true;status.textContent="Requesting verified FYERS candles…";chartHost.replaceChildren();details.textContent="";
