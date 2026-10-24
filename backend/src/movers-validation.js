@@ -31,14 +31,17 @@ export function assertCompleteMoverSnapshot({
 
 export function assertFreshMoverSnapshot(rows, marketOpen) {
   if (!marketOpen) return true;
-  const staleSymbols = (Array.isArray(rows) ? rows : [])
-    .filter(row => !row || row.priceStatus !== 'LIVE_QUOTE')
-    .map(row => row && row.symbol)
-    .filter(Boolean);
-  if (staleSymbols.length > 0) {
-    const error = new Error('FYERS returned stale or timestamp-unverified quotes; live rankings and dependent signals are blocked.');
+  const list = Array.isArray(rows) ? rows : [];
+  const staleSymbols = list
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => !row || row.priceStatus !== 'LIVE_QUOTE' ||
+      typeof row.symbol !== 'string' || row.symbol.length === 0)
+    .map(({ row, index }) => row && typeof row.symbol === 'string' && row.symbol.length
+      ? row.symbol : `<row-${index + 1}>`);
+  if (list.length === 0 || staleSymbols.length > 0) {
+    const error = new Error('FYERS returned an empty, stale, or timestamp-unverified quote snapshot; live rankings and dependent signals are blocked.');
     error.statusCode = 502;
-    error.staleSymbols = staleSymbols;
+    error.staleSymbols = list.length === 0 ? ['<empty-snapshot>'] : staleSymbols;
     throw error;
   }
   return true;
