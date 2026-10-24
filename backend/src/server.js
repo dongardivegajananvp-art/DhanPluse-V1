@@ -552,7 +552,7 @@ async function fyersReadOnlyGet(url) {
     error.statusCode = 429;
     throw error;
   }
-  const response = await fetch(url, {
+  const response = await fetchWithFyersBudget(url, {
     method: 'GET',
     headers: { Authorization: appId + ':' + accessToken, Accept: 'application/json' },
     cache: 'no-store',
