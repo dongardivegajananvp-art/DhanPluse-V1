@@ -1617,6 +1617,16 @@ function bindTabActions() {
   }));
 }
 
+function markDashboardQuotesBlocked(message) {
+  const metrics = document.querySelectorAll('.metrics .metric');
+  SYMBOLS.forEach((item, index) => {
+    const metric = metrics[index + 1];
+    if (!metric) return;
+    const detail = metric.querySelector('small');
+    if (detail) detail.textContent = message;
+  });
+}
+
 function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   if (!Array.isArray(quotes)) return false;
   const map = {};
@@ -1905,6 +1915,7 @@ async function fetchLiveQuotes() {
     if (response.status === 429) {
       const retrySeconds = Number(data.retryAfterSeconds) || 30;
       quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, 15000), QUOTE_POLL_MAX_MS);
+      markDashboardQuotesBlocked('FYERS RATE LIMIT · LIVE SIGNALS BLOCKED');
       setStatus('FYERS RATE LIMIT — WAITING');
       showMessage('FYERS rate limit is active. The dashboard is backing off and will not force REST quote polling.', true);
       return;
@@ -1943,10 +1954,12 @@ async function fetchLiveQuotes() {
         showMessage('FYERS is not authenticated. Open FYERS Settings to connect.', true);
       } else if (response.status === 503) {
         quotePollDelay = 5000;
+        markDashboardQuotesBlocked(Object.keys(latestQuotes).length ? 'STALE / LAST KNOWN · LIVE SIGNALS BLOCKED' : 'DATA MISSING · WAITING FOR VERIFIED TICKS');
         if (Object.keys(latestQuotes).length) setStatus('LIVE DATA STALE');
         else setStatus('WAITING FOR LIVE TICKS');
         showMessage(data.detail || data.error || 'Waiting for fresh FYERS WebSocket ticks. REST fallback is disabled to protect rate limits.');
       } else {
+        markDashboardQuotesBlocked('DATA UNAVAILABLE · LIVE SIGNALS BLOCKED');
         setStatus('LIVE DATA UNAVAILABLE');
         showMessage(data.error || 'The backend did not return verified quotes.', true);
       }
@@ -1954,6 +1967,7 @@ async function fetchLiveQuotes() {
     }
     quotePollDelay = QUOTE_POLL_MS;
     if (!updateQuoteCards(data.data, data.fetchedAt, data.source, data.streamConnected)) {
+      markDashboardQuotesBlocked('BLOCKED · INCOMPLETE INDEX SNAPSHOT');
       setStatus('INCOMPLETE QUOTE RESPONSE');
       showMessage('All expected index quotes were not present. No new values were applied.', true);
       logEvent('Quote response was incomplete.', 'warn');
@@ -1965,6 +1979,7 @@ async function fetchLiveQuotes() {
       showMessage('NIFTY, BANK NIFTY and SENSEX quotes received from the backend.');
     }
   } catch {
+    markDashboardQuotesBlocked(Object.keys(latestQuotes).length ? 'STALE / LAST KNOWN · LIVE SIGNALS BLOCKED' : 'DATA MISSING · LIVE SIGNALS BLOCKED');
     setStatus('LIVE DATA UNAVAILABLE');
     showMessage('Cannot reach the quote API. Retrying automatically.', true);
     logEvent('Quote API request failed; automatic retry scheduled.', 'error');
