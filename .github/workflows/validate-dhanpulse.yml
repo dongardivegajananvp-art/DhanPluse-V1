@@ -33,6 +33,7 @@ jobs:
           node --check backend/src/cors-origin-policy.js
           node --check scripts/check-tabs.mjs
           node --check scripts/check-oauth-offline.mjs
+          node --check scripts/check-deployed-cors.mjs
           node --check site/sw.js
       - name: Validate PWA manifest and required assets
         run: |
@@ -62,3 +63,9 @@ jobs:
       - name: Verify backend dependency graph
         working-directory: backend
         run: npm audit --omit=dev --audit-level=high
+      - name: Verify deployed test-backend CORS (PR #42 only)
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 42
+        env:
+          DHANPULSE_TEST_BACKEND: https://dhanpulse-clean-test.onrender.com
+          DHANPULSE_PREVIEW_ORIGIN: https://deploy-preview-42--spectacular-gaufre-b5c029.netlify.app
+        run: node scripts/check-deployed-cors.mjs
