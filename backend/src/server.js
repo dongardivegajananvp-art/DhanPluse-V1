@@ -62,6 +62,7 @@ let streamError = '';
 const latestTicks = new Map();
 const lastTickDiagnosticAt = new Map();
 const lastRejectedDiagnosticAt = new Map();
+const lastControlDiagnosticAt = new Map();
 const SOCKET_DIAGNOSTIC_LOG_INTERVAL_MS = 15_000;
 let restQuoteCache = null;
 let restQuoteFetchedAt = 0;
@@ -155,6 +156,23 @@ function startMarketDataStream(token) {
         ? (() => { try { return JSON.parse(message); } catch { return null; } })()
         : message;
       const frames = Array.isArray(parsedMessage) ? parsedMessage : [parsedMessage];
+      // FYERS sends connection/subscription acknowledgements and error frames
+      // on the same channel as market updates. Log only safe diagnostic fields
+      // so a reconnect that opens but does not resume ticks can be distinguished
+      // from a rejected subscription without exposing tokens or raw payloads.
+      const controlFrames = frames
+        .filter(x => x && typeof x === 'object' && (x.type || x.s || x.code != null))
+        .filter(x => shouldLogSocketDiagnostic(lastControlDiagnosticAt, String(x.type || x.code || x.s)))
+        .slice(0, 3)
+        .map(x => ({
+          type: typeof x.type === 'string' ? x.type.slice(0, 24) : null,
+          status: typeof x.s === 'string' ? x.s.slice(0, 16) : null,
+          code: x.code == null ? null : String(x.code).slice(0, 24),
+          message: typeof x.message === 'string' ? x.message.replace(/\\s+/g, ' ').slice(0, 120) : null
+        }));
+      if (controlFrames.length) {
+        console.log('FYERS socket control frame:', JSON.stringify(controlFrames));
+      }
       const acceptedCount = parseTick(parsedMessage);
       if (acceptedCount > 0) {
         const summary = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n))
