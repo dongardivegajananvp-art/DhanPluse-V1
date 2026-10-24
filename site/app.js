@@ -963,33 +963,34 @@ function deriveSureshotZones(candles) {
 }
 async function loadSureshotStockUniverse() {
   const select=document.querySelector('#setupSymbol');
-  if(!select||select.dataset.universeLoaded==='true')return;
+  if(!select||select.dataset.universeLoaded==='true'||select.dataset.universeLoaded==='loading')return;
   select.dataset.universeLoaded='loading';
   try {
-    const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
+    // Use the authenticated FYERS NSE_FO + NSE_CM symbol masters, not today's
+    // live movers list, so the complete F&O chart/analysis universe remains
+    // selectable even after market close.
+    const response=await fetch(BACKEND_URL+'/api/market/fno-universe',{headers:{Accept:'application/json'},cache:'no-store'});
     const result=await response.json().catch(()=>({}));
-    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||'Verified stock universe unavailable.');
-    if(result.marketSession!=='OPEN')throw new Error('MARKET CLOSED — verified live stock choices will refresh during the next regular session.');
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||result.detail||'Verified NSE F&O symbol master unavailable.');
     const previous=select.value;
     const indexOptions=Array.from(select.options).filter(option=>!option.value.endsWith('-EQ'));
-    const stockRows=result.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
-    const stockOptions=stockRows.map(row=>{
-      const symbol=row.symbol;
-      const name=symbol.replace(/^NSE:/,'').replace(/-EQ$/,'');
-      const option=document.createElement('option');
-      option.value=symbol;
-      option.textContent=name+' · Stock options';
-      return option;
-    });
+    const seen=new Set(indexOptions.map(option=>option.value));
+    const stockOptions=result.data.filter(item=>item&&typeof item.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(item.symbol)&&!seen.has(item.symbol))
+      .map(item=>{
+        const option=document.createElement('option');
+        option.value=item.symbol;
+        option.textContent=item.symbol.replace(/^NSE:/,'').replace(/-EQ$/,'')+' · NSE F&O';
+        return option;
+      });
     select.replaceChildren(...indexOptions,...stockOptions);
     if(Array.from(select.options).some(option=>option.value===previous))select.value=previous;
     select.dataset.universeLoaded='true';
     const status=document.querySelector('#setupStatus');
-    if(status)status.textContent='Verified quote universe loaded: '+stockRows.length+' configured stock symbols plus indices. This is the backend selected-stock list, not the complete NSE F&O universe.';
+    if(status)status.textContent='FYERS symbol masters loaded: '+stockOptions.length+' NSE F&O equities plus indices. Historical charts can be requested after market close; signals still require fresh live data and verified option quotes.';
   } catch(error) {
     select.dataset.universeLoaded='false';
     const status=document.querySelector('#setupStatus');
-    if(status)status.textContent='Could not refresh stock choices from FYERS: '+(error.message||'verified quote universe unavailable')+'. Existing index/stock choices remain; no prices invented.';
+    if(status)status.textContent='Full NSE F&O universe unavailable: '+(error.message||'verified FYERS symbol master unavailable')+'. No partial universe is labelled complete.';
   }
 }
 
