@@ -2081,6 +2081,7 @@ async function exchangeAuthCode() {
     showMessage('FYERS authentication succeeded. Verifying live quotes…');
     await loadDashboardCandles();
     await fetchLiveQuotes();
+    if (currentTab === 'Dashboard') await loadFnoChartUniverse();
   } catch (error) {
     setStatus('FYERS AUTH FAILED');
     setFyersStatus('AUTH FAILED');
