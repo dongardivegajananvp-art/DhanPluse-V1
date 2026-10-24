@@ -622,6 +622,7 @@ async function loadVerifiedFnoStockQuotes() {
   }
   const result = {
     ok: true, source: "FYERS quotes API", verified: true, fetchedAt: new Date().toISOString(),
+    marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED",
     freshnessLimitSeconds: 120, universe: "FYERS current NSE F&O equity symbol master",
     universeCount: symbols.length, quotedCount: data.length, data, missingSymbols
   };
