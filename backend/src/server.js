@@ -209,7 +209,10 @@ function startMarketDataStream(token) {
 
     // Configure reconnection before opening the socket so the SDK can
     // attach its retry handler before any early disconnect event.
-    if (typeof socket.autoreconnect === 'function') socket.autoreconnect(10);
+    // Keep recovery enabled through transient network/provider drops; FYERS documents
+// a maximum retry count of 50. We still withhold quotes unless fresh exchange
+// timestamps arrive, so retries can never turn stale data into a live signal.
+if (typeof socket.autoreconnect === 'function') socket.autoreconnect(50);
     socket.connect();
   } catch (error) {
     streamConnected = false;
