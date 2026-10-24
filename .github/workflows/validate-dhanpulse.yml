@@ -29,6 +29,8 @@ jobs:
           node --check backend/src/server.js
           node --check backend/src/gap-analysis.js
           node --check backend/src/movers-validation.js
+          node --check backend/src/fresh-data-validation.js
+          node --check scripts/check-tabs.mjs
           node --check site/sw.js
       - name: Validate PWA manifest and required assets
         run: |
@@ -43,7 +45,7 @@ jobs:
           grep -q 'backtest.js' site/index.html
           test -s site/sw.js
           test -s site/dhanpulse-icon.svg
-          test "$(grep -o 'data-tab=' site/index.html | wc -l | tr -d ' ')" = "12"
+          node scripts/check-tabs.mjs
           grep -q 'BSE:SENSEX-INDEX' backend/src/server.js
           grep -q 'Order placement' site/index.html
           grep -q 'publish = "site"' netlify.toml
