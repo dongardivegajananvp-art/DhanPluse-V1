@@ -304,6 +304,9 @@ async function renderStockExplorer(){
  async function load(){
   refresh.disabled=true;status.textContent="Requesting fresh FYERS quotes…";tbody.replaceChildren();verifiedRows=[];lastKnownMode=false;
   try{
+   const sessionResponse=await fetch(API_BASE+"/api/status",{cache:"no-store"});
+   const sessionInfo=await sessionResponse.json().catch(()=>({}));
+   if(sessionInfo.marketSession&&sessionInfo.marketSession.isRegularHours===false)throw new Error("Market closed; switching directly to actual last-known LTPs.");
    const r=await fetch(API_BASE+"/api/market/stock-quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
    const data=await r.json();
    if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Connect FYERS again.");}
