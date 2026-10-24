@@ -77,3 +77,15 @@ test('allows explicitly last-known rows after market close', () => {
     { symbol: 'NSE:AAA-EQ', priceStatus: 'LAST_KNOWN_PRICE' }
   ], false), true);
 });
+
+test('blocks an empty live mover snapshot', () => {
+  assert.throws(() => assertFreshMoverSnapshot([], true),
+    error => error.statusCode === 502 && error.staleSymbols.includes('<empty-snapshot>'));
+});
+
+test('blocks malformed rows with no verifiable symbol', () => {
+  assert.throws(() => assertFreshMoverSnapshot([null], true),
+    error => error.statusCode === 502 && error.staleSymbols.includes('<row-1>'));
+  assert.throws(() => assertFreshMoverSnapshot([{ priceStatus: 'LIVE_QUOTE' }], true),
+    error => error.statusCode === 502 && error.staleSymbols.includes('<row-1>'));
+});
