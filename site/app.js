@@ -470,7 +470,7 @@ async function loadStockExplorerQuotes() {
         };
         status.textContent = 'Market closed · actual last-known FYERS LTPs loaded; display-only, not live signals.';
       } else {
-        status.textContent = 'Market closed. Last-known F&O prices unavailable: ' + (lastKnown.error || 'FYERS did not return exchange-stamped quotes.') + '. No prices were fabricated.';
+        throw new Error('Market closed. Last-known F&O prices unavailable: ' + (lastKnown.error || 'FYERS did not return exchange-stamped quotes.') + '. No prices were fabricated.');
       }
     }
     stockExplorerMoverRows = result.data.filter(row =>
