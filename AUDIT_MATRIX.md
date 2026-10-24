@@ -51,6 +51,14 @@ This is not a claim that a live FYERS session or production deployment has passe
 6. Option-chain source must provide a verifiable exchange timestamp; otherwise it stays blocked.
 7. Historical candle freshness, derived-signal gates, account endpoint failures, and post-close LAST KNOWN labels must pass.
 8. Production deployment is not authorized by a green CI run alone. Do not merge/deploy while live-session gates are unverified.
+9. Isolate the PR UI from the production backend before browser/OAuth tests; the current frontend hardcodes the production backend URL.
+
+## Production runtime and deployment evidence (checked 2026-10-24)
+
+- Render production logs contain two upstream FYERS `/data/quotes` HTTP 429 / Cloudflare Error 1015 events: `2026-10-23T06:20:18Z` and `2026-10-23T08:33:14Z`. This confirms a real rate-limit incident; these log entries alone do not prove successful recovery after cooldown. Do not infer quote coverage from backend health.
+- Production backend Render service remains on `main`; its latest live deploy is commit `8ae4b4f`. PR #40 is still a draft and is not deployed to Render.
+- Current Render test UIs are on `test-ultimate-session-fix` and `clean-rebuild`; the test backend is also on `clean-rebuild`. The current `site/app.js` hardcodes the production backend URL. Therefore, do not use a PR-branch UI click-through for OAuth or protected API checks until the UI is safely isolated from the production backend.
+- Safe next deployment step: establish a test UI/backend pairing that cannot send authentication or data requests to production; then run browser/mobile regression on that isolated pair. No production environment variables or services were changed during this check.
 
 ## Changes made on this branch
 
