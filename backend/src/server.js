@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './gap-analysis.js';
 import { assertCompleteMoverSnapshot } from './movers-validation.js';
+import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -75,6 +76,7 @@ const SOCKET_DIAGNOSTIC_LOG_INTERVAL_MS = 15_000;
 let restQuoteCache = null;
 let restQuoteFetchedAt = 0;
 let restQuoteInFlight = null;
+const fyersDataApiFetch = createFyersDataApiBudget();
 
 function shouldLogSocketDiagnostic(store, symbol) {
   const now = Date.now();
@@ -499,7 +501,7 @@ async function fyersReadOnlyGet(url) {
     error.statusCode = 429;
     throw error;
   }
-  const response = await fetch(url, {
+  const response = await fyersDataApiFetch(url, {
     method: 'GET',
     headers: { Authorization: appId + ':' + accessToken, Accept: 'application/json' },
     cache: 'no-store',
