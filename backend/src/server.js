@@ -5,7 +5,7 @@ import express from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './gap-analysis.js';
-import { assertCompleteMoverSnapshot } from './movers-validation.js';
+import { assertCompleteMoverSnapshot, assertFreshMoverSnapshot } from './movers-validation.js';
 import { quoteTimestampStatus } from './fresh-data-validation.js';
 
 const require = createRequire(import.meta.url);
@@ -790,6 +790,13 @@ app.get('/api/market/movers', async (_req, res) => {
         marketSession: marketOpen ? 'OPEN' : 'CLOSED',
         priceStatus: marketOpen ? (freshness === 'FRESH' ? 'LIVE_QUOTE' : freshness === 'STALE' ? 'STALE_QUOTE' : 'TIME_UNVERIFIED') : 'LAST_KNOWN_PRICE' };
     });
+    if (marketOpen) {
+      try {
+        assertFreshMoverSnapshot(data, true);
+      } catch (error) {
+        return res.status(502).json({ ok: false, error: error.message, staleSymbols: error.staleSymbols || [] });
+      }
+    }
     res.set('Cache-Control', 'no-store');
     return res.json({ ...cachedPayload, data, cached: true });
   }
@@ -872,6 +879,7 @@ app.get('/api/market/movers', async (_req, res) => {
           receivedSymbols: received,
           rateLimitError: batchRateLimitError
         });
+        assertFreshMoverSnapshot(rows, marketOpen);
         if (!rows.length) {
           if (batchRateLimitError) throw batchRateLimitError;
           throw new Error('FYERS returned no valid verified equity quote rows.');
