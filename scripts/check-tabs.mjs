@@ -22,4 +22,43 @@ if (navTabs.length !== 24 || describedTabs.length !== 24 ||
     missingNavigation, missingDescription, duplicateNav }, null, 2));
   process.exit(1);
 }
+const renderBlock = app.match(/function render\\(tab\\) \\{([\\s\\S]*?)\\n\\}\\n\\nfunction bindTabActions/);
+if (!renderBlock) throw new Error('Workspace render function could not be located.');
+
+const requiredRenderRoutes = [
+  ['Dashboard', /tab === 'Dashboard'\\) featureContent\\.innerHTML = dashboardMarkup\\(\\)/],
+  ['Stock Explorer', /tab === 'Stock Explorer'\\) featureContent\\.innerHTML = stockExplorerMarkup\\(\\)/],
+  ['NIFTY', /tab === 'NIFTY'\\) featureContent\\.innerHTML = focusedQuoteMarkup\\(SYMBOLS\\[0\\]\\.symbol\\)/],
+  ['BANKNIFTY', /tab === 'BANKNIFTY'\\) featureContent\\.innerHTML = focusedQuoteMarkup\\(SYMBOLS\\[1\\]\\.symbol\\)/],
+  ['Watchlist', /tab === 'Watchlist'\\) featureContent\\.innerHTML = watchlistMarkup\\(\\)/],
+  ['Sureshot CE/PE', /tab === 'Sureshot CE\\/PE'\\) featureContent\\.innerHTML = advancedScannerMarkup\\(tab\\)/],
+  ['Breakout Scanner', /'Breakout Scanner','Momentum Scanner','Zero-to-Hero'/],
+  ['Momentum Scanner', /'Breakout Scanner','Momentum Scanner','Zero-to-Hero'/],
+  ['Zero-to-Hero', /'Breakout Scanner','Momentum Scanner','Zero-to-Hero'/],
+  ['FII/DII Flow', /tab === 'FII\\/DII Flow'\\) featureContent\\.innerHTML = advancedScannerMarkup\\(tab\\)/],
+  ['Market Activity', /tab === 'Market Activity'\\) featureContent\\.innerHTML = marketActivityMarkup\\(\\)/],
+  ['Charts & Patterns', /tab === 'Charts & Patterns'\\) featureContent\\.innerHTML = advancedScannerMarkup\\(tab\\)/],
+  ['Gap-Up/Down', /tab === 'Gap-Up\\/Down'\\) featureContent\\.innerHTML = gapAnalysisMarkup\\(\\)/],
+  ['Gainers & Losers', /tab === 'Gainers & Losers'\\) featureContent\\.innerHTML = moversMarkup\\(\\)/],
+  ['Option Chain', /tab === 'Option Chain'\\) featureContent\\.innerHTML = optionChainMarkup\\(\\)/],
+  ['Technical Indicators', /tab === 'Technical Indicators'\\) featureContent\\.innerHTML = indicatorsMarkup\\(\\)/],
+  ['AI Signals', /tab === 'AI Signals'\\) featureContent\\.innerHTML = signalsMarkup\\(\\)/],
+  ['Holdings', /tab === 'Holdings'\\) featureContent\\.innerHTML = holdingsMarkup\\(\\)/],
+  ['Alerts', /tab === 'Alerts'\\) featureContent\\.innerHTML = alertsMarkup\\(\\)/],
+  ['FYERS Settings', /tab === 'FYERS Settings'\\) featureContent\\.innerHTML = settingsMarkup\\(\\)/],
+  ['Logs', /tab === 'Logs'\\) featureContent\\.innerHTML = '<div id="logList" class="log-list"><\\/div>'/],
+  ['Trade Journal', /'Trade Journal','Capital Protection','Backtesting'/],
+  ['Capital Protection', /'Trade Journal','Capital Protection','Backtesting'/],
+  ['Backtesting', /'Trade Journal','Capital Protection','Backtesting'/]
+];
+const missingRenderRoutes = requiredRenderRoutes
+  .filter(([tab, pattern]) => navTabs.includes(tab) && !pattern.test(renderBlock[1]))
+  .map(([tab]) => tab);
+if (missingRenderRoutes.length) {
+  console.error('Tabs without a dedicated renderer route: ' + missingRenderRoutes.join(', '));
+  process.exit(1);
+}
+if (requiredRenderRoutes.length !== 24) {
+  throw new Error('Render-route audit must cover all 24 tabs.');
+}
 console.log('Tab audit passed: all 24 tabs have navigation and descriptions.');
