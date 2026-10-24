@@ -452,21 +452,37 @@ async function loadStockExplorerQuotes() {
     if (result.marketSession === 'CLOSED' || result.data.length === 0) {
       const lastResponse = await fetch(BACKEND_URL + '/api/market/last-known-stock-quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const lastKnown = await lastResponse.json().catch(() => ({}));
-      if (lastResponse.ok && lastKnown.ok === true && Array.isArray(lastKnown.data) && lastKnown.partial !== true && Number(lastKnown.quotedCount) === Number(lastKnown.universeCount) && (!Array.isArray(lastKnown.missingSymbols) || lastKnown.missingSymbols.length === 0)) {
+      const validLastKnownRows = Array.isArray(lastKnown.data) ? lastKnown.data.filter(row =>
+        row && row.verified === true && typeof row.symbol === 'string' &&
+        Number.isFinite(Number(row.price)) && Number(row.price) > 0 &&
+        Number.isFinite(Date.parse(String(row.priceAsOf || ''))) &&
+        Date.parse(String(row.priceAsOf || '')) <= Date.now() + 5000
+      ) : [];
+      if (lastResponse.ok && lastKnown.ok === true && validLastKnownRows.length > 0) {
+        const universeCount = Number(lastKnown.universeCount);
+        const missingSymbols = Array.isArray(lastKnown.missingSymbols) ? lastKnown.missingSymbols : [];
+        const complete = Number.isFinite(universeCount) && universeCount > 0 &&
+          validLastKnownRows.length === universeCount && missingSymbols.length === 0 &&
+          lastKnown.partial !== true;
         result = {
-          ok: true, marketSession: 'CLOSED', source: lastKnown.source, universe: 'FYERS-NSE-FO-symbol-master',
-          fetchedAt: lastKnown.fetchedAt, universeCount: lastKnown.universeCount, quotedCount: lastKnown.quotedCount,
-          requestedSymbols: lastKnown.universeCount, receivedSymbols: lastKnown.quotedCount,
-          partial: lastKnown.partial === true, failedSymbols: lastKnown.missingSymbols || [],
-          data: lastKnown.data.map(row => ({
-            symbol: row.symbol, price: row.price, changePct: row.changePct,
-            priceAsOf: row.priceAsOf, quoteAgeSeconds: row.quoteAgeSeconds,
-            priceStatus: 'LAST_KNOWN_PRICE', verified: row.verified === true, source: row.source
+          ok: true, marketSession: lastKnown.marketSession || 'CLOSED',
+          source: lastKnown.source, universe: 'FYERS-NSE-FO-symbol-master',
+          fetchedAt: lastKnown.fetchedAt, universeCount,
+          quotedCount: validLastKnownRows.length,
+          requestedSymbols: universeCount, receivedSymbols: validLastKnownRows.length,
+          partial: !complete, failedSymbols: missingSymbols,
+          data: validLastKnownRows.map(row => ({
+            symbol: row.symbol, price: Number(row.price),
+            changePct: row.changePct == null ? null : Number(row.changePct),
+            priceAsOf: row.priceAsOf, quoteAgeSeconds: Number(row.quoteAgeSeconds),
+            priceStatus: 'LAST_KNOWN_PRICE', verified: true, source: row.source
           }))
         };
-        status.textContent = 'Market closed · loading actual last-known FYERS LTPs; these are display-only and cannot trigger signals.';
+        status.textContent = (result.marketSession === 'CLOSED' ? 'Market closed' : 'Live snapshot unavailable') +
+          ' · showing ' + validLastKnownRows.length + '/' + (Number.isFinite(universeCount) ? universeCount : '?') +
+          ' actual FYERS last-known LTPs; unavailable symbols remain blank. Display-only; no signals from these prices.';
       } else {
-        status.textContent = 'Market closed. ' + (lastKnown.partial === true || (Number.isFinite(Number(lastKnown.universeCount)) && Number(lastKnown.quotedCount) !== Number(lastKnown.universeCount)) ? 'FYERS snapshot incomplete; partial F&O rankings discarded.' : (lastKnown.error || 'FYERS did not return exchange-stamped quotes.')) + ' No prices were fabricated.';
+        status.textContent = 'Last-known FYERS prices unavailable. ' + (lastKnown.error || 'No valid exchange-stamped LTPs returned.') + ' No prices were fabricated.';
       }
     }
     stockExplorerMoverRows = result.data.filter(row =>
