@@ -3,9 +3,13 @@ import fs from 'node:fs';
 const app = fs.readFileSync(new URL('../site/app.js', import.meta.url), 'utf8');
 const productionBackend = 'https://dhanpluse-v1.onrender.com';
 const testBackend = 'https://dhanpulse-clean-test.onrender.com';
+const previewHostPattern = /^deploy-preview-\d+--spectacular-gaufre-b5c029\.netlify\.app$/;
+const expectedMatcherSource = String.raw`/^deploy-preview-\d+--spectacular-gaufre-b5c029\.netlify\.app$/`;
 
 const checks = [
-  ['preview host matcher is tied to the Netlify deploy-preview hostname', app.includes('IS_ISOLATED_TEST_PREVIEW') && app.includes('deploy-preview-') && app.includes('spectacular-gaufre-b5c029') && app.includes('window.location.hostname')],
+  ['source uses the exact escaped preview-host matcher', app.includes(expectedMatcherSource)],
+  ['preview hostname matches the isolated preview rule', previewHostPattern.test('deploy-preview-40--spectacular-gaufre-b5c029.netlify.app')],
+  ['ordinary production hostname does not match preview rule', !previewHostPattern.test('dhanpulse-clean-test-ui.onrender.com')],
   ['preview routes to the isolated test backend', app.includes("? '" + testBackend + "'")],
   ['non-preview routes to production backend', app.includes(": '" + productionBackend + "'")],
   ['routing is conditional on isolated preview detection', app.includes('const BACKEND_URL = IS_ISOLATED_TEST_PREVIEW')],
