@@ -266,10 +266,15 @@ function startMarketDataStream(token) {
 }
 
 function liveSnapshot() {
-  const ticks = allowedSymbols.map(symbol => latestTicks.get(symbol));
-  if (ticks.some(tick => !tick)) return null;
-  const ages = ticks.map(tick => Date.now() - Date.parse(tick.updatedAt));
-  if (ages.some(age => !Number.isFinite(age) || age < -30000 || age > 120000)) return null;
+  // NIFTY and BANKNIFTY remain the baseline health gate; SENSEX and stock ticks
+  // are included independently when their own exchange timestamps are fresh.
+  const coreSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX"];
+  const now = Date.now();
+  const isFresh = tick => tick && Number.isFinite(Number(tick.ltp)) && Number(tick.ltp) > 0 &&
+    Number.isFinite(Date.parse(tick.updatedAt)) && now - Date.parse(tick.updatedAt) >= -30000 &&
+    now - Date.parse(tick.updatedAt) <= 120000;
+  if (coreSymbols.some(symbol => !isFresh(latestTicks.get(symbol)))) return null;
+  const ticks = allowedSymbols.map(symbol => latestTicks.get(symbol)).filter(isFresh);
   return {
     ok: true,
     fetchedAt: new Date(Math.min(...ticks.map(tick => Date.parse(tick.updatedAt)))).toISOString(),
@@ -316,7 +321,7 @@ app.get("/api/status", (_req, res) => res.set("Cache-Control", "no-store").json(
   lastAcceptedTickAtBySymbol: Object.fromEntries([...latestTicks.entries()].map(([symbol, tick]) => [symbol, tick.updatedAt])),
   ...(streamError ? { marketDataMessage: streamError } : {}),
   orderPlacement: "disabled",
-  note: "Live feed is reported only when NIFTY, BANKNIFTY, and SENSEX have valid, fresh exchange timestamps. Backend status alone is not proof of live data."
+  note: "Live feed requires fresh exchange timestamps for NIFTY and BANKNIFTY; SENSEX is reported independently when its own fresh tick is available. Backend status alone is not proof of live data."
 }));
 
 app.get("/api/fyers/auth/start", (_req, res) => {
