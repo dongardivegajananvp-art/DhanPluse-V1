@@ -51,7 +51,7 @@ This is not a claim that a live FYERS session or production deployment has passe
 6. Option-chain source must provide a verifiable exchange timestamp; otherwise it stays blocked.
 7. Historical candle freshness, derived-signal gates, account endpoint failures, and post-close LAST KNOWN labels must pass.
 8. Production deployment is not authorized by a green CI run alone. Do not merge/deploy while live-session gates are unverified.
-9. Isolate the PR UI from the production backend before browser/OAuth tests; the current frontend hardcodes the production backend URL.
+9. Confirm in a real browser that PR #40 preview sends API requests only to the test backend and receives CORS responses. OAuth initiation remains blocked until the test redirect URI is verified.
 
 ## Production runtime and deployment evidence (checked 2026-10-24)
 
