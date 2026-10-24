@@ -1078,7 +1078,7 @@ async function loadAdvancedScanner() {
       if(x.priceStatus!=='LIVE_QUOTE'||!x.priceAsOf) return false;
       const age=Number(x.quoteAgeSeconds);
       const timestamp=Date.parse(x.priceAsOf);
-      return Number.isFinite(age)&&age>=0&&age<=MAX_EQUITY_QUOTE_AGE_SECONDS&&Number.isFinite(timestamp)&&Date.now()-timestamp>=-30000&&Date.now()-timestamp<=180000;
+      return Number.isFinite(age)&&age>=0&&age<=MAX_EQUITY_QUOTE_AGE_SECONDS&&Number.isFinite(timestamp)&&Date.now()-timestamp>=-30000&&Date.now()-timestamp<=MAX_EQUITY_QUOTE_AGE_SECONDS*1000;
     });
     if(rows.length!==requestedCount){
       table.innerHTML='<div class="chart-empty"><b>NO TRADE — incomplete fresh-quote coverage.</b><p>Only '+rows.length+' of '+requestedCount+' F&O symbols have fresh, exchange-timestamped quotes. Stale or timestamp-unverified symbols are not silently excluded to create a misleading shortlist; scanner candidates are withheld.</p></div>';
