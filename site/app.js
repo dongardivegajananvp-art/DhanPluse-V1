@@ -1742,8 +1742,10 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
       }
     }
   });
-  // The dashboard is a three-index view: never apply a partial quote response as a complete snapshot.
-  if (!SYMBOLS.every(item => map[item.symbol])) return false;
+  // Live display requires the two NSE baseline indices; SENSEX is shown when its own quote exists.
+  // Last-known display-only snapshots may be partial, but never enable signals.
+  const requiredSymbols = source === 'last-known' ? [] : SYMBOLS.filter(item => item.symbol !== 'BSE:SENSEX-INDEX');
+  if (!Object.keys(map).length || !requiredSymbols.every(item => map[item.symbol])) return false;
   SYMBOLS.forEach(item => {
     const next = map[item.symbol];
     if (!next) return; // Missing symbols stay unavailable; they must not hide other verified quotes.
