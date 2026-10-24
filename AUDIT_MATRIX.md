@@ -64,6 +64,18 @@ This is not a claim that a live FYERS session or production deployment has passe
 - The test backend CORS allowlist deployment is live on the test service only. GitHub Actions run #391 passed after the preview-host matcher and empty/malformed mover-snapshot fixes. The latest documentation-only commit triggers a new validation run. These automated checks validate source-level routing/guard assertions, not browser network behavior.
 - Remaining next step: real browser/mobile verification of the deployed preview's API destination, CORS preflight/response, console errors, and all 24 tab click-through. No production environment variables or services were changed during this check.
 
+## Offline FYERS OAuth / redirect review (2026-10-24)
+
+Static source review completed without starting a live authorization:
+- The backend constructs the FYERS authorization URL using the exact `FYERS_REDIRECT_URI` environment value and requests an authorization code.
+- Each login start creates a cryptographically random state; the backend accepts it once and expires it after 10 minutes.
+- The callback reads FYERS's `auth_code` and `state`, removes the query string from the visible URL before exchanging the code, and stores only the opaque dashboard session token in browser `sessionStorage`.
+- The app secret is used only in the backend's app-id hash; no browser-side app secret reference was found.
+- Isolated Netlify previews block OAuth initiation until their redirect URI is separately verified.
+- Added `scripts/check-oauth-offline.mjs` to enforce these source-level invariants in CI.
+
+Still unverified: the actual value of `FYERS_REDIRECT_URI` on the test service, the exact callback URL registered in the FYERS developer portal, whether FYERS returns `auth_code` plus the expected `state` to that URL, and a successful real callback. No live authorization was attempted. The prior `redirectUrl mismatch` cannot be declared fixed from source inspection alone.
+
 ## Changes made on this branch
 
 - Locked the shared fresh-data policy.
