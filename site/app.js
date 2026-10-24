@@ -1640,7 +1640,8 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
       }
     }
   });
-  if (!SYMBOLS.some(item => map[item.symbol])) return false;
+  // The dashboard is a three-index view: never apply a partial quote response as a complete snapshot.
+  if (!SYMBOLS.every(item => map[item.symbol])) return false;
   SYMBOLS.forEach(item => {
     const next = map[item.symbol];
     if (!next) return; // Missing symbols stay unavailable; they must not hide other verified quotes.
@@ -1672,9 +1673,15 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
     if (detailEl) {
       const change = quote.change;
       const pct = quote.changePct;
+      const quoteAgeMs = Date.now() - quote.receivedAt;
+      const verifiedLiveTick = quote.source === 'websocket' && quote.streamConnected === true &&
+        Number.isFinite(quoteAgeMs) && quoteAgeMs >= 0 && quoteAgeMs <= 15000;
       detailEl.textContent = !isRegularMarketSession()
-        ? 'Last received · market closed'
-        : change === null ? 'FYERS live quote received' : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)');
+        ? 'LAST KNOWN · MARKET CLOSED · ' + (quote.sourceTime ? new Date(quote.sourceTime).toLocaleTimeString('en-IN') : 'TIME UNVERIFIED')
+        : !verifiedLiveTick
+          ? 'STALE / LAST KNOWN · LIVE SIGNALS BLOCKED'
+          : change === null ? 'FRESH FYERS exchange tick · ' + new Date(quote.receivedAt).toLocaleTimeString('en-IN')
+            : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)') + ' · FRESH';
     }
   });
   if (source === 'last-known') {
