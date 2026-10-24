@@ -920,12 +920,15 @@ app.get("/api/market/last-known-quotes", requireSession, async (_req, res) => {
         }
         return row;
       });
-      if (data.some(row => !row)) {
+      const missingSymbols = allowedSymbols.filter((symbol, index) => !data[index]);
+      data = data.filter(Boolean);
+      if (!data.length) {
         return res.status(502).json({
-          ok: false, source: "last-known", error: "FYERS quote is missing a valid price or exchange timestamp; no values shown.",
-          data: [], marketOpen: session.isRegularHours, signalsAllowed: false
+          ok: false, source: "last-known", error: "FYERS quotes are missing valid prices or exchange timestamps; no values shown.",
+          data: [], missingSymbols: allowedSymbols, marketOpen: session.isRegularHours, signalsAllowed: false
         });
       }
+      if (missingSymbols.length) recordDiagnostic("warn", "partial_last_known_index_snapshot", { missingSymbols });
       source = "FYERS quotes API last-known snapshot";
     } catch (error) {
       return res.status(502).json({
@@ -938,6 +941,8 @@ app.get("/api/market/last-known-quotes", requireSession, async (_req, res) => {
   const fetchedAt = new Date(Math.min(...data.map(row => Number(row.v.tt) * 1000))).toISOString();
   return res.json({
     ok: true, source, fetchedAt, data,
+    complete: data.length === allowedSymbols.length,
+    missingSymbols: allowedSymbols.filter(symbol => !data.some(row => row.n === symbol)),
     marketOpen: session.isRegularHours,
     quoteAgeSeconds: Math.max(0, Math.floor((Date.now() - Date.parse(fetchedAt)) / 1000)),
     signalsAllowed: false,
