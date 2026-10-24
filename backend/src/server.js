@@ -780,8 +780,18 @@ app.get('/api/market/movers', async (_req, res) => {
 
   await refreshMoversUniverse();
   if (moversSnapshotCache && Date.now() - moversSnapshotCache.cachedAt < MOVERS_CACHE_TTL_MS) {
+    const now = Date.now();
+    const marketOpen = nseRegularSessionNow();
+    const cachedPayload = moversSnapshotCache.payload;
+    const data = (Array.isArray(cachedPayload.data) ? cachedPayload.data : []).map(row => {
+      const timestamp = row.priceAsOf ? Date.parse(row.priceAsOf) / 1000 : null;
+      const freshness = quoteTimestampStatus(timestamp, now, 30);
+      return { ...row, quoteAgeSeconds: Number.isFinite(timestamp) ? Math.max(0, now / 1000 - timestamp) : null,
+        marketSession: marketOpen ? 'OPEN' : 'CLOSED',
+        priceStatus: marketOpen ? (freshness === 'FRESH' ? 'LIVE_QUOTE' : freshness === 'STALE' ? 'STALE_QUOTE' : 'TIME_UNVERIFIED') : 'LAST_KNOWN_PRICE' };
+    });
     res.set('Cache-Control', 'no-store');
-    return res.json({ ...moversSnapshotCache.payload, cached: true });
+    return res.json({ ...cachedPayload, data, cached: true });
   }
   try {
     if (!moversSnapshotInFlight) {
