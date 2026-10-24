@@ -974,7 +974,7 @@ app.get('/api/fyers/option-quote', async (req, res) => {
     const ageMs = Date.now() - quoteTimeMs;
     if (!Number.isFinite(ltp) || ltp <= 0 || !Number.isFinite(bid) || bid <= 0 ||
         !Number.isFinite(ask) || ask < bid || !Number.isFinite(quoteTimeMs) ||
-        ageMs < -5000 || ageMs > 15000) {
+        ageMs < 0 || ageMs > 15000) {
       return res.status(502).json({ ok: false, error: 'Selected option contract quote is missing, stale, or invalid; no signal.' });
     }
     res.set('Cache-Control', 'no-store');
