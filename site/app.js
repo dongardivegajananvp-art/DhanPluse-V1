@@ -545,14 +545,14 @@ function renderStockExplorerResults() {
   // Use the backend's current FYERS NSE F&O master snapshot, not a short hard-coded
   // stock list. Rank equity rows by verified percent change before showing indices.
   const dynamicRows=stockExplorerMoverRows.map(x=>({symbol:x.symbol,name:x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''),kind:'equity',tab:'Gainers & Losers',note:'Verified FYERS quote snapshot',price:Number(x.price),changePct:x.changePct==null?null:Number(x.changePct)}));
-  // Do not present a partial or after-hours snapshot as a full-universe live ranking.
-  if(stockExplorerCanRank){
-    dynamicRows.sort((a,b)=>{
-      const av=Number.isFinite(a.changePct)?a.changePct:-Infinity;
-      const bv=Number.isFinite(b.changePct)?b.changePct:-Infinity;
-      return bv-av;
-    });
-  }
+  // Always order rows with a verified percent-change value from highest to lowest.
+  // Ranking is separate from the completeness badge: partial/last-known data may be
+  // sorted for reference, but must never be described as a complete live-universe scan.
+  dynamicRows.sort((a,b)=>{
+    const av=Number.isFinite(a.changePct)?a.changePct:-Infinity;
+    const bv=Number.isFinite(b.changePct)?b.changePct:-Infinity;
+    return bv-av;
+  });
   const combined=[...dynamicRows,...universe];
   const rows=combined.filter(x=>(category==='all'||x.kind===category)&&(!q||(x.symbol+' '+x.name).toLowerCase().includes(q)));
   host.innerHTML=rows.length?rows.map(x=>{
