@@ -60,6 +60,8 @@ const allowedOrigins = new Set((process.env.ALLOWED_ORIGIN || "").split(",").map
 allowedOrigins.add("https://dhanpulse-clean-test-ui.onrender.com");
 // Permit the isolated Ultimate UI test deployment to call this test backend.
 allowedOrigins.add("https://dhanpulse-ultimate-session-test-ui.onrender.com");
+// Allow only the current DhanPulse PR #40 test preview to use this test backend.
+allowedOrigins.add("https://deploy-preview-40--spectacular-gaufre-b5c029.netlify.app");
 if (redirectUri) { try { allowedOrigins.add(new URL(redirectUri).origin); } catch {} }
 app.use(cors({ origin(origin, callback) {
   if (!origin || allowedOrigins.has(origin)) return callback(null, true);
