@@ -64,6 +64,13 @@ This is not a claim that a live FYERS session or production deployment has passe
 - The test backend CORS allowlist deployment is live on the test service only. GitHub Actions run #391 passed after the preview-host matcher and empty/malformed mover-snapshot fixes. The latest documentation-only commit triggers a new validation run. These automated checks validate source-level routing/guard assertions, not browser network behavior.
 - Remaining next step: real browser/mobile verification of the deployed preview's API destination, CORS preflight/response, console errors, and all 24 tab click-through. No production environment variables or services were changed during this check.
 
+
+## Newly found offline regression — tab renderer wiring (2026-10-24)
+
+A deeper source audit found that several tabs had navigation labels and descriptions but fell through to the generic log-list renderer. Fixed the render dispatcher to connect each of the 24 tabs to its intended renderer, including Stock Explorer, NIFTY/BANKNIFTY, Watchlist, Market Activity, FII/DII Flow, Option Chain, Technical Indicators, Alerts and Logs. Market Activity now also initiates its verified-snapshot loader on tab entry. Index workspaces use the existing quote-focus renderer; no prices are fabricated.
+
+Extended `scripts/check-tabs.mjs` so CI checks that all 24 navigation tabs have a render route, not just a navigation button and description. This is a source-level regression check; it does not substitute for interactive browser/mobile click-through, visual layout checks, or console inspection.
+
 ## Offline FYERS OAuth / redirect review (2026-10-24)
 
 Static source review completed without starting a live authorization:
