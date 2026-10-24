@@ -448,7 +448,7 @@ function renderCandleChart(key){
  const status=el("p","Choose an interval and load historical candles.");
  const chartHost=el("div",undefined,"candle-chart-host");
  const details=el("p",undefined,"candle-details");
- sourceSelect.addEventListener("change",()=>{if(candleRefreshTimer){clearInterval(candleRefreshTimer);candleRefreshTimer=null;}if(sourceSelect.value==="live"){if(resolution.value==="D"){status.textContent="Live tick candles require an intraday interval.";return;}if(resolution.value==="D")resolution.value="5";if(sessionToken){form.requestSubmit();candleRefreshTimer=setInterval(()=>{if(document.body.contains(wrap)&&sourceSelect.value==="live"&&!submit.disabled)form.requestSubmit();},15000);}}else if(sessionToken)form.requestSubmit();});
+ sourceSelect.addEventListener("change",()=>{if(candleRefreshTimer){clearInterval(candleRefreshTimer);candleRefreshTimer=null;}if(sourceSelect.value==="live"){if(resolution.value==="D")resolution.value="5";if(sessionToken){form.requestSubmit();candleRefreshTimer=setInterval(()=>{if(document.body.contains(wrap)&&sourceSelect.value==="live"&&!submit.disabled)form.requestSubmit();},15000);}}else if(sessionToken)form.requestSubmit();});
  resolution.addEventListener("change",()=>{
   const daily=resolution.value==="D";
   form.elements.from.value=istDateString(new Date(Date.now()-(daily?60:7)*86400000));
