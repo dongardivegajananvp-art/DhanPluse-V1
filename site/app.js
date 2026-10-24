@@ -1509,13 +1509,25 @@ function render(tab) {
     });
   }
   if (tab === 'Dashboard') featureContent.innerHTML = dashboardMarkup();
+  else if (tab === 'Stock Explorer') featureContent.innerHTML = stockExplorerMarkup();
+  else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
+  else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
+  else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
+  else if (tab === 'Sureshot CE/PE') featureContent.innerHTML = advancedScannerMarkup(tab);
+  else if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
+  else if (tab === 'FII/DII Flow') featureContent.innerHTML = advancedScannerMarkup(tab);
+  else if (tab === 'Market Activity') featureContent.innerHTML = marketActivityMarkup();
+  else if (tab === 'Charts & Patterns') featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gap-Up/Down') featureContent.innerHTML = gapAnalysisMarkup();
-  else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gainers & Losers') featureContent.innerHTML = moversMarkup();
+  else if (tab === 'Option Chain') featureContent.innerHTML = optionChainMarkup();
+  else if (tab === 'Technical Indicators') featureContent.innerHTML = indicatorsMarkup();
   else if (tab === 'AI Signals') featureContent.innerHTML = signalsMarkup();
   else if (tab === 'Holdings') featureContent.innerHTML = holdingsMarkup();
+  else if (tab === 'Alerts') featureContent.innerHTML = alertsMarkup();
   else if (tab === 'FYERS Settings') featureContent.innerHTML = settingsMarkup();
-  else featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
+  else if (tab === 'Logs') featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
+  else featureContent.innerHTML = '<div class="chart-empty">This workspace has no renderer configured. No market data or signals are shown.</div>';
   bindTabActions();
   if (tab === 'Gap-Up/Down') {
     const gapButton = document.querySelector('#loadGapAnalysisBtn');
@@ -1523,6 +1535,7 @@ function render(tab) {
   }
   updateDynamicPanel();
   if (tab === 'Gap-Up/Down') loadGapAnalysis();
+  if (tab === 'Market Activity') loadMarketActivity();
   if (tab === 'Charts & Patterns') loadPatternStockUniverse();
   if (tab === 'Charts & Patterns') { const scan=document.querySelector('#scanPatternsBtn'); if(scan) scan.onclick=scanTopVerifiedPatterns; }
   if (tab === 'Technical Indicators') loadTechnicalIndicators();
