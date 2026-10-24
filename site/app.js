@@ -773,6 +773,21 @@ async function loadWatchlistQuotes() {
     const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
     const result=await response.json().catch(()=>({}));
     if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.detail||result.error||'FYERS equity snapshot unavailable.');
+    if(result.marketSession==='CLOSED'||result.data.length===0){
+      const lastResponse=await fetch(BACKEND_URL+'/api/market/last-known-stock-quotes',{headers:{Accept:'application/json'},cache:'no-store'});
+      const lastKnown=await lastResponse.json().catch(()=>({}));
+      const lastRows=Array.isArray(lastKnown.data)?lastKnown.data.filter(row=>row&&row.verified===true&&typeof row.symbol==='string'&&Number.isFinite(Number(row.price))&&Number(row.price)>0&&Number.isFinite(Date.parse(String(row.priceAsOf||'')))&&Date.parse(String(row.priceAsOf||''))<=Date.now()+5000):[];
+      if(lastResponse.ok&&lastKnown.ok===true&&lastRows.length){
+        result={...result,marketSession:lastKnown.marketSession||'CLOSED',fetchedAt:lastKnown.fetchedAt,
+          data:lastRows.map(row=>({symbol:row.symbol,price:Number(row.price),changePct:row.changePct==null?null:Number(row.changePct),
+            priceAsOf:row.priceAsOf,quoteAgeSeconds:Number(row.quoteAgeSeconds),priceStatus:'LAST_KNOWN_PRICE',verified:true,source:row.source})),
+          quotedCount:lastRows.length,universeCount:Number(lastKnown.universeCount),
+          partial:lastKnown.partial===true||lastRows.length!==Number(lastKnown.universeCount),
+          missingSymbols:Array.isArray(lastKnown.missingSymbols)?lastKnown.missingSymbols:[]};
+      }else{
+        if(status)status.textContent='Market closed · last-known FYERS equity quotes unavailable. '+(lastKnown.error||'No verified prices returned.')+' No prices fabricated.';
+      }
+    }
     watchlistEquityRows=result.data.filter(row=>row&&typeof row.symbol==='string'&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
     watchlistEquityRows.fetchedAt=result.fetchedAt||new Date().toISOString();
     if(select){
