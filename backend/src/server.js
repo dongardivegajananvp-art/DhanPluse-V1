@@ -64,6 +64,8 @@ allowedOrigins.add("https://dhanpulse-clean-test-ui.onrender.com");
 allowedOrigins.add("https://dhanpulse-ultimate-session-test-ui.onrender.com");
 // Allow only the current DhanPulse PR #40 test preview to use this test backend.
 allowedOrigins.add("https://deploy-preview-40--spectacular-gaufre-b5c029.netlify.app");
+// Permit the current PR #42 Ultimate consolidation preview to call the isolated test backend.
+allowedOrigins.add("https://deploy-preview-42--spectacular-gaufre-b5c029.netlify.app");
 if (redirectUri) { try { allowedOrigins.add(new URL(redirectUri).origin); } catch {} }
 app.use(cors({ origin(origin, callback) {
   if (!origin || allowedOrigins.has(origin)) return callback(null, true);
