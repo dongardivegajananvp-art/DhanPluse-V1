@@ -235,7 +235,7 @@ function startMarketDataStream(token) {
       console.warn("FYERS market socket closed:", JSON.stringify({ code: code ?? null, reason: reason == null ? null : String(reason).slice(0, 120) }));
     });
     socket.connect();
-    if (typeof socket.autoreconnect === "function") socket.autoreconnect(10);
+    if (typeof socket.autoReconnect === "function") socket.autoReconnect(10);
   } catch (error) {
     streamConnected = false;
     streamError = "Could not start the FYERS market data socket.";
