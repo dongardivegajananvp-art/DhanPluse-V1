@@ -27,6 +27,7 @@ let streamConnected = false;
 let streamError = "";
 const latestTicks = new Map();
 const acceptedTickCounts = new Map();
+const lastControlDiagnosticAt = new Map();
 const diagnostics = [];
 function recordDiagnostic(level, event, detail = {}) {
   diagnostics.push({ timestamp: new Date().toISOString(), level, event, ...detail });
@@ -175,7 +176,28 @@ function startMarketDataStream(token) {
     });
     socket.on("message", message => {
       if (marketSocket !== socket) return;
-      parseTick(message);
+      const parsed = typeof message === "string"
+        ? (() => { try { return JSON.parse(message); } catch { return null; } })()
+        : message;
+      const frames = Array.isArray(parsed) ? parsed : [parsed];
+      const now = Date.now();
+      const controls = frames.filter(x => x && typeof x === "object" && (x.type || x.s || x.code != null))
+        .filter(x => {
+          const key = String(x.type || x.code || x.s);
+          const last = lastControlDiagnosticAt.get(key) || 0;
+          if (now - last < 15000) return false;
+          lastControlDiagnosticAt.set(key, now);
+          return true;
+        })
+        .slice(0, 3)
+        .map(x => ({
+          type: typeof x.type === "string" ? x.type.slice(0, 24) : null,
+          status: typeof x.s === "string" ? x.s.slice(0, 16) : null,
+          code: x.code == null ? null : String(x.code).slice(0, 24),
+          message: typeof x.message === "string" ? x.message.replace(/\\s+/g, " ").slice(0, 120) : null
+        }));
+      if (controls.length) console.log("FYERS socket control frame:", JSON.stringify(controls));
+      parseTick(parsed);
       // Sample raw timestamp metadata to diagnose SDK payload shape without logging credentials or full payloads.
       tickDiagnosticCounter += 1;
       if (tickDiagnosticCounter % 20 === 1) {
