@@ -422,40 +422,75 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
 // Never fall back to REST polling here: the dashboard polls this route frequently,
 // and REST fallback caused repeated HTTP 429s while the socket was reconnecting.
 // Last-known index quotes are read-only and never treated as fresh ticks.
-app.get('/api/market/last-known-quotes', (req, res) => {
-  const rows = allowedSymbols.map(symbol => latestTicks.get(symbol)).filter(tick =>
+app.get('/api/market/last-known-quotes', async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const marketOpen = nseRegularSessionNow();
+  let rows = allowedSymbols.map(symbol => latestTicks.get(symbol)).filter(tick =>
     tick && Number.isFinite(Number(tick.ltp)) && Number(tick.ltp) > 0 &&
     Number.isFinite(Date.parse(tick.updatedAt))
   );
+  let source = 'FYERS WebSocket last-known tick';
   if (rows.length !== allowedSymbols.length) {
-    return res.status(503).json({
-      ok: false,
-      error: 'No complete last-known FYERS index snapshot is available.',
-      availableSymbols: rows.map(tick => tick.symbol),
-      requiredSymbols: allowedSymbols
-    });
+    if (!accessToken) {
+      return res.status(401).json({ ok: false, source: 'last-known',
+        error: 'Connect FYERS to retrieve the last known exchange prices.',
+        data: [], marketOpen, signalsAllowed: false });
+    }
+    try {
+      const url = new URL('https://api-t1.fyers.in/data/quotes');
+      url.searchParams.set('symbols', allowedSymbols.join(','));
+      const response = await fetchWithFyersBudget(url, {
+        headers: { Authorization: appId + ':' + accessToken, Accept: 'application/json' },
+        cache: 'no-store', signal: AbortSignal.timeout(12000)
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 429) return res.status(429).json({
+        ok: false, source: 'last-known', error: 'FYERS rate limit active; last-known prices could not be retrieved.',
+        data: [], marketOpen, signalsAllowed: false,
+        retryAfterSeconds: Math.max(30, Number(response.headers.get('retry-after')) || 60)
+      });
+      if (!response.ok || body.s !== 'ok' || !Array.isArray(body.d)) {
+        return res.status(response.status === 401 ? 401 : 502).json({
+          ok: false, source: 'last-known', error: 'FYERS did not return a verifiable last-known index snapshot.',
+          data: [], marketOpen, signalsAllowed: false
+        });
+      }
+      rows = allowedSymbols.map(symbol => {
+        const item = body.d.find(row => row && row.n === symbol && row.v);
+        const v = item?.v, ltp = Number(v?.lp);
+        const rawTime = v?.tt ?? v?.ltt ?? v?.exch_feed_time;
+        const n = Number(rawTime);
+        const timeMs = Number.isFinite(n) && n > 0 ? (n > 1e12 ? n : n * 1000) : Date.parse(String(rawTime || ''));
+        if (!Number.isFinite(ltp) || ltp <= 0 || !Number.isFinite(timeMs) || timeMs <= 0 || timeMs > Date.now() + 5000) return null;
+        return { symbol, ltp, updatedAt: new Date(timeMs).toISOString(),
+          ch: v.ch == null || !Number.isFinite(Number(v.ch)) ? null : Number(v.ch),
+          chp: v.chp == null || !Number.isFinite(Number(v.chp)) ? null : Number(v.chp) };
+      });
+      if (rows.some(row => !row)) return res.status(502).json({
+        ok: false, source: 'last-known', error: 'FYERS quote is missing a valid price or exchange timestamp; values withheld.',
+        data: [], marketOpen, signalsAllowed: false
+      });
+      source = 'FYERS quotes API last-known snapshot';
+    } catch (error) {
+      return res.status(502).json({ ok: false, source: 'last-known',
+        error: 'Could not retrieve last-known FYERS index prices.',
+        detail: String(error.message || 'Upstream request failed').slice(0, 160),
+        data: [], marketOpen, signalsAllowed: false });
+    }
   }
   const newestTickAt = Math.max(...rows.map(tick => Date.parse(tick.updatedAt)));
   const oldestTickAt = Math.min(...rows.map(tick => Date.parse(tick.updatedAt)));
-  const now = Date.now();
-  const marketOpen = nseRegularSessionNow();
-  res.set('Cache-Control', 'no-store');
   return res.json({
-    ok: true,
-    source: 'last-known',
-    streamConnected: false,
-    marketOpen,
+    ok: true, source, streamConnected: false, marketOpen,
     fetchedAt: new Date(newestTickAt).toISOString(),
-    quoteAgeSeconds: Math.max(0, Math.floor((now - oldestTickAt) / 1000)),
-    data: rows.map(tick => ({
-      n: tick.symbol,
-      v: {
-        lp: Number(tick.ltp),
-        tt: epochSeconds(tick.updatedAt),
-        ...(tick.ch === null || tick.ch === undefined ? {} : { ch: tick.ch }),
-        ...(tick.chp === null || tick.chp === undefined ? {} : { chp: tick.chp })
-      }
-    }))
+    quoteAgeSeconds: Math.max(0, Math.floor((Date.now() - oldestTickAt) / 1000)),
+    data: rows.map(tick => ({ n: tick.symbol, verified: true, v: {
+      lp: Number(tick.ltp), tt: epochSeconds(tick.updatedAt),
+      ...(tick.ch == null ? {} : { ch: tick.ch }),
+      ...(tick.chp == null ? {} : { chp: tick.chp })
+    }})),
+    signalsAllowed: false,
+    note: 'Actual FYERS last-known exchange prices for display only. Source exchange timestamp is preserved; this response never enables live signals.'
   });
 });
 
