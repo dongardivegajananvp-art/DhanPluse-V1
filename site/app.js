@@ -1009,8 +1009,9 @@ async function loadSureshotSetup() {
     if(typeof chainCheck==='string')throw new Error(chainCheck);
     const chain=chainCheck.chain;
     const spot=chainCheck.spot;
-    const fetchedAt=Date.parse(optionResult.fetchedAt||'');
-    if(!Number.isFinite(fetchedAt)||Date.now()-fetchedAt>15000||fetchedAt>Date.now()+5000)throw new Error('Option-chain snapshot timestamp is stale or invalid; no signal.');
+    const chainTimestamp=Date.parse(optionResult.chainTimestamp||'');
+    const chainAgeMs=Date.now()-chainTimestamp;
+    if(!Number.isFinite(chainTimestamp)||chainAgeMs<0||chainAgeMs>15000)throw new Error('Option-chain exchange timestamp is missing, stale, or invalid; no signal.');
     const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
     const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
     const type=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
@@ -1313,6 +1314,11 @@ async function loadOptionChain() {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.ok !== true || !result.data) {
       throw new Error(result.error || result.detail || 'Option-chain response unavailable.');
+    }
+    const chainTimestamp = Date.parse(result.chainTimestamp || '');
+    const chainAgeMs = Date.now() - chainTimestamp;
+    if (!Number.isFinite(chainTimestamp) || chainAgeMs < 0 || chainAgeMs > 15000) {
+      throw new Error('Option-chain exchange timestamp is missing, stale, or unverified; chain display blocked.');
     }
     const data = result.data;
     const chainCheck = validateOptionChainPayload(data);
