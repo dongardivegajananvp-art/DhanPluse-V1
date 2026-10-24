@@ -30,6 +30,7 @@ jobs:
           node --check backend/src/gap-analysis.js
           node --check backend/src/movers-validation.js
           node --check backend/src/fresh-data-validation.js
+          node --check backend/src/cors-origin-policy.js
           node --check scripts/check-tabs.mjs
           node --check scripts/check-oauth-offline.mjs
           node --check site/sw.js
