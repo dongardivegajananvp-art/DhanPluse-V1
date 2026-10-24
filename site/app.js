@@ -1,5 +1,6 @@
 
-const IS_ISOLATED_TEST_PREVIEW = /^deploy-preview-\d+--spectacular-gaufre-b5c029\.netlify\.app$/.test(window.location.hostname);
+const IS_ISOLATED_TEST_PREVIEW = /^deploy-preview-\d+--spectacular-gaufre-b5c029\.netlify\.app$/.test(window.location.hostname)
+  || window.location.hostname === 'dhanpulse-clean-test-ui.onrender.com';
 const BACKEND_URL = IS_ISOLATED_TEST_PREVIEW
   ? 'https://dhanpulse-clean-test.onrender.com'
   : 'https://dhanpluse-v1.onrender.com';
