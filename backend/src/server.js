@@ -7,6 +7,7 @@ import cors from 'cors';
 import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './gap-analysis.js';
 import { assertCompleteMoverSnapshot, assertFreshMoverSnapshot } from './movers-validation.js';
 import { quoteTimestampStatus } from './fresh-data-validation.js';
+import { isTrustedDhanPulsePreview } from './cors-origin-policy.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -35,17 +36,6 @@ allowedOrigins.add('https://dongardivegajananvp-art.github.io');
 allowedOrigins.add('https://splendid-gelato-9c2566.netlify.app');
 allowedOrigins.add('https://dhanpulse-clean-test-ui.onrender.com');
 allowedOrigins.add('https://dhanpulse-ultimate-session-test-ui.onrender.com');
-
-// Netlify assigns a numbered origin to each deploy preview of this same site.
-// Keep this constrained to the known Netlify site rather than allowing arbitrary
-// *.netlify.app origins.
-function isTrustedDhanPulsePreview(origin) {
-  const prefix = 'https://deploy-preview-';
-  const suffix = '--spectacular-gaufre-b5c029.netlify.app';
-  if (!origin.startsWith(prefix) || !origin.endsWith(suffix)) return false;
-  const buildNumber = origin.slice(prefix.length, -suffix.length);
-  return buildNumber.length > 0 && [...buildNumber].every(char => char >= '0' && char <= '9');
-}
 
 if (redirectUri) {
   try {
