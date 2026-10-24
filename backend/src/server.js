@@ -930,8 +930,19 @@ app.get('/api/fyers/options-chain', async (req, res) => {
     url.searchParams.set('greeks', '1');
     if (timestamp) url.searchParams.set('timestamp', timestamp);
     const result = await fyersReadOnlyGet(url);
+    const chainData = result && result.data;
+    const rawChainTimestamp = chainData?.timestamp ?? chainData?.tt ?? chainData?.exch_feed_time ??
+      chainData?.last_traded_time ?? chainData?.ltt ?? result?.timestamp ?? result?.tt ??
+      result?.exch_feed_time ?? result?.last_traded_time ?? result?.ltt;
+    const chainTimestamp = epochSeconds(rawChainTimestamp);
+    if (quoteTimestampStatus(chainTimestamp, Date.now(), 15) !== 'FRESH') {
+      return res.status(502).json({ ok: false,
+        status: chainTimestamp ? 'STALE' : 'TIME_UNVERIFIED',
+        error: 'Option-chain exchange timestamp is missing, stale, or unverified; chain data and dependent signals are blocked.' });
+    }
     res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, fetchedAt: new Date().toISOString(), data: result.data });
+    return res.json({ ok: true, fetchedAt: new Date().toISOString(),
+      chainTimestamp: new Date(chainTimestamp * 1000).toISOString(), data: chainData });
   } catch (error) {
     return res.status(error.statusCode || 502).json({
       ok: false,
