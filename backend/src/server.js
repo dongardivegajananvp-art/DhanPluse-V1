@@ -638,7 +638,7 @@ app.get("/api/market/stock-quotes", requireSession, async (_req, res) => {
   if (stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS) {
     const cache = stockQuoteCache.data;
     const fresh = cache.data.filter(item => Math.abs(Date.now() - Number(item.v.tt) * 1000) <= 120000);
-    if (fresh.length) return res.json({ ...cache, data: fresh, quotedCount: fresh.length, cached: true, fetchedAt: new Date(stockQuoteCache.fetchedAt).toISOString() });
+    if (fresh.length) return res.json({ ...cache, marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED", data: fresh, quotedCount: fresh.length, cached: true, fetchedAt: new Date(stockQuoteCache.fetchedAt).toISOString() });
   }
 
   const remaining = stockQuoteCooldown.until - Date.now();
@@ -688,7 +688,7 @@ app.get("/api/market/last-known-stock-quotes", requireSession, async (_req, res)
   res.set("Cache-Control", "no-store");
   if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first.", data: [], signalsAllowed: false });
   if (lastKnownStockCache.data && Date.now() - lastKnownStockCache.fetchedAt < LAST_KNOWN_STOCK_CACHE_MS) {
-    return res.json({ ...lastKnownStockCache.data, cached: true, cacheAgeSeconds: Math.floor((Date.now() - lastKnownStockCache.fetchedAt) / 1000) });
+    return res.json({ ...lastKnownStockCache.data, marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED", cached: true, cacheAgeSeconds: Math.floor((Date.now() - lastKnownStockCache.fetchedAt) / 1000) });
   }
   const request = lastKnownStockPromise || (lastKnownStockPromise = (async () => {
     const universe = await getNseFnoEquityUniverse();
