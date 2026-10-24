@@ -21,7 +21,8 @@ app.use(express.json({ limit: "32kb" }));
 const appId = process.env.FYERS_APP_ID || "";
 const appSecret = process.env.FYERS_APP_SECRET || "";
 const redirectUri = process.env.FYERS_REDIRECT_URI || "";
-const allowedSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX"];
+const allowedSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"];
+const subscribedSymbols = new Set(allowedSymbols);
 let marketSocket = null;
 let streamConnected = false;
 let streamError = "";
@@ -108,7 +109,7 @@ function parseTick(raw) {
   for (const item of messages) {
     const value = item.v && typeof item.v === "object" ? item.v : {};
     const symbol = item.symbol || item.n || value.symbol || value.n;
-    if (!allowedSymbols.includes(symbol)) continue;
+    if (!subscribedSymbols.has(symbol)) continue;
     const rawLtp = item.ltp ?? item.lp ?? value.ltp ?? value.lp;
     const ltp = Number(rawLtp);
     if (rawLtp == null || !Number.isFinite(ltp) || ltp <= 0) {
@@ -167,8 +168,29 @@ function startMarketDataStream(token) {
       try {
         socket.mode(socket.FullMode);
         socket.subscribe(allowedSymbols);
-        console.log("FYERS market socket subscription request sent.");
+        console.log("FYERS market socket index subscription request sent:", JSON.stringify({ symbols: allowedSymbols }));
         recordDiagnostic("info", "subscription_requested", { symbols: allowedSymbols });
+        // Expand to eligible NSE F&O cash-equity underlyings from the official FYERS masters.
+        void (async () => {
+          try {
+            const universe = await getNseFnoEquityUniverse();
+            const equities = universe.data.map(item => item.symbol).filter(symbol => /^NSE:[A-Z0-9&-]+-EQ$/.test(symbol));
+            let subscribedCount = 0;
+            for (let offset = 0; offset < equities.length; offset += 100) {
+              if (marketSocket !== socket) return;
+              const batch = equities.slice(offset, offset + 100);
+              for (const symbol of batch) subscribedSymbols.add(symbol);
+              socket.subscribe(batch);
+              subscribedCount += batch.length;
+              if (offset + 100 < equities.length) await new Promise(resolve => setTimeout(resolve, 250));
+            }
+            recordDiagnostic("info", "fno_equity_subscription_requested", { universeCount: universe.count, subscribedCount });
+            console.log("FYERS NSE F&O equity subscription requests sent:", JSON.stringify({ universeCount: universe.count, subscribedCount }));
+          } catch (error) {
+            recordDiagnostic("warn", "fno_equity_subscription_unavailable", { message: String(error?.message || error).slice(0, 140) });
+            console.warn("FYERS F&O equity subscriptions unavailable; historical candles remain available:", String(error?.message || error).slice(0, 160));
+          }
+        })();
       } catch (error) {
         streamError = "Could not subscribe to FYERS index symbols.";
         console.error("FYERS market socket subscription failed:", String(error?.message || error).slice(0, 200));
@@ -294,7 +316,7 @@ app.get("/api/status", (_req, res) => res.set("Cache-Control", "no-store").json(
   lastAcceptedTickAtBySymbol: Object.fromEntries([...latestTicks.entries()].map(([symbol, tick]) => [symbol, tick.updatedAt])),
   ...(streamError ? { marketDataMessage: streamError } : {}),
   orderPlacement: "disabled",
-  note: "Live feed is reported only when both configured indices have valid, fresh exchange timestamps. Backend status alone is not proof of live data."
+  note: "Live feed is reported only when NIFTY, BANKNIFTY, and SENSEX have valid, fresh exchange timestamps. Backend status alone is not proof of live data."
 }));
 
 app.get("/api/fyers/auth/start", (_req, res) => {
@@ -951,7 +973,7 @@ app.get("/api/market/live-candles", requireSession, (req, res) => {
   res.set("Cache-Control", "no-store");
   const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
   const resolution = Number(req.query.resolution || 5);
-  if (!allowedSymbols.includes(symbol)) return res.status(400).json({ ok: false, error: "Live tick candles are currently enabled only for NIFTY and BANKNIFTY." });
+  if (!subscribedSymbols.has(symbol)) return res.status(400).json({ ok: false, error: "Symbol is not in the verified FYERS live-subscription universe." });
   if (!liveCandleIntervals.includes(resolution)) return res.status(400).json({ ok: false, error: "Live candle resolution must be 1, 5, 15, 30, or 60 minutes." });
   const now = Date.now();
   const rows = (liveCandles.get(symbol + "|" + resolution) || []).filter(row => now - row.bucketMs <= 24 * 60 * 60 * 1000);
@@ -966,7 +988,7 @@ app.get("/api/market/candles", requireSession, async (req, res) => {
   const resolution = String(req.query.resolution || "5");
   const from = String(req.query.from || "");
   const to = String(req.query.to || "");
-  const allowedIndexSymbols = new Set(["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX"]);
+  const allowedIndexSymbols = new Set(["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"]);
   const equitySymbolFormat = /^NSE:[A-Z0-9&-]+-EQ$/;
   const datePattern = /^\d{4}-\d{2}-\d{2}$/;
   const isRealDate = value => datePattern.test(value) && Number.isFinite(Date.parse(value + "T00:00:00Z")) && new Date(value + "T00:00:00Z").toISOString().slice(0, 10) === value;
