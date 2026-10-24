@@ -67,5 +67,5 @@ jobs:
         if: github.event_name == 'pull_request' && github.event.pull_request.number == 42
         env:
           DHANPULSE_TEST_BACKEND: https://dhanpulse-clean-test.onrender.com
-          DHANPULSE_PREVIEW_ORIGIN: https://deploy-preview-42--spectacular-gaufre-b5c029.netlify.app
+          DHANPULSE_PREVIEW_ORIGINS: https://deploy-preview-42--spectacular-gaufre-b5c029.netlify.app,https://dhanpulse-clean-test-ui.onrender.com
         run: node scripts/check-deployed-cors.mjs
