@@ -1084,8 +1084,6 @@ app.get("/api/market/live-candles", requireSession, (req, res) => {
 app.get("/api/market/candles", requireSession, async (req, res) => {
   const symbol = String(req.query.symbol || "NSE:NIFTY50-INDEX");
   const resolution = String(req.query.resolution || "5");
-  const from = String(req.query.from || "");
-  const to = String(req.query.to || "");
   const allowedIndexSymbols = new Set(["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"]);
   const equitySymbolFormat = /^NSE:[A-Z0-9&-]+-EQ$/;
   const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -1093,7 +1091,14 @@ app.get("/api/market/candles", requireSession, async (req, res) => {
   const allowedResolutions = new Set(["1", "2", "3", "5", "10", "15", "20", "30", "60", "D"]);
   if (!allowedIndexSymbols.has(symbol) && !equitySymbolFormat.test(symbol)) return res.status(400).json({ ok: false, error: "Unsupported symbol format for verified candles." });
   if (!allowedResolutions.has(resolution)) return res.status(400).json({ ok: false, error: "Resolution must be a supported FYERS interval: 1, 2, 3, 5, 10, 15, 20, 30, 60, or D." });
-  if (!isRealDate(from) || !isRealDate(to) || from > to) return res.status(400).json({ ok: false, error: "Provide valid from/to dates in YYYY-MM-DD format." });
+  // The dashboard requests a symbol/timeframe only; default to a bounded IST range.
+  const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
+  const today = indiaNow.toISOString().slice(0, 10);
+  const defaultLookbackDays = resolution === "D" ? 29 : 6;
+  const defaultFrom = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - defaultLookbackDays)).toISOString().slice(0, 10);
+  const from = String(req.query.from || defaultFrom);
+  const to = String(req.query.to || today);
+  if (!isRealDate(from) || !isRealDate(to) || from > to || to > today) return res.status(400).json({ ok: false, error: "Provide valid YYYY-MM-DD dates ending no later than today (IST)." });
   const days = (Date.parse(to + "T00:00:00Z") - Date.parse(from + "T00:00:00Z")) / 86400000;
   const maxDays = resolution === "D" ? 365 : 30;
   if (days > maxDays) return res.status(400).json({ ok: false, error: "Date range exceeds " + maxDays + " days for this candle interval." });
