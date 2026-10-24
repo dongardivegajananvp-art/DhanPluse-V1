@@ -58,3 +58,34 @@ test('blocks an empty requested universe', () => {
     receivedSymbols: new Set()
   }), error => error.statusCode === 502);
 });
+
+import { assertFreshMoverSnapshot } from '../src/movers-validation.js';
+
+test('blocks live rankings if any quote is stale or timestamp-unverified', () => {
+  assert.throws(() => assertFreshMoverSnapshot([
+    { symbol: 'NSE:AAA-EQ', priceStatus: 'LIVE_QUOTE' },
+    { symbol: 'NSE:BBB-EQ', priceStatus: 'STALE_QUOTE' }
+  ], true), error => error.statusCode === 502 && error.staleSymbols.includes('NSE:BBB-EQ'));
+  assert.throws(() => assertFreshMoverSnapshot([
+    { symbol: 'NSE:AAA-EQ', priceStatus: 'LIVE_QUOTE' },
+    { symbol: 'NSE:BBB-EQ', priceStatus: 'TIME_UNVERIFIED' }
+  ], true), error => error.statusCode === 502 && error.staleSymbols.includes('NSE:BBB-EQ'));
+});
+
+test('allows explicitly last-known rows after market close', () => {
+  assert.equal(assertFreshMoverSnapshot([
+    { symbol: 'NSE:AAA-EQ', priceStatus: 'LAST_KNOWN_PRICE' }
+  ], false), true);
+});
+
+test('blocks an empty live mover snapshot', () => {
+  assert.throws(() => assertFreshMoverSnapshot([], true),
+    error => error.statusCode === 502 && error.staleSymbols.includes('<empty-snapshot>'));
+});
+
+test('blocks malformed rows with no verifiable symbol', () => {
+  assert.throws(() => assertFreshMoverSnapshot([null], true),
+    error => error.statusCode === 502 && error.staleSymbols.includes('<row-1>'));
+  assert.throws(() => assertFreshMoverSnapshot([{ priceStatus: 'LIVE_QUOTE' }], true),
+    error => error.statusCode === 502 && error.staleSymbols.includes('<row-1>'));
+});

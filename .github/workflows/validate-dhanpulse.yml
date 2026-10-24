@@ -29,6 +29,11 @@ jobs:
           node --check backend/src/server.js
           node --check backend/src/gap-analysis.js
           node --check backend/src/movers-validation.js
+          node --check backend/src/fresh-data-validation.js
+          node --check backend/src/cors-origin-policy.js
+          node --check scripts/check-tabs.mjs
+          node --check scripts/check-oauth-offline.mjs
+          node --check scripts/check-deployed-cors.mjs
           node --check site/sw.js
       - name: Validate PWA manifest and required assets
         run: |
@@ -43,7 +48,9 @@ jobs:
           grep -q 'backtest.js' site/index.html
           test -s site/sw.js
           test -s site/dhanpulse-icon.svg
-          test "$(grep -o 'data-tab=' site/index.html | wc -l | tr -d ' ')" = "12"
+          node scripts/check-tabs.mjs
+          node scripts/check-preview-isolation.mjs
+          node scripts/check-oauth-offline.mjs
           grep -q 'BSE:SENSEX-INDEX' backend/src/server.js
           grep -q 'Order placement' site/index.html
           grep -q 'publish = "site"' netlify.toml
@@ -56,3 +63,9 @@ jobs:
       - name: Verify backend dependency graph
         working-directory: backend
         run: npm audit --omit=dev --audit-level=high
+      - name: Verify deployed test-backend CORS (PR #42 only)
+        if: github.event_name == 'pull_request' && github.event.pull_request.number == 42
+        env:
+          DHANPULSE_TEST_BACKEND: https://dhanpulse-clean-test.onrender.com
+          DHANPULSE_PREVIEW_ORIGINS: https://deploy-preview-42--spectacular-gaufre-b5c029.netlify.app,https://dhanpulse-clean-test-ui.onrender.com
+        run: node scripts/check-deployed-cors.mjs
