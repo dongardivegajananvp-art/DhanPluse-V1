@@ -2036,7 +2036,7 @@ async function fetchLiveQuotes() {
         try {
           const lastResponse = await fetch(BACKEND_URL + '/api/market/last-known-quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
           const lastData = await lastResponse.json().catch(() => ({}));
-          if (lastResponse.ok && lastData.ok === true && lastData.source === 'last-known' && Array.isArray(lastData.data) &&
+          if (lastResponse.ok && lastData.ok === true && lastData.signalsAllowed === false && Array.isArray(lastData.data) &&
               updateQuoteCards(lastData.data, lastData.fetchedAt, 'last-known', false)) {
             quotePollDelay = 15000;
             setStatus(lastData.marketOpen ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
