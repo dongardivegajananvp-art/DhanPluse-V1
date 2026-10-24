@@ -452,7 +452,7 @@ async function loadStockExplorerQuotes() {
     if (result.marketSession === 'CLOSED' || result.data.length === 0) {
       const lastResponse = await fetch(BACKEND_URL + '/api/market/last-known-stock-quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const lastKnown = await lastResponse.json().catch(() => ({}));
-      if (lastResponse.ok && lastKnown.ok === true && Array.isArray(lastKnown.data)) {
+      if (lastResponse.ok && lastKnown.ok === true && Array.isArray(lastKnown.data) && lastKnown.partial !== true && Number(lastKnown.quotedCount) === Number(lastKnown.universeCount) && (!Array.isArray(lastKnown.missingSymbols) || lastKnown.missingSymbols.length === 0)) {
         result = {
           ok: true, marketSession: 'CLOSED', source: lastKnown.source, universe: 'FYERS-NSE-FO-symbol-master',
           fetchedAt: lastKnown.fetchedAt, universeCount: lastKnown.universeCount, quotedCount: lastKnown.quotedCount,
@@ -466,7 +466,7 @@ async function loadStockExplorerQuotes() {
         };
         status.textContent = 'Market closed · loading actual last-known FYERS LTPs; these are display-only and cannot trigger signals.';
       } else {
-        status.textContent = 'Market closed. Last-known F&O prices unavailable: ' + (lastKnown.error || 'FYERS did not return exchange-stamped quotes.') + '. No prices were fabricated.';
+        status.textContent = 'Market closed. ' + (lastKnown.partial === true || (Number.isFinite(Number(lastKnown.universeCount)) && Number(lastKnown.quotedCount) !== Number(lastKnown.universeCount)) ? 'FYERS snapshot incomplete; partial F&O rankings discarded.' : (lastKnown.error || 'FYERS did not return exchange-stamped quotes.')) + ' No prices were fabricated.';
       }
     }
     stockExplorerMoverRows = result.data.filter(row =>
