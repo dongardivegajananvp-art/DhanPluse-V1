@@ -610,7 +610,7 @@ async function fyersReadOnlyGet(url) {
 
 app.get('/api/market/candles', async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
-  const allowed = new Set([...allowedSymbols, ...moversSymbols]);
+  const allowed = new Set(allowedSymbols);
   if (!allowed.has(symbol) && accessToken) {
     try {
       const verifiedUniverse = await getNseFnoEquityUniverse();
