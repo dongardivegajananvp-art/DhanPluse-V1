@@ -1,5 +1,8 @@
 
-const BACKEND_URL = 'https://dhanpluse-v1.onrender.com';
+const IS_ISOLATED_TEST_PREVIEW = /^deploy-preview-\\d+--spectacular-gaufre-b5c029\\.netlify\\.app$/.test(window.location.hostname);
+const BACKEND_URL = IS_ISOLATED_TEST_PREVIEW
+  ? 'https://dhanpulse-clean-test.onrender.com'
+  : 'https://dhanpluse-v1.onrender.com';
 // The FYERS access token stays on the backend. This opaque session token only
 // authorizes this browser session to read protected dashboard APIs.
 const nativeFetch = window.fetch.bind(window);
@@ -10,6 +13,12 @@ window.fetch = function(input, init = {}) {
   const isBackend = url.startsWith(BACKEND_URL + '/');
   const publicPaths = ['/health', '/api/status', '/api/fyers/auth/start', '/api/fyers/auth/exchange'];
   const pathname = isBackend ? new URL(url).pathname : '';
+  // Never initiate OAuth from an isolated preview until its redirect URI is
+  // independently verified. This prevents a test page from sending auth flow
+  // to a production-configured callback by mistake.
+  if (IS_ISOLATED_TEST_PREVIEW && isBackend && pathname === '/api/fyers/auth/start') {
+    return Promise.reject(new Error('OAuth is disabled in this isolated test preview until the test redirect URI is verified.'));
+  }
   if (isBackend && !publicPaths.includes(pathname)) {
     const session = sessionStorage.getItem('dhanpulse-dashboard-session-v1');
     if (session) headers.set('Authorization', 'Bearer ' + session);
