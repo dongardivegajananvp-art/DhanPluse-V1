@@ -611,6 +611,19 @@ async function fyersReadOnlyGet(url) {
 app.get('/api/market/candles', async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
   const allowed = new Set([...allowedSymbols, ...moversSymbols]);
+  if (!allowed.has(symbol) && accessToken) {
+    try {
+      const verifiedUniverse = await getNseFnoEquityUniverse();
+      for (const item of verifiedUniverse.data) allowed.add(item.symbol);
+    } catch (error) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(503).json({
+        ok: false,
+        error: 'Verified NSE F&O universe unavailable; chart symbol validation blocked.',
+        detail: String(error.message || error).slice(0, 160)
+      });
+    }
+  }
   const resolution = String(req.query.resolution || '5');
   const allowedResolutions = new Set(['1', '3', '5', '15', '30', '60', 'D']);
   // FYERS candle dates are exchange-local calendar dates. Use IST rather than UTC
