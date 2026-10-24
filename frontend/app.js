@@ -307,6 +307,7 @@ async function renderStockExplorer(){
    const r=await fetch(API_BASE+"/api/market/stock-quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
    const data=await r.json();
    if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS session expired. Connect FYERS again.");}
+   if(data.marketSession==="CLOSED")throw new Error("Market closed; switching to actual last-known LTPs.");
    if(!r.ok||!Array.isArray(data.data))throw new Error([data.error,data.detail,data.retryAfterSeconds?("Retry in "+data.retryAfterSeconds+" seconds."):null].filter(Boolean).join(" · ")||"Fresh verified quotes unavailable.");
    const nowMs=Date.now();
    verifiedRows=data.data.filter(item=>{
