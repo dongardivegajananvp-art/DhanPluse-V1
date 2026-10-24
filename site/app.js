@@ -19,6 +19,7 @@ window.fetch = function(input, init = {}) {
 
 const QUOTE_POLL_MS = 2000;
 const QUOTE_POLL_MAX_MS = 30000;
+const MAX_EQUITY_QUOTE_AGE_SECONDS = 30; // Locked live-session policy: stale equity/F&O quotes must never feed live views.
 const SYMBOLS = [
   { symbol: 'NSE:NIFTY50-INDEX', label: 'NIFTY 50', tab: 'NIFTY' },
   { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'BANKNIFTY' },
@@ -407,10 +408,10 @@ async function loadStockExplorerQuotes() {
     const allRowsFresh = stockExplorerMoverRows.length === requested && stockExplorerMoverRows.every(row => {
       if (row.priceStatus !== 'LIVE_QUOTE' || !Number.isFinite(Number(row.changePct)) ||
           !Number.isFinite(Number(row.quoteAgeSeconds)) || Number(row.quoteAgeSeconds) < 0 ||
-          Number(row.quoteAgeSeconds) > 180 || !row.priceAsOf) return false;
+          Number(row.quoteAgeSeconds) > MAX_EQUITY_QUOTE_AGE_SECONDS || !row.priceAsOf) return false;
       const tradedAt = Date.parse(row.priceAsOf);
       const ageSeconds = (Date.now() - tradedAt) / 1000;
-      return Number.isFinite(tradedAt) && ageSeconds >= 0 && ageSeconds <= 180;
+      return Number.isFinite(tradedAt) && ageSeconds >= 0 && ageSeconds <= MAX_EQUITY_QUOTE_AGE_SECONDS;
     });
     stockExplorerCanRank = result.marketSession === 'OPEN' && result.partial !== true &&
       requested > 0 && count === requested && missingSymbols.length === 0 && allRowsFresh;
@@ -479,7 +480,7 @@ function renderStockExplorerResults() {
     const moverStatus=!mover?'':marketClosed?'LAST_KNOWN_PRICE'
       :mover.priceStatus==='TIME_UNVERIFIED'?'TIME_UNVERIFIED'
       :mover.priceStatus!=='LIVE_QUOTE'?'STALE_QUOTE'
-      :Number.isFinite(currentQuoteAgeMs)&&currentQuoteAgeMs>=0&&currentQuoteAgeMs<=180000?'LIVE_QUOTE':'STALE_QUOTE';
+      :Number.isFinite(currentQuoteAgeMs)&&currentQuoteAgeMs>=0&&currentQuoteAgeMs<=MAX_EQUITY_QUOTE_AGE_SECONDS*1000?'LIVE_QUOTE':'STALE_QUOTE';
     const priceLabel=mover
       ? (moverStatus==='LIVE_QUOTE'?'LIVE FYERS QUOTE':moverStatus==='LAST_KNOWN_PRICE'?'LAST KNOWN PRICE':moverStatus==='STALE_QUOTE'?'STALE QUOTE':'QUOTE TIME UNKNOWN')
       : (fresh?'LIVE INDEX QUOTE':quote?(marketClosed?'LAST KNOWN INDEX PRICE':'STALE / RECONNECTING INDEX QUOTE'):'DATA PENDING');
@@ -546,11 +547,11 @@ async function loadMarketActivity() {
           !Number.isFinite(Number(row.price)) || Number(row.price) <= 0 ||
           !Number.isFinite(Number(row.changePct)) ||
           !Number.isFinite(Number(row.quoteAgeSeconds)) ||
-          Number(row.quoteAgeSeconds) < 0 || Number(row.quoteAgeSeconds) > 180 ||
+          Number(row.quoteAgeSeconds) < 0 || Number(row.quoteAgeSeconds) > MAX_EQUITY_QUOTE_AGE_SECONDS ||
           !row.priceAsOf) return false;
       const tradedAt = Date.parse(row.priceAsOf);
       const ageSeconds = (Date.now() - tradedAt) / 1000;
-      return Number.isFinite(tradedAt) && ageSeconds >= 0 && ageSeconds <= 180;
+      return Number.isFinite(tradedAt) && ageSeconds >= 0 && ageSeconds <= MAX_EQUITY_QUOTE_AGE_SECONDS;
     });
     if (rows.length !== requested) {
       throw new Error('FRESHNESS CHECK FAILED — only ' + rows.length + ' of ' + requested + ' quotes passed validation. Breadth and rankings blocked.');
@@ -659,7 +660,7 @@ function renderWatchlistTable() {
       const indexFresh=hasFreshLiveQuote(row.quote);
       const equityTime=row.equity&&row.equity.priceAsOf?Date.parse(row.equity.priceAsOf):NaN;
       const equityAge=Number.isFinite(equityTime)?(Date.now()-equityTime)/1000:Infinity;
-      const equityFresh=!!row.equity&&!marketClosed&&row.equity.priceStatus==='LIVE_QUOTE'&&equityAge>=0&&equityAge<=180&&Number(row.equity.quoteAgeSeconds)>=0&&Number(row.equity.quoteAgeSeconds)<=180;
+      const equityFresh=!!row.equity&&!marketClosed&&row.equity.priceStatus==='LIVE_QUOTE'&&equityAge>=0&&equityAge<=MAX_EQUITY_QUOTE_AGE_SECONDS&&Number(row.equity.quoteAgeSeconds)>=0&&Number(row.equity.quoteAgeSeconds)<=MAX_EQUITY_QUOTE_AGE_SECONDS;
       const hasIndexPrice=!!row.quote&&Number.isFinite(Number(row.quote.price))&&Number(row.quote.price)>0;
       const hasEquityPrice=!!row.equity&&Number.isFinite(Number(row.equity.price))&&Number(row.equity.price)>0;
       const price=row.quote?(hasIndexPrice?Number(row.quote.price):null):hasEquityPrice?Number(row.equity.price):null;
@@ -732,11 +733,11 @@ async function loadMovers() {
           !Number.isFinite(Number(item.price)) || Number(item.price) <= 0 ||
           !Number.isFinite(Number(item.changePct)) ||
           !Number.isFinite(Number(item.quoteAgeSeconds)) ||
-          Number(item.quoteAgeSeconds) < 0 || Number(item.quoteAgeSeconds) > 180 ||
+          Number(item.quoteAgeSeconds) < 0 || Number(item.quoteAgeSeconds) > MAX_EQUITY_QUOTE_AGE_SECONDS ||
           !item.priceAsOf) return false;
       const tradedAt = Date.parse(item.priceAsOf);
       const actualAgeSeconds = (Date.now() - tradedAt) / 1000;
-      return Number.isFinite(tradedAt) && actualAgeSeconds >= 0 && actualAgeSeconds <= 180;
+      return Number.isFinite(tradedAt) && actualAgeSeconds >= 0 && actualAgeSeconds <= MAX_EQUITY_QUOTE_AGE_SECONDS;
     });
     if (rows.length !== requested) {
       throw new Error('FRESHNESS CHECK FAILED — only ' + rows.length + ' of ' + requested + ' quotes passed validation. Ranking blocked.');
@@ -1077,7 +1078,7 @@ async function loadAdvancedScanner() {
       if(x.priceStatus!=='LIVE_QUOTE'||!x.priceAsOf) return false;
       const age=Number(x.quoteAgeSeconds);
       const timestamp=Date.parse(x.priceAsOf);
-      return Number.isFinite(age)&&age>=0&&age<=180&&Number.isFinite(timestamp)&&Date.now()-timestamp>=-30000&&Date.now()-timestamp<=180000;
+      return Number.isFinite(age)&&age>=0&&age<=MAX_EQUITY_QUOTE_AGE_SECONDS&&Number.isFinite(timestamp)&&Date.now()-timestamp>=-30000&&Date.now()-timestamp<=180000;
     });
     if(rows.length!==requestedCount){
       table.innerHTML='<div class="chart-empty"><b>NO TRADE — incomplete fresh-quote coverage.</b><p>Only '+rows.length+' of '+requestedCount+' F&O symbols have fresh, exchange-timestamped quotes. Stale or timestamp-unverified symbols are not silently excluded to create a misleading shortlist; scanner candidates are withheld.</p></div>';
