@@ -21,7 +21,8 @@ const QUOTE_POLL_MS = 2000;
 const QUOTE_POLL_MAX_MS = 30000;
 const SYMBOLS = [
   { symbol: 'NSE:NIFTY50-INDEX', label: 'NIFTY 50', tab: 'NIFTY' },
-  { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'BANKNIFTY' }
+  { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'BANKNIFTY' },
+  { symbol: 'BSE:SENSEX-INDEX', label: 'SENSEX', tab: 'Dashboard' }
 ];
 
 const nav = document.querySelector('#nav');
@@ -45,6 +46,8 @@ let currentTab = 'Dashboard';
 let latestQuotes = {};
 let historyBySymbol = {};
 let stockExplorerMoverRows = [];
+let fnoChartSymbols = [];
+let fnoChartUniverseRequestRunning = false;
 let watchlistEquityRows = [];
 let watchlistRequestRunning = false;
 let watchlistSymbols = loadWatchlistSymbols();
@@ -316,6 +319,41 @@ function svgChart(symbol, height) {
     '<polyline points="' + coords.join(' ') + '" fill="none" stroke="' + stroke + '" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>' +
     '<text x="12" y="16" class="chart-label">HIGH ' + formatPrice(max) + '</text>' +
     '<text x="12" y="' + (h - 3) + '" class="chart-label">LOW ' + formatPrice(min) + '</text></svg>';
+}
+
+async function loadFnoChartUniverse() {
+  if (fnoChartUniverseRequestRunning || currentTab !== 'Dashboard') return;
+  const select = document.querySelector('#dashboardCandleSymbol');
+  if (!select) return;
+  fnoChartUniverseRequestRunning = true;
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/fno-universe', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) throw new Error(result.error || 'FYERS symbol master unavailable.');
+    fnoChartSymbols = result.data.filter(item => item && typeof item.symbol === 'string' && /^NSE:[A-Z0-9&-]+-EQ$/.test(item.symbol))
+      .map(item => ({ symbol: item.symbol, name: item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '') }));
+    if (currentTab !== 'Dashboard') return;
+    const liveSelect = document.querySelector('#dashboardCandleSymbol');
+    if (!liveSelect) return;
+    const selected = liveSelect.value;
+    const options = [
+      { symbol: 'NSE:NIFTY50-INDEX', name: 'NIFTY 50' },
+      { symbol: 'NSE:NIFTYBANK-INDEX', name: 'BANK NIFTY' },
+      { symbol: 'BSE:SENSEX-INDEX', name: 'SENSEX' },
+      ...fnoChartSymbols
+    ];
+    const seen = new Set();
+    liveSelect.innerHTML = options.filter(item => !seen.has(item.symbol) && seen.add(item.symbol))
+      .map(item => '<option value="' + escapeHtml(item.symbol) + '">' + escapeHtml(item.name) + '</option>').join('');
+    if (options.some(item => item.symbol === selected)) liveSelect.value = selected;
+    const status = document.querySelector('#dashboardCandleStatus');
+    if (status) status.textContent = 'Verified FYERS symbol master loaded: ' + fnoChartSymbols.length + ' NSE F&O equities plus NIFTY, BANK NIFTY and SENSEX. Load real historical OHLC candles for any symbol.';
+  } catch (error) {
+    const status = document.querySelector('#dashboardCandleStatus');
+    if (status) status.textContent = 'Full NSE F&O chart list unavailable: ' + (error.message || 'Connect FYERS first') + '. No symbols or candles were fabricated.';
+  } finally {
+    fnoChartUniverseRequestRunning = false;
+  }
 }
 
 async function loadDashboardCandles() {
@@ -613,6 +651,8 @@ function dashboardMarkup() {
   const chartSymbols = [
     { symbol: 'NSE:NIFTY50-INDEX', name: 'NIFTY 50' },
     { symbol: 'NSE:NIFTYBANK-INDEX', name: 'BANK NIFTY' },
+    { symbol: 'BSE:SENSEX-INDEX', name: 'SENSEX' },
+    ...fnoChartSymbols,
     ...stockExplorerMoverRows.map(row => ({
       symbol: row.symbol,
       name: row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')
@@ -624,9 +664,9 @@ function dashboardMarkup() {
     seenChartSymbols.add(item.symbol);
     return true;
   }).map(item => '<option value="' + escapeHtml(item.symbol) + '">' + escapeHtml(item.name) + '</option>').join('');
-  const chartUniverseNote = stockExplorerMoverRows.length
-    ? 'Symbol list includes ' + stockExplorerMoverRows.length + ' equities from the latest FYERS Stock Explorer snapshot.'
-    : 'Index candles are available here. Open Stock Explorer and refresh verified FYERS quotes to populate the F&O equity symbol list.';
+  const chartUniverseNote = fnoChartSymbols.length
+    ? 'Symbol list includes ' + fnoChartSymbols.length + ' verified NSE F&O equities plus NIFTY, BANK NIFTY and SENSEX.'
+    : 'NIFTY, BANK NIFTY and SENSEX are listed; connect FYERS to load the full NSE F&O chart universe.';
   return '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
     '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
     '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol">' + chartSymbolOptions + '</select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
@@ -1473,7 +1513,7 @@ function render(tab) {
       else fetchLiveQuotes();
     });
   }
-  if (tab === 'Dashboard') featureContent.innerHTML = dashboardMarkup();
+  if (tab === 'Dashboard') { featureContent.innerHTML = dashboardMarkup(); loadFnoChartUniverse(); }
   else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
   else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
   else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
@@ -1648,8 +1688,8 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
       if (Number.isFinite(price) && price > 0) {
         map[item.n] = {
           price: price,
-          change: Number.isFinite(Number(item.v.ch)) ? Number(item.v.ch) : null,
-          changePct: Number.isFinite(Number(item.v.chp)) ? Number(item.v.chp) : null,
+          change: item.v.ch == null ? null : (Number.isFinite(Number(item.v.ch)) ? Number(item.v.ch) : null),
+          changePct: item.v.chp == null ? null : (Number.isFinite(Number(item.v.chp)) ? Number(item.v.chp) : null),
           receivedAt: Number.isFinite(Number(item.v.tt)) && Number(item.v.tt) > 0
             ? (Number(item.v.tt) > 1e12 ? Number(item.v.tt) : Number(item.v.tt) * 1000)
             : (source === 'websocket' && Number.isFinite(Date.parse(fetchedAt)) ? Date.parse(fetchedAt) : 0),
@@ -1662,9 +1702,11 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
       }
     }
   });
-  if (!map[SYMBOLS[0].symbol] || !map[SYMBOLS[1].symbol]) return false;
+  const requiredSymbols = source === 'last-known' ? [] : SYMBOLS.filter(item => item.symbol !== 'BSE:SENSEX-INDEX');
+  if (!Object.keys(map).length || !requiredSymbols.every(item => map[item.symbol])) return false;
   SYMBOLS.forEach(item => {
     const next = map[item.symbol];
+    if (!next) return;
     const old = latestQuotes[item.symbol];
     latestQuotes[item.symbol] = next;
     const history = historyBySymbol[item.symbol];
@@ -1925,7 +1967,7 @@ async function fetchLiveQuotes() {
         try {
           const lastResponse = await fetch(BACKEND_URL + '/api/market/last-known-quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
           const lastData = await lastResponse.json().catch(() => ({}));
-          if (lastResponse.ok && lastData.ok === true && lastData.source === 'last-known' && Array.isArray(lastData.data) &&
+          if (lastResponse.ok && lastData.ok === true && (lastData.signalsAllowed === false || String(lastData.source || '').toLowerCase().includes('last-known')) && Array.isArray(lastData.data) &&
               updateQuoteCards(lastData.data, lastData.fetchedAt, 'last-known', false)) {
             quotePollDelay = 15000;
             setStatus(lastData.marketOpen ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
