@@ -65,6 +65,11 @@ This is not a claim that a live FYERS session or production deployment has passe
 - Remaining next step: real browser/mobile verification of the deployed preview's API destination, CORS preflight/response, console errors, and all 24 tab click-through. This environment could not establish a browser session or resolve the public preview/backend hosts; that is a tooling/network limitation, not proof that the services are down. No production environment variables or services were changed during this check.
 
 
+
+## Offline CORS policy regression tests (2026-10-24)
+
+Extracted the numbered Netlify preview-origin matcher into `backend/src/cors-origin-policy.js` and added unit tests that accept only the exact DhanPulse deploy-preview hostname pattern while rejecting unrelated Netlify sites, lookalike domains, malformed build IDs, non-HTTPS origins, and non-string values. The server now uses the tested helper. This validates origin-matching logic offline; it does not prove that a deployed browser preflight or CORS response succeeds.
+
 ## Newly found offline regression — tab renderer wiring (2026-10-24)
 
 A deeper source audit found that several tabs had navigation labels and descriptions but fell through to the generic log-list renderer. Fixed the render dispatcher to connect each of the 24 tabs to its intended renderer, including Stock Explorer, NIFTY/BANKNIFTY, Watchlist, Market Activity, FII/DII Flow, Option Chain, Technical Indicators, Alerts and Logs. Market Activity now also initiates its verified-snapshot loader on tab entry. Index workspaces use the existing quote-focus renderer; no prices are fabricated.
