@@ -449,9 +449,29 @@ async function loadStockExplorerQuotes() {
     const response = await fetch(BACKEND_URL + '/api/market/movers', {
       headers: { Accept: 'application/json' }, cache: 'no-store'
     });
-    const result = await response.json().catch(() => ({}));
+    let result = await response.json().catch(() => ({}));
     if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
       throw new Error(result.detail || result.error || 'FYERS equity snapshot unavailable.');
+    }
+    if (result.marketSession === 'CLOSED' || result.data.length === 0) {
+      const lastResponse = await fetch(BACKEND_URL + '/api/market/last-known-stock-quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const lastKnown = await lastResponse.json().catch(() => ({}));
+      if (lastResponse.ok && lastKnown.ok === true && Array.isArray(lastKnown.data)) {
+        result = {
+          ok: true, marketSession: 'CLOSED', source: lastKnown.source, universe: 'FYERS-NSE-FO-symbol-master',
+          fetchedAt: lastKnown.fetchedAt, universeCount: lastKnown.universeCount, quotedCount: lastKnown.quotedCount,
+          requestedSymbols: lastKnown.universeCount, receivedSymbols: lastKnown.quotedCount,
+          partial: lastKnown.partial === true, failedSymbols: lastKnown.missingSymbols || [],
+          data: lastKnown.data.map(row => ({
+            symbol: row.symbol, price: row.price, changePct: row.changePct,
+            priceAsOf: row.priceAsOf, quoteAgeSeconds: row.quoteAgeSeconds,
+            priceStatus: 'LAST_KNOWN_PRICE', verified: row.verified === true, source: row.source
+          }))
+        };
+        status.textContent = 'Market closed · actual last-known FYERS LTPs loaded; display-only, not live signals.';
+      } else {
+        status.textContent = 'Market closed. Last-known F&O prices unavailable: ' + (lastKnown.error || 'FYERS did not return exchange-stamped quotes.') + '. No prices were fabricated.';
+      }
     }
     stockExplorerMoverRows = result.data.filter(row =>
       row && typeof row.symbol === 'string' &&
