@@ -223,37 +223,50 @@ async function renderLiveQuotes(key){
  const target=document.querySelector("#liveQuotePanel");
  if(!target)return;
  target.replaceChildren(el("h3","Verified index quotes"));
- if(!sessionToken){
-  target.append(el("p","Connect FYERS to load authenticated live quotes."));
-  return;
- }
- try{
-  const r=await fetch(API_BASE+"/api/market/quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
-  const data=await r.json();
-  if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS dashboard session expired. Connect FYERS again.");}
-  if(!r.ok||!Array.isArray(data.data))throw new Error(data.detail||data.error||"Fresh verified quotes are not available.");
-  const wanted=key==="nifty"?["NSE:NIFTY50-INDEX"]:key==="banknifty"?["NSE:NIFTYBANK-INDEX"]:["NSE:NIFTY50-INDEX","NSE:NIFTYBANK-INDEX"];
-  const rows=data.data.filter(item=>wanted.includes(item.n));
-  if(rows.length!==wanted.length)throw new Error("Required index quote is missing; no price shown.");
+ if(!sessionToken){target.append(el("p","Connect FYERS to load authenticated quotes."));return;}
+ const wanted=key==="nifty"?["NSE:NIFTY50-INDEX"]:key==="banknifty"?["NSE:NIFTYBANK-INDEX"]:["NSE:NIFTY50-INDEX","NSE:NIFTYBANK-INDEX","BSE:SENSEX-INDEX"];
+ (async()=>{
+  let data=null,mode="live";
+  try{
+   const r=await fetch(API_BASE+"/api/market/quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
+   const payload=await r.json();
+   if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS dashboard session expired. Connect FYERS again.");}
+   if(r.ok&&payload.ok===true&&Array.isArray(payload.data))data=payload;
+   else throw new Error(payload.detail||payload.error||"Fresh verified quotes are not available.");
+  }catch(liveError){
+   try{
+    const r=await fetch(API_BASE+"/api/market/last-known-quotes",{cache:"no-store",headers:{Authorization:"Bearer "+sessionToken}});
+    const payload=await r.json();
+    if(r.status===401){sessionToken="";sessionStorage.removeItem(sessionKey);throw new Error("FYERS dashboard session expired. Connect FYERS again.");}
+    if(!r.ok||payload.ok!==true||!Array.isArray(payload.data)||!payload.data.length)throw new Error(payload.error||"Last-known index quotes unavailable.");
+    data=payload;mode="last-known";
+   }catch(lastError){
+    target.append(el("p",String(lastError?.message||liveError?.message||"Verified quotes unavailable.")+" No placeholder prices are shown; live signals remain blocked."));
+    return;
+   }
+  }
+  const rows=data.data.filter(item=>item&&wanted.includes(item.n)&&item.v&&Number.isFinite(Number(item.v.lp))&&Number(item.v.lp)>0);
+  const required=key==="nifty"?["NSE:NIFTY50-INDEX"]:key==="banknifty"?["NSE:NIFTYBANK-INDEX"]:["NSE:NIFTY50-INDEX","NSE:NIFTYBANK-INDEX"];
+  if(!required.every(symbol=>rows.some(item=>item.n===symbol))){
+   target.append(el("p","Required NIFTY/BANKNIFTY quote is missing. Available verified data is withheld from live analysis."));
+   return;
+  }
   for(const item of rows){
-   const symbol=item.n;
-   const label=symbol==="NSE:NIFTY50-INDEX"?"NIFTY":"BANKNIFTY";
-   const price=Number(item.v?.lp);
-   const stamp=Number(item.v?.tt);
-   const time=stamp>0?new Date(stamp*1000):null;
-   const ageMs=time?Date.now()-time.getTime():Infinity;
-   if(!Number.isFinite(price)||price<=0||!time||Number.isNaN(time.getTime())||ageMs < -30000||ageMs > 120000)continue;
+   const symbol=item.n,label=symbol==="NSE:NIFTY50-INDEX"?"NIFTY":symbol==="NSE:NIFTYBANK-INDEX"?"BANKNIFTY":"SENSEX";
+   const price=Number(item.v.lp),stamp=Number(item.v.tt);
+   const time=stamp>0?new Date(stamp*1000):null,ageMs=time?Date.now()-time.getTime():Infinity;
+   if(!Number.isFinite(price)||price<=0||!time||Number.isNaN(time.getTime())||ageMs < -30000)continue;
+   if(mode==="live"&&ageMs>120000)continue;
    const card=el("article",undefined,"quote-card");
-   card.append(el("span",label),el("strong","₹"+price.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})),el("small","Exchange time: "+time.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})));
-   const chp=Number(item.v?.chp);
-   if(Number.isFinite(chp))card.append(el("small",(chp>=0?"+":"")+chp.toFixed(2)+"% (FYERS reported change)"));
+   card.append(el("span",label),el("strong","₹"+price.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2})),el("small",(mode==="last-known"?"LAST KNOWN · ":"Exchange time: ")+time.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})));
+   const chp=item.v.chp==null?null:Number(item.v.chp);
+   if(chp!==null&&Number.isFinite(chp))card.append(el("small",(chp>=0?"+":"")+chp.toFixed(2)+"% (FYERS reported change)"));
+   if(mode==="last-known")card.append(el("small","Age: "+Math.floor(Math.max(0,ageMs)/60000)+" min · display only"));
    target.append(card);
   }
-  const validCards=target.querySelectorAll(".quote-card").length;
-  if(validCards!==wanted.length)throw new Error("Only "+validCards+" of "+wanted.length+" required index quote(s) passed price and 120-second exchange-timestamp validation.");
- }catch(error){
-  target.append(el("p",String(error?.message||"Verified quotes unavailable.")+" No placeholder price is displayed."));
- }
+  if(mode==="last-known")target.append(el("p","Market closed or live feed unavailable. These are actual FYERS last-known prices, not live ticks. Signals are blocked."));
+  else if(key==="dashboard"&&!rows.some(item=>item.n==="BSE:SENSEX-INDEX"))target.append(el("p","SENSEX fresh tick is not available yet; NIFTY and BANKNIFTY remain independently verified."));
+ })();
 }
 async function renderStockExplorer(){
  const box=el("section",undefined,"stock-explorer");
