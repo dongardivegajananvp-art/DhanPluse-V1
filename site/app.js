@@ -928,7 +928,7 @@ function advancedScannerMarkup(tab) {
       '<p class="hint">Figures are provisional and may be revised. This module is context only: it does not create a trade signal. If NSE blocks or changes its response, values remain unavailable rather than being guessed.</p></div>';
   }
   if (tab === 'Sureshot CE/PE') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY CE/PE · OHLC zones + verified option chain</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50 · Index options</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><button class="primary" id="refreshSetupBtn">Analyse verified setup</button></div><div id="setupStatus" class="hint">A setup is shown only after verified OHLC candles and option-chain data are available. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY CE/PE · OHLC zones + verified option chain</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50 · Index options</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><label>Strike selection<select id="setupStrike"><option value="AUTO" selected>AUTO · best verified eligible</option></select></label><button class="primary" id="refreshSetupBtn">Analyse verified setup</button></div><div id="setupStatus" class="hint">A setup is shown only after verified OHLC candles and option-chain data are available. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
   }
   if (tab === 'FII/DII Flow') {
     return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
@@ -997,9 +997,9 @@ async function loadSureshotStockUniverse() {
 
 async function loadSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
-  const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
-  if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
-  const symbol=symbolEl.value,resolution=resolutionEl.value;
+  const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),strikeEl=document.querySelector('#setupStrike'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
+  if(!status||!cards||!symbolEl||!resolutionEl||!strikeEl||!chart||!summary)return;
+  const symbol=symbolEl.value,resolution=resolutionEl.value,requestedStrike=strikeEl.value;
   status.textContent='Requesting verified FYERS OHLC candles and option-chain data…';
   cards.innerHTML='<div class="chart-empty">Checking conditions…</div>';
   chart.innerHTML='<div class="chart-empty">Loading verified candles…</div>';
@@ -1029,7 +1029,11 @@ async function loadSureshotSetup() {
     const spot=chainCheck.spot;
     const fetchedAt=Date.parse(optionResult.fetchedAt||'');
     if(!Number.isFinite(fetchedAt)||Date.now()-fetchedAt>15000||fetchedAt>Date.now()+5000)throw new Error('Option-chain snapshot timestamp is stale or invalid; no signal.');
-    const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
+    const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))].sort((a,b)=>a-b);
+    const previousStrike=strikeEl.value||'AUTO';
+    strikeEl.innerHTML='<option value="AUTO">AUTO · best verified eligible</option>'+strikes.map(x=>'<option value="'+x+'">'+displayNumber(x,0)+' · manual</option>').join('');
+    strikeEl.value=previousStrike!=='AUTO'&&strikes.includes(Number(previousStrike))?previousStrike:'AUTO';
+    const selectedStrike=strikeEl.value==='AUTO'?null:Number(strikeEl.value);
     const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
     const confirmedType=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
     const atmIndex=atm===null?-1:strikes.indexOf(atm);
@@ -1046,11 +1050,13 @@ async function loadSureshotSetup() {
         setupCards.push('<article class="console-section"><div class="console-section-head"><h4>'+type+' · NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(sideReason)+'</p><p class="hint">No entry, stop-loss or target is issued without independent directional confirmation.</p></article>');
         continue;
       }
-      const legCandidates=chain.filter(x=>nearbyStrikes.has(Number(x.strike_price))&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0);
+      const eligibleStrikes=selectedStrike===null?nearbyStrikes:new Set([selectedStrike]);
+      const legCandidates=chain.filter(x=>eligibleStrikes.has(Number(x.strike_price))&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0);
       legCandidates.sort((a,b)=>b.volume-a.volume||b.oi-a.oi||a.spreadPct-b.spreadPct||Math.abs(a.strike_price-spot)-Math.abs(b.strike_price-spot));
       const leg=legCandidates[0]||null;
       if(!leg){
-        setupCards.push('<article class="console-section"><div class="console-section-head"><h4>'+type+' · NO TRADE</h4><span class="signal-tone neutral">NO CONTRACT</span></div><p>No nearby '+type+' contract passed verified premium, liquidity, OI and spread filters.</p></article>');
+        const noLegReason=selectedStrike!==null?'The manually selected strike '+selectedStrike+' has no eligible '+type+' contract in the verified chain. No automatic strike substitution was made.':'No nearby '+type+' contract passed verified premium, liquidity, OI and spread filters.';
+        setupCards.push('<article class="console-section"><div class="console-section-head"><h4>'+type+' · NO TRADE</h4><span class="signal-tone neutral">NO CONTRACT</span></div><p>'+escapeHtml(noLegReason)+'</p></article>');
         continue;
       }
       try{
@@ -1073,7 +1079,7 @@ async function loadSureshotSetup() {
       }
     }
     cards.innerHTML=setupCards.join('');
-    status.textContent='CE and PE evaluated independently · Underlying: '+bias+' · '+(quoteWarnings.length?'Some contract quotes were blocked; see side-specific cards. ':'')+'Candidate only; no order placed.';
+    status.textContent='CE and PE evaluated independently · Underlying: '+bias+' · Strike: '+(selectedStrike===null?'AUTO':'MANUAL '+selectedStrike)+' · '+(quoteWarnings.length?'Some contract quotes were blocked; see side-specific cards. ':'')+'Candidate only; no order placed.';
     logEvent('Sureshot evaluated CE and PE independently using verified underlying candles and contract quote checks.','info');
   }catch(error){
     cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">DATA / FILTER</span></div><p>'+escapeHtml(error.message||'Required verified data unavailable.')+'</p><p class="hint">No prices or signals were invented. Retry after confirming FYERS historical-data and option-chain access.</p></article>';
@@ -1702,6 +1708,10 @@ function bindTabActions() {
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
   const setupSymbol=document.querySelector('#setupSymbol');
   if(setupSymbol) setupSymbol.addEventListener('change',loadSureshotSetup);
+  const setupResolution=document.querySelector('#setupResolution');
+  if(setupResolution) setupResolution.addEventListener('change',loadSureshotSetup);
+  const setupStrike=document.querySelector('#setupStrike');
+  if(setupStrike) setupStrike.addEventListener('change',loadSureshotSetup);
   const advancedRefresh=document.querySelector('#refreshAdvancedBtn');
   if(advancedRefresh) advancedRefresh.addEventListener('click',loadAdvancedScanner);
   const loadCandlesBtn=document.querySelector('#loadCandlesBtn');
