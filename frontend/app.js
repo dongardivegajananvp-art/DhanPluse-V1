@@ -293,7 +293,7 @@ async function renderStockExplorer(){
     const tr=document.createElement("tr");
     const symbol=item.n.replace("NSE:","").replace("-EQ","");
     const stamp=new Date(Number(item.v.tt)*1000);
-    const change=safeNumber(item.v.ch);
+    const change=item.v.ch==null?null:safeNumber(item.v.ch);
     const pct=item.v.chp==null?null:Number(item.v.chp);
     const vals=[symbol,Number(item.v.lp).toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),change===null?"—":change.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}),pct===null||!Number.isFinite(pct)?"—":(pct>=0?"+":"")+pct.toFixed(2)+"%",stamp.toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})];
     vals.forEach((v,i)=>{const td=el("td",v);if(i===3&&pct!==null&&Number.isFinite(pct))td.style.color=pct>=0?"#63f0cb":"#ff718c";tr.append(td);});
