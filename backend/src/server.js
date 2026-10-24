@@ -168,7 +168,7 @@ function startMarketDataStream(token) {
           type: typeof x.type === 'string' ? x.type.slice(0, 24) : null,
           status: typeof x.s === 'string' ? x.s.slice(0, 16) : null,
           code: x.code == null ? null : String(x.code).slice(0, 24),
-          message: typeof x.message === 'string' ? x.message.replace(/\\s+/g, ' ').slice(0, 120) : null
+          message: typeof x.message === 'string' ? x.message.replace(/\s+/g, ' ').slice(0, 120) : null
         }));
       if (controlFrames.length) {
         console.log('FYERS socket control frame:', JSON.stringify(controlFrames));
