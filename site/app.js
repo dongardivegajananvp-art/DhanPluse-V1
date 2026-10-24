@@ -226,6 +226,19 @@ function signalDataBlockReason(symbol) {
 
 function validateOhlcCandles(candles, resolution) {
   if (!Array.isArray(candles) || candles.length < 12) return 'At least 12 OHLC candles are required.';
+  // The backend's verified FYERS history endpoint returns objects; normalize those
+  // into the same [epochSeconds, open, high, low, close, volume] shape used by
+  // the chart/scanner code. Keep strict validation below; never synthesize values.
+  for (let i = 0; i < candles.length; i++) {
+    const row = candles[i];
+    if (!Array.isArray(row) && row && typeof row === 'object') {
+      const rawTime = row.timestamp ?? row.time ?? row.t;
+      let time = Number(rawTime);
+      if (typeof rawTime === 'string' && !Number.isFinite(time)) time = Date.parse(rawTime) / 1000;
+      else if (time > 1e12) time /= 1000;
+      candles[i] = [time, row.open ?? row.o, row.high ?? row.h, row.low ?? row.l, row.close ?? row.c, row.volume ?? row.v];
+    }
+  }
   let previousTime = -Infinity;
   for (const row of candles) {
     if (!Array.isArray(row) || row.length < 5) return 'Candle row is incomplete.';
