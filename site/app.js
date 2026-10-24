@@ -41,6 +41,7 @@ let fyersAuthState = 'NOT CONNECTED';
 let authInProgress = false;
 let deferredInstallPrompt = null;
 let optionRequestRunning = false;
+let selectedOptionStrike = null;
 let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
 let latestQuotes = {};
@@ -1286,7 +1287,7 @@ function signalsMarkup() {
 }
 
 function optionChainMarkup() {
-  return '<div class="console-section"><div class="option-controls"><label>Underlying<select id="ocSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option></select></label><label>Strikes each side<select id="ocStrikeCount"><option value="5">5</option><option value="10" selected>10</option><option value="15">15</option><option value="20">20</option></select></label><label>Expiry<select id="ocExpiry"><option value="">Nearest expiry</option></select></label><button class="primary" id="loadOptionChainBtn">Load option chain</button></div><div id="ocStatus" class="hint">Option chain will load from the authenticated FYERS read-only endpoint.</div><div class="console-grid console-grid-3" id="ocSummary"><article class="console-section"><small>Total Call OI</small><strong id="ocCallOi">—</strong></article><article class="console-section"><small>Total Put OI</small><strong id="ocPutOi">—</strong></article><article class="console-section"><small>Put / Call Ratio</small><strong id="ocPcr">—</strong></article></div><div id="ocTable" class="table-wrap"><div class="chart-empty">Open the panel to load verified strikes.</div></div></div><p class="hint">Market-data display only. Option premiums and OI can change quickly; verify with FYERS before acting. No orders can be placed from this console.</p>';
+  return '<div class="console-section"><div class="option-controls"><label>Underlying<select id="ocSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option></select></label><label>Strikes each side<select id="ocStrikeCount"><option value="5">5</option><option value="10" selected>10</option><option value="15">15</option><option value="20">20</option></select></label><label>Expiry<select id="ocExpiry"><option value="">Nearest expiry</option></select></label><button class="primary" id="loadOptionChainBtn">Load option chain</button></div><div id="ocStatus" class="hint">Option chain will load from the authenticated FYERS read-only endpoint.</div><div class="console-grid console-grid-3" id="ocSummary"><article class="console-section"><small>Total Call OI</small><strong id="ocCallOi">—</strong></article><article class="console-section"><small>Total Put OI</small><strong id="ocPutOi">—</strong></article><article class="console-section"><small>Put / Call Ratio</small><strong id="ocPcr">—</strong></article></div><div id="ocSelectedStrike" class="hint">No strike selected. Load the chain, then tap a strike price in the middle column.</div><div id="ocTable" class="table-wrap"><div class="chart-empty">Open the panel to load verified strikes.</div></div></div><p class="hint">Tap any strike price in the middle column to select it for review. Selection is local/read-only and does not place an order. Market-data display only. Option premiums and OI can change quickly; verify with FYERS before acting. No orders can be placed from this console.</p>';
 }
 
 function holdingsMarkup() {
@@ -1417,9 +1418,26 @@ async function loadOptionChain() {
           const row = byStrike.get(strike);
           const ce = row.CE || {};
           const pe = row.PE || {};
-          return '<tr><td>' + displayNumber(ce.ltp) + '</td><td>' + displayNumber(ce.ltpchp) + '</td><td>' + displayNumber(ce.oi, 0) + '</td><td>' + displayNumber(ce.volume, 0) + '</td><td><b>' + displayNumber(strike, 0) + '</b></td><td>' + displayNumber(pe.ltp) + '</td><td>' + displayNumber(pe.ltpchp) + '</td><td>' + displayNumber(pe.oi, 0) + '</td><td>' + displayNumber(pe.volume, 0) + '</td></tr>';
+          return '<tr data-strike-row="' + strike + '" style="' + (Number(selectedOptionStrike) === strike ? 'background:rgba(93,224,162,.12);' : '') + '"><td>' + displayNumber(ce.ltp) + '</td><td>' + displayNumber(ce.ltpchp) + '</td><td>' + displayNumber(ce.oi, 0) + '</td><td>' + displayNumber(ce.volume, 0) + '</td><td><button type="button" class="secondary" data-select-strike="' + strike + '" style="padding:4px 8px;min-width:64px;" aria-pressed="' + (Number(selectedOptionStrike) === strike ? 'true' : 'false') + '">' + displayNumber(strike, 0) + '</button></td><td>' + displayNumber(pe.ltp) + '</td><td>' + displayNumber(pe.ltpchp) + '</td><td>' + displayNumber(pe.oi, 0) + '</td><td>' + displayNumber(pe.volume, 0) + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
+    const selectedStrikeStatus = document.querySelector('#ocSelectedStrike');
+    if (selectedStrikeStatus) selectedStrikeStatus.textContent = selectedOptionStrike != null && byStrike.has(Number(selectedOptionStrike))
+      ? 'Selected strike: ' + displayNumber(selectedOptionStrike, 0) + ' · ' + symbolEl.options[symbolEl.selectedIndex].text + ' · review CE/PE LTP, OI and volume in this row. Selection is not an order.'
+      : 'Tap a strike price in the middle column to select it. Selection is review-only; no order is placed.';
+    table.onclick = event => {
+      const button = event.target.closest('button[data-select-strike]');
+      if (!button) return;
+      selectedOptionStrike = Number(button.getAttribute('data-select-strike'));
+      table.querySelectorAll('tr[data-strike-row]').forEach(row => {
+        const chosen = Number(row.getAttribute('data-strike-row')) === selectedOptionStrike;
+        row.style.background = chosen ? 'rgba(93,224,162,.12)' : '';
+        const selectButton = row.querySelector('button[data-select-strike]');
+        if (selectButton) selectButton.setAttribute('aria-pressed', chosen ? 'true' : 'false');
+      });
+      if (selectedStrikeStatus) selectedStrikeStatus.textContent = 'Selected strike: ' + displayNumber(selectedOptionStrike, 0) + ' · ' + symbolEl.options[symbolEl.selectedIndex].text + ' · review CE/PE LTP, OI and volume in this row. Selection is not an order.';
+      logEvent('Option-chain strike selected for read-only review: ' + selectedOptionStrike + '.', 'info');
+    };
     status.textContent = backendNormalized
       ? 'DISPLAY ONLY · FYERS response received at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + '. ' + strikes.length + ' strikes shown. Exchange-time freshness and bid/ask are not verified; Sureshot signals remain blocked.'
       : 'FYERS option-chain response received at ' + new Date(result.fetchedAt || Date.now()).toLocaleTimeString('en-IN') + '. ' + strikes.length + ' strikes shown. Response time alone does not prove exchange-quote freshness; selected contracts are checked separately before a Sureshot setup.';
