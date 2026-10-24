@@ -9,6 +9,8 @@ This is not a claim that a live FYERS session or production deployment has passe
 - [x] Restored all 24 tab buttons in the original Ultimate UI.
 - [x] Added CI check that the navigation and tab-description registry each contain the same 24 unique tabs.
 - [x] Added CI regression checks for preview-to-test backend routing, production default routing, and preview OAuth blocking.
+- [x] Fixed an over-escaped preview hostname matcher discovered during offline source review; regression test now exercises a realistic preview hostname and a non-preview hostname.
+- [x] Hardened live mover validation to block empty/malformed snapshots and added unit tests for those cases.
 - [x] Kept Gap-Up/Down and existing PWA assets.
 - [x] Order placement remains disabled.
 - [ ] Browser/mobile end-to-end click-through on the deployed test UI.
@@ -59,7 +61,7 @@ This is not a claim that a live FYERS session or production deployment has passe
 - Render production logs contain two upstream FYERS `/data/quotes` HTTP 429 / Cloudflare Error 1015 events: `2026-10-23T06:20:18Z` and `2026-10-23T08:33:14Z`. This confirms a real rate-limit incident; these log entries alone do not prove successful recovery after cooldown. Do not infer quote coverage from backend health.
 - Production backend Render service remains on `main`; its latest live deploy is commit `8ae4b4f`. PR #40 is still a draft and is not deployed to Render.
 - Current Render test UIs are on `test-ultimate-session-fix` and `clean-rebuild`; the test backend is also on `clean-rebuild`. The PR #40 Netlify deploy preview now routes to `https://dhanpulse-clean-test.onrender.com`; non-preview hosts retain `https://dhanpluse-v1.onrender.com`. The isolated preview blocks FYERS OAuth start until its exact test redirect URI is verified.
-- The test backend CORS allowlist deployment is live on the test service only. Automated CI run #385 passed after adding `scripts/check-preview-isolation.mjs`; this validates source-level routing/guard assertions, not browser network behavior.
+- The test backend CORS allowlist deployment is live on the test service only. Automated CI run #385 passed before the latest follow-up fixes. The preview-host matcher and empty-snapshot checks were then hardened in source; the new CI result is pending. These automated checks validate source-level routing/guard assertions, not browser network behavior.
 - Remaining next step: real browser/mobile verification of the deployed preview's API destination, CORS preflight/response, console errors, and all 24 tab click-through. No production environment variables or services were changed during this check.
 
 ## Changes made on this branch
