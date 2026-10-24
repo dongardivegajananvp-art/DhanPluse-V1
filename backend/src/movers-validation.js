@@ -28,3 +28,18 @@ export function assertCompleteMoverSnapshot({
 
   return true;
 }
+
+export function assertFreshMoverSnapshot(rows, marketOpen) {
+  if (!marketOpen) return true;
+  const staleSymbols = (Array.isArray(rows) ? rows : [])
+    .filter(row => !row || row.priceStatus !== 'LIVE_QUOTE')
+    .map(row => row && row.symbol)
+    .filter(Boolean);
+  if (staleSymbols.length > 0) {
+    const error = new Error('FYERS returned stale or timestamp-unverified quotes; live rankings and dependent signals are blocked.');
+    error.statusCode = 502;
+    error.staleSymbols = staleSymbols;
+    throw error;
+  }
+  return true;
+}
