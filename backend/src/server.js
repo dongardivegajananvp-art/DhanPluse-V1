@@ -6,6 +6,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './gap-analysis.js';
 import { assertCompleteMoverSnapshot } from './movers-validation.js';
+import { quoteTimestampStatus } from './fresh-data-validation.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -241,7 +242,7 @@ function liveSnapshot() {
   const now = Date.now();
   const tickAges = ticks.map(tick => now - Date.parse(tick.updatedAt));
   // Every index timestamp must be plausible: reject both stale and future-dated ticks.
-  if (tickAges.some(age => !Number.isFinite(age) || age < 0 || age > 120000)) return null;
+  if (ticks.some(tick => quoteTimestampStatus(Date.parse(tick.updatedAt) / 1000, now, 15) !== 'FRESH')) return null;
 
   return {
     ok: true,
@@ -839,11 +840,10 @@ app.get('/api/market/movers', async (_req, res) => {
           const quoteAgeSeconds = rawQuoteAgeSeconds === null ? null : Math.max(0, rawQuoteAgeSeconds);
           // A successful HTTP response is not proof that the underlying quote is fresh.
           // Missing, future-dated, or old exchange timestamps must never be called live.
+          const timestampStatus = quoteTimestampStatus(tradedAtEpoch, Date.now(), 30);
           const priceStatus = !marketOpen
             ? 'LAST_KNOWN_PRICE'
-            : (!tradedAtEpoch || rawQuoteAgeSeconds < 0
-              ? 'TIME_UNVERIFIED'
-              : (rawQuoteAgeSeconds <= 180 ? 'LIVE_QUOTE' : 'STALE_QUOTE'));
+            : (timestampStatus === 'FRESH' ? 'LIVE_QUOTE' : timestampStatus === 'STALE' ? 'STALE_QUOTE' : 'TIME_UNVERIFIED');
           return {
             symbol, price,
             change: Number.isFinite(change) ? change : null,
