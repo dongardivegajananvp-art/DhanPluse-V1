@@ -31,6 +31,7 @@ jobs:
           node --check backend/src/movers-validation.js
           node --check backend/src/fresh-data-validation.js
           node --check scripts/check-tabs.mjs
+          node --check scripts/check-oauth-offline.mjs
           node --check site/sw.js
       - name: Validate PWA manifest and required assets
         run: |
@@ -47,6 +48,7 @@ jobs:
           test -s site/dhanpulse-icon.svg
           node scripts/check-tabs.mjs
           node scripts/check-preview-isolation.mjs
+          node scripts/check-oauth-offline.mjs
           grep -q 'BSE:SENSEX-INDEX' backend/src/server.js
           grep -q 'Order placement' site/index.html
           grep -q 'publish = "site"' netlify.toml
