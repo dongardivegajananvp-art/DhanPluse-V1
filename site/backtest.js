@@ -2,7 +2,7 @@
   'use strict';
   const nav=document.querySelector('#nav'), content=document.querySelector('#featureContent');
   if(!nav||!content)return;
-  const BACKEND='https://dhanpluse-v1.onrender.com';
+  const BACKEND='https://dhanpulse-clean-test.onrender.com';
   const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const dateStr=d=>{const x=new Date(d.getTime()-d.getTimezoneOffset()*60000);return x.toISOString().slice(0,10);};
   function markup(){const now=new Date(),from=new Date(now.getTime()-6*86400000);return '<article class="console-section"><div class="console-section-head"><div><h4>Historical candle backtest</h4><p>EMA 5/20 crossover, next-candle entry, fixed stop/target, conservative stop-first handling if both hit.</p></div><span class="live-tag">SIMULATION ONLY</span></div><form id="dpBtForm" class="alert-form">'+
