@@ -177,17 +177,30 @@ function startMarketDataStream(token) {
           try {
             const universe = await getNseFnoEquityUniverse();
             const equities = universe.data.map(item => item.symbol).filter(symbol => /^NSE:[A-Z0-9&-]+-EQ$/.test(symbol));
-            let subscribedCount = 0;
-            for (let offset = 0; offset < equities.length; offset += 100) {
-              if (marketSocket !== socket) return;
-              const batch = equities.slice(offset, offset + 100);
-              for (const symbol of batch) subscribedSymbols.add(symbol);
-              socket.subscribe(batch);
-              subscribedCount += batch.length;
-              if (offset + 100 < equities.length) await new Promise(resolve => setTimeout(resolve, 250));
-            }
-            recordDiagnostic("info", "fno_equity_subscription_requested", { universeCount: universe.count, subscribedCount });
-            console.log("FYERS NSE F&O equity subscription requests sent:", JSON.stringify({ universeCount: universe.count, subscribedCount }));
+            // FYERS Standard allows at most 100 symbols per socket. The three
+            // index subscriptions already consume three slots, so cap equity
+            // subscriptions at 97. Never send oversized batches: FYERS rejects
+            // the subscription and can stop the stream for every symbol.
+            const maxEquitySubscriptions = Math.max(0, 100 - allowedSymbols.length);
+            const selectedEquities = equities.slice(0, maxEquitySubscriptions);
+            if (marketSocket !== socket) return;
+            for (const symbol of selectedEquities) subscribedSymbols.add(symbol);
+            if (selectedEquities.length) socket.subscribe(selectedEquities);
+            const subscribedCount = selectedEquities.length;
+            recordDiagnostic("info", "fno_equity_subscription_requested", {
+              universeCount: universe.count,
+              eligibleCount: equities.length,
+              subscribedCount,
+              skippedBySocketPlanLimit: Math.max(0, equities.length - subscribedCount),
+              socketSymbolLimit: 100
+            });
+            console.log("FYERS NSE F&O equity subscription requests sent:", JSON.stringify({
+              universeCount: universe.count,
+              eligibleCount: equities.length,
+              subscribedCount,
+              skippedBySocketPlanLimit: Math.max(0, equities.length - subscribedCount),
+              socketSymbolLimit: 100
+            }));
           } catch (error) {
             recordDiagnostic("warn", "fno_equity_subscription_unavailable", { message: String(error?.message || error).slice(0, 140) });
             console.warn("FYERS F&O equity subscriptions unavailable; historical candles remain available:", String(error?.message || error).slice(0, 160));
