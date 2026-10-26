@@ -1871,8 +1871,11 @@ function updateDashboardLiveCandle() {
   const status = document.querySelector('#dashboardCandleStatus');
   if (!symbolEl || !resolutionEl || !chart || symbolEl.value !== state.symbol || resolutionEl.value !== state.resolution) return;
   if (!isRegularMarketSession()) return;
-  let quote = quoteFor(state.symbol) || state.liveQuote || null;
-  if ((!quote || !hasFreshLiveQuote(quote)) && !state.chartQuoteRequestRunning) {
+  const baselineQuote = quoteFor(state.symbol);
+  let quote = baselineQuote || state.liveQuote || null;
+  // Equity chart symbols are separate from the baseline index stream; poll the backend's
+  // in-memory WebSocket tick cache on each normal dashboard quote refresh.
+  if (!baselineQuote && !state.chartQuoteRequestRunning) {
     state.chartQuoteRequestRunning = true;
     fetch(BACKEND_URL + '/api/market/chart-quote?' + new URLSearchParams({ symbol: state.symbol }), {
       headers: { Accept: 'application/json' }, cache: 'no-store'
