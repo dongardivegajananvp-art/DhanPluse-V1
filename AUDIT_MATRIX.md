@@ -1,12 +1,13 @@
-# DhanPulse 24-Tab Audit Matrix
+# DhanPulse Navigation and Feature Audit Matrix
 
 Audit date: 2026-10-24 (Asia/Kolkata)
 Scope: static source review of `site/index.html`, `site/app.js`, and backend quote routes on `fix/fresh-data-session-policy`.
-This is not a claim that a live FYERS session or production deployment has passed.
+This is not a claim that a live FYERS session or production deployment has passed. Important: the current `site/index.html` exposes 12 visible tabs, while `site/app.js` and the audit script retain 24 feature routes; this is not a 24-visible-tab UI.
 
 ## Navigation / regression
 
-- [x] Restored all 24 tab buttons in the original Ultimate UI.
+- [x] Preserved 12 visible navigation tabs in the original Ultimate UI, matching the requested removals/hiding of legacy tabs.
+- [ ] Do not describe this as 24 visible tabs: 24 feature descriptions/routes exist, but only 12 buttons are currently visible.
 - [x] Added CI check that the navigation and tab-description registry each contain the same 24 unique tabs.
 - [x] Added CI regression checks for preview-to-test backend routing, production default routing, and preview OAuth blocking.
 - [x] Fixed an over-escaped preview hostname matcher discovered during offline source review; regression test now exercises a realistic preview hostname and a non-preview hostname.
@@ -56,10 +57,10 @@ This is not a claim that a live FYERS session or production deployment has passe
 8. Production deployment is not authorized by a green CI run alone. Do not merge/deploy while live-session gates are unverified.
 9. Confirm in a real browser that PR #40 preview sends API requests only to the test backend and receives CORS responses. OAuth initiation remains blocked until the test redirect URI is verified.
 
-## Production runtime and deployment evidence (checked 2026-10-24)
+## Production runtime and deployment evidence (checked 2026-10-26)
 
 - Render production logs contain two upstream FYERS `/data/quotes` HTTP 429 / Cloudflare Error 1015 events: `2026-10-23T06:20:18Z` and `2026-10-23T08:33:14Z`. This confirms a real rate-limit incident; these log entries alone do not prove successful recovery after cooldown. Do not infer quote coverage from backend health.
-- Production backend Render service remains on `main`; its latest live deploy is commit `8ae4b4f`. PR #40 is still a draft and is not deployed to Render.
+- Production backend Render service remains on `main`; latest confirmed live deploy is commit `8ae4b4f` (2026-10-23). PR #42 (`consolidate/one-canonical-ultimate`, HEAD `cbad93c`) is still an open draft and is not deployed to production.
 - Current Render test UIs are on `test-ultimate-session-fix` and `clean-rebuild`; the test backend is also on `clean-rebuild`. The PR #40 Netlify deploy preview now routes to `https://dhanpulse-clean-test.onrender.com`; non-preview hosts retain `https://dhanpluse-v1.onrender.com`. The isolated preview blocks FYERS OAuth start until its exact test redirect URI is verified.
 - The test backend CORS allowlist deployment is live on the test service only. GitHub Actions run #406 passed on head `58c1033`, including JavaScript syntax, PWA asset checks, the 24-tab render-route audit, preview isolation checks, offline OAuth source checks, strict CORS-origin policy unit tests, backend unit tests, and dependency audit. The Netlify deploy preview status is green for the same head. These checks validate code/build properties, not browser network behavior.
 - Remaining next step: real browser/mobile verification of the deployed preview's API destination, CORS preflight/response, console errors, and all 24 tab click-through. This environment could not establish a browser session or resolve the public preview/backend hosts; that is a tooling/network limitation, not proof that the services are down. No production environment variables or services were changed during this check.
