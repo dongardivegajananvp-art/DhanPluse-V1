@@ -1,5 +1,9 @@
 
-const BACKEND_URL = 'https://dhanpluse-v1.onrender.com';
+const IS_ISOLATED_TEST_PREVIEW = /^deploy-preview-\d+--spectacular-gaufre-b5c029\.netlify\.app$/.test(window.location.hostname)
+  || window.location.hostname === 'dhanpulse-clean-test-ui.onrender.com';
+const BACKEND_URL = IS_ISOLATED_TEST_PREVIEW
+  ? 'https://dhanpulse-clean-test.onrender.com'
+  : 'https://dhanpluse-v1.onrender.com';
 // The FYERS access token stays on the backend. This opaque session token only
 // authorizes this browser session to read protected dashboard APIs.
 const nativeFetch = window.fetch.bind(window);
@@ -10,6 +14,12 @@ window.fetch = function(input, init = {}) {
   const isBackend = url.startsWith(BACKEND_URL + '/');
   const publicPaths = ['/health', '/api/status', '/api/fyers/auth/start', '/api/fyers/auth/exchange'];
   const pathname = isBackend ? new URL(url).pathname : '';
+  // Never initiate OAuth from an isolated preview until its redirect URI is
+  // independently verified. This prevents a test page from sending auth flow
+  // to a production-configured callback by mistake.
+  if (IS_ISOLATED_TEST_PREVIEW && isBackend && pathname === '/api/fyers/auth/start') {
+    return Promise.reject(new Error('OAuth is disabled in this isolated test preview until the test redirect URI is verified.'));
+  }
   if (isBackend && !publicPaths.includes(pathname)) {
     const session = sessionStorage.getItem('dhanpulse-dashboard-session-v1');
     if (session) headers.set('Authorization', 'Bearer ' + session);
@@ -17,11 +27,12 @@ window.fetch = function(input, init = {}) {
   return nativeFetch(input, { ...init, headers });
 };
 
-const QUOTE_POLL_MS = 2000;
+const QUOTE_POLL_MS = 5000;
 const QUOTE_POLL_MAX_MS = 30000;
+const MAX_EQUITY_QUOTE_AGE_SECONDS = 30; // Locked live-session policy: stale equity/F&O quotes must never feed live views.
 const SYMBOLS = [
-  { symbol: 'NSE:NIFTY50-INDEX', label: 'NIFTY 50', tab: 'NIFTY' },
-  { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'BANKNIFTY' },
+  { symbol: 'NSE:NIFTY50-INDEX', label: 'NIFTY 50', tab: 'Dashboard' },
+  { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'Dashboard' },
   { symbol: 'BSE:SENSEX-INDEX', label: 'SENSEX', tab: 'Dashboard' }
 ];
 
@@ -46,6 +57,8 @@ let currentTab = 'Dashboard';
 let latestQuotes = {};
 let historyBySymbol = {};
 let stockExplorerMoverRows = [];
+let fnoChartSymbols = [];
+let fnoChartUniverseRequestRunning = false;
 let watchlistEquityRows = [];
 let watchlistRequestRunning = false;
 let watchlistSymbols = loadWatchlistSymbols();
@@ -319,6 +332,46 @@ function svgChart(symbol, height) {
     '<text x="12" y="' + (h - 3) + '" class="chart-label">LOW ' + formatPrice(min) + '</text></svg>';
 }
 
+async function loadFnoChartUniverse() {
+  if (fnoChartUniverseRequestRunning) return;
+  const select = document.querySelector('#dashboardCandleSymbol');
+  if (!select || currentTab !== 'Dashboard') return;
+  fnoChartUniverseRequestRunning = true;
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/fno-universe', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
+      const status = document.querySelector('#dashboardCandleStatus');
+      if (status) status.textContent = 'Full NSE F&O chart list is not available yet. Connect FYERS; no symbols or prices were fabricated.';
+      return;
+    }
+    fnoChartSymbols = result.data
+      .filter(item => item && typeof item.symbol === 'string' && /^NSE:[A-Z0-9&-]+-EQ$/.test(item.symbol))
+      .map(item => ({ symbol: item.symbol, name: item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '') }));
+    if (currentTab !== 'Dashboard') return;
+    const liveSelect = document.querySelector('#dashboardCandleSymbol');
+    if (!liveSelect) return;
+    const selected = liveSelect.value;
+    const options = [
+      { symbol: 'NSE:NIFTY50-INDEX', name: 'NIFTY 50' },
+      { symbol: 'NSE:NIFTYBANK-INDEX', name: 'BANK NIFTY' },
+      { symbol: 'BSE:SENSEX-INDEX', name: 'SENSEX' },
+      ...fnoChartSymbols
+    ];
+    const seen = new Set();
+    liveSelect.innerHTML = options.filter(item => !seen.has(item.symbol) && seen.add(item.symbol))
+      .map(item => '<option value="' + escapeHtml(item.symbol) + '">' + escapeHtml(item.name) + '</option>').join('');
+    if (options.some(item => item.symbol === selected)) liveSelect.value = selected;
+    const status = document.querySelector('#dashboardCandleStatus');
+    if (status) status.textContent = 'Verified FYERS symbol master loaded: ' + fnoChartSymbols.length + ' NSE F&O equities plus NIFTY, BANK NIFTY and SENSEX. Select any symbol and load its real historical OHLC candles.';
+  } catch (error) {
+    const status = document.querySelector('#dashboardCandleStatus');
+    if (status) status.textContent = 'NSE F&O chart universe unavailable: ' + (error.message || 'FYERS session required') + '.';
+  } finally {
+    fnoChartUniverseRequestRunning = false;
+  }
+}
+
 async function loadDashboardCandles() {
   const symbol=document.querySelector('#dashboardCandleSymbol');
   const resolution=document.querySelector('#dashboardCandleResolution');
@@ -393,9 +446,45 @@ async function loadStockExplorerQuotes() {
     const response = await fetch(BACKEND_URL + '/api/market/movers', {
       headers: { Accept: 'application/json' }, cache: 'no-store'
     });
-    const result = await response.json().catch(() => ({}));
+    let result = await response.json().catch(() => ({}));
     if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
       throw new Error(result.detail || result.error || 'FYERS equity snapshot unavailable.');
+    }
+    if (result.marketSession === 'CLOSED' || result.data.length === 0) {
+      const lastResponse = await fetch(BACKEND_URL + '/api/market/last-known-stock-quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const lastKnown = await lastResponse.json().catch(() => ({}));
+      const validLastKnownRows = Array.isArray(lastKnown.data) ? lastKnown.data.filter(row =>
+        row && row.verified === true && typeof row.symbol === 'string' &&
+        Number.isFinite(Number(row.price)) && Number(row.price) > 0 &&
+        Number.isFinite(Date.parse(String(row.priceAsOf || ''))) &&
+        Date.parse(String(row.priceAsOf || '')) <= Date.now() + 5000
+      ) : [];
+      if (lastResponse.ok && lastKnown.ok === true && validLastKnownRows.length > 0) {
+        const universeCount = Number(lastKnown.universeCount);
+        const missingSymbols = Array.isArray(lastKnown.missingSymbols) ? lastKnown.missingSymbols : [];
+        const complete = Number.isFinite(universeCount) && universeCount > 0 &&
+          validLastKnownRows.length === universeCount && missingSymbols.length === 0 &&
+          lastKnown.partial !== true;
+        result = {
+          ok: true, marketSession: lastKnown.marketSession || 'CLOSED',
+          source: lastKnown.source, universe: 'FYERS-NSE-FO-symbol-master',
+          fetchedAt: lastKnown.fetchedAt, universeCount,
+          quotedCount: validLastKnownRows.length,
+          requestedSymbols: universeCount, receivedSymbols: validLastKnownRows.length,
+          partial: !complete, failedSymbols: missingSymbols,
+          data: validLastKnownRows.map(row => ({
+            symbol: row.symbol, price: Number(row.price),
+            changePct: row.changePct == null ? null : Number(row.changePct),
+            priceAsOf: row.priceAsOf, quoteAgeSeconds: Number(row.quoteAgeSeconds),
+            priceStatus: 'LAST_KNOWN_PRICE', verified: true, source: row.source
+          }))
+        };
+        status.textContent = (result.marketSession === 'CLOSED' ? 'Market closed' : 'Live snapshot unavailable') +
+          ' · showing ' + validLastKnownRows.length + '/' + (Number.isFinite(universeCount) ? universeCount : '?') +
+          ' actual FYERS last-known LTPs; unavailable symbols remain blank. Display-only; no signals from these prices.';
+      } else {
+        status.textContent = 'Last-known FYERS prices unavailable. ' + (lastKnown.error || 'No valid exchange-stamped LTPs returned.') + ' No prices were fabricated.';
+      }
     }
     stockExplorerMoverRows = result.data.filter(row =>
       row && typeof row.symbol === 'string' &&
@@ -407,10 +496,10 @@ async function loadStockExplorerQuotes() {
     const allRowsFresh = stockExplorerMoverRows.length === requested && stockExplorerMoverRows.every(row => {
       if (row.priceStatus !== 'LIVE_QUOTE' || !Number.isFinite(Number(row.changePct)) ||
           !Number.isFinite(Number(row.quoteAgeSeconds)) || Number(row.quoteAgeSeconds) < 0 ||
-          Number(row.quoteAgeSeconds) > 180 || !row.priceAsOf) return false;
+          Number(row.quoteAgeSeconds) > MAX_EQUITY_QUOTE_AGE_SECONDS || !row.priceAsOf) return false;
       const tradedAt = Date.parse(row.priceAsOf);
       const ageSeconds = (Date.now() - tradedAt) / 1000;
-      return Number.isFinite(tradedAt) && ageSeconds >= 0 && ageSeconds <= 180;
+      return Number.isFinite(tradedAt) && ageSeconds >= 0 && ageSeconds <= MAX_EQUITY_QUOTE_AGE_SECONDS;
     });
     stockExplorerCanRank = result.marketSession === 'OPEN' && result.partial !== true &&
       requested > 0 && count === requested && missingSymbols.length === 0 && allRowsFresh;
@@ -451,7 +540,8 @@ function renderStockExplorerResults() {
   const category=document.querySelector('#stockCategory')?.value||'all';
   const universe=[
     {symbol:'NSE:NIFTY50-INDEX',name:'NIFTY 50',kind:'index',tab:'NIFTY',note:'Benchmark index'},
-    {symbol:'NSE:NIFTYBANK-INDEX',name:'BANK NIFTY',kind:'index',tab:'BANKNIFTY',note:'Banking index'}
+    {symbol:'NSE:NIFTYBANK-INDEX',name:'BANK NIFTY',kind:'index',tab:'BANKNIFTY',note:'Banking index'},
+    {symbol:'BSE:SENSEX-INDEX',name:'SENSEX',kind:'index',tab:'Dashboard',note:'BSE benchmark index'}
   ];
   // Use the backend's current FYERS NSE F&O master snapshot, not a short hard-coded
   // stock list. Rank equity rows by verified percent change before showing indices.
@@ -479,7 +569,7 @@ function renderStockExplorerResults() {
     const moverStatus=!mover?'':marketClosed?'LAST_KNOWN_PRICE'
       :mover.priceStatus==='TIME_UNVERIFIED'?'TIME_UNVERIFIED'
       :mover.priceStatus!=='LIVE_QUOTE'?'STALE_QUOTE'
-      :Number.isFinite(currentQuoteAgeMs)&&currentQuoteAgeMs>=0&&currentQuoteAgeMs<=180000?'LIVE_QUOTE':'STALE_QUOTE';
+      :Number.isFinite(currentQuoteAgeMs)&&currentQuoteAgeMs>=0&&currentQuoteAgeMs<=MAX_EQUITY_QUOTE_AGE_SECONDS*1000?'LIVE_QUOTE':'STALE_QUOTE';
     const priceLabel=mover
       ? (moverStatus==='LIVE_QUOTE'?'LIVE FYERS QUOTE':moverStatus==='LAST_KNOWN_PRICE'?'LAST KNOWN PRICE':moverStatus==='STALE_QUOTE'?'STALE QUOTE':'QUOTE TIME UNKNOWN')
       : (fresh?'LIVE INDEX QUOTE':quote?(marketClosed?'LAST KNOWN INDEX PRICE':'STALE / RECONNECTING INDEX QUOTE'):'DATA PENDING');
@@ -546,11 +636,11 @@ async function loadMarketActivity() {
           !Number.isFinite(Number(row.price)) || Number(row.price) <= 0 ||
           !Number.isFinite(Number(row.changePct)) ||
           !Number.isFinite(Number(row.quoteAgeSeconds)) ||
-          Number(row.quoteAgeSeconds) < 0 || Number(row.quoteAgeSeconds) > 180 ||
+          Number(row.quoteAgeSeconds) < 0 || Number(row.quoteAgeSeconds) > MAX_EQUITY_QUOTE_AGE_SECONDS ||
           !row.priceAsOf) return false;
       const tradedAt = Date.parse(row.priceAsOf);
       const ageSeconds = (Date.now() - tradedAt) / 1000;
-      return Number.isFinite(tradedAt) && ageSeconds >= 0 && ageSeconds <= 180;
+      return Number.isFinite(tradedAt) && ageSeconds >= 0 && ageSeconds <= MAX_EQUITY_QUOTE_AGE_SECONDS;
     });
     if (rows.length !== requested) {
       throw new Error('FRESHNESS CHECK FAILED — only ' + rows.length + ' of ' + requested + ' quotes passed validation. Breadth and rankings blocked.');
@@ -596,6 +686,7 @@ function dashboardMarkup() {
     { symbol: 'NSE:NIFTY50-INDEX', name: 'NIFTY 50' },
     { symbol: 'NSE:NIFTYBANK-INDEX', name: 'BANK NIFTY' },
     { symbol: 'BSE:SENSEX-INDEX', name: 'SENSEX' },
+    ...fnoChartSymbols,
     ...stockExplorerMoverRows.map(row => ({
       symbol: row.symbol,
       name: row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')
@@ -607,9 +698,9 @@ function dashboardMarkup() {
     seenChartSymbols.add(item.symbol);
     return true;
   }).map(item => '<option value="' + escapeHtml(item.symbol) + '">' + escapeHtml(item.name) + '</option>').join('');
-  const chartUniverseNote = stockExplorerMoverRows.length
-    ? 'Symbol list includes ' + stockExplorerMoverRows.length + ' equities from the latest FYERS Stock Explorer snapshot.'
-    : 'NIFTY 50, BANK NIFTY and SENSEX candles are available here when verified FYERS historical data is returned.';
+  const chartUniverseNote = fnoChartSymbols.length
+    ? 'Symbol list includes ' + fnoChartSymbols.length + ' equities from the verified FYERS NSE F&O symbol master, plus NIFTY, BANK NIFTY and SENSEX.'
+    : 'NIFTY 50, BANK NIFTY and SENSEX are listed now; connect FYERS to load the complete NSE F&O chart universe.';
   return '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
     '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
     '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol">' + chartSymbolOptions + '</select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
@@ -659,7 +750,7 @@ function renderWatchlistTable() {
       const indexFresh=hasFreshLiveQuote(row.quote);
       const equityTime=row.equity&&row.equity.priceAsOf?Date.parse(row.equity.priceAsOf):NaN;
       const equityAge=Number.isFinite(equityTime)?(Date.now()-equityTime)/1000:Infinity;
-      const equityFresh=!!row.equity&&!marketClosed&&row.equity.priceStatus==='LIVE_QUOTE'&&equityAge>=0&&equityAge<=180&&Number(row.equity.quoteAgeSeconds)>=0&&Number(row.equity.quoteAgeSeconds)<=180;
+      const equityFresh=!!row.equity&&!marketClosed&&row.equity.priceStatus==='LIVE_QUOTE'&&equityAge>=0&&equityAge<=MAX_EQUITY_QUOTE_AGE_SECONDS&&Number(row.equity.quoteAgeSeconds)>=0&&Number(row.equity.quoteAgeSeconds)<=MAX_EQUITY_QUOTE_AGE_SECONDS;
       const hasIndexPrice=!!row.quote&&Number.isFinite(Number(row.quote.price))&&Number(row.quote.price)>0;
       const hasEquityPrice=!!row.equity&&Number.isFinite(Number(row.equity.price))&&Number(row.equity.price)>0;
       const price=row.quote?(hasIndexPrice?Number(row.quote.price):null):hasEquityPrice?Number(row.equity.price):null;
@@ -683,6 +774,21 @@ async function loadWatchlistQuotes() {
     const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
     const result=await response.json().catch(()=>({}));
     if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.detail||result.error||'FYERS equity snapshot unavailable.');
+    if(result.marketSession==='CLOSED'||result.data.length===0){
+      const lastResponse=await fetch(BACKEND_URL+'/api/market/last-known-stock-quotes',{headers:{Accept:'application/json'},cache:'no-store'});
+      const lastKnown=await lastResponse.json().catch(()=>({}));
+      const lastRows=Array.isArray(lastKnown.data)?lastKnown.data.filter(row=>row&&row.verified===true&&typeof row.symbol==='string'&&Number.isFinite(Number(row.price))&&Number(row.price)>0&&Number.isFinite(Date.parse(String(row.priceAsOf||'')))&&Date.parse(String(row.priceAsOf||''))<=Date.now()+5000):[];
+      if(lastResponse.ok&&lastKnown.ok===true&&lastRows.length){
+        result={...result,marketSession:lastKnown.marketSession||'CLOSED',fetchedAt:lastKnown.fetchedAt,
+          data:lastRows.map(row=>({symbol:row.symbol,price:Number(row.price),changePct:row.changePct==null?null:Number(row.changePct),
+            priceAsOf:row.priceAsOf,quoteAgeSeconds:Number(row.quoteAgeSeconds),priceStatus:'LAST_KNOWN_PRICE',verified:true,source:row.source})),
+          quotedCount:lastRows.length,universeCount:Number(lastKnown.universeCount),
+          partial:lastKnown.partial===true||lastRows.length!==Number(lastKnown.universeCount),
+          missingSymbols:Array.isArray(lastKnown.missingSymbols)?lastKnown.missingSymbols:[]};
+      }else{
+        if(status)status.textContent='Market closed · last-known FYERS equity quotes unavailable. '+(lastKnown.error||'No verified prices returned.')+' No prices fabricated.';
+      }
+    }
     watchlistEquityRows=result.data.filter(row=>row&&typeof row.symbol==='string'&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
     watchlistEquityRows.fetchedAt=result.fetchedAt||new Date().toISOString();
     if(select){
@@ -732,11 +838,11 @@ async function loadMovers() {
           !Number.isFinite(Number(item.price)) || Number(item.price) <= 0 ||
           !Number.isFinite(Number(item.changePct)) ||
           !Number.isFinite(Number(item.quoteAgeSeconds)) ||
-          Number(item.quoteAgeSeconds) < 0 || Number(item.quoteAgeSeconds) > 180 ||
+          Number(item.quoteAgeSeconds) < 0 || Number(item.quoteAgeSeconds) > MAX_EQUITY_QUOTE_AGE_SECONDS ||
           !item.priceAsOf) return false;
       const tradedAt = Date.parse(item.priceAsOf);
       const actualAgeSeconds = (Date.now() - tradedAt) / 1000;
-      return Number.isFinite(tradedAt) && actualAgeSeconds >= 0 && actualAgeSeconds <= 180;
+      return Number.isFinite(tradedAt) && actualAgeSeconds >= 0 && actualAgeSeconds <= MAX_EQUITY_QUOTE_AGE_SECONDS;
     });
     if (rows.length !== requested) {
       throw new Error('FRESHNESS CHECK FAILED — only ' + rows.length + ' of ' + requested + ' quotes passed validation. Ranking blocked.');
@@ -947,36 +1053,47 @@ async function loadPatternStockUniverse() {
 }
 
 async function loadSureshotStockUniverse() {
-  const select=document.querySelector('#setupSymbol');
-  if(!select||select.dataset.universeLoaded==='true')return;
-  select.dataset.universeLoaded='loading';
+  const select = document.querySelector('#setupSymbol');
+  if (!select || select.dataset.universeLoaded === 'true' || select.dataset.universeLoaded === 'loading') return;
+  select.dataset.universeLoaded = 'loading';
   try {
-    const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
-    const result=await response.json().catch(()=>({}));
-    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||'Verified stock universe unavailable.');
-    const previous=select.value;
-    const indexOptions=Array.from(select.options).filter(option=>!option.value.endsWith('-EQ'));
-    const stockRows=result.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
-    const stockOptions=stockRows.map(row=>{
-      const symbol=row.symbol;
-      const name=symbol.replace(/^NSE:/,'').replace(/-EQ$/,'');
-      const option=document.createElement('option');
-      option.value=symbol;
-      option.textContent=name+' · Stock options';
+    // Symbol discovery must not depend on a complete, fresh quote snapshot.
+    // The movers endpoint intentionally fails closed when quotes are stale,
+    // the market is closed, or FYERS rate-limits requests; that made strike/
+    // stock selection disappear even when the F&O symbol master was available.
+    const response = await fetch(BACKEND_URL + '/api/market/fno-universe', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
+      throw new Error(result.error || result.detail || 'Verified NSE F&O symbol universe unavailable.');
+    }
+    const previous = select.value;
+    const indexOptions = Array.from(select.options).filter(option =>
+      !/^NSE:[A-Z0-9&-]+-EQ$/.test(option.value)
+    );
+    const stockRows = result.data.filter(row =>
+      row && typeof row.symbol === 'string' && /^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)
+    );
+    const stockOptions = stockRows.map(row => {
+      const option = document.createElement('option');
+      option.value = row.symbol;
+      option.textContent = row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '') + ' · Stock options';
       return option;
     });
-    select.replaceChildren(...indexOptions,...stockOptions);
-    if(Array.from(select.options).some(option=>option.value===previous))select.value=previous;
-    select.dataset.universeLoaded='true';
-    const status=document.querySelector('#setupStatus');
-    if(status)status.textContent='Verified quote universe loaded: '+stockRows.length+' configured stock symbols plus indices. This is the backend selected-stock list, not the complete NSE F&O universe.';
-  } catch(error) {
-    select.dataset.universeLoaded='false';
-    const status=document.querySelector('#setupStatus');
-    if(status)status.textContent='Could not refresh stock choices from FYERS: '+(error.message||'verified quote universe unavailable')+'. Existing index/stock choices remain; no prices invented.';
+    select.replaceChildren(...indexOptions, ...stockOptions);
+    if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
+    select.dataset.universeLoaded = 'true';
+    const status = document.querySelector('#setupStatus');
+    if (status) status.textContent = 'Verified NSE F&O symbol master loaded: ' + stockRows.length +
+      ' stock symbols plus index choices. Prices and option strikes are still checked separately against fresh FYERS responses; symbol listing alone does not enable signals.';
+  } catch (error) {
+    select.dataset.universeLoaded = 'false';
+    const status = document.querySelector('#setupStatus');
+    if (status) status.textContent = 'NSE F&O symbol list unavailable: ' +
+      (error.message || 'verified symbol master unavailable') + '. No stock prices or strikes were fabricated.';
   }
 }
-
 async function loadSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
@@ -1008,8 +1125,9 @@ async function loadSureshotSetup() {
     if(typeof chainCheck==='string')throw new Error(chainCheck);
     const chain=chainCheck.chain;
     const spot=chainCheck.spot;
-    const fetchedAt=Date.parse(optionResult.fetchedAt||'');
-    if(!Number.isFinite(fetchedAt)||Date.now()-fetchedAt>15000||fetchedAt>Date.now()+5000)throw new Error('Option-chain snapshot timestamp is stale or invalid; no signal.');
+    const chainTimestamp=Date.parse(optionResult.chainTimestamp||'');
+    const chainAgeMs=Date.now()-chainTimestamp;
+    if(!Number.isFinite(chainTimestamp)||chainAgeMs<0||chainAgeMs>15000)throw new Error('Option-chain exchange timestamp is missing, stale, or invalid; no signal.');
     const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
     const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
     const type=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
@@ -1077,7 +1195,7 @@ async function loadAdvancedScanner() {
       if(x.priceStatus!=='LIVE_QUOTE'||!x.priceAsOf) return false;
       const age=Number(x.quoteAgeSeconds);
       const timestamp=Date.parse(x.priceAsOf);
-      return Number.isFinite(age)&&age>=0&&age<=180&&Number.isFinite(timestamp)&&Date.now()-timestamp>=-30000&&Date.now()-timestamp<=180000;
+      return Number.isFinite(age)&&age>=0&&age<=MAX_EQUITY_QUOTE_AGE_SECONDS&&Number.isFinite(timestamp)&&Date.now()-timestamp>=-30000&&Date.now()-timestamp<=MAX_EQUITY_QUOTE_AGE_SECONDS*1000;
     });
     if(rows.length!==requestedCount){
       table.innerHTML='<div class="chart-empty"><b>NO TRADE — incomplete fresh-quote coverage.</b><p>Only '+rows.length+' of '+requestedCount+' F&O symbols have fresh, exchange-timestamped quotes. Stale or timestamp-unverified symbols are not silently excluded to create a misleading shortlist; scanner candidates are withheld.</p></div>';
@@ -1313,6 +1431,11 @@ async function loadOptionChain() {
     if (!response.ok || result.ok !== true || !result.data) {
       throw new Error(result.error || result.detail || 'Option-chain response unavailable.');
     }
+    const chainTimestamp = Date.parse(result.chainTimestamp || '');
+    const chainAgeMs = Date.now() - chainTimestamp;
+    if (!Number.isFinite(chainTimestamp) || chainAgeMs < 0 || chainAgeMs > 15000) {
+      throw new Error('Option-chain exchange timestamp is missing, stale, or unverified; chain display blocked.');
+    }
     const data = result.data;
     const chainCheck = validateOptionChainPayload(data);
     if (typeof chainCheck === 'string') throw new Error(chainCheck);
@@ -1492,14 +1615,26 @@ function render(tab) {
       else fetchLiveQuotes();
     });
   }
-  if (tab === 'Dashboard') featureContent.innerHTML = dashboardMarkup();
+  if (tab === 'Dashboard') { featureContent.innerHTML = dashboardMarkup(); loadFnoChartUniverse(); }
+  else if (tab === 'Stock Explorer') featureContent.innerHTML = stockExplorerMarkup();
+  else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
+  else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
+  else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
+  else if (tab === 'Sureshot CE/PE') featureContent.innerHTML = advancedScannerMarkup(tab);
+  else if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
+  else if (tab === 'FII/DII Flow') featureContent.innerHTML = advancedScannerMarkup(tab);
+  else if (tab === 'Market Activity') featureContent.innerHTML = marketActivityMarkup();
+  else if (tab === 'Charts & Patterns') featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gap-Up/Down') featureContent.innerHTML = gapAnalysisMarkup();
-  else if (['Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','Charts & Patterns'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'Gainers & Losers') featureContent.innerHTML = moversMarkup();
+  else if (tab === 'Option Chain') featureContent.innerHTML = optionChainMarkup();
+  else if (tab === 'Technical Indicators') featureContent.innerHTML = indicatorsMarkup();
   else if (tab === 'AI Signals') featureContent.innerHTML = signalsMarkup();
   else if (tab === 'Holdings') featureContent.innerHTML = holdingsMarkup();
+  else if (tab === 'Alerts') featureContent.innerHTML = alertsMarkup();
   else if (tab === 'FYERS Settings') featureContent.innerHTML = settingsMarkup();
-  else featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
+  else if (tab === 'Logs') featureContent.innerHTML = '<div id="logList" class="log-list"></div>';
+  else featureContent.innerHTML = '<div class="chart-empty">This workspace has no renderer configured. No market data or signals are shown.</div>';
   bindTabActions();
   if (tab === 'Gap-Up/Down') {
     const gapButton = document.querySelector('#loadGapAnalysisBtn');
@@ -1507,6 +1642,7 @@ function render(tab) {
   }
   updateDynamicPanel();
   if (tab === 'Gap-Up/Down') loadGapAnalysis();
+  if (tab === 'Market Activity') loadMarketActivity();
   if (tab === 'Charts & Patterns') loadPatternStockUniverse();
   if (tab === 'Charts & Patterns') { const scan=document.querySelector('#scanPatternsBtn'); if(scan) scan.onclick=scanTopVerifiedPatterns; }
   if (tab === 'Technical Indicators') loadTechnicalIndicators();
@@ -1616,6 +1752,16 @@ function bindTabActions() {
   }));
 }
 
+function markDashboardQuotesBlocked(message) {
+  const metrics = document.querySelectorAll('.metrics .metric');
+  SYMBOLS.forEach((item, index) => {
+    const metric = metrics[index + 1];
+    if (!metric) return;
+    const detail = metric.querySelector('small');
+    if (detail) detail.textContent = message;
+  });
+}
+
 function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   if (!Array.isArray(quotes)) return false;
   const map = {};
@@ -1639,7 +1785,10 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
       }
     }
   });
-  if (!SYMBOLS.some(item => map[item.symbol])) return false;
+  // Live display requires the two NSE baseline indices; SENSEX is shown when its own quote exists.
+  // Last-known display-only snapshots may be partial, but never enable signals.
+  const requiredSymbols = source === 'last-known' ? [] : SYMBOLS.filter(item => item.symbol !== 'BSE:SENSEX-INDEX');
+  if (!Object.keys(map).length || !requiredSymbols.every(item => map[item.symbol])) return false;
   SYMBOLS.forEach(item => {
     const next = map[item.symbol];
     if (!next) return; // Missing symbols stay unavailable; they must not hide other verified quotes.
@@ -1671,9 +1820,15 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
     if (detailEl) {
       const change = quote.change;
       const pct = quote.changePct;
+      const quoteAgeMs = Date.now() - quote.receivedAt;
+      const verifiedLiveTick = quote.source === 'websocket' && quote.streamConnected === true &&
+        Number.isFinite(quoteAgeMs) && quoteAgeMs >= 0 && quoteAgeMs <= 15000;
       detailEl.textContent = !isRegularMarketSession()
-        ? 'Last received · market closed'
-        : change === null ? 'FYERS live quote received' : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)');
+        ? 'LAST KNOWN · MARKET CLOSED · ' + (quote.sourceTime ? new Date(quote.sourceTime).toLocaleTimeString('en-IN') : 'TIME UNVERIFIED')
+        : !verifiedLiveTick
+          ? 'STALE / LAST KNOWN · LIVE SIGNALS BLOCKED'
+          : change === null ? 'FRESH FYERS exchange tick · ' + new Date(quote.receivedAt).toLocaleTimeString('en-IN')
+            : (change > 0 ? '+' : '') + change.toFixed(2) + (pct === null ? '' : ' (' + (pct > 0 ? '+' : '') + pct.toFixed(2) + '%)') + ' · FRESH';
     }
   });
   if (source === 'last-known') {
@@ -1897,6 +2052,7 @@ async function fetchLiveQuotes() {
     if (response.status === 429) {
       const retrySeconds = Number(data.retryAfterSeconds) || 30;
       quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, 15000), QUOTE_POLL_MAX_MS);
+      markDashboardQuotesBlocked('FYERS RATE LIMIT · LIVE SIGNALS BLOCKED');
       setStatus('FYERS RATE LIMIT — WAITING');
       showMessage('FYERS rate limit is active. The dashboard is backing off and will not force REST quote polling.', true);
       return;
@@ -1907,7 +2063,7 @@ async function fetchLiveQuotes() {
         try {
           const lastResponse = await fetch(BACKEND_URL + '/api/market/last-known-quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
           const lastData = await lastResponse.json().catch(() => ({}));
-          if (lastResponse.ok && lastData.ok === true && lastData.source === 'last-known' && Array.isArray(lastData.data) &&
+          if (lastResponse.ok && lastData.ok === true && lastData.signalsAllowed === false && Array.isArray(lastData.data) &&
               updateQuoteCards(lastData.data, lastData.fetchedAt, 'last-known', false)) {
             quotePollDelay = 15000;
             setStatus(lastData.marketOpen ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
@@ -1935,10 +2091,12 @@ async function fetchLiveQuotes() {
         showMessage('FYERS is not authenticated. Open FYERS Settings to connect.', true);
       } else if (response.status === 503) {
         quotePollDelay = 5000;
+        markDashboardQuotesBlocked(Object.keys(latestQuotes).length ? 'STALE / LAST KNOWN · LIVE SIGNALS BLOCKED' : 'DATA MISSING · WAITING FOR VERIFIED TICKS');
         if (Object.keys(latestQuotes).length) setStatus('LIVE DATA STALE');
         else setStatus('WAITING FOR LIVE TICKS');
         showMessage(data.detail || data.error || 'Waiting for fresh FYERS WebSocket ticks. REST fallback is disabled to protect rate limits.');
       } else {
+        markDashboardQuotesBlocked('DATA UNAVAILABLE · LIVE SIGNALS BLOCKED');
         setStatus('LIVE DATA UNAVAILABLE');
         showMessage(data.error || 'The backend did not return verified quotes.', true);
       }
@@ -1946,6 +2104,7 @@ async function fetchLiveQuotes() {
     }
     quotePollDelay = QUOTE_POLL_MS;
     if (!updateQuoteCards(data.data, data.fetchedAt, data.source, data.streamConnected)) {
+      markDashboardQuotesBlocked('BLOCKED · INCOMPLETE INDEX SNAPSHOT');
       setStatus('INCOMPLETE QUOTE RESPONSE');
       showMessage('All expected index quotes were not present. No new values were applied.', true);
       logEvent('Quote response was incomplete.', 'warn');
@@ -1957,6 +2116,7 @@ async function fetchLiveQuotes() {
       showMessage('NIFTY, BANK NIFTY and SENSEX quotes received from the backend.');
     }
   } catch {
+    markDashboardQuotesBlocked(Object.keys(latestQuotes).length ? 'STALE / LAST KNOWN · LIVE SIGNALS BLOCKED' : 'DATA MISSING · LIVE SIGNALS BLOCKED');
     setStatus('LIVE DATA UNAVAILABLE');
     showMessage('Cannot reach the quote API. Retrying automatically.', true);
     logEvent('Quote API request failed; automatic retry scheduled.', 'error');
