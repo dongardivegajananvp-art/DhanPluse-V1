@@ -1872,8 +1872,6 @@ function updateDashboardLiveCandle() {
   if (!symbolEl || !resolutionEl || !chart || symbolEl.value !== state.symbol || resolutionEl.value !== state.resolution) return;
   const quote = quoteFor(state.symbol);
   if (!isRegularMarketSession() || !hasFreshLiveQuote(quote) || !Number.isFinite(quote.price) || quote.price <= 0) return;
-  if (state.lastRenderedPrice === quote.price && state.lastRenderedBucket !== null) return;
-
   const candles = state.candles;
   const last = candles[candles.length - 1];
   if (!Array.isArray(last) || last.length < 5) return;
@@ -1905,11 +1903,12 @@ function updateDashboardLiveCandle() {
     last[3] = Math.min(Number(last[3]), quote.price);
     last[4] = quote.price;
   }
+  if (state.lastRenderedPrice === quote.price && state.lastRenderedBucket === bucket) return;
   state.lastRenderedPrice = quote.price;
   state.lastRenderedBucket = bucket;
   const html = verifiedZoneChart(candles);
   chart.innerHTML = html;
-  const mainChart = document.querySelector('#mainTabChart');
+  const mainChart = currentTab === 'Dashboard' ? document.querySelector('#mainTabChart') : null;
   if (mainChart) mainChart.innerHTML = html;
   if (status) status.textContent = candles.length + ' verified FYERS candles · ' + state.symbol + ' · ' + state.resolution + ' timeframe · LIVE candle updating from fresh WebSocket ticks · exchange tick ' + new Date(quote.receivedAt).toLocaleTimeString('en-IN');
 }
