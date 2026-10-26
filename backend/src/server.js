@@ -922,7 +922,7 @@ async function getNseFnoEquityUniverse() {
   try { return await fnoUniversePromise; }
   finally { fnoUniversePromise = null; }
 }
-app.get("/api/market/fno-universe", requireSession, async (_req, res) => {
+app.get("/api/market/fno-universe", requireDashboardSession, async (_req, res) => {
   res.set("Cache-Control", "no-store");
   if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
   try {
@@ -1014,7 +1014,7 @@ async function loadVerifiedFnoStockQuotes() {
   stockQuoteCooldown = { until: 0, backoffMs: 30000 };
   return result;
 }
-app.get("/api/market/stock-quotes", requireSession, async (_req, res) => {
+app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) => {
   res.set("Cache-Control", "no-store");
   if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
 
@@ -1068,7 +1068,7 @@ app.get("/api/market/stock-quotes", requireSession, async (_req, res) => {
 let lastKnownStockCache = { fetchedAt: 0, data: null };
 let lastKnownStockPromise = null;
 const LAST_KNOWN_STOCK_CACHE_MS = 5 * 60 * 1000;
-app.get("/api/market/last-known-stock-quotes", requireSession, async (_req, res) => {
+app.get("/api/market/last-known-stock-quotes", requireDashboardSession, async (_req, res) => {
   res.set("Cache-Control", "no-store");
   if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first.", data: [], signalsAllowed: false });
   if (lastKnownStockCache.data && Date.now() - lastKnownStockCache.fetchedAt < LAST_KNOWN_STOCK_CACHE_MS) {
