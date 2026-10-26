@@ -18,7 +18,7 @@ const missingNavigation = describedTabs.filter(tab => !navTabs.includes(tab) && 
 const missingDescription = navTabs.filter(tab => !describedTabs.includes(tab));
 const duplicateNav = duplicates(navTabs);
 if (navTabs.length !== 12 || describedTabs.length !== 24 ||
-    missingDescription.length || duplicateNav.length) {
+    missingNavigation.length || missingDescription.length || duplicateNav.length) {
   console.error(JSON.stringify({ navCount: navTabs.length, descriptionCount: describedTabs.length,
     missingNavigation, missingDescription, duplicateNav }, null, 2));
   process.exit(1);
