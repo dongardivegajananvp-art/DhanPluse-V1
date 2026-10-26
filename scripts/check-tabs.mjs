@@ -13,15 +13,14 @@ const describedTabs = [...descriptionsBlock[1].matchAll(/^\s*'([^']+)':\s*\[/gm)
   .map(match => match[1]);
 
 const expectedVisibleTabs = [
-  'Dashboard', 'Sureshot CE/PE', 'Breakout Scanner', 'Momentum Scanner',
-  'Zero-to-Hero', 'Charts & Patterns', 'Gap-Up/Down', 'Gainers & Losers',
-  'AI Signals', 'Holdings', 'FYERS Settings', 'Backtesting'
+  'Dashboard', 'Stock Explorer', 'NIFTY', 'BANKNIFTY', 'Watchlist',
+  'Sureshot CE/PE', 'Breakout Scanner', 'Momentum Scanner', 'Zero-to-Hero',
+  'FII/DII Flow', 'Market Activity', 'Charts & Patterns', 'Gap-Up/Down',
+  'Gainers & Losers', 'Option Chain', 'Technical Indicators', 'AI Signals',
+  'Holdings', 'Alerts', 'FYERS Settings', 'Logs', 'Trade Journal',
+  'Capital Protection', 'Backtesting'
 ];
-const approvedHiddenTabs = new Set([
-  'Stock Explorer', 'NIFTY', 'BANKNIFTY', 'Watchlist', 'FII/DII Flow',
-  'Market Activity', 'Option Chain', 'Technical Indicators', 'Alerts', 'Logs',
-  'Trade Journal', 'Capital Protection'
-]);
+const approvedHiddenTabs = new Set();
 const duplicates = values => values.filter((value, index) => values.indexOf(value) !== index);
 const missingNavigation = describedTabs.filter(tab => !navTabs.includes(tab) && !approvedHiddenTabs.has(tab));
 const missingDescription = navTabs.filter(tab => !describedTabs.includes(tab));
@@ -30,7 +29,7 @@ const unexpectedVisible = navTabs.filter(tab => !expectedVisibleTabs.includes(ta
 const missingVisible = expectedVisibleTabs.filter(tab => !navTabs.includes(tab));
 const hiddenTabShown = navTabs.filter(tab => approvedHiddenTabs.has(tab));
 const duplicateDescriptions = duplicates(describedTabs);
-if (navTabs.length !== 12 || describedTabs.length !== 24 ||
+if (navTabs.length !== 24 || describedTabs.length !== 24 ||
     missingNavigation.length || missingDescription.length || duplicateNav.length ||
     unexpectedVisible.length || missingVisible.length || hiddenTabShown.length || duplicateDescriptions.length) {
   console.error(JSON.stringify({ navCount: navTabs.length, descriptionCount: describedTabs.length,
@@ -77,4 +76,4 @@ if (missingRenderRoutes.length) {
   process.exit(1);
 }
 if (requiredRenderRoutes.length !== 24) throw new Error('Render-route audit must cover all 24 original tab routes.');
-console.log('Tab audit passed: exact 12-tab navigation, 24 unique descriptions, all 24 renderer routes, and no hidden tabs exposed.');
+console.log('Tab audit passed: exact 24-tab navigation, 24 unique descriptions, all 24 renderer routes, and no hidden tabs.');
