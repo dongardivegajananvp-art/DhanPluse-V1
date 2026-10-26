@@ -27,12 +27,12 @@ window.fetch = function(input, init = {}) {
   return nativeFetch(input, { ...init, headers });
 };
 
-const QUOTE_POLL_MS = 2000;
+const QUOTE_POLL_MS = 5000;
 const QUOTE_POLL_MAX_MS = 30000;
 const MAX_EQUITY_QUOTE_AGE_SECONDS = 30; // Locked live-session policy: stale equity/F&O quotes must never feed live views.
 const SYMBOLS = [
-  { symbol: 'NSE:NIFTY50-INDEX', label: 'NIFTY 50', tab: 'NIFTY' },
-  { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'BANKNIFTY' },
+  { symbol: 'NSE:NIFTY50-INDEX', label: 'NIFTY 50', tab: 'Dashboard' },
+  { symbol: 'NSE:NIFTYBANK-INDEX', label: 'BANK NIFTY', tab: 'Dashboard' },
   { symbol: 'BSE:SENSEX-INDEX', label: 'SENSEX', tab: 'Dashboard' }
 ];
 
