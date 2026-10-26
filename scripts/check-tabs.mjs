@@ -2,14 +2,14 @@ import fs from 'node:fs';
 
 const html = fs.readFileSync(new URL('../site/index.html', import.meta.url), 'utf8');
 const app = fs.readFileSync(new URL('../site/app.js', import.meta.url), 'utf8');
-const navBlock = html.match(/<nav id="nav">([\\s\\S]*?)<\\/nav>/);
+const navBlock = html.match(/<nav id="nav">([\s\S]*?)<\/nav>/);
 if (!navBlock) throw new Error('Navigation block #nav is missing.');
 
 const navTabs = [...navBlock[1].matchAll(/data-tab="([^"]+)"/g)]
   .map(match => match[1].replace(/&amp;/g, '&'));
-const descriptionsBlock = app.match(/const descriptions = \\{([\\s\\S]*?)\\n\\};/);
+const descriptionsBlock = app.match(/const descriptions = \{([\s\S]*?)\n\};/);
 if (!descriptionsBlock) throw new Error('Tab descriptions registry is missing.');
-const describedTabs = [...descriptionsBlock[1].matchAll(/^\\s*'([^']+)':\\s*\\[/gm)]
+const describedTabs = [...descriptionsBlock[1].matchAll(/^\s*'([^']+)':\s*\[/gm)]
   .map(match => match[1]);
 
 const expectedVisibleTabs = [
@@ -39,7 +39,7 @@ if (navTabs.length !== 12 || describedTabs.length !== 24 ||
   process.exit(1);
 }
 const renderStart = app.indexOf('function render(tab) {');
-const renderEnd = app.indexOf('\\nfunction bindTabActions', renderStart);
+const renderEnd = app.indexOf('\nfunction bindTabActions', renderStart);
 if (renderStart < 0 || renderEnd < 0) throw new Error('Workspace render function could not be located.');
 const renderBlock = app.slice(renderStart, renderEnd);
 
@@ -64,7 +64,7 @@ const requiredRenderRoutes = [
   ['Holdings', "tab === 'Holdings') featureContent.innerHTML = holdingsMarkup()"],
   ['Alerts', "tab === 'Alerts') featureContent.innerHTML = alertsMarkup()"],
   ['FYERS Settings', "tab === 'FYERS Settings') featureContent.innerHTML = settingsMarkup()"],
-  ['Logs', "tab === 'Logs') featureContent.innerHTML = '<div id=\\"logList\\" class=\\"log-list\\"></div>'"],
+  ['Logs', "tab === 'Logs') featureContent.innerHTML = '<div id=\"logList\" class=\"log-list\"></div>'"],
   ['Trade Journal', "['Trade Journal','Capital Protection','Backtesting'].includes(tab)"],
   ['Capital Protection', "['Trade Journal','Capital Protection','Backtesting'].includes(tab)"],
   ['Backtesting', "['Trade Journal','Capital Protection','Backtesting'].includes(tab)"]
