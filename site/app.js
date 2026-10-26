@@ -56,6 +56,8 @@ let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
 let latestQuotes = {};
 let historyBySymbol = {};
+// The historical OHLC baseline is kept separate from the currently forming candle.
+let dashboardCandleState = null;
 let stockExplorerMoverRows = [];
 let fnoChartSymbols = [];
 let fnoChartUniverseRequestRunning = false;
@@ -391,7 +393,8 @@ async function loadDashboardCandles() {
     if(!result.data.length)throw new Error('FYERS returned no historical candles for this symbol and timeframe.');
     const candleError=validateOhlcCandles(result.data,resolution.value);
     if(candleError)throw new Error(candleError);
-    const zoneChart=verifiedZoneChart(result.data);
+    dashboardCandleState = { symbol: symbol.value, resolution: resolution.value, candles: result.data.map(row => row.slice()), lastRenderedPrice: null, lastRenderedBucket: null };
+    const zoneChart=verifiedZoneChart(dashboardCandleState.candles);
     chart.innerHTML=zoneChart;
     const mainChart=document.querySelector('#mainTabChart');
     if(mainChart)mainChart.innerHTML=zoneChart;
@@ -1853,7 +1856,61 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   }
   // Avoid flooding the console log on every 1.5-second refresh.
   updateDynamicPanel();
+  updateDashboardLiveCandle();
   return true;
+}
+
+// Update only the active OHLC bar from a fresh, connected FYERS WebSocket quote.
+// Stale/last-known snapshots never mutate candles or imply a live chart.
+function updateDashboardLiveCandle() {
+  const state = dashboardCandleState;
+  if (!state || !Array.isArray(state.candles) || !state.candles.length) return;
+  const symbolEl = document.querySelector('#dashboardCandleSymbol');
+  const resolutionEl = document.querySelector('#dashboardCandleResolution');
+  const chart = document.querySelector('#dashboardChart');
+  const status = document.querySelector('#dashboardCandleStatus');
+  if (!symbolEl || !resolutionEl || !chart || symbolEl.value !== state.symbol || resolutionEl.value !== state.resolution) return;
+  const quote = quoteFor(state.symbol);
+  if (!isRegularMarketSession() || !hasFreshLiveQuote(quote) || !Number.isFinite(quote.price) || quote.price <= 0) return;
+  const candles = state.candles;
+  const last = candles[candles.length - 1];
+  if (!Array.isArray(last) || last.length < 5) return;
+  const exchangeSeconds = Math.floor(quote.receivedAt / 1000);
+  const resolutionSeconds = ({ '5': 300, '15': 900, '30': 1800, '60': 3600 })[state.resolution];
+  let bucket = null;
+  if (state.resolution === 'D') {
+    const dateKey = value => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value * 1000));
+    if (dateKey(exchangeSeconds) !== dateKey(Number(last[0]))) return;
+    bucket = dateKey(exchangeSeconds);
+  } else {
+    if (!resolutionSeconds) return;
+    bucket = Math.floor(exchangeSeconds / resolutionSeconds) * resolutionSeconds;
+    const lastBucket = Math.floor(Number(last[0]) / resolutionSeconds) * resolutionSeconds;
+    if (bucket < lastBucket) return;
+    if (bucket > lastBucket) {
+      // Never bridge a missing-data gap. A new live bar is appended only for the next adjacent interval.
+      if (bucket - lastBucket > resolutionSeconds * 2) return;
+      candles.push([bucket, quote.price, quote.price, quote.price, quote.price, 0]);
+      if (candles.length > 300) candles.splice(0, candles.length - 300);
+    } else {
+      last[2] = Math.max(Number(last[2]), quote.price);
+      last[3] = Math.min(Number(last[3]), quote.price);
+      last[4] = quote.price;
+    }
+  }
+  if (state.resolution === 'D') {
+    last[2] = Math.max(Number(last[2]), quote.price);
+    last[3] = Math.min(Number(last[3]), quote.price);
+    last[4] = quote.price;
+  }
+  if (state.lastRenderedPrice === quote.price && state.lastRenderedBucket === bucket) return;
+  state.lastRenderedPrice = quote.price;
+  state.lastRenderedBucket = bucket;
+  const html = verifiedZoneChart(candles);
+  chart.innerHTML = html;
+  const mainChart = currentTab === 'Dashboard' ? document.querySelector('#mainTabChart') : null;
+  if (mainChart) mainChart.innerHTML = html;
+  if (status) status.textContent = candles.length + ' verified FYERS candles · ' + state.symbol + ' · ' + state.resolution + ' timeframe · LIVE candle updating from fresh WebSocket ticks · exchange tick ' + new Date(quote.receivedAt).toLocaleTimeString('en-IN');
 }
 
 function candleSvg(candles) {
