@@ -952,7 +952,7 @@ function advancedScannerMarkup(tab) {
   }
   const title = tab === 'Breakout Scanner' ? 'Breakout candidates to review' : tab === 'Momentum Scanner' ? 'Momentum leaders' : 'High-momentum candidates';
   const desc = tab === 'Breakout Scanner' ? 'Snapshot candidates only — confirm resistance, volume and candle close.' : tab === 'Momentum Scanner' ? 'Ranked by verified percentage change from the selected large-cap universe.' : 'Large percentage movers for research; not a “cheap option” guarantee.';
-  return '<div class="movers-toolbar"><div><b>'+title+'</b><p>'+desc+'</p></div><button class="primary" id="refreshAdvancedBtn">Refresh FYERS snapshot</button></div><div id="advancedStatus" class="hint">Fetching no data until you request a verified FYERS snapshot.</div><div id="advancedTable" class="table-wrap"><div class="chart-empty">No snapshot loaded.</div></div><p class="hint">Universe: selected large-cap NSE symbols returned by FYERS Quotes API, not the entire exchange. Snapshot momentum alone does not confirm a breakout or predict future returns.</p>';
+  return '<div class="movers-toolbar"><div><b>'+title+'</b><p>'+desc+'</p></div><button class="primary" id="refreshAdvancedBtn">Refresh FYERS snapshot</button></div><div id="advancedStatus" class="hint">Fetching no data until you request a verified FYERS snapshot.</div><div id="advancedTable" class="table-wrap"><div class="chart-empty">No snapshot loaded.</div></div><article class="console-section"><div class="console-section-head"><div><h4>Verified candlestick chart</h4><p>Historical FYERS OHLC · red/green candles · calculated supply and demand zones</p></div><span class="live-tag">NO SYNTHETIC DATA</span></div><div class="option-controls"><label>Symbol<select id="advancedChartSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option><option value="BSE:SENSEX-INDEX">SENSEX</option><option value="NSE:RELIANCE-EQ">RELIANCE</option><option value="NSE:HDFCBANK-EQ">HDFC BANK</option><option value="NSE:INFY-EQ">INFOSYS</option><option value="NSE:TCS-EQ">TCS</option><option value="NSE:ICICIBANK-EQ">ICICI BANK</option><option value="NSE:SBIN-EQ">SBIN</option></select></label><label>Interval<select id="advancedChartResolution"><option value="5">5 min</option><option value="15" selected>15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">Daily</option></select></label><button class="secondary" id="loadAdvancedChartBtn">Load chart</button></div><div id="advancedChartStatus" class="hint">Choose a symbol and load verified candles.</div><div id="advancedChart" class="pattern-chart"><div class="chart-empty">No verified candles loaded.</div></div><div id="advancedChartSummary" class="hint">Supply/demand zones appear only when enough valid candles are returned.</div></article><p class="hint">Universe: selected large-cap NSE symbols returned by FYERS Quotes API, not the entire exchange. Snapshot momentum alone does not confirm a breakout or predict future returns.</p>';
 }
 
 function sureshotZoneChart(candles, supply, demand) {
@@ -1685,6 +1685,9 @@ function bindTabActions() {
   if(refreshStockQuotesBtn)refreshStockQuotesBtn.addEventListener('click',loadStockExplorerQuotes);
   const dashCandles=document.querySelector('#dashboardCandlesBtn');
   if(dashCandles) dashCandles.addEventListener('click',loadDashboardCandles);
+  const advancedChartButton=document.querySelector('#loadAdvancedChartBtn');
+  if(advancedChartButton) advancedChartButton.addEventListener('click',loadAdvancedTabChart);
+  if(['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(currentTab)) loadAdvancedTabChart();
   const dashSymbol=document.querySelector('#dashboardCandleSymbol');
   const dashResolution=document.querySelector('#dashboardCandleResolution');
   if(dashSymbol) dashSymbol.addEventListener('change',()=>{const st=document.querySelector('#dashboardCandleStatus');if(st)st.textContent='Selection changed. Load candles to refresh the chart.';});
@@ -1894,6 +1897,29 @@ function summarizeCandles(candles) {
   }
   return pattern+' Latest verified OHLC: O '+formatPrice(last[1])+' · H '+formatPrice(last[2])+' · L '+formatPrice(last[3])+' · C '+formatPrice(close)+'. Patterns are heuristic candidates, not trading guarantees.';
 }
+async function loadAdvancedTabChart() {
+  const symbol=document.querySelector('#advancedChartSymbol'),resolution=document.querySelector('#advancedChartResolution'),status=document.querySelector('#advancedChartStatus'),chart=document.querySelector('#advancedChart'),summary=document.querySelector('#advancedChartSummary'),button=document.querySelector('#loadAdvancedChartBtn');
+  if(!symbol||!resolution||!status||!chart||!summary)return;
+  if(button)button.disabled=true;
+  status.textContent='Requesting verified historical FYERS OHLC candles…';chart.innerHTML='<div class="chart-empty">Loading verified candles…</div>';
+  try {
+    const response=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:symbol.value,resolution:resolution.value}),{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||result.detail||'Verified historical candles unavailable.');
+    const rows=result.data,error=validateOhlcCandles(rows,resolution.value);
+    if(error)throw new Error(error);
+    chart.innerHTML=verifiedZoneChart(rows);
+    const stamp=Number(rows[rows.length-1][0])*1000;
+    const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(stamp));
+    summary.textContent=summarizeCandles(rows)+' Latest candle session: '+day+' (India). Historical candles are not presented as live ticks.';
+    status.textContent='Verified FYERS OHLC · '+rows.length+' candles · '+resolution.value+' interval · fetched '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
+  } catch(error) {
+    chart.innerHTML='<div class="chart-empty">Verified candles unavailable. No fabricated candles or zones shown.</div>';
+    summary.textContent='Pattern analysis withheld until valid FYERS OHLC data is available.';
+    status.textContent=(error.message||'Historical candles unavailable.')+' No chart values were fabricated.';
+  } finally { if(button)button.disabled=false; }
+}
+
 async function loadCandles() {
   const se=document.querySelector('#patternSymbol'),re=document.querySelector('#patternResolution'),status=document.querySelector('#patternStatus'),chart=document.querySelector('#patternChart'),summary=document.querySelector('#patternSummary'),table=document.querySelector('#candleTable');
   if(!se||!re||!status||!chart||!summary||!table)return;
@@ -1908,9 +1934,7 @@ async function loadCandles() {
     if(candleError)throw new Error(candleError);
     const latestCandleTime=Number(rows[rows.length-1][0])*1000;
     const latestCandleDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(latestCandleTime));
-    const todayIndia=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-    if(latestCandleDay!==todayIndia)throw new Error('No verified candles from the current India trading date are available. Previous-session candles are not presented as a current-session pattern; select a different symbol/timeframe or wait for the next session.');
-    chart.innerHTML=verifiedZoneChart(rows);summary.textContent=summarizeCandles(rows)+' Buying/demand and selling/supply zones are calculated only when at least 12 valid candles are available.';const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML=verifiedZoneChart(rows);const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='Historical OHLC candles returned by FYERS. '+rows.length+' candles loaded. Zones are calculated from verified candles; if insufficient, chart zones are withheld.';
+    chart.innerHTML=verifiedZoneChart(rows);summary.textContent=summarizeCandles(rows)+' Latest candle session: '+latestCandleDay+' (India). Historical-session candles are labelled by date and are not represented as live/current-session data. Buying/demand and selling/supply zones are calculated only when at least 12 valid candles are available.';const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML=verifiedZoneChart(rows);const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='Historical OHLC candles returned by FYERS. '+rows.length+' candles loaded. Zones are calculated from verified candles; if insufficient, chart zones are withheld.';
     table.innerHTML=rows.length?'<table class="console-table"><thead><tr><th>Time</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead><tbody>'+rows.slice(-12).reverse().map(row=>'<tr><td>'+escapeHtml(new Date(Number(row[0])*1000).toLocaleString('en-IN'))+'</td>'+row.slice(1,6).map((v,i)=>'<td>'+displayNumber(v,i===4?0:2)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'<div class="chart-empty">FYERS returned no candles for this range.</div>';
     status.textContent='Verified FYERS history response · '+rows.length+' candles · '+re.value+' interval · '+new Date(result.fetchedAt||Date.now()).toLocaleTimeString('en-IN');
     logEvent('Historical candles loaded for '+se.value+' ('+rows.length+').','info');
