@@ -1870,8 +1870,32 @@ function updateDashboardLiveCandle() {
   const chart = document.querySelector('#dashboardChart');
   const status = document.querySelector('#dashboardCandleStatus');
   if (!symbolEl || !resolutionEl || !chart || symbolEl.value !== state.symbol || resolutionEl.value !== state.resolution) return;
-  const quote = quoteFor(state.symbol);
-  if (!isRegularMarketSession() || !hasFreshLiveQuote(quote) || !Number.isFinite(quote.price) || quote.price <= 0) return;
+  if (!isRegularMarketSession()) return;
+  let quote = quoteFor(state.symbol) || state.liveQuote || null;
+  if ((!quote || !hasFreshLiveQuote(quote)) && !state.chartQuoteRequestRunning) {
+    state.chartQuoteRequestRunning = true;
+    fetch(BACKEND_URL + '/api/market/chart-quote?' + new URLSearchParams({ symbol: state.symbol }), {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    }).then(response => response.json().then(data => ({ response, data })))
+      .then(({ response, data }) => {
+        if (!response.ok || data.ok !== true || !data.data || data.data.symbol !== state.symbol) return;
+        const exchangeTime = Date.parse(data.data.exchangeTime || '');
+        if (!Number.isFinite(exchangeTime) || Date.now() - exchangeTime < 0 || Date.now() - exchangeTime > 15000) return;
+        state.liveQuote = {
+          price: Number(data.data.price),
+          receivedAt: exchangeTime,
+          sourceTime: data.data.exchangeTime,
+          source: 'websocket',
+          streamConnected: data.streamConnected === true
+        };
+        updateDashboardLiveCandle();
+      })
+      .catch(() => {})
+      .finally(() => { state.chartQuoteRequestRunning = false; });
+    return;
+  }
+  quote = quoteFor(state.symbol) || state.liveQuote || null;
+  if (!hasFreshLiveQuote(quote) || !Number.isFinite(quote.price) || quote.price <= 0) return;
   const candles = state.candles;
   const last = candles[candles.length - 1];
   if (!Array.isArray(last) || last.length < 5) return;
