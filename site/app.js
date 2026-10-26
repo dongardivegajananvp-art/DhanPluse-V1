@@ -1053,36 +1053,47 @@ async function loadPatternStockUniverse() {
 }
 
 async function loadSureshotStockUniverse() {
-  const select=document.querySelector('#setupSymbol');
-  if(!select||select.dataset.universeLoaded==='true')return;
-  select.dataset.universeLoaded='loading';
+  const select = document.querySelector('#setupSymbol');
+  if (!select || select.dataset.universeLoaded === 'true' || select.dataset.universeLoaded === 'loading') return;
+  select.dataset.universeLoaded = 'loading';
   try {
-    const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
-    const result=await response.json().catch(()=>({}));
-    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||'Verified stock universe unavailable.');
-    const previous=select.value;
-    const indexOptions=Array.from(select.options).filter(option=>!option.value.endsWith('-EQ'));
-    const stockRows=result.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
-    const stockOptions=stockRows.map(row=>{
-      const symbol=row.symbol;
-      const name=symbol.replace(/^NSE:/,'').replace(/-EQ$/,'');
-      const option=document.createElement('option');
-      option.value=symbol;
-      option.textContent=name+' · Stock options';
+    // Symbol discovery must not depend on a complete, fresh quote snapshot.
+    // The movers endpoint intentionally fails closed when quotes are stale,
+    // the market is closed, or FYERS rate-limits requests; that made strike/
+    // stock selection disappear even when the F&O symbol master was available.
+    const response = await fetch(BACKEND_URL + '/api/market/fno-universe', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
+      throw new Error(result.error || result.detail || 'Verified NSE F&O symbol universe unavailable.');
+    }
+    const previous = select.value;
+    const indexOptions = Array.from(select.options).filter(option =>
+      !/^NSE:[A-Z0-9&-]+-EQ$/.test(option.value)
+    );
+    const stockRows = result.data.filter(row =>
+      row && typeof row.symbol === 'string' && /^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)
+    );
+    const stockOptions = stockRows.map(row => {
+      const option = document.createElement('option');
+      option.value = row.symbol;
+      option.textContent = row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '') + ' · Stock options';
       return option;
     });
-    select.replaceChildren(...indexOptions,...stockOptions);
-    if(Array.from(select.options).some(option=>option.value===previous))select.value=previous;
-    select.dataset.universeLoaded='true';
-    const status=document.querySelector('#setupStatus');
-    if(status)status.textContent='Verified quote universe loaded: '+stockRows.length+' configured stock symbols plus indices. This is the backend selected-stock list, not the complete NSE F&O universe.';
-  } catch(error) {
-    select.dataset.universeLoaded='false';
-    const status=document.querySelector('#setupStatus');
-    if(status)status.textContent='Could not refresh stock choices from FYERS: '+(error.message||'verified quote universe unavailable')+'. Existing index/stock choices remain; no prices invented.';
+    select.replaceChildren(...indexOptions, ...stockOptions);
+    if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
+    select.dataset.universeLoaded = 'true';
+    const status = document.querySelector('#setupStatus');
+    if (status) status.textContent = 'Verified NSE F&O symbol master loaded: ' + stockRows.length +
+      ' stock symbols plus index choices. Prices and option strikes are still checked separately against fresh FYERS responses; symbol listing alone does not enable signals.';
+  } catch (error) {
+    select.dataset.universeLoaded = 'false';
+    const status = document.querySelector('#setupStatus');
+    if (status) status.textContent = 'NSE F&O symbol list unavailable: ' +
+      (error.message || 'verified symbol master unavailable') + '. No stock prices or strikes were fabricated.';
   }
 }
-
 async function loadSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
