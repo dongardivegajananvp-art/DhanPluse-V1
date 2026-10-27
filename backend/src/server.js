@@ -230,7 +230,7 @@ function startMarketDataStream(token) {
 
     // Configure reconnection before opening the socket so the SDK can
     // attach its retry handler before any early disconnect event.
-    if (typeof socket.autoReconnect === 'function') socket.autoReconnect(50);
+    if (typeof socket.autoreconnect === 'function') socket.autoreconnect(50);
     socket.connect();
   } catch (error) {
     streamConnected = false;
