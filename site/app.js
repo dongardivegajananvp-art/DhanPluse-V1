@@ -382,6 +382,13 @@ async function loadDashboardCandles() {
   const count=document.querySelector('#chartSampleCount');
   const button=document.querySelector('#dashboardCandlesBtn');
   if(!symbol||!resolution||!chart||!status||dashboardCandleRequestRunning)return;
+  if (!sessionStorage.getItem('dhanpulse-dashboard-session-v1')) {
+    status.textContent='Connect FYERS to load verified historical candles.';
+    chart.innerHTML='<div class="chart-empty"><strong>FYERS connection required.</strong><p>Connect FYERS to load verified historical candles. No candle values are fabricated.</p><button type="button" class="primary dashboardReconnectBtn">Connect FYERS</button></div>';
+    chart.querySelector('.dashboardReconnectBtn')?.addEventListener('click',startFyersLogin);
+    if(count)count.textContent='0 verified candles';
+    return;
+  }
   dashboardCandleRequestRunning=true;
   if(button)button.disabled=true;
   status.textContent='Requesting verified FYERS historical candles…';
@@ -405,12 +412,24 @@ async function loadDashboardCandles() {
     logEvent('Dashboard candlestick chart loaded ('+result.data.length+' verified candles for '+symbol.value+').','info');
   } catch(error) {
     const message=error.message||'Historical candles unavailable.';
-    chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
+    const sessionExpired=/Dashboard session missing or expired|FYERS session expired|Reconnect FYERS/i.test(message);
     const mainChart=document.querySelector('#mainTabChart');
-    if(mainChart)mainChart.innerHTML='<div class="chart-empty">Candlestick chart unavailable: '+escapeHtml(message)+'. No candle values were fabricated.</div>';
     const mainNote=document.querySelector('#mainViewNote');
-    if(mainNote)mainNote.textContent='Verified OHLC candles are unavailable right now; no substitute line chart or fabricated candle values are shown.';
-    status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
+    if(sessionExpired) {
+      sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
+      const recovery='<div class="chart-empty"><strong>FYERS dashboard session expired.</strong><p>Reconnect FYERS to securely renew the session before loading historical candles.</p><button type="button" class="primary dashboardReconnectBtn">Reconnect FYERS</button></div>';
+      chart.innerHTML=recovery;
+      if(mainChart)mainChart.innerHTML=recovery;
+      document.querySelectorAll('.dashboardReconnectBtn').forEach(reconnectButton => reconnectButton.addEventListener('click',startFyersLogin));
+      status.textContent='FYERS session expired. Reconnect FYERS to load verified candles.';
+      if(mainNote)mainNote.textContent='Historical candles are withheld until a fresh FYERS dashboard session is established.';
+      setFyersStatus('SESSION EXPIRED');
+    } else {
+      chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
+      if(mainChart)mainChart.innerHTML='<div class="chart-empty">Candlestick chart unavailable: '+escapeHtml(message)+'. No candle values were fabricated.</div>';
+      if(mainNote)mainNote.textContent='Verified OHLC candles are unavailable right now; no substitute line chart or fabricated candle values are shown.';
+      status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
+    }
     logEvent('Dashboard candlestick chart failed: '+message,'warn');
   } finally {
     dashboardCandleRequestRunning=false;
