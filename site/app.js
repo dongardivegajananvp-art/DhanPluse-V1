@@ -1049,28 +1049,58 @@ async function loadPatternStockUniverse() {
   if(!select||select.dataset.universeLoaded==='true'||select.dataset.universeLoaded==='loading')return;
   select.dataset.universeLoaded='loading';
   try {
-    const response=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
+    const response=await fetch(BACKEND_URL+'/api/market/fno-universe',{headers:{Accept:'application/json'},cache:'no-store'});
     const result=await response.json().catch(()=>({}));
-    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||'Verified stock list unavailable.');
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||result.detail||'Verified NSE F&O symbol master unavailable.');
     const previous=select.value;
     const fixed=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
     const fixedOptions=Array.from(select.options).filter(option=>fixed.includes(option.value));
-    const rows=result.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)&&Number.isFinite(Number(row.price))&&Number(row.price)>0);
+    const rows=result.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol));
     const options=rows.map(row=>{
       const option=document.createElement('option');
       option.value=row.symbol;
-      option.textContent=row.symbol.replace(/^NSE:/,'').replace(/-EQ$/,'')+' · verified quote universe';
+      option.textContent=row.symbol.replace(/^NSE:/,'').replace(/-EQ$/,'')+' · NSE F&O';
       return option;
     });
     select.replaceChildren(...fixedOptions,...options);
     if(Array.from(select.options).some(option=>option.value===previous))select.value=previous;
     select.dataset.universeLoaded='true';
     const status=document.querySelector('#patternStatus');
-    if(status)status.textContent='Loaded '+rows.length+' symbols from the backend verified movers list. This is not guaranteed to be the complete NSE F&O universe; unavailable/stale symbols are not invented.';
+    if(status)status.textContent='Loaded '+rows.length+' equity symbols from the verified FYERS NSE F&O symbol master, plus NIFTY, BANK NIFTY and SENSEX. Prices/candles are validated separately before charting.';
   } catch(error) {
     select.dataset.universeLoaded='false';
     const status=document.querySelector('#patternStatus');
-    if(status)status.textContent='Could not load the verified stock list: '+(error.message||'unknown error')+'. Choose an available index or configured symbol and retry.';
+    if(status)status.textContent='Could not load the verified NSE F&O symbol master: '+(error.message||'unknown error')+'. No incomplete stock list is presented as the full universe.';
+  }
+}
+
+async function loadAdvancedChartUniverse() {
+  const select=document.querySelector('#advancedChartSymbol');
+  if(!select||select.dataset.universeLoaded==='true'||select.dataset.universeLoaded==='loading')return;
+  select.dataset.universeLoaded='loading';
+  try {
+    const response=await fetch(BACKEND_URL+'/api/market/fno-universe',{headers:{Accept:'application/json'},cache:'no-store'});
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.error||result.detail||'Verified NSE F&O symbol master unavailable.');
+    const previous=select.value;
+    const fixed=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
+    const fixedOptions=Array.from(select.options).filter(option=>fixed.includes(option.value));
+    const rows=result.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol));
+    const options=rows.map(row=>{
+      const option=document.createElement('option');
+      option.value=row.symbol;
+      option.textContent=row.symbol.replace(/^NSE:/,'').replace(/-EQ$/,'')+' · NSE F&O';
+      return option;
+    });
+    select.replaceChildren(...fixedOptions,...options);
+    if(Array.from(select.options).some(option=>option.value===previous))select.value=previous;
+    select.dataset.universeLoaded='true';
+    const status=document.querySelector('#advancedChartStatus');
+    if(status)status.textContent='Loaded '+rows.length+' verified NSE F&O equity symbols plus index choices. A chart is displayed only after valid FYERS OHLC candles are returned.';
+  } catch(error) {
+    select.dataset.universeLoaded='false';
+    const status=document.querySelector('#advancedChartStatus');
+    if(status)status.textContent='Full NSE F&O symbol selection is unavailable: '+(error.message||'unknown error')+'. The configured fallback symbols remain available; no full-universe claim is made.';
   }
 }
 
@@ -1670,7 +1700,7 @@ function render(tab) {
   if (tab === 'Technical Indicators') loadTechnicalIndicators();
   if (tab === 'Gainers & Losers') loadMovers();
   if (tab === 'Sureshot CE/PE') loadSureshotSetup();
-  if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(tab)) loadAdvancedScanner();
+  if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(tab)) { loadAdvancedScanner(); loadAdvancedChartUniverse(); }
   if (tab === 'Charts & Patterns') loadCandles();
   if (tab === 'Option Chain') loadOptionChain();
   if (tab === 'Holdings') loadPortfolio();
