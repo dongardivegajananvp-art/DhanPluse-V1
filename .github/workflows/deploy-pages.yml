@@ -73,6 +73,51 @@ jobs:
           grep -Fq "DMA20 crossover + SwingLow/ATR stop" <<< "$backtest"
           grep -Fq "0.35*atr14[i]" <<< "$backtest"
           echo "PASS: deployed Backtesting JavaScript includes the DMA20/SwingLow/ATR strategy."
+      - name: Interactive browser smoke test for all tabs
+        env:
+          APP_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/dhanpulse-playwright
+          cd /tmp/dhanpulse-playwright
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright
+          npx playwright install --with-deps chromium
+          cat > ui-smoke.cjs <<'NODE'
+          const { chromium } = require('playwright');
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage();
+            const pageErrors = [];
+            page.on('pageerror', error => pageErrors.push(error.message));
+            const appUrl = process.env.APP_URL.replace(/\\/$/, '') + '/site/';
+            const response = await page.goto(appUrl + '?browser_smoke=' + Date.now(), { waitUntil: 'networkidle', timeout: 60000 });
+            if (!response || !response.ok()) throw new Error('Original /site/ page did not return HTTP success');
+            const buttons = page.locator('#nav button[data-tab]');
+            const names = await buttons.evaluateAll(items => items.map(item => item.getAttribute('data-tab')));
+            if (names.length !== 24) throw new Error('Expected 24 original tabs; found ' + names.length);
+            const visited = [];
+            for (const name of names) {
+              await page.locator('#nav button[data-tab]').filter({ has: page.locator('text=' + JSON.stringify(name)) }).first().click().catch(async () => {
+                await page.locator('#nav button[data-tab="' + name.replace(/"/g, '\\"') + '"]').click();
+              });
+              await page.waitForFunction(expected => document.querySelector('#pageTitle')?.textContent?.trim() === expected, name, { timeout: 5000 });
+              visited.push(name);
+              if (name === 'Backtesting') {
+                await page.waitForSelector('#dpBtStrategy', { timeout: 5000 });
+                const strategy = await page.locator('#dpBtStrategy option').allTextContents();
+                if (!strategy.some(value => value.includes('DMA20 crossover + SwingLow/ATR stop'))) {
+                  throw new Error('DMA20/SwingLow/ATR option missing in interactive Backtesting UI');
+                }
+              }
+            }
+            if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join(' | '));
+            console.log('PASS: interactive Chromium opened original /site/, clicked all ' + visited.length + ' tabs, and found DMA20/SwingLow/ATR strategy. No uncaught page errors.');
+            console.log('Visited tabs: ' + visited.join(' | '));
+            await browser.close();
+          })().catch(error => { console.error(error); process.exit(1); });
+          NODE
+          node ui-smoke.cjs
       - name: Verify production backend health and CORS
         env:
           BACKEND_URL: https://dhanpluse-v1.onrender.com
@@ -90,7 +135,7 @@ jobs:
             echo "::error::Production backend /health did not return a response."
             exit 1
           fi
-          node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1); console.log("PASS: backend online, FYERS environment configured, order placement disabled; liveDataConnected="+h.liveDataConnected)' "$health"
+          node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1); const now=new Date(); const ist=new Date(now.getTime()+330*60000); const day=ist.getUTCDay(); const minute=ist.getUTCHours()*60+ist.getUTCMinutes(); const inSession=day>=1&&day<=5&&minute>=555&&minute<930; const age=h.lastTickAt?Date.now()-Date.parse(h.lastTickAt):Infinity; console.log("Backend health: liveDataConnected="+h.liveDataConnected+", marketSocketConnected="+h.marketSocketConnected+", lastTickAt="+h.lastTickAt+", tickAgeMs="+age+", regularSession="+inSession+", orderPlacementEnabled="+h.orderPlacementEnabled); if(inSession&&(!h.liveDataConnected||!h.marketSocketConnected||!Number.isFinite(age)||age<0||age>15000)) { console.error("FAIL: regular-session verified exchange tick is missing, stale, or future-dated."); process.exit(1); } console.log("PASS: backend/FYERS configured and order placement disabled; "+(inSession?"fresh exchange-timestamped index snapshot verified":"outside regular session; freshness not asserted"));' "$health"
           curl --fail --silent --show-error --max-time 60 -D /tmp/dhanpulse-status-headers.txt -o /tmp/dhanpulse-status.json -H "Origin: ${PRODUCTION_ORIGIN}" -H "Accept: application/json" "${BACKEND_URL}/api/status"
           grep -Eiq "^access-control-allow-origin: ${PRODUCTION_ORIGIN}" /tmp/dhanpulse-status-headers.txt
-          node -e 'const s=JSON.parse(require("node:fs").readFileSync("/tmp/dhanpulse-status.json","utf8")); if(s.backend!=="online" || s.orderPlacement!=="disabled") process.exit(1); console.log("PASS: production /api/status returns backend online, order placement disabled, FYERS="+s.fyers+", liveData="+s.liveData)' 
+          node -e 'const s=JSON.parse(require("node:fs").readFileSync("/tmp/dhanpulse-status.json","utf8")); if(s.backend!=="online" || s.orderPlacement!=="disabled") process.exit(1); console.log("PASS: production /api/status returns backend online, order placement disabled, FYERS="+s.fyers+", liveData="+s.liveData+", lastTickAt="+s.lastTickAt)' 
