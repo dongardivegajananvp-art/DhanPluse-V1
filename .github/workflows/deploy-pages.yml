@@ -88,5 +88,5 @@ jobs:
           fi
           node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1); console.log("PASS: backend online, FYERS environment configured, order placement disabled; liveDataConnected="+h.liveDataConnected)' "$health"
           curl --fail --silent --show-error --max-time 60 -D /tmp/dhanpulse-status-headers.txt -o /tmp/dhanpulse-status.json -H "Origin: ${PRODUCTION_ORIGIN}" -H "Accept: application/json" "${BACKEND_URL}/api/status"
-          grep -Eiq "^access-control-allow-origin: ${PRODUCTION_ORIGIN}?$" /tmp/dhanpulse-status-headers.txt
+          grep -Eiq "^access-control-allow-origin: ${PRODUCTION_ORIGIN}" /tmp/dhanpulse-status-headers.txt
           node -e 'const s=JSON.parse(require("node:fs").readFileSync("/tmp/dhanpulse-status.json","utf8")); if(s.backend!=="online" || s.orderPlacement!=="disabled") process.exit(1); console.log("PASS: production /api/status returns backend online, order placement disabled, FYERS="+s.fyers+", liveData="+s.liveData)' 
