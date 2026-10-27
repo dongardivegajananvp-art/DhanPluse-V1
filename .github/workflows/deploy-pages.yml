@@ -90,7 +90,7 @@ jobs:
             const page = await browser.newPage();
             const pageErrors = [];
             page.on('pageerror', error => pageErrors.push(error.message));
-            const appUrl = process.env.APP_URL.replace(/\\/$/, '') + '/site/';
+            const appUrl = process.env.APP_URL.replace(/\/$/, '') + '/site/';
             const response = await page.goto(appUrl + '?browser_smoke=' + Date.now(), { waitUntil: 'networkidle', timeout: 60000 });
             if (!response || !response.ok()) throw new Error('Original /site/ page did not return HTTP success');
             const buttons = page.locator('#nav button[data-tab]');
@@ -98,9 +98,7 @@ jobs:
             if (names.length !== 24) throw new Error('Expected 24 original tabs; found ' + names.length);
             const visited = [];
             for (const name of names) {
-              await page.locator('#nav button[data-tab]').filter({ has: page.locator('text=' + JSON.stringify(name)) }).first().click().catch(async () => {
-                await page.locator('#nav button[data-tab="' + name.replace(/"/g, '\\"') + '"]').click();
-              });
+              await page.locator('#nav button[data-tab="' + name.replace(/"/g, '\\"') + '"]').click();
               await page.waitForFunction(expected => document.querySelector('#pageTitle')?.textContent?.trim() === expected, name, { timeout: 5000 });
               visited.push(name);
               if (name === 'Backtesting') {
