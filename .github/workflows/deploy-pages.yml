@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "index.html"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
@@ -28,10 +29,43 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure Pages
         uses: actions/configure-pages@v5
+      - name: Stage the original URL layout
+        run: |
+          set -euo pipefail
+          mkdir -p dist/site
+          cp index.html dist/index.html
+          cp -R site/. dist/site/
+          test -s dist/index.html
+          test -s dist/site/index.html
+          grep -q "site/" dist/index.html
+          grep -q "UI build 2026-10-27" dist/site/index.html
+          grep -q "dhanpulse-shell-v82-live-candle-24tab" dist/site/sw.js
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: dist
       - name: Deploy site
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Verify published original /site/ URL
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          app_url="${PAGE_URL%/}/site/"
+          html=""
+          for attempt in $(seq 1 12); do
+            html="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}?deploy_smoke=$(date +%s)" 2>/dev/null || true)"
+            if [[ -n "$html" ]] && grep -q "UI build 2026-10-27" <<< "$html" && grep -q "style.css?v=20261027-ui-refresh2" <<< "$html"; then
+              break
+            fi
+            echo "Waiting for the deployed Pages asset to become visible (attempt $attempt/12)."
+            sleep 10
+          done
+          if [[ -z "$html" ]] || ! grep -q "UI build 2026-10-27" <<< "$html" || ! grep -q "style.css?v=20261027-ui-refresh2" <<< "$html"; then
+            echo "::error::The original /site/ URL did not serve the expected DhanPulse UI build."
+            exit 1
+          fi
+          sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
+          grep -q "dhanpulse-shell-v82-live-candle-24tab" <<< "$sw"
+          echo "PASS: ${app_url} serves the expected DhanPulse UI and service-worker cache build."
