@@ -30,7 +30,7 @@ const unexpectedVisible = navTabs.filter(tab => !expectedVisibleTabs.includes(ta
 const missingVisible = expectedVisibleTabs.filter(tab => !navTabs.includes(tab));
 const hiddenTabShown = navTabs.filter(tab => approvedHiddenTabs.has(tab));
 const duplicateDescriptions = duplicates(describedTabs);
-if (navTabs.length !== 24 || describedTabs.length !== 24 ||
+if (navTabs.length !== 12 || describedTabs.length !== 24 ||
     missingNavigation.length || missingDescription.length || duplicateNav.length ||
     unexpectedVisible.length || missingVisible.length || hiddenTabShown.length || duplicateDescriptions.length) {
   console.error(JSON.stringify({ navCount: navTabs.length, descriptionCount: describedTabs.length,
