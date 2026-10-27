@@ -899,6 +899,42 @@ function gapAnalysisMarkup() {
     '<p class="hint">Gap-Up/Down is descriptive, not a trade signal. Historical fill rates do not predict the next session. No orders are placed; missing, stale/unverified, or invalid candles block the result.</p></div>';
 }
 
+async function loadGapStockUniverse() {
+  const select = document.querySelector('#gapSymbol');
+  if (!select || select.dataset.universeLoaded === 'true' || select.dataset.universeLoaded === 'loading') return;
+  select.dataset.universeLoaded = 'loading';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/fno-universe', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
+      throw new Error(result.error || result.detail || 'Verified FYERS F&O universe unavailable.');
+    }
+    const previous = select.value;
+    const indexOptions = Array.from(select.options).filter(option => option.value.endsWith('-INDEX'));
+    const stocks = result.data.filter(row => row && typeof row.symbol === 'string' && /^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol));
+    const fragment = document.createDocumentFragment();
+    indexOptions.forEach(option => fragment.appendChild(option.cloneNode(true)));
+    stocks.forEach(row => {
+      const option = document.createElement('option');
+      option.value = row.symbol;
+      option.textContent = row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '');
+      fragment.appendChild(option);
+    });
+    select.replaceChildren(fragment);
+    if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
+    select.dataset.universeLoaded = 'true';
+    const status = document.querySelector('#gapStatus');
+    if (status) status.textContent = 'Verified FYERS F&O symbol list loaded (' + stocks.length + ' equities). Gap history is descriptive; turnover ranking is not available from this endpoint.';
+    if (currentTab === 'Gap-Up/Down') loadGapAnalysis();
+  } catch (error) {
+    select.dataset.universeLoaded = 'error';
+    const status = document.querySelector('#gapStatus');
+    if (status) status.textContent = 'F&O symbol list unavailable; only the preset index symbols can be selected. ' + (error.message || 'Unknown error');
+  }
+}
+
 async function loadGapAnalysis() {
   if (currentTab !== 'Gap-Up/Down') return;
   const status = document.querySelector('#gapStatus');
@@ -964,7 +1000,7 @@ function advancedScannerMarkup(tab) {
       '<p><a href="https://www.nseindia.com/all-reports" target="_blank" rel="noopener noreferrer">NSE All Reports ↗</a></p></div>';
   }
   if (tab === 'Sureshot CE/PE') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY CE/PE · OHLC zones + verified option chain</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50 · Index options</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><button class="primary" id="refreshSetupBtn">Analyse verified setup</button></div><div id="setupStatus" class="hint">A setup is shown only after verified OHLC candles and option-chain data are available. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY CE/PE · OHLC zones + verified option chain</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50 · Index options</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse verified setup</button></div><div id="setupStatus" class="hint">A setup is shown only after verified OHLC candles and option-chain data are available. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
   }
   if (tab === 'FII/DII Flow') {
     return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
@@ -1170,9 +1206,21 @@ async function loadSureshotSetup() {
     if(!isRegularMarketSession()){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
     else if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
     else if(close<zones.demand.low&&close<previous){bias='PE WATCH';reason='Latest candle closed below the calculated buyer/demand-zone low.';}
-    const optionResponse=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+new URLSearchParams({symbol,strikecount:'10'}),{headers:{Accept:'application/json'},cache:'no-store'});
+    const expiryEl=document.querySelector('#setupExpiry');
+    const requestedExpiry=expiryEl&&expiryEl.value?expiryEl.value:'';
+    const chainParams=new URLSearchParams({symbol,strikecount:'10'});
+    if(requestedExpiry)chainParams.set('timestamp',requestedExpiry);
+    const optionResponse=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+chainParams.toString(),{headers:{Accept:'application/json'},cache:'no-store'});
     const optionResult=await optionResponse.json().catch(()=>({}));
     if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error(optionResult.error||optionResult.detail||'Verified option-chain data unavailable; no entry plan generated.');
+    const expiries=Array.isArray(optionResult.data.expiryData)?optionResult.data.expiryData:[];
+    if(expiryEl&&expiries.length){
+      const before=expiryEl.value;
+      expiryEl.innerHTML='<option value="">Nearest expiry</option>'+expiries.map(item=>'<option value="'+escapeHtml(item.expiry)+'">'+escapeHtml(item.date||String(item.expiry))+(item.expiry_flag?' · '+escapeHtml(item.expiry_flag):'')+'</option>').join('');
+      if(before&&expiries.some(item=>String(item.expiry)===before))expiryEl.value=before;
+      else if(requestedExpiry&&expiries.some(item=>String(item.expiry)===requestedExpiry))expiryEl.value=requestedExpiry;
+      else if(expiries[0])expiryEl.value=String(expiries[0].expiry);
+    }
     const chainCheck=validateOptionChainPayload(optionResult.data);
     if(typeof chainCheck==='string')throw new Error(chainCheck);
     const chain=chainCheck.chain;
@@ -1182,18 +1230,26 @@ async function loadSureshotSetup() {
     if(!Number.isFinite(chainTimestamp)||chainAgeMs<0||chainAgeMs>15000)throw new Error('Option-chain exchange timestamp is missing, stale, or invalid; no signal.');
     const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
     const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
-    const type=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
+    const typeEl=document.querySelector('#setupOptionType'),strikeEl=document.querySelector('#setupStrike');
+    const autoType=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
+    const requestedType=typeEl&&typeEl.value!=='AUTO'?typeEl.value:null;
+    const type=requestedType||autoType;
     const atmIndex=atm===null?-1:strikes.indexOf(atm);
     const nearbyStrikes=new Set(atmIndex<0?[]:strikes.slice(Math.max(0,atmIndex-2),Math.min(strikes.length,atmIndex+3)));
-    const legCandidates=type?chain.filter(x=>nearbyStrikes.has(Number(x.strike_price))&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0):[];
+    const eligibleStrikes=[...new Set(chain.filter(x=>x&&['CE','PE'].includes(x.option_type)&&Number(x.strike_price)>0&&Number(x.ltp)>0).map(x=>String(x.strike_price)))].sort((a,b)=>Number(a)-Number(b));
+    if(strikeEl){const before=strikeEl.value;strikeEl.innerHTML='<option value="">Auto nearest eligible strike</option>'+eligibleStrikes.map(s=>'<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+'</option>').join('');if(before&&eligibleStrikes.includes(before))strikeEl.value=before;}
+    const chosenStrike=strikeEl&&strikeEl.value?Number(strikeEl.value):null;
+    const sideAgrees=!!autoType&&(!requestedType||requestedType===autoType);
+    const legCandidates=type?chain.filter(x=>(chosenStrike!==null?Number(x.strike_price)===chosenStrike:nearbyStrikes.has(Number(x.strike_price)))&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0):[];
     // Prefer the most actively traded verified contract among the five nearest strikes,
     // then use OI, spread, and ATM distance as deterministic tie-breakers.
     legCandidates.sort((a,b)=>b.volume-a.volume||b.oi-a.oi||a.spreadPct-b.spreadPct||Math.abs(a.strike_price-spot)-Math.abs(b.strike_price-spot));
     const leg=legCandidates[0]||null;
-    if(!type||!leg){
-      cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(reason)+'</p><p class="hint">No entry/target is issued without a confirmed breakout and a verified matching option premium.</p></article>';
-      status.textContent='NO TRADE · '+reason+' Option chain was verified; no actionable setup passed all filters.';
-      logEvent('Sureshot filtered setup: '+reason,'info');return;
+    if(!type||!leg||!sideAgrees){
+      const why=!type?'No directional breakout has been confirmed.':!sideAgrees?'Selected option side does not match the verified underlying breakout direction.':'No eligible contract passed strike, liquidity and spread checks.';
+      cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(why)+'</p><div class="data-row"><span>Selected strike</span><b>'+(chosenStrike===null?'Auto / not selected':formatPrice(chosenStrike))+'</b></div><div class="data-row"><span>Entry</span><b>BLOCKED</b></div><div class="data-row"><span>Target</span><b>BLOCKED</b></div><div class="data-row"><span>Stop loss</span><b>BLOCKED</b></div><div class="data-row"><span>Risk : Reward</span><b>—</b></div><p class="hint">A verified option chain alone is not a trade signal. Entry, target, stop loss and RR stay blocked until direction and contract checks pass.</p></article>';
+      status.textContent='NO TRADE · '+why+' Verified candles and option chain do not currently support an actionable setup.';
+      logEvent('Sureshot filtered setup: '+why,'info');return;
     }
     const quoteResponse=await fetch(BACKEND_URL+'/api/fyers/option-quote?'+new URLSearchParams({symbol:leg.symbol}),{headers:{Accept:'application/json'},cache:'no-store'});
     const quoteResult=await quoteResponse.json().catch(()=>({}));
@@ -1214,7 +1270,9 @@ async function loadSureshotSetup() {
   }catch(error){
     cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">DATA / FILTER</span></div><p>'+escapeHtml(error.message||'Required verified data unavailable.')+'</p><p class="hint">No prices or signals were invented. Retry after confirming FYERS historical-data and option-chain access.</p></article>';
     status.textContent='No setup generated · '+(error.message||'Verified data unavailable.');
-    chart.innerHTML='<div class="chart-empty">Supply/demand chart unavailable until verified candles are returned.</div>';
+    // Keep a successfully rendered, verified candle chart visible when the separate option-chain/quote step fails.
+    // Missing option data must block the trade plan, not erase valid underlying history.
+    if(!chart.querySelector('svg,canvas')) chart.innerHTML='<div class="chart-empty">Verified candle chart is unavailable. Trade plan remains blocked until option data is verified.</div>';
     logEvent('Sureshot withheld signal because verified data or setup conditions were unavailable.','warn');
   }
 }
@@ -1702,7 +1760,7 @@ function render(tab) {
     if (gapButton) gapButton.onclick = loadGapAnalysis;
   }
   updateDynamicPanel();
-  if (tab === 'Gap-Up/Down') loadGapAnalysis();
+  if (tab === 'Gap-Up/Down') loadGapStockUniverse();
   if (tab === 'Market Activity') loadMarketActivity();
   if (tab === 'Charts & Patterns') loadPatternStockUniverse();
   if (tab === 'Charts & Patterns') { const scan=document.querySelector('#scanPatternsBtn'); if(scan) scan.onclick=scanTopVerifiedPatterns; }
