@@ -1214,7 +1214,9 @@ async function loadSureshotSetup() {
   }catch(error){
     cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">DATA / FILTER</span></div><p>'+escapeHtml(error.message||'Required verified data unavailable.')+'</p><p class="hint">No prices or signals were invented. Retry after confirming FYERS historical-data and option-chain access.</p></article>';
     status.textContent='No setup generated · '+(error.message||'Verified data unavailable.');
-    chart.innerHTML='<div class="chart-empty">Supply/demand chart unavailable until verified candles are returned.</div>';
+    // Keep a successfully rendered, verified candle chart visible when the separate option-chain/quote step fails.
+    // Missing option data must block the trade plan, not erase valid underlying history.
+    if(!chart.querySelector('svg,canvas')) chart.innerHTML='<div class="chart-empty">Verified candle chart is unavailable. Trade plan remains blocked until option data is verified.</div>';
     logEvent('Sureshot withheld signal because verified data or setup conditions were unavailable.','warn');
   }
 }
