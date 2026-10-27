@@ -1,12 +1,13 @@
-// FYERS Standard-plan Data API budget is shared across Data API endpoints.
-// Keep a safety margin below the published 50 requests/minute limit and avoid
-// bursts. A Cloudflare 1015 response blocks further Data API calls globally.
+// FYERS Data API limits can be stricter than the published plan limit because
+// multiple endpoints share the same upstream/IP-level throttling. Use a
+// conservative global budget and serialize all /data/* calls; do not retry
+// through a Cloudflare 1015 block. A 1015 cooldown is shared across endpoints.
 export function createFyersDataApiBudget({
   fetchImpl = fetch,
   now = () => Date.now(),
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  maxRequestsPerMinute = 45,
-  minIntervalMs = 1250,
+  maxRequestsPerMinute = 15,
+  minIntervalMs = 3000,
   windowMs = 60_000,
   cloudflareCooldownMs = 60 * 60_000,
   rateLimitCooldownMs = 60_000
@@ -54,7 +55,7 @@ export function createFyersDataApiBudget({
       if (response.status === 429) {
         const body = await response.clone().text().catch(() => '');
         const retryAfter = Number(response.headers?.get?.('retry-after'));
-        const cloudflare1015 = /error\s*1015|cloudflare.{0,80}1015/i.test(body);
+        const cloudflare1015 = /error\\s*1015|cloudflare.{0,80}1015/i.test(body);
         const cooldown = cloudflare1015
           ? cloudflareCooldownMs
           : Math.max(rateLimitCooldownMs, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0);
