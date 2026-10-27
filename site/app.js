@@ -899,6 +899,42 @@ function gapAnalysisMarkup() {
     '<p class="hint">Gap-Up/Down is descriptive, not a trade signal. Historical fill rates do not predict the next session. No orders are placed; missing, stale/unverified, or invalid candles block the result.</p></div>';
 }
 
+async function loadGapStockUniverse() {
+  const select = document.querySelector('#gapSymbol');
+  if (!select || select.dataset.universeLoaded === 'true' || select.dataset.universeLoaded === 'loading') return;
+  select.dataset.universeLoaded = 'loading';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/fno-universe', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
+      throw new Error(result.error || result.detail || 'Verified FYERS F&O universe unavailable.');
+    }
+    const previous = select.value;
+    const indexOptions = Array.from(select.options).filter(option => option.value.endsWith('-INDEX'));
+    const stocks = result.data.filter(row => row && typeof row.symbol === 'string' && /^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol));
+    const fragment = document.createDocumentFragment();
+    indexOptions.forEach(option => fragment.appendChild(option.cloneNode(true)));
+    stocks.forEach(row => {
+      const option = document.createElement('option');
+      option.value = row.symbol;
+      option.textContent = row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '');
+      fragment.appendChild(option);
+    });
+    select.replaceChildren(fragment);
+    if (Array.from(select.options).some(option => option.value === previous)) select.value = previous;
+    select.dataset.universeLoaded = 'true';
+    const status = document.querySelector('#gapStatus');
+    if (status) status.textContent = 'Verified FYERS F&O symbol list loaded (' + stocks.length + ' equities). Gap history is descriptive; turnover ranking is not available from this endpoint.';
+    if (currentTab === 'Gap-Up/Down') loadGapAnalysis();
+  } catch (error) {
+    select.dataset.universeLoaded = 'error';
+    const status = document.querySelector('#gapStatus');
+    if (status) status.textContent = 'F&O symbol list unavailable; only the preset index symbols can be selected. ' + (error.message || 'Unknown error');
+  }
+}
+
 async function loadGapAnalysis() {
   if (currentTab !== 'Gap-Up/Down') return;
   const status = document.querySelector('#gapStatus');
@@ -1724,7 +1760,7 @@ function render(tab) {
     if (gapButton) gapButton.onclick = loadGapAnalysis;
   }
   updateDynamicPanel();
-  if (tab === 'Gap-Up/Down') loadGapAnalysis();
+  if (tab === 'Gap-Up/Down') loadGapStockUniverse();
   if (tab === 'Market Activity') loadMarketActivity();
   if (tab === 'Charts & Patterns') loadPatternStockUniverse();
   if (tab === 'Charts & Patterns') { const scan=document.querySelector('#scanPatternsBtn'); if(scan) scan.onclick=scanTopVerifiedPatterns; }
