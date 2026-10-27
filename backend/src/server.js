@@ -10,6 +10,7 @@ import { quoteTimestampStatus } from './fresh-data-validation.js';
 import { isTrustedDhanPulsePreview } from './cors-origin-policy.js';
 import { getNseSessionWindow } from './market-data.js';
 import { buildFnoEquityUniverse } from './fno-universe.js';
+import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 
@@ -26,6 +27,8 @@ const appId = process.env.FYERS_APP_ID || '';
 const appSecret = process.env.FYERS_APP_SECRET || '';
 const redirectUri = process.env.FYERS_REDIRECT_URI || '';
 const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
+// Only the currently selected chart equity is streamed in addition to the three baseline indices.
+let chartStreamSymbol = null;
 
 const allowedOrigins = new Set(
   (process.env.ALLOWED_ORIGIN || '')
@@ -98,7 +101,7 @@ function parseTick(raw) {
     if (!item || typeof item !== 'object') continue;
     const symbol = item.symbol || item.n;
     const ltp = Number(item.ltp ?? item.lp ?? item.v?.lp);
-    if (!allowedSymbols.includes(symbol) || !Number.isFinite(ltp) || ltp <= 0) continue;
+    if (!(allowedSymbols.includes(symbol) || symbol === chartStreamSymbol) || !Number.isFinite(ltp) || ltp <= 0) continue;
 
     // Use the exchange feed timestamp, not the time this server received the
     // message. FYERS can send the last known index snapshot after reconnecting
@@ -145,13 +148,12 @@ function startMarketDataStream(token) {
       if (marketSocket !== socket) return;
       streamConnected = true;
       streamError = '';
-      console.log('FYERS market socket connected; subscribing to configured index symbols.');
+      console.log('FYERS market socket connected; subscribing to baseline indices and selected chart symbol.');
       try {
         // Select full updates before subscribing so exchange timestamps are present
-        // when the first index messages arrive; this prevents stale snapshots from
-        // being treated as fresh live data.
+        // when the first messages arrive; stale snapshots must not be treated as fresh.
         socket.mode(socket.FullMode);
-        socket.subscribe(allowedSymbols);
+        socket.subscribe([...allowedSymbols, ...(chartStreamSymbol && !allowedSymbols.includes(chartStreamSymbol) ? [chartStreamSymbol] : [])]);
         console.log('FYERS market socket subscription request sent.');
       } catch (error) {
         streamError = 'Could not subscribe to FYERS index symbols.';
@@ -608,6 +610,28 @@ async function fyersReadOnlyGet(url) {
 }
 
 
+app.get('/api/market/chart-quote', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const symbol = String(req.query.symbol || '');
+  if (!allowedSymbols.includes(symbol) && symbol !== chartStreamSymbol) {
+    return res.status(400).json({ ok: false, error: 'Symbol is not the currently selected verified chart symbol.' });
+  }
+  if (!streamConnected) return res.status(503).json({ ok: false, error: 'FYERS WebSocket is not connected; live candle update unavailable.' });
+  const tick = latestTicks.get(symbol);
+  const exchangeTime = tick ? Date.parse(tick.updatedAt) : NaN;
+  const ageMs = Date.now() - exchangeTime;
+  if (!tick || !Number.isFinite(Number(tick.ltp)) || Number(tick.ltp) <= 0 ||
+      !Number.isFinite(exchangeTime) || ageMs < 0 || ageMs > 15000 || !nseRegularSessionNow()) {
+    return res.status(409).json({ ok: false, error: 'No fresh exchange-stamped FYERS tick for this chart symbol; historical candles remain unchanged.' });
+  }
+  return res.json({
+    ok: true,
+    source: 'FYERS WebSocket',
+    streamConnected: true,
+    data: { symbol, price: Number(tick.ltp), exchangeTime: tick.updatedAt, ageMs }
+  });
+});
+
 app.get('/api/market/candles', async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
   const allowed = new Set(allowedSymbols);
@@ -638,8 +662,26 @@ app.get('/api/market/candles', async (req, res) => {
   )).toISOString().slice(0, 10);
   const rangeFrom = String(req.query.from || defaultFrom);
   const rangeTo = String(req.query.to || today);
-  if (!allowed.has(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported candle symbol.' });
+  if (!isAllowedChartSymbol(symbol, allowedSymbols, allowed)) return res.status(400).json({ ok: false, error: 'Unsupported candle symbol.' });
   if (!allowedResolutions.has(resolution)) return res.status(400).json({ ok: false, error: 'Unsupported candle resolution.' });
+  // Keep only the selected equity chart subscribed alongside the three baseline indices.
+  // Historical data can still render if the live subscription is unavailable; the UI must not claim live updates.
+  if (!allowedSymbols.includes(symbol) && chartStreamSymbol !== symbol) {
+    const previousChartSymbol = chartStreamSymbol;
+    chartStreamSymbol = symbol;
+    try {
+      if (marketSocket && streamConnected) {
+        if (previousChartSymbol && !allowedSymbols.includes(previousChartSymbol) &&
+            typeof marketSocket.unsubscribe === 'function') {
+          try { marketSocket.unsubscribe([previousChartSymbol]); } catch {}
+        }
+        marketSocket.subscribe([symbol]);
+        console.log('FYERS selected chart symbol subscription requested:', symbol);
+      }
+    } catch (error) {
+      console.warn('FYERS selected chart symbol subscription failed:', String(error?.message || error).slice(0, 160));
+    }
+  }
   if (!isValidIsoDate(rangeFrom) || !isValidIsoDate(rangeTo) || rangeFrom > rangeTo || rangeTo > today) return res.status(400).json({ ok: false, error: 'Use real calendar dates in YYYY-MM-DD format, ending no later than today (IST).' });
   const spanDays = (Date.parse(rangeTo + 'T00:00:00Z') - Date.parse(rangeFrom + 'T00:00:00Z')) / 86400000;
   if (!Number.isFinite(spanDays) || spanDays > (resolution === 'D' ? 365 : 30)) return res.status(400).json({ ok: false, error: 'Requested candle range is too large.' });
