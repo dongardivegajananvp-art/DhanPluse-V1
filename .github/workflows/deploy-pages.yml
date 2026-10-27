@@ -39,7 +39,7 @@ jobs:
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
           grep -q "UI build 2026-10-27" dist/site/index.html
-          grep -q "dhanpulse-shell-v82-live-candle-24tab" dist/site/sw.js
+          grep -q "dhanpulse-shell-v83-fno-universe" dist/site/sw.js
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
@@ -67,7 +67,7 @@ jobs:
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "dhanpulse-shell-v82-live-candle-24tab" <<< "$sw"
+          grep -q "dhanpulse-shell-v83-fno-universe" <<< "$sw"
           echo "PASS: ${app_url} serves the expected DhanPulse UI and service-worker cache build."
       - name: Verify production backend health and CORS
         env:
