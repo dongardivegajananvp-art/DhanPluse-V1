@@ -39,7 +39,7 @@ jobs:
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
           grep -q "UI build 2026-10-27" dist/site/index.html
-          grep -q "dhanpulse-shell-v86-final-nav1" dist/site/sw.js
+          grep -q "dhanpulse-shell-v88-fno-gap-selector" dist/site/sw.js
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
@@ -56,20 +56,20 @@ jobs:
           html=""
           for attempt in $(seq 1 12); do
             html="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}?deploy_smoke=$(date +%s)" 2>/dev/null || true)"
-            if [[ -n "$html" ]] && grep -q "UI build 2026-10-27" <<< "$html" && grep -q "style.css?v=20261027-final-nav1" <<< "$html"; then
+            if [[ -n "$html" ]] && grep -q "UI build 2026-10-27" <<< "$html" && grep -q "style.css?v=20261027-fno-gap-selector2" <<< "$html"; then
               break
             fi
             echo "Waiting for the deployed Pages asset to become visible (attempt $attempt/12)."
             sleep 10
           done
-          if [[ -z "$html" ]] || ! grep -q "UI build 2026-10-27" <<< "$html" || ! grep -q "style.css?v=20261027-final-nav1" <<< "$html"; then
+          if [[ -z "$html" ]] || ! grep -q "UI build 2026-10-27" <<< "$html" || ! grep -q "style.css?v=20261027-fno-gap-selector2" <<< "$html"; then
             echo "::error::The original /site/ URL did not serve the expected DhanPulse UI build."
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "dhanpulse-shell-v86-final-nav1" <<< "$sw"
+          grep -q "dhanpulse-shell-v88-fno-gap-selector" <<< "$sw"
           echo "PASS: ${app_url} serves the expected DhanPulse UI and service-worker cache build."
-          backtest="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}backtest.js?v=20261027-final-nav1&deploy_smoke=$(date +%s)")"
+          backtest="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}backtest.js?v=20261027-fno-gap-selector2&deploy_smoke=$(date +%s)")"
           grep -Fq "DMA20 crossover + SwingLow/ATR stop" <<< "$backtest"
           grep -Fq "0.35*atr14[i]" <<< "$backtest"
           echo "PASS: deployed Backtesting JavaScript includes the DMA20/SwingLow/ATR strategy."
