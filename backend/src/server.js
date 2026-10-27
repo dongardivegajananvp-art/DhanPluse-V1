@@ -739,6 +739,21 @@ app.get('/api/market/candles', async (req, res) => {
 app.get('/api/gap-analysis/history', requireDashboardSession, async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
   const allowed = new Set(['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'NSE:RELIANCE-EQ', 'NSE:TCS-EQ', 'NSE:INFY-EQ']);
+  // Allow verified NSE F&O equities from the current FYERS symbol masters instead
+  // of hard-coding five instruments. This is symbol discovery only; history data
+  // still comes from FYERS and must pass OHLC/timestamp validation below.
+  if (!allowed.has(symbol) && /^NSE:[A-Z0-9&-]+-EQ$/.test(symbol) && accessToken) {
+    try {
+      const universe = await getNseFnoEquityUniverse();
+      for (const item of universe.data) if (item && typeof item.symbol === 'string') allowed.add(item.symbol);
+    } catch (error) {
+      return res.status(503).json({
+        ok: false,
+        error: 'Verified FYERS NSE F&O universe unavailable; gap analysis blocked.',
+        detail: String(error.message || error).slice(0, 160)
+      });
+    }
+  }
   const datePattern = /^\d{4}-\d{2}-\d{2}$/;
   const istNow = new Date(Date.now() + 330 * 60 * 1000);
   const today = istNow.toISOString().slice(0, 10);
