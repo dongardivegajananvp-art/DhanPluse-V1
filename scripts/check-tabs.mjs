@@ -76,4 +76,12 @@ if (missingRenderRoutes.length) {
   process.exit(1);
 }
 if (requiredRenderRoutes.length !== 24) throw new Error('Render-route audit must cover all 24 original tab routes.');
+
+if (!app.includes("async function loadPatternStockUniverse()") ||
+    !app.includes("async function loadAdvancedChartUniverse()") ||
+    !app.includes("BACKEND_URL+'/api/market/fno-universe'") ||
+    !renderBlock.includes("loadAdvancedChartUniverse()")) {
+  throw new Error('Chart symbol selectors must load the authenticated verified NSE F&O universe.');
+}
+console.log('Chart-universe audit passed: Patterns and advanced scanner charts use the verified FYERS F&O symbol master.');
 console.log('Tab audit passed: exact 24-tab navigation, 24 unique descriptions, all 24 renderer routes, and no hidden tabs.');
