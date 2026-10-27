@@ -10,6 +10,7 @@ import { quoteTimestampStatus } from './fresh-data-validation.js';
 import { isTrustedDhanPulsePreview } from './cors-origin-policy.js';
 import { getNseSessionWindow } from './market-data.js';
 import { buildFnoEquityUniverse } from './fno-universe.js';
+import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 
@@ -661,7 +662,7 @@ app.get('/api/market/candles', async (req, res) => {
   )).toISOString().slice(0, 10);
   const rangeFrom = String(req.query.from || defaultFrom);
   const rangeTo = String(req.query.to || today);
-  if (!allowed.has(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported candle symbol.' });
+  if (!isAllowedChartSymbol(symbol, allowedSymbols, allowed)) return res.status(400).json({ ok: false, error: 'Unsupported candle symbol.' });
   if (!allowedResolutions.has(resolution)) return res.status(400).json({ ok: false, error: 'Unsupported candle resolution.' });
   // Keep only the selected equity chart subscribed alongside the three baseline indices.
   // Historical data can still render if the live subscription is unavailable; the UI must not claim live updates.
