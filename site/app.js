@@ -1183,6 +1183,7 @@ async function loadSureshotSetup() {
       expiryEl.innerHTML='<option value="">Nearest expiry</option>'+expiries.map(item=>'<option value="'+escapeHtml(item.expiry)+'">'+escapeHtml(item.date||String(item.expiry))+(item.expiry_flag?' · '+escapeHtml(item.expiry_flag):'')+'</option>').join('');
       if(before&&expiries.some(item=>String(item.expiry)===before))expiryEl.value=before;
       else if(requestedExpiry&&expiries.some(item=>String(item.expiry)===requestedExpiry))expiryEl.value=requestedExpiry;
+      else if(expiries[0])expiryEl.value=String(expiries[0].expiry);
     }
     const chainCheck=validateOptionChainPayload(optionResult.data);
     if(typeof chainCheck==='string')throw new Error(chainCheck);
