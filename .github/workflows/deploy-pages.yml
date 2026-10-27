@@ -95,7 +95,7 @@ jobs:
             if (!response || !response.ok()) throw new Error('Original /site/ page did not return HTTP success');
             const buttons = page.locator('#nav button[data-tab]');
             const names = await buttons.evaluateAll(items => items.map(item => item.getAttribute('data-tab')));
-            if (names.length !== 12) throw new Error('Expected 12 approved original tabs; found ' + names.length);
+            if (names.length !== 24) throw new Error('Expected 24 original tabs; found ' + names.length);
             const visited = [];
             for (const name of names) {
               await page.locator('#nav button[data-tab="' + name.replace(/"/g, '\\"') + '"]').click();
