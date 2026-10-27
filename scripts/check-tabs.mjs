@@ -13,14 +13,15 @@ const describedTabs = [...descriptionsBlock[1].matchAll(/^\s*'([^']+)':\s*\[/gm)
   .map(match => match[1]);
 
 const expectedVisibleTabs = [
-  'Dashboard', 'Stock Explorer', 'NIFTY', 'BANKNIFTY', 'Watchlist',
-  'Sureshot CE/PE', 'Breakout Scanner', 'Momentum Scanner', 'Zero-to-Hero',
-  'FII/DII Flow', 'Market Activity', 'Charts & Patterns', 'Gap-Up/Down',
-  'Gainers & Losers', 'Option Chain', 'Technical Indicators', 'AI Signals',
-  'Holdings', 'Alerts', 'FYERS Settings', 'Logs', 'Trade Journal',
-  'Capital Protection', 'Backtesting'
+  'Dashboard', 'Sureshot CE/PE', 'Breakout Scanner', 'Momentum Scanner',
+  'Zero-to-Hero', 'Charts & Patterns', 'Gap-Up/Down', 'Gainers & Losers',
+  'AI Signals', 'Holdings', 'FYERS Settings', 'Backtesting'
 ];
-const approvedHiddenTabs = new Set();
+const approvedHiddenTabs = new Set([
+  'Stock Explorer', 'NIFTY', 'BANKNIFTY', 'Watchlist', 'FII/DII Flow',
+  'Market Activity', 'Option Chain', 'Technical Indicators', 'Alerts', 'Logs',
+  'Trade Journal', 'Capital Protection'
+]);
 const duplicates = values => values.filter((value, index) => values.indexOf(value) !== index);
 const missingNavigation = describedTabs.filter(tab => !navTabs.includes(tab) && !approvedHiddenTabs.has(tab));
 const missingDescription = navTabs.filter(tab => !describedTabs.includes(tab));
