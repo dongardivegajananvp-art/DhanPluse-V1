@@ -1371,19 +1371,21 @@ function calculateCandleIndicators(rows) {
 async function loadTechnicalIndicators() {
   const status = document.querySelector('#indicatorStatus');
   if (!status) return;
-  status.textContent = 'Requesting verified 5-minute OHLC candles from FYERS…';
+  status.textContent = 'Requesting verified 5-minute OHLC candles from FYERS sequentially to respect API limits…';
   const targets = SYMBOLS.map((item, index) => ({ item, index }));
-  try {
-    const results = await Promise.all(targets.map(async target => {
+  const failures = [];
+  let successes = 0;
+  // Do not burst multiple historical requests at once: FYERS may rate-limit the shared data API.
+  for (const target of targets) {
+    try {
       const params = new URLSearchParams({ symbol: target.item.symbol, resolution: '5' });
       const response = await fetch(BACKEND_URL + '/api/market/candles?' + params.toString(), { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.ok !== true || !Array.isArray(result.data)) throw new Error(result.error || result.detail || 'Verified candles unavailable.');
       const candleError = validateOhlcCandles(result.data, '5');
       if (candleError) throw new Error(candleError);
-      return { ...target, result, indicators: calculateCandleIndicators(result.data) };
-    }));
-    results.forEach(({ index, result, indicators }) => {
+      const indicators = calculateCandleIndicators(result.data);
+      const index = target.index;
       const put = (suffix, value) => {
         const el = document.getElementById('candle-' + suffix + '-' + index);
         if (el) el.textContent = value;
@@ -1395,12 +1397,19 @@ async function loadTechnicalIndicators() {
       put('atr', indicators.atr === null ? 'Need 14+ candles' : formatPrice(indicators.atr));
       put('volume', indicators.volumeRatio === null ? 'Unavailable' : indicators.volumeRatio.toFixed(2) + '×');
       put('trend', indicators.trend);
+      successes++;
       logEvent('OHLC indicators refreshed for ' + targetSymbolName(index) + ' (' + indicators.count + ' candles).', 'info');
-    });
-    status.textContent = 'Verified FYERS candles received for both indices · updated ' + new Date().toLocaleTimeString('en-IN') + '.';
-  } catch (error) {
-    status.textContent = (error.message || 'Historical indicators unavailable.') + ' No values have been fabricated.';
-    logEvent('Historical technical indicator request failed.', 'warn');
+    } catch (error) {
+      failures.push(targetSymbolName(target.index) + ': ' + (error.message || 'historical candles unavailable'));
+      logEvent('OHLC indicator request failed for ' + targetSymbolName(target.index) + '.', 'warn');
+    }
+  }
+  if (successes === targets.length) {
+    status.textContent = 'Verified FYERS 5-minute OHLC candles received for both indices · updated ' + new Date().toLocaleTimeString('en-IN') + '.';
+  } else if (successes > 0) {
+    status.textContent = 'Partial verified candle data: ' + successes + ' / ' + targets.length + ' index sets loaded sequentially. ' + failures.join(' | ') + '. Missing indicators remain unavailable; no values fabricated.';
+  } else {
+    status.textContent = failures.join(' | ') + '. No values have been fabricated.';
   }
 }
 
