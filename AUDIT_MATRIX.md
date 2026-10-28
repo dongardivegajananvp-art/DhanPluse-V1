@@ -9,7 +9,7 @@ Scope: source-level review of the original `main` branch plus production deploym
 - [x] Latest recorded GitHub Actions run `40505682253` completed all listed deployment, original `/site/` URL, browser smoke-test, backend-health and CORS steps successfully.
 - [x] Render production service `DhanPluse-V1` is configured to deploy from the original repository `main` branch; latest recorded deployment is live.
 - [ ] Do not interpret source-level route checks or smoke tests as full functional verification of every scanner, chart, option-chain, or turnover calculation.
-- [ ] Production live-session acceptance remains incomplete for the blockers listed below.
+- [ ] Production live-session acceptance remains incomplete for the blockers listed below. No claim of complete feature-level acceptance is made.
 - [x] Added CI check that the navigation and tab-description registry each contain the same 24 unique tabs.
 - [x] Added CI regression checks for preview-to-test backend routing, production default routing, and preview OAuth blocking.
 - [x] Fixed an over-escaped preview hostname matcher discovered during offline source review; regression test now exercises a realistic preview hostname and a non-preview hostname.
@@ -27,16 +27,16 @@ Scope: source-level review of the original `main` branch plus production deploym
 | NIFTY | Uses shared index WebSocket quote state and 15-second signal gate. | Verify real exchange timestamps and reconnect behavior. |
 | BANKNIFTY | Uses shared index WebSocket quote state and 15-second signal gate. | Verify real exchange timestamps and reconnect behavior. |
 | Watchlist | Equity rows use the 30-second policy and do not claim a full-exchange universe. | Confirm the supported symbol universe and test stale/disconnect transitions in browser. |
-| Sureshot CE/PE | Requires validated OHLC, a fresh option-chain exchange timestamp, and an independently verified selected-contract quote before candidates. Missing chain timestamp now blocks setup. | Confirm FYERS actually supplies a usable chain exchange timestamp and validate 1:2 RR, fixed entry/SL/target, liquidity, expiry and spread in live data. |
+| Sureshot CE/PE | Requires validated OHLC and a separately timestamped selected-contract quote. Current chain endpoint blocks if it cannot find an exchange timestamp. | Official FYERS option-chain response schema does not document a response exchange timestamp. Do not infer one from request/fetch time. Chain freshness/OI/volume provenance remains unverified; keep dependent signal blocked until a trustworthy source is added. Validate strike, expiry, spread and RR live. |
 | Breakout Scanner | Fresh quote checks are 30 seconds; a quote snapshot alone is not proof of a technical breakout. | Verify all expected F&O symbols and candle-derived pattern rules; test stale/partial input blocks. |
 | Momentum Scanner | Fresh quote checks are 30 seconds; configured-universe limitations are disclosed. | Verify full F&O coverage and amount/value ranking semantics against actual exchange data. |
 | Zero-to-Hero | Requires verified underlying/option inputs for candidate generation; stale inputs are intended to block. | Validate selection logic, active strike quantity, risk/reward, and no-signal behavior live. |
 | FII/DII Flow | Explicitly shows unavailable without a verified timestamped source; no fabricated figures. | Remains unavailable until a reliable source and timestamp are integrated. |
 | Market Activity | Uses fresh equity snapshot and blocks complete metrics/ranking when the snapshot is partial or stale. | Verify breadth/volatility/volume source coverage and rate-limit behavior in live session. |
 | Charts & Patterns | OHLC validator checks values, ordering, future timestamps, and interval-specific staleness. | Verify candle alignment and latest expected candle against FYERS live-session data. |
-| Gap-Up/Down | Historical gap calculations use validated FYERS OHLC history and are descriptive, not forecasts. | Verify market calendar/holidays, source timestamps, and historical coverage. |
+| Gap-Up/Down | Historical gap calculations use validated FYERS OHLC history and are descriptive, not forecasts. Current implementation does not calculate same-day ₹2,000 crore traded value or rank qualifying stocks. | FYERS Quotes documents `volume` but not traded turnover/value. Do not label volume × price as exchange turnover. A verified turnover source and session-complete coverage are required before this filter can pass. |
 | Gainers & Losers | Equity quote rows use the 30-second policy; current UI discloses a selected large-cap universe. | Full NSE F&O ranking remains blocked until complete symbol-master coverage is verified. |
-| Option Chain | Backend and frontend now require an explicit exchange-chain timestamp no older than 15 seconds; missing timestamp blocks display. | If FYERS does not expose an exchange timestamp, module will remain unavailable until a verifiable source is implemented. |
+| Option Chain | Backend/frontend currently require an explicit exchange-chain timestamp no older than 15 seconds; absent timestamp blocks display. | FYERS public Option Chain response schema lists contract fields (including LTP, bid/ask, OI and volume) but does not document an exchange timestamp field. Therefore the current gate may block valid FYERS responses; do not bypass it with server fetch time. Need an independently timestamped source or documented provenance before enabling chain-dependent signals. |
 | Technical Indicators | Calculations depend on validated OHLC candles. | Validate current candle freshness and indicator values against a live FYERS chart. |
 | AI Signals | Index-derived signal gate requires fresh WebSocket quotes; no signal when the required inputs are stale/missing. | Test every signal path, data loss, market close, and recovery in live session. |
 | Holdings & Positions | Read-only authenticated endpoints; failed calls render unavailable rather than invented rows. | Verify real API update time, session expiry, empty account response, and account-data errors. |
@@ -99,3 +99,14 @@ Still unverified: the actual value of `FYERS_REDIRECT_URI` on the test service, 
 - Revalidated mover cache timestamps and block live full-universe rankings when any quote is stale or timestamp-unverified.
 - Require all expected index quotes before applying a dashboard snapshot; explicitly label stale/blocked dashboard data.
 - Restored all 24 navigation buttons and added a CI parity test.
+
+
+## Evidence-driven blocker review (2026-10-28)
+
+Reviewed the current backend handlers against the official FYERS API v3 documentation:
+
+- Option Chain endpoint: https://fyers.in/api-docs/v3/api/market-data/ — documented request parameter `timestamp` selects option-chain data at a requested timestamp/expiry context; the documented response fields do not identify a trustworthy exchange-response timestamp. The current backend's `chainTimestamp` check searches undocumented candidate properties and correctly blocks if none is present. Do not replace this with `fetchedAt` or local server time: that only proves when the HTTP response arrived, not when its OI/volume values were observed.
+- Quotes endpoint: https://fyers.in/api-docs/v3/api/market-data/quotes/ — documents `volume`, LTP, OHLC and related quote fields, but not traded turnover/value. `volume × LTP` or `volume × close` is an estimate, not authoritative exchange turnover, and must not be used to certify the user's ₹2,000 crore threshold.
+- Contract quote route independently checks LTP, bid, ask and a quote timestamp within 15 seconds. That is useful for a selected contract quote, but it does not establish freshness of the option-chain OI/volume snapshot itself.
+- The code has not been changed to weaken either safety gate. Option-chain-dependent signals remain blocked when chain timestamp provenance is unavailable; the ₹2,000 crore same-day turnover filter remains unimplemented until a trustworthy turnover source is available.
+- The 24-tab checks prove navigation/description/render-route wiring and the recorded automated smoke test, not the correctness of all calculations, visual behavior, or live-market feature outputs. A real browser/mobile click-through and a regular-session FYERS acceptance run remain required.
