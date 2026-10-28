@@ -1,13 +1,15 @@
 # DhanPulse Navigation and Feature Audit Matrix
 
-Audit date: 2026-10-24 (Asia/Kolkata)
-Scope: static source review of `site/index.html`, `site/app.js`, and backend quote routes on `fix/fresh-data-session-policy`.
-This is not a claim that a live FYERS session or production deployment has passed. Important: the current `site/index.html` exposes 12 visible tabs, while `site/app.js` and the audit script retain 24 feature routes; this is not a 24-visible-tab UI.
+Audit date: 2026-10-28 (Asia/Kolkata)
+Scope: source-level review of the original `main` branch plus production deployment and backend-log evidence. This matrix separates automated/source checks from live feature acceptance; a passing deployment is not proof that every trading module is functionally correct.
 
 ## Navigation / regression
 
-- [x] Preserved 12 visible navigation tabs in the original Ultimate UI, matching the requested removals/hiding of legacy tabs.
-- [ ] Do not describe this as 24 visible tabs: 24 feature descriptions/routes exist, but only 12 buttons are currently visible.
+- [x] Current `site/index.html` contains 24 visible navigation buttons; `scripts/check-tabs.mjs` asserts 24 unique tabs, descriptions, and renderer routes.
+- [x] Latest recorded GitHub Actions run `40505682253` completed all listed deployment, original `/site/` URL, browser smoke-test, backend-health and CORS steps successfully.
+- [x] Render production service `DhanPluse-V1` is configured to deploy from the original repository `main` branch; latest recorded deployment is live.
+- [ ] Do not interpret source-level route checks or smoke tests as full functional verification of every scanner, chart, option-chain, or turnover calculation.
+- [ ] Production live-session acceptance remains incomplete for the blockers listed below.
 - [x] Added CI check that the navigation and tab-description registry each contain the same 24 unique tabs.
 - [x] Added CI regression checks for preview-to-test backend routing, production default routing, and preview OAuth blocking.
 - [x] Fixed an over-escaped preview hostname matcher discovered during offline source review; regression test now exercises a realistic preview hostname and a non-preview hostname.
