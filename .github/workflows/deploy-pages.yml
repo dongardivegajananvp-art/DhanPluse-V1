@@ -56,13 +56,13 @@ jobs:
           html=""
           for attempt in $(seq 1 12); do
             html="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}?deploy_smoke=$(date +%s)" 2>/dev/null || true)"
-            if [[ -n "$html" ]] && grep -q "UI build 2026-10-29" <<< "$html" && grep -q "style.css?v=20261029-nav-final3" <<< "$html"; then
+            if [[ -n "$html" ]] && grep -q "UI build 2026-10-29" <<< "$html" && grep -q "style.css?v=20261029-restore24-v1" <<< "$html"; then
               break
             fi
             echo "Waiting for the deployed Pages asset to become visible (attempt $attempt/12)."
             sleep 10
           done
-          if [[ -z "$html" ]] || ! grep -q "UI build 2026-10-29" <<< "$html" || ! grep -q "style.css?v=20261029-nav-final3" <<< "$html"; then
+          if [[ -z "$html" ]] || ! grep -q "UI build 2026-10-29" <<< "$html" || ! grep -q "style.css?v=20261029-restore24-v1" <<< "$html"; then
             echo "::error::The original /site/ URL did not serve the expected DhanPulse UI build."
             exit 1
           fi
