@@ -1271,6 +1271,9 @@ async function loadSureshotSetup() {
     // then use OI, spread, and ATM distance as deterministic tie-breakers.
     legCandidates.sort((a,b)=>b.volume-a.volume||b.oi-a.oi||a.spreadPct-b.spreadPct||Math.abs(a.strike_price-spot)-Math.abs(b.strike_price-spot));
     const leg=legCandidates[0]||null;
+    // Reflect the exact contract selected by the verified liquidity filters in the UI.
+    // The selector must not remain on the misleading 'Auto' placeholder after a leg is chosen.
+    if(leg&&strikeEl) strikeEl.value=String(leg.strike_price);
     if(!type||!leg||!sideAgrees){
       const why=!type?'No directional breakout has been confirmed.':!sideAgrees?'Selected option side does not match the verified underlying breakout direction.':'No eligible contract passed strike, liquidity and spread checks.';
       cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(why)+'</p><div class="data-row"><span>Selected strike</span><b>'+(chosenStrike===null?'Auto / not selected':formatPrice(chosenStrike))+'</b></div><div class="data-row"><span>Entry</span><b>BLOCKED</b></div><div class="data-row"><span>Target</span><b>BLOCKED</b></div><div class="data-row"><span>Stop loss</span><b>BLOCKED</b></div><div class="data-row"><span>Risk : Reward</span><b>—</b></div><p class="hint">A verified option chain alone is not a trade signal. Entry, target, stop loss and RR stay blocked until direction and contract checks pass.</p></article>';
