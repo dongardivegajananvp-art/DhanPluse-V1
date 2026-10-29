@@ -1397,6 +1397,7 @@ async function loadAiSignals() {
   status.textContent = 'Validating market session and requesting FYERS historical OHLC…';
   try {
     if (!isRegularMarketSession()) throw new Error('Market is closed or outside NSE regular hours. Actionable signals are blocked; retry during market hours.');
+    if (resolution.value === 'D') throw new Error('Daily signal mode is blocked until a completed prior-session candle can be distinguished from the current forming daily candle. Choose 5m, 15m, 30m, or 1h; no daily signal is fabricated.');
     const response = await fetch(BACKEND_URL + '/api/market/candles?' + new URLSearchParams({symbol:symbol.value,resolution:resolution.value}), {headers:{Accept:'application/json'},cache:'no-store'});
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.ok !== true || !Array.isArray(result.data)) throw new Error(result.detail || result.error || 'FYERS historical candles unavailable.');
