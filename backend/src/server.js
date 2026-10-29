@@ -552,6 +552,7 @@ async function fyersReadOnlyGet(url) {
     const waitSeconds = Math.ceil((rateLimit.until - Date.now()) / 1000);
     const error = new Error(`FYERS rate-limit cooldown active for ${rateLimitKey}. Retry in about ${waitSeconds} seconds.`);
     error.statusCode = 429;
+    error.retryAfterSeconds = waitSeconds;
     throw error;
   }
   const response = await fetchWithFyersBudget(url, {
