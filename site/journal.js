@@ -136,11 +136,5 @@
     const button = event.target.closest('button[data-tab="Trade Journal"]');
     if (button) render();
   });
-  // Add the tab here too so the journal still appears if the HTML cache is older.
-  if (!nav.querySelector('button[data-tab="Trade Journal"]')) {
-    const button = document.createElement('button');
-    button.dataset.tab = 'Trade Journal';
-    button.textContent = '✓ Trade Journal';
-    nav.appendChild(button);
-  }
+  // Trade Journal is intentionally hidden from the final 12-tab navigation.
 })();
