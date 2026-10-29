@@ -38,8 +38,8 @@ jobs:
           test -s dist/index.html
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
-          grep -q "UI build 2026-10-27" dist/site/index.html
-          grep -q "dhanpulse-shell-v88-fno-gap-selector" dist/site/sw.js
+          grep -q "UI build 2026-10-29" dist/site/index.html
+          grep -q "dhanpulse-shell-v90-sureshot-strike" dist/site/sw.js
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
@@ -56,18 +56,18 @@ jobs:
           html=""
           for attempt in $(seq 1 12); do
             html="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}?deploy_smoke=$(date +%s)" 2>/dev/null || true)"
-            if [[ -n "$html" ]] && grep -q "UI build 2026-10-27" <<< "$html" && grep -q "style.css?v=20261027-fno-gap-selector2" <<< "$html"; then
+            if [[ -n "$html" ]] && grep -q "UI build 2026-10-29" <<< "$html" && grep -q "style.css?v=20261029-sureshot-strike2" <<< "$html"; then
               break
             fi
             echo "Waiting for the deployed Pages asset to become visible (attempt $attempt/12)."
             sleep 10
           done
-          if [[ -z "$html" ]] || ! grep -q "UI build 2026-10-27" <<< "$html" || ! grep -q "style.css?v=20261027-fno-gap-selector2" <<< "$html"; then
+          if [[ -z "$html" ]] || ! grep -q "UI build 2026-10-29" <<< "$html" || ! grep -q "style.css?v=20261029-sureshot-strike2" <<< "$html"; then
             echo "::error::The original /site/ URL did not serve the expected DhanPulse UI build."
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "dhanpulse-shell-v88-fno-gap-selector" <<< "$sw"
+          grep -q "dhanpulse-shell-v90-sureshot-strike" <<< "$sw"
           echo "PASS: ${app_url} serves the expected DhanPulse UI and service-worker cache build."
           backtest="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}backtest.js?v=20261027-fno-gap-selector2&deploy_smoke=$(date +%s)")"
           grep -Fq "DMA20 crossover + SwingLow/ATR stop" <<< "$backtest"
@@ -95,7 +95,7 @@ jobs:
             if (!response || !response.ok()) throw new Error('Original /site/ page did not return HTTP success');
             const buttons = page.locator('#nav button[data-tab]');
             const names = await buttons.evaluateAll(items => items.map(item => item.getAttribute('data-tab')));
-            if (names.length !== 24) throw new Error('Expected 24 original tabs; found ' + names.length);
+            if (names.length !== 12) throw new Error('Expected 12 final original tabs; found ' + names.length);
             const visited = [];
             for (const name of names) {
               await page.locator('#nav button[data-tab="' + name.replace(/"/g, '\\"') + '"]').click();
