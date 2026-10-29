@@ -595,6 +595,10 @@ async function fyersReadOnlyGet(url) {
       : (responseText ? responseText.replace(/\s+/g, ' ').slice(0, 150) : 'FYERS API returned no error message.');
     const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}${retryAfterHeader ? `, Retry-After ${retryAfterHeader}` : ''}): ${message}`.slice(0, 220));
     error.statusCode = response.status === 429 ? 429 : (response.status === 401 || data.code === -16 ? 401 : 502);
+    if (response.status === 429) {
+      const activeLimit = fyersRateLimits.get(rateLimitKey);
+      error.retryAfterSeconds = Math.max(1, Math.ceil(((activeLimit?.until || Date.now() + FYERS_429_INITIAL_BACKOFF_MS) - Date.now()) / 1000));
+    }
     console.warn('FYERS read-only request failed:', JSON.stringify({
       path: url.pathname,
       httpStatus: response.status,
@@ -1017,21 +1021,30 @@ async function loadVerifiedFnoStockQuotes() {
     const batch = symbols.slice(offset, offset + STOCK_QUOTE_BATCH_SIZE);
     const url = new URL("https://api-t1.fyers.in/data/quotes");
     url.searchParams.set("symbols", batch.join(","));
-    const response = await fetchWithFyersBudget(url, { headers: { Authorization: appId + ":" + accessToken, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(12000) });
-    const body = await response.json().catch(() => ({}));
-    if (response.status === 429) {
-      console.warn("FYERS stock quotes rate-limited:", JSON.stringify({ batchNumber: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1, batchSize: batch.length }));
-      throw stockQuoteRateLimitError();
+    let body;
+    try {
+      // Share the same /data/quotes cooldown with movers and other read-only quote
+      // consumers. A separate raw fetch here used to bypass endpoint cooldown state.
+      body = await fyersReadOnlyGet(url);
+    } catch (error) {
+      if (Number(error.statusCode) === 429) {
+        console.warn("FYERS stock quotes rate-limited:", JSON.stringify({
+          batchNumber: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1,
+          batchSize: batch.length,
+          retryAfterSeconds: Number(error.retryAfterSeconds) || null
+        }));
+      }
+      throw error;
     }
-    if (!response.ok || body.s !== "ok" || !Array.isArray(body.d)) {
+    if (body.s !== "ok" || !Array.isArray(body.d)) {
       const reason = String(body.message || body.code || "Invalid quote response").slice(0, 160);
       console.error("FYERS stock quote batch rejected:", JSON.stringify({
         batchNumber: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1,
-        batchSize: batch.length, httpStatus: response.status,
+        batchSize: batch.length,
         responseStatus: body.s ?? null, reason
       }));
-      const error = new Error(`FYERS quote batch ${Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1} failed (HTTP ${response.status}; ${reason}).`);
-      error.statusCode = response.status === 401 ? 401 : response.status === 429 ? 429 : 502;
+      const error = new Error(`FYERS quote batch ${Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1} failed (invalid quote payload; ${reason}).`);
+      error.statusCode = 502;
       throw error;
     }
     const returned = new Set();
