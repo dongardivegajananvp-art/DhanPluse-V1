@@ -1113,6 +1113,12 @@ app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) =
     const status = Number(error.statusCode) || 502;
     if (status === 429) {
       const retry = Math.max(1, Number(error.retryAfterSeconds) || Math.ceil((stockQuoteCooldown.until - Date.now()) / 1000));
+      // Mirror the shared /data/quotes cooldown locally so browser polling does
+      // not repeatedly enter the quote loader while FYERS is still blocking it.
+      stockQuoteCooldown = {
+        until: Math.max(stockQuoteCooldown.until, Date.now() + retry * 1000),
+        backoffMs: Math.min(Math.max(stockQuoteCooldown.backoffMs * 2, retry * 1000), 15 * 60 * 1000)
+      };
       res.set("Retry-After", String(retry));
       return res.status(429).json({
         ok: false, error: "FYERS quote rate limit reached while loading the F&O universe. Partial results were discarded.",
