@@ -1,5 +1,5 @@
-const CACHE_NAME = 'dhanpulse-shell-v88-fno-gap-selector';
-const SHELL = ['./', './index.html', './style.css?v=20261027-fno-gap-selector2', './app.js?v=20261027-fno-gap-selector2', './journal.js?v=20261027-fno-gap-selector2', './risk-calculator.js?v=20261027-fno-gap-selector2', './backtest.js?v=20261027-fno-gap-selector2', './manifest.webmanifest', './dhanpulse-icon.svg'];
+const CACHE_NAME = 'dhanpulse-shell-v89-nav-cleanup';
+const SHELL = ['./', './index.html', './style.css?v=20261029-nav-cleanup1', './app.js?v=20261029-nav-cleanup1', './journal.js?v=20261029-nav-cleanup1', './risk-calculator.js?v=20261029-nav-cleanup1', './backtest.js?v=20261029-nav-cleanup1', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
