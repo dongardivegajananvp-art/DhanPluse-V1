@@ -1403,10 +1403,12 @@ async function loadAiSignals() {
     const candles = result.data;
     const candleError = validateOhlcCandles(candles, resolution.value);
     if (candleError) throw new Error(candleError);
-    const intervalMs = resolution.value === 'D' ? 86400000 : (Number(resolution.value) || 5) * 60000;
+    const intervalMs = resolution.value === 'D' ? null : (Number(resolution.value) || 5) * 60000;
     const lastTime = Number(candles[candles.length-1][0]) * 1000;
-    if (lastTime + intervalMs > Date.now() + 5000) throw new Error('Latest candle is still forming or timestamped in the future; signal blocked.');
-    if (Date.now() - (lastTime + intervalMs) > intervalMs * 3) throw new Error('Latest candle is stale for this interval; signal blocked.');
+    // FYERS daily candles are timestamped at the session's opening time, not at candle close.
+    // Only intraday bars can be judged as still-forming using timestamp + interval.
+    if (intervalMs !== null && lastTime + intervalMs > Date.now() + 5000) throw new Error('Latest candle is still forming or timestamped in the future; signal blocked.');
+    if (intervalMs !== null && Date.now() - (lastTime + intervalMs) > intervalMs * 3) throw new Error('Latest candle is stale for this interval; signal blocked.');
     const ind = calculateCandleIndicators(candles);
     if (!ind.last || ind.ema20 === null || ind.ema50 === null || ind.rsi === null || ind.atr === null) throw new Error('Need at least 50 valid candles with usable OHLC/volume; signal blocked.');
     const zones = deriveSureshotZones(candles);
