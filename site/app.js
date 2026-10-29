@@ -1502,11 +1502,92 @@ function targetSymbolName(index) {
 }
 
 function signalsMarkup() {
-  return '<div class="console-grid console-grid-2">' + SYMBOLS.map((item, index) => {
-    const signal = signalFor(item.symbol);
-    const quote = quoteFor(item.symbol);
-    return '<article class="console-section"><div class="console-section-head"><h4>' + item.label + '</h4><span class="signal-tone ' + signal.tone + '" id="signal-tone-' + index + '">' + signal.label + '</span></div><strong class="console-price" data-price-symbol="' + item.symbol + '">' + (quote ? formatPrice(quote.price) : '—') + '</strong><p id="signal-detail-' + index + '">' + signal.detail + '</p></article>';
-  }).join('') + '</div><p class="hint">Signals are simple summaries of recent sampled prices. They do not predict the market and must not be used alone to make trades.</p>';
+  return '<div class="console-section"><div class="console-section-head"><div><h4>AI Signals · verified-data rules engine</h4><p>Explainable technical setup from FYERS historical OHLC only. No Yahoo, demo candles, or generated prices.</p></div><span class="live-tag">FYERS · READ ONLY</span></div>' +
+    '<div class="option-controls"><label>Symbol<select id="aiSignalSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY</option><option value="BSE:SENSEX-INDEX">SENSEX</option></select></label><label>Interval<select id="aiSignalResolution"><option value="5" selected>5 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="D">Daily</option></select></label><button class="primary" id="runAiSignalBtn">Analyse FYERS data</button></div>' +
+    '<div id="aiSignalStatus" class="hint">No signal generated yet. Analyse during regular market hours.</div><div id="aiSignalResult"><div class="chart-empty">Waiting for a verified FYERS OHLC response.</div></div>' +
+    '<p class="hint">Explainable rule-based research aid, not a price prediction or guaranteed recommendation. Signals are blocked when the market is closed, candles are invalid/stale, or rules do not align. This version reports underlying levels only; it does not claim an option strike is verified. Order placement remains disabled.</p></div>';
+}
+
+async function loadAiSignalUniverse() {
+  const select = document.querySelector('#aiSignalSymbol');
+  if (!select || select.dataset.universeLoaded === 'true') return;
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/fno-universe', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) throw new Error('FYERS F&O symbol master unavailable.');
+    const previous = select.value;
+    const fixed = [{symbol:'NSE:NIFTY50-INDEX',name:'NIFTY 50'},{symbol:'NSE:NIFTYBANK-INDEX',name:'BANK NIFTY'},{symbol:'BSE:SENSEX-INDEX',name:'SENSEX'}];
+    const equities = result.data.filter(x => x && typeof x.symbol === 'string' && /^NSE:[A-Z0-9&-]+-EQ$/.test(x.symbol))
+      .map(x => ({symbol:x.symbol,name:x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,'')}));
+    const seen = new Set();
+    select.innerHTML = [...fixed,...equities].filter(x => !seen.has(x.symbol) && seen.add(x.symbol))
+      .map(x => '<option value="' + escapeHtml(x.symbol) + '">' + escapeHtml(x.name) + '</option>').join('');
+    if ([...select.options].some(x => x.value === previous)) select.value = previous;
+    select.dataset.universeLoaded = 'true';
+  } catch (error) {
+    const status = document.querySelector('#aiSignalStatus');
+    if (status) status.textContent = (error.message || 'FYERS symbol master unavailable.') + ' Index symbols remain available; no fallback prices are used.';
+  }
+}
+
+async function loadAiSignals() {
+  const symbol = document.querySelector('#aiSignalSymbol');
+  const resolution = document.querySelector('#aiSignalResolution');
+  const status = document.querySelector('#aiSignalStatus');
+  const host = document.querySelector('#aiSignalResult');
+  const button = document.querySelector('#runAiSignalBtn');
+  if (!symbol || !resolution || !status || !host || (button && button.disabled)) return;
+  if (button) button.disabled = true;
+  host.innerHTML = '<div class="chart-empty">Requesting verified FYERS candles…</div>';
+  status.textContent = 'Validating market session and requesting FYERS historical OHLC…';
+  try {
+    if (!isRegularMarketSession()) throw new Error('Market is closed or outside NSE regular hours. Actionable signals are blocked; retry during market hours.');
+    if (resolution.value === 'D') throw new Error('Daily signal mode is blocked until a completed prior-session candle can be distinguished from the current forming daily candle. Choose 5m, 15m, 30m, or 1h; no daily signal is fabricated.');
+    const response = await fetch(BACKEND_URL + '/api/market/candles?' + new URLSearchParams({symbol:symbol.value,resolution:resolution.value}), {headers:{Accept:'application/json'},cache:'no-store'});
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) throw new Error(result.detail || result.error || 'FYERS historical candles unavailable.');
+    const candles = result.data;
+    const candleError = validateOhlcCandles(candles, resolution.value);
+    if (candleError) throw new Error(candleError);
+    const intervalMs = resolution.value === 'D' ? null : (Number(resolution.value) || 5) * 60000;
+    const lastTime = Number(candles[candles.length-1][0]) * 1000;
+    // FYERS daily candles are timestamped at the session's opening time, not at candle close.
+    // Only intraday bars can be judged as still-forming using timestamp + interval.
+    if (intervalMs !== null && lastTime + intervalMs > Date.now() + 5000) throw new Error('Latest candle is still forming or timestamped in the future; signal blocked.');
+    if (intervalMs !== null && Date.now() - (lastTime + intervalMs) > intervalMs * 3) throw new Error('Latest candle is stale for this interval; signal blocked.');
+    const ind = calculateCandleIndicators(candles);
+    if (!ind.last || ind.ema20 === null || ind.ema50 === null || ind.rsi === null || ind.atr === null) throw new Error('Need at least 50 valid candles with usable OHLC/volume; signal blocked.');
+    const zones = deriveSureshotZones(candles);
+    if (!zones) throw new Error('Supply/demand zones cannot be calculated; signal blocked.');
+    const prior = candles.slice(Math.max(0,candles.length-21),candles.length-1);
+    if (prior.length < 10) throw new Error('Not enough prior candles to test breakout; signal blocked.');
+    const priorHigh = Math.max(...prior.map(x => Number(x[2])));
+    const priorLow = Math.min(...prior.map(x => Number(x[3])));
+    const close = ind.last.close;
+    const bullish = close > ind.ema20 && ind.ema20 > ind.ema50 && ind.rsi >= 50 && close > priorHigh;
+    const bearish = close < ind.ema20 && ind.ema20 < ind.ema50 && ind.rsi <= 50 && close < priorLow;
+    let decision = 'NO TRADE · RULES NOT ALIGNED', tone = 'neutral';
+    let reason = 'No confirmed breakout with aligned EMA20/EMA50 trend and RSI. Entry levels withheld.';
+    let levels = '<div class="data-row"><span>Entry / stop / target</span><b>Withheld</b></div>';
+    if (bullish || bearish) {
+      const entry = close;
+      const stop = bullish ? Math.min(zones.demand.low, entry - ind.atr * 0.25) : Math.max(zones.supply.high, entry + ind.atr * 0.25);
+      const risk = bullish ? entry - stop : stop - entry;
+      const target = bullish ? entry + 2*risk : entry - 2*risk;
+      if (Number.isFinite(risk) && risk > 0 && target > 0) {
+        decision = (bullish ? 'LONG WATCH' : 'SHORT WATCH') + ' · CANDIDATE'; tone = bullish ? 'positive' : 'negative';
+        reason = (bullish ? 'Bullish' : 'Bearish') + ' EMA alignment, RSI confirmation, and close beyond the prior ' + prior.length + '-candle range. Candidate only; follow-through is not guaranteed.';
+        levels = '<div class="data-row"><span>Entry · last closed candle</span><b>' + formatPrice(entry) + '</b></div><div class="data-row"><span>Stop-loss · zone/ATR rule</span><b>' + formatPrice(stop) + '</b></div><div class="data-row"><span>Target · planned 1:2 RR</span><b>' + formatPrice(target) + '</b></div><div class="data-row"><span>Risk : Reward</span><b>1 : 2.00</b></div>';
+      }
+    }
+    host.innerHTML = '<article class="console-section"><div class="console-section-head"><div><h4>' + escapeHtml(symbol.value) + '</h4><p>Last closed candle · interval ' + escapeHtml(resolution.value) + '</p></div><span class="signal-tone ' + tone + '">' + escapeHtml(decision) + '</span></div><div class="pattern-chart">' + verifiedZoneChart(candles) + '</div><div class="console-grid console-grid-2"><div class="data-row"><span>Last close</span><b>' + formatPrice(close) + '</b></div><div class="data-row"><span>EMA20 / EMA50</span><b>' + formatPrice(ind.ema20) + ' / ' + formatPrice(ind.ema50) + '</b></div><div class="data-row"><span>RSI 14</span><b>' + ind.rsi.toFixed(1) + '</b></div><div class="data-row"><span>ATR 14</span><b>' + formatPrice(ind.atr) + '</b></div><div class="data-row"><span>Demand zone</span><b>' + formatPrice(zones.demand.low) + ' – ' + formatPrice(zones.demand.high) + '</b></div><div class="data-row"><span>Supply zone</span><b>' + formatPrice(zones.supply.low) + ' – ' + formatPrice(zones.supply.high) + '</b></div></div>' + levels + '<p class="hint">' + escapeHtml(reason) + '</p><p class="hint">Source: validated FYERS historical OHLC · fetched ' + escapeHtml(new Date(result.fetchedAt || Date.now()).toLocaleString('en-IN')) + '. Underlying levels only; option contract/strike is not verified here.</p></article>';
+    status.textContent = 'Analysis completed from ' + candles.length + ' validated FYERS candles. ' + decision + '.';
+    logEvent('AI Signals analysed verified FYERS candles for ' + symbol.value + ': ' + decision + '.', decision.includes('CANDIDATE') ? 'info' : 'warn');
+  } catch (error) {
+    host.innerHTML = '<div class="chart-empty">' + escapeHtml(error.message || 'AI Signal unavailable.') + ' No substitute data or signal shown.</div>';
+    status.textContent = 'SIGNAL BLOCKED · ' + (error.message || 'Verified data unavailable.');
+    logEvent('AI Signals blocked: ' + (error.message || 'verified data unavailable.'), 'warn');
+  } finally { if (button) button.disabled = false; }
 }
 
 function optionChainMarkup() {
@@ -1865,6 +1946,9 @@ function bindTabActions() {
   if(loadCandlesBtn) loadCandlesBtn.addEventListener('click',loadCandles);
   const refreshMarketActivity = document.querySelector('#refreshMarketActivityBtn');
   if (refreshMarketActivity) refreshMarketActivity.addEventListener('click', loadMarketActivity);
+  const runAiSignalBtn = document.querySelector('#runAiSignalBtn');
+  if (runAiSignalBtn) runAiSignalBtn.addEventListener('click', loadAiSignals);
+  if (currentTab === 'AI Signals') loadAiSignalUniverse();
   const refreshIndicators = document.querySelector('#refreshIndicatorsBtn');
   if (refreshIndicators) refreshIndicators.addEventListener('click', loadTechnicalIndicators);
   const refreshMovers = document.querySelector('#refreshMoversBtn');
