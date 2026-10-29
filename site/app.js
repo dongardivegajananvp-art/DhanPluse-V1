@@ -1219,7 +1219,7 @@ async function loadSureshotSetup() {
   try{
     const candleResponse=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol,resolution}),{headers:{Accept:'application/json'},cache:'no-store'});
     const candleResult=await candleResponse.json().catch(()=>({}));
-    if(!candleResponse.ok||candleResult.ok!==true||!Array.isArray(candleResult.data))throw new Error(candleResult.error||candleResult.detail||'Verified historical candles unavailable.');
+    if(!candleResponse.ok||candleResult.ok!==true||!Array.isArray(candleResult.data))throw new Error([candleResult.error,candleResult.detail].filter(Boolean).join(' · ')||'Verified historical candles unavailable.');
     const candles=candleResult.data;
     const candleError=validateOhlcCandles(candles,resolution);
     if(candleError)throw new Error(candleError);
@@ -1238,7 +1238,7 @@ async function loadSureshotSetup() {
     if(requestedExpiry)chainParams.set('timestamp',requestedExpiry);
     const optionResponse=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+chainParams.toString(),{headers:{Accept:'application/json'},cache:'no-store'});
     const optionResult=await optionResponse.json().catch(()=>({}));
-    if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error(optionResult.error||optionResult.detail||'Verified option-chain data unavailable; no entry plan generated.');
+    if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error([optionResult.error,optionResult.detail].filter(Boolean).join(' · ')||'Verified option-chain data unavailable; no entry plan generated.');
     const expiries=Array.isArray(optionResult.data.expiryData)?optionResult.data.expiryData:[];
     if(expiryEl&&expiries.length){
       const before=expiryEl.value;
