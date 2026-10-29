@@ -59,6 +59,7 @@ let historyBySymbol = {};
 // The historical OHLC baseline is kept separate from the currently forming candle.
 let dashboardCandleState = null;
 let stockExplorerMoverRows = [];
+let stockExplorerUniverseSymbols = [];
 let fnoChartSymbols = [];
 let fnoChartUniverseRequestRunning = false;
 let watchlistEquityRows = [];
@@ -463,8 +464,25 @@ async function loadStockExplorerQuotes() {
   if (!status) return;
   stockExplorerRequestRunning = true;
   if (button) button.disabled = true;
-  status.textContent = 'Requesting verified equity quotes from FYERS…';
+  status.textContent = 'Loading the verified FYERS NSE F&O stock universe…';
   try {
+    // Load the full official F&O equity universe independently from movers/quotes.
+    // Movers may contain only a subset, especially after market close.
+    try {
+      const universeResponse = await fetch(BACKEND_URL + '/api/market/fno-universe', {
+        headers: { Accept: 'application/json' }, cache: 'no-store'
+      });
+      const universeResult = await universeResponse.json().catch(() => ({}));
+      if (universeResponse.ok && universeResult.ok === true && Array.isArray(universeResult.data)) {
+        stockExplorerUniverseSymbols = universeResult.data
+          .filter(item => item && typeof item.symbol === 'string' && /^NSE:.+-EQ$/.test(item.symbol))
+          .map(item => ({ symbol: item.symbol, underlying: item.underlying || item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '') }));
+      } else {
+        logEvent('Stock Explorer F&O universe unavailable: ' + (universeResult.detail || universeResult.error || 'verified symbol list unavailable'), 'warn');
+      }
+    } catch (universeError) {
+      logEvent('Stock Explorer F&O universe request failed: ' + (universeError.message || 'unknown error'), 'warn');
+    }
     const response = await fetch(BACKEND_URL + '/api/market/movers', {
       headers: { Accept: 'application/json' }, cache: 'no-store'
     });
@@ -539,7 +557,8 @@ async function loadStockExplorerQuotes() {
       ' · Live: ' + liveCount + ' · Last-known: ' + lastKnownCount + ' · Stale/time-unverified: ' + staleCount +
       (result.partial ? ' · INCOMPLETE coverage; missing/unavailable: ' + missing.length +
         (missing.length ? ' (' + missing.slice(0, 8).join(', ') + (missing.length > 8 ? ', …' : '') + ')' : '') : ' · Quote coverage complete for returned universe') +
-      (stockExplorerCanRank ? ' · FULL LIVE RANKING VERIFIED' : ' · NOT A FULL LIVE RANKING; showing available quotes without ranking');
+      (stockExplorerCanRank ? ' · FULL LIVE RANKING VERIFIED' : ' · NOT A FULL LIVE RANKING; showing available quotes without ranking') +
+      (stockExplorerUniverseSymbols.length ? ' · F&O universe: ' + stockExplorerUniverseSymbols.length + ' symbols' : ' · F&O symbol universe unavailable');
     logEvent('Stock Explorer FYERS snapshot (' + count + '/' + requested + '; ' + sourceLabel +
       '; live=' + liveCount + '; last-known=' + lastKnownCount + '; stale/unverified=' + staleCount +
       '; missing=' + missing.length + ').', result.partial ? 'warn' : 'info');
@@ -567,7 +586,14 @@ function renderStockExplorerResults() {
   ];
   // Use the backend's current FYERS NSE F&O master snapshot, not a short hard-coded
   // stock list. Rank equity rows by verified percent change before showing indices.
-  const dynamicRows=stockExplorerMoverRows.map(x=>({symbol:x.symbol,name:x.symbol.replace(/^NSE:/,'').replace(/-EQ$/,''),kind:'equity',tab:'Gainers & Losers',note:'Verified FYERS quote snapshot',price:Number(x.price),changePct:x.changePct==null?null:Number(x.changePct)}));
+  const quoteBySymbol = new Map(stockExplorerMoverRows.map(row => [row.symbol, row]));
+  const stockSymbols = stockExplorerUniverseSymbols.length
+    ? stockExplorerUniverseSymbols
+    : stockExplorerMoverRows.map(row => ({ symbol: row.symbol, underlying: row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '') }));
+  const dynamicRows = stockSymbols.map(item => {
+    const quote = quoteBySymbol.get(item.symbol);
+    return { symbol: item.symbol, name: item.underlying || item.symbol.replace(/^NSE:/, '').replace(/-EQ$/, ''), kind: 'equity', tab: 'Gainers & Losers', note: quote ? 'FYERS quote available' : 'F&O symbol verified; quote unavailable', price: quote && Number.isFinite(Number(quote.price)) ? Number(quote.price) : null, changePct: quote && quote.changePct != null ? Number(quote.changePct) : null };
+  });
   // Do not present a partial or after-hours snapshot as a full-universe live ranking.
   if(stockExplorerCanRank){
     dynamicRows.sort((a,b)=>{
