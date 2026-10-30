@@ -23,27 +23,27 @@ app.disable('x-powered-by');
 app.use(helmet());
 app.use(express.json({ limit: '32kb' }));
 
-const appId = process.env.FYERS_APP_ID || '';
-const appSecret = process.env.FYERS_APP_SECRET || '';
-const redirectUri = process.env.FYERS_REDIRECT_URI || '';
+const appId = (process.env.FYERS_APP_ID || '').trim();
+const appSecret = (process.env.FYERS_APP_SECRET || '').trim();
+// FIX: Accept both URI and URL naming - Render UI truncation issue
+const redirectUri = (process.env.FYERS_REDIRECT_URI || process.env.FYERS_REDIRECT_URL || process.env.FYERS_REDIRECT || '').trim();
 const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
-// Only the currently selected chart equity is streamed in addition to the three baseline indices.
 let chartStreamSymbol = null;
 
+// FIX: Build allowedOrigins robustly
+const rawAllowed = process.env.ALLOWED_ORIGIN || process.env.ALLOWED_ORIGINS || '';
 const allowedOrigins = new Set(
-  (process.env.ALLOWED_ORIGIN || '')
-    .split(',')
-    .map(x => x.trim())
-    .filter(Boolean)
+  rawAllowed.split(',').map(x => x.trim()).filter(Boolean)
 );
 
-// Explicitly allow the known DhanPulse browser frontends. The Render UI
-// and Netlify deploy-preview origins must be allowed to call the backend; an
-// origin mismatch otherwise looks like a network outage in browser fetch().
+// Always allow your known frontends - including new Netlify
 allowedOrigins.add('https://dongardivegajananvp-art.github.io');
+allowedOrigins.add('https://spectacular-gaufre-b5c029.netlify.app');
 allowedOrigins.add('https://splendid-gelato-9c2566.netlify.app');
 allowedOrigins.add('https://dhanpulse-clean-test-ui.onrender.com');
 allowedOrigins.add('https://dhanpulse-ultimate-session-test-ui.onrender.com');
+allowedOrigins.add('http://localhost:5173');
+allowedOrigins.add('http://localhost:3000');
 
 if (redirectUri) {
   try {
@@ -51,11 +51,18 @@ if (redirectUri) {
   } catch {}
 }
 
+console.log('Allowed Origins:', [...allowedOrigins]);
+console.log('FYERS Config - AppID:', appId ? appId.slice(0,6)+'...' : 'MISSING', 'Redirect:', redirectUri || 'MISSING');
+
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin) || isTrustedDhanPulsePreview(origin)) return callback(null, true);
+    // Allow no-origin (curl, health checks, Render)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.has(origin) || isTrustedDhanPulsePreview(origin)) return callback(null, true);
+    console.warn('CORS blocked origin:', origin);
     return callback(new Error('Origin not allowed'));
-  }
+  },
+  credentials: true
 }));
 
 let accessToken = '';
@@ -96,17 +103,11 @@ function parseTick(raw) {
   }
   const messages = Array.isArray(parsed) ? parsed : [parsed];
   let acceptedCount = 0;
-
   for (const item of messages) {
     if (!item || typeof item !== 'object') continue;
     const symbol = item.symbol || item.n;
     const ltp = Number(item.ltp ?? item.lp ?? item.v?.lp);
     if (!(allowedSymbols.includes(symbol) || symbol === chartStreamSymbol) || !Number.isFinite(ltp) || ltp <= 0) continue;
-
-    // Use the exchange feed timestamp, not the time this server received the
-    // message. FYERS can send the last known index snapshot after reconnecting
-    // when the market is closed; stamping that replay with "now" falsely makes
-    // an old quote look live.
     const exchangeTime = epochSeconds(
       item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt
     );
@@ -116,10 +117,8 @@ function parseTick(raw) {
       }
       continue;
     }
-
     latestTicks.set(symbol, {
-      symbol,
-      ltp,
+      symbol, ltp,
       ch: Number.isFinite(Number(item.ch)) ? Number(item.ch) : null,
       chp: Number.isFinite(Number(item.chp)) ? Number(item.chp) : null,
       updatedAt: new Date(exchangeTime * 1000).toISOString(),
@@ -134,24 +133,19 @@ function startMarketDataStream(token) {
   streamError = '';
   streamConnected = false;
   latestTicks.clear();
-
   try {
     if (marketSocket) {
       try { marketSocket.close(); } catch {}
       marketSocket = null;
     }
-
     const socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
     marketSocket = socket;
-
     socket.on('connect', () => {
       if (marketSocket !== socket) return;
       streamConnected = true;
       streamError = '';
       console.log('FYERS market socket connected; subscribing to baseline indices and selected chart symbol.');
       try {
-        // Select full updates before subscribing so exchange timestamps are present
-        // when the first messages arrive; stale snapshots must not be treated as fresh.
         socket.mode(socket.FullMode);
         socket.subscribe([...allowedSymbols, ...(chartStreamSymbol && !allowedSymbols.includes(chartStreamSymbol) ? [chartStreamSymbol] : [])]);
         console.log('FYERS market socket subscription request sent.');
@@ -160,18 +154,12 @@ function startMarketDataStream(token) {
         console.error('FYERS market socket subscription failed:', String(error?.message || error).slice(0, 240));
       }
     });
-
     socket.on('message', message => {
       if (marketSocket !== socket) return;
-      // Decode once so string-encoded JSON is diagnosed exactly like object frames.
       const parsedMessage = typeof message === 'string'
         ? (() => { try { return JSON.parse(message); } catch { return null; } })()
         : message;
       const frames = Array.isArray(parsedMessage) ? parsedMessage : [parsedMessage];
-      // FYERS sends connection/subscription acknowledgements and error frames
-      // on the same channel as market updates. Log only safe diagnostic fields
-      // so a reconnect that opens but does not resume ticks can be distinguished
-      // from a rejected subscription without exposing tokens or raw payloads.
       const controlFrames = frames
         .filter(x => x && typeof x === 'object' && (x.type || x.s || x.code != null))
         .filter(x => shouldLogSocketDiagnostic(lastControlDiagnosticAt, String(x.type || x.code || x.s)))
@@ -194,7 +182,6 @@ function startMarketDataStream(token) {
             symbol: x.symbol || x.n,
             exchangeTimestampPresent: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt))
           }));
-        // Keep logs useful during reconnect diagnosis without writing every tick.
         if (summary.length) {
           console.log('FYERS verified index tick accepted:', JSON.stringify({ acceptedCount, ticks: summary }));
         }
@@ -211,25 +198,17 @@ function startMarketDataStream(token) {
         }
       }
     });
-
     socket.on('error', error => {
       if (marketSocket !== socket) return;
       streamError = 'FYERS market data socket reported an error.';
       console.error('FYERS market socket error:', String(error?.message || error).slice(0, 240));
     });
-
     socket.on('close', (code, reason) => {
       if (marketSocket !== socket) return;
       streamConnected = false;
       const safeReason = reason == null ? '' : String(reason).slice(0, 160);
-      console.warn('FYERS market socket closed:', JSON.stringify({
-        code: code ?? null,
-        reason: safeReason || null
-      }));
+      console.warn('FYERS market socket closed:', JSON.stringify({ code: code ?? null, reason: safeReason || null }));
     });
-
-    // Configure reconnection before opening the socket so the SDK can
-    // attach its retry handler before any early disconnect event.
     if (typeof socket.autoreconnect === 'function') socket.autoreconnect(50);
     socket.connect();
   } catch (error) {
@@ -260,20 +239,13 @@ function liveSnapshot() {
   const ticks = allowedSymbols.map(symbol => latestTicks.get(symbol));
   if (ticks.some(tick => !tick)) return null;
   const now = Date.now();
-  // Every index timestamp must be plausible: reject both stale and future-dated ticks.
   if (ticks.some(tick => quoteTimestampStatus(Date.parse(tick.updatedAt) / 1000, now, 15) !== 'FRESH')) return null;
-
   return {
     ok: true,
     fetchedAt: new Date(Math.max(...ticks.map(tick => Date.parse(tick.updatedAt)))).toISOString(),
     data: ticks.map(tick => ({
       n: tick.symbol,
-      v: {
-        lp: tick.ltp,
-        tt: epochSeconds(tick.updatedAt),
-        ...(tick.ch === null ? {} : { ch: tick.ch }),
-        ...(tick.chp === null ? {} : { chp: tick.chp })
-      }
+      v: { lp: tick.ltp, tt: epochSeconds(tick.updatedAt), ...(tick.ch === null ? {} : { ch: tick.ch }), ...(tick.chp === null ? {} : { chp: tick.chp }) }
     }))
   };
 }
@@ -281,18 +253,11 @@ function liveSnapshot() {
 app.get('/', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({
-    ok: true,
-    service: 'dhanpulse-backend',
+    ok: true, service: 'dhanpulse-backend',
     message: 'Backend is online. Check /api/status for FYERS authentication and live-data state.',
-    endpoints: {
-      health: '/health',
-      status: '/api/status',
-      quotes: '/api/market/quotes',
-      candles: '/api/market/candles',
-      movers: '/api/market/movers',
-      optionsChain: '/api/fyers/options-chain'
-    },
-    orderPlacement: 'disabled'
+    endpoints: { health: '/health', status: '/api/status', quotes: '/api/market/quotes', candles: '/api/market/candles', movers: '/api/market/movers', optionsChain: '/api/fyers/options-chain' },
+    orderPlacement: 'disabled',
+    allowedOrigins: [...allowedOrigins]
   });
 });
 
@@ -300,13 +265,13 @@ app.get('/health', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
   res.json({
-    ok: true,
-    service: 'dhanpulse-backend',
+    ok: true, service: 'dhanpulse-backend',
     fyersConfigured: Boolean(appId && appSecret && redirectUri),
     liveDataConnected: Boolean(streamConnected && snapshot),
     marketSocketConnected: streamConnected,
     lastTickAt: snapshot?.fetchedAt || null,
-    orderPlacementEnabled: false
+    orderPlacementEnabled: false,
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -314,14 +279,13 @@ app.get('/api/status', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
   res.json({
-    backend: 'online',
-    fyers: accessToken ? 'connected' : 'not-connected',
+    backend: 'online', fyers: accessToken ? 'connected' : 'not-connected',
     liveData: streamConnected && snapshot ? 'streaming' : 'waiting-for-live-ticks',
-    marketSocketConnected: streamConnected,
-    authenticatedAt,
+    marketSocketConnected: streamConnected, authenticatedAt,
     lastTickAt: snapshot?.fetchedAt || null,
     ...(streamError ? { marketDataMessage: streamError } : {}),
-    orderPlacement: 'disabled'
+    orderPlacement: 'disabled',
+    configCheck: { hasAppId: !!appId, hasSecret: !!appSecret, hasRedirect: !!redirectUri, redirectUri }
   });
 });
 
@@ -338,9 +302,6 @@ function requireDashboardSession(req, res, next) {
   return next();
 }
 
-// Browser requests must prove they completed the FYERS OAuth flow before
-// receiving quotes, historical candles, option-chain, holdings or positions.
-// CORS is not authentication; this short-lived opaque session token is.
 app.use('/api/market', requireDashboardSession);
 app.use('/api/fyers/options-chain', requireDashboardSession);
 app.use('/api/fyers/option-quote', requireDashboardSession);
@@ -349,9 +310,8 @@ app.use('/api/fyers/positions', requireDashboardSession);
 
 app.get('/api/fyers/auth/start', (_req, res) => {
   if (!appId || !redirectUri) {
-    return res.status(503).json({ error: 'FYERS environment settings are incomplete.' });
+    return res.status(503).json({ error: 'FYERS environment settings are incomplete.', detail: { hasAppId: !!appId, hasRedirect: !!redirectUri } });
   }
-
   const now = Date.now();
   for (const [key, value] of pendingAuthStates) {
     if (now - value.createdAt > AUTH_STATE_TTL_MS) pendingAuthStates.delete(key);
@@ -370,7 +330,6 @@ app.get('/api/fyers/auth/start', (_req, res) => {
 app.post('/api/fyers/auth/exchange', async (req, res) => {
   const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
   const state = typeof req.body?.state === 'string' ? req.body.state.trim() : '';
-
   if (!appId || !appSecret || !redirectUri) {
     return res.status(503).json({ error: 'FYERS environment settings are incomplete.' });
   }
@@ -382,33 +341,19 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
     if (state) pendingAuthStates.delete(state);
     return res.status(400).json({ error: 'FYERS login state is invalid or expired. Start Connect FYERS again.' });
   }
-  // One-time state prevents callback replay and cross-site login mix-ups.
   pendingAuthStates.delete(state);
-
   try {
-    const appIdHash = crypto.createHash('sha256')
-      .update(`${appId}:${appSecret}`)
-      .digest('hex');
-
+    const appIdHash = crypto.createHash('sha256').update(`${appId}:${appSecret}`).digest('hex');
     const response = await fetch('https://api-t1.fyers.in/api/v3/validate-authcode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        grant_type: 'authorization_code',
-        appIdHash,
-        code
-      }),
+      body: JSON.stringify({ grant_type: 'authorization_code', appIdHash, code }),
       signal: AbortSignal.timeout(12000)
     });
-
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.s !== 'ok' || !data.access_token) {
-      return res.status(401).json({
-        error: 'FYERS authentication failed.',
-        detail: data.message || data.error || 'Please check FYERS settings.'
-      });
+      return res.status(401).json({ error: 'FYERS authentication failed.', detail: data.message || data.error || 'Please check FYERS settings.' });
     }
-
     accessToken = data.access_token;
     dashboardSessions.clear();
     const dashboardSessionToken = crypto.randomBytes(32).toString('hex');
@@ -417,14 +362,7 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
     restQuoteCache = null;
     restQuoteFetchedAt = 0;
     startMarketDataStream(accessToken);
-
-    res.json({
-      ok: true,
-      fyers: 'connected',
-      liveData: 'connecting',
-      dashboardSessionToken,
-      authenticatedAt
-    });
+    res.json({ ok: true, fyers: 'connected', liveData: 'connecting', dashboardSessionToken, authenticatedAt });
   } catch {
     res.status(502).json({ error: 'Could not reach FYERS authentication service.' });
   }
