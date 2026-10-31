@@ -3,7 +3,7 @@ import fs from 'node:fs';
 const server = fs.readFileSync(new URL('../backend/src/server.js', import.meta.url), 'utf8');
 const app = fs.readFileSync(new URL('../site/app.js', import.meta.url), 'utf8');
 const checks = [
-  ['backend uses FYERS_REDIRECT_URI first with supported legacy fallbacks', server.includes("const redirectUri = (process.env.FYERS_REDIRECT_URI || process.env.FYERS_REDIRECT_URL || process.env.FYERS_REDIRECT || '').trim();')],
+  ['backend uses FYERS_REDIRECT_URI first with supported legacy fallbacks', server.includes("const redirectUri = (process.env.FYERS_REDIRECT_URI || process.env.FYERS_REDIRECT_URL || process.env.FYERS_REDIRECT || '').trim();")],
   ['authorization request uses exact configured redirect URI', /url\.searchParams\.set\('redirect_uri', redirectUri\)/.test(server)],
   ['authorization request includes state and authorization-code response type', /url\.searchParams\.set\('response_type', 'code'\)[\s\S]{0,120}url\.searchParams\.set\('state', state\)/.test(server)],
   ['state is cryptographically random and expires after ten minutes', /crypto\.randomBytes\(24\)\.toString\('hex'\)/.test(server) && /AUTH_STATE_TTL_MS = 10 \* 60 \* 1000/.test(server)],
