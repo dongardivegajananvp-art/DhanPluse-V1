@@ -13,6 +13,7 @@ import { buildFnoEquityUniverse } from './fno-universe.js';
 import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
+import { buildOptionRiskPlan } from './option-risk-plan.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -305,6 +306,7 @@ function requireDashboardSession(req, res, next) {
 app.use('/api/market', requireDashboardSession);
 app.use('/api/fyers/options-chain', requireDashboardSession);
 app.use('/api/fyers/option-quote', requireDashboardSession);
+app.use('/api/fyers/option-risk-plan', requireDashboardSession);
 app.use('/api/fyers/holdings', requireDashboardSession);
 app.use('/api/fyers/positions', requireDashboardSession);
 
@@ -1379,6 +1381,72 @@ app.get('/api/fyers/option-quote', async (req, res) => {
       ok: false,
       error: error.statusCode === 401 ? 'Connect FYERS to verify the selected option quote.' : 'Selected option quote verification failed.',
       detail: String(error.message || 'FYERS quote request failed.').slice(0, 220)
+    });
+  }
+});
+
+
+app.get('/api/fyers/option-risk-plan', async (req, res) => {
+  const symbol = String(req.query.symbol || '');
+  const resolution = String(req.query.resolution || '5');
+  if (!/^NSE:[A-Z0-9&-]{3,48}(CE|PE)$/.test(symbol)) {
+    return res.status(400).json({ ok: false, error: 'A selected NSE option contract symbol is required.' });
+  }
+  if (!['5', '15', '30', '60'].includes(resolution)) {
+    return res.status(400).json({ ok: false, error: 'Option risk candles must use a 5, 15, 30 or 60 minute interval.' });
+  }
+  if (!nseRegularSessionNow()) {
+    return res.status(409).json({ ok: false, error: 'Market is closed; no actionable option risk plan is generated.' });
+  }
+  try {
+    const quoteUrl = new URL('https://api-t1.fyers.in/data/quotes');
+    quoteUrl.searchParams.set('symbols', symbol);
+    const historyUrl = new URL('https://api-t1.fyers.in/data/history');
+    historyUrl.searchParams.set('symbol', symbol);
+    historyUrl.searchParams.set('resolution', resolution);
+    historyUrl.searchParams.set('date_format', '1');
+    historyUrl.searchParams.set('cont_flag', '1');
+    const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
+    const today = indiaNow.toISOString().slice(0, 10);
+    const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 6)).toISOString().slice(0, 10);
+    historyUrl.searchParams.set('range_from', from);
+    historyUrl.searchParams.set('range_to', today);
+    const [quoteResult, historyResult] = await Promise.all([
+      fyersReadOnlyGet(quoteUrl),
+      fyersReadOnlyGet(historyUrl)
+    ]);
+    const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d :
+      (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
+    const quoteRow = quoteRows.find(item => (item?.n || item?.symbol || item?.v?.symbol) === symbol);
+    const quote = quoteRow?.v || quoteRow;
+    const bid = Number(quote?.bid ?? quote?.bid_price);
+    const ask = Number(quote?.ask ?? quote?.ask_price);
+    const ltp = Number(quote?.lp ?? quote?.ltp);
+    const quoteTime = epochSeconds(quote?.ltt ?? quote?.tt ?? quote?.exch_feed_time);
+    if (!Number.isFinite(bid) || bid <= 0 || !Number.isFinite(ask) || ask < bid ||
+        !Number.isFinite(ltp) || ltp <= 0 ||
+        quoteTimestampStatus(quoteTime, Date.now(), 15) !== 'FRESH') {
+      return res.status(502).json({ ok: false, error: 'Selected option bid/ask/LTP quote is missing, invalid or older than 15 seconds.' });
+    }
+    const candles = Array.isArray(historyResult?.candles) ? historyResult.candles : [];
+    const plan = buildOptionRiskPlan({ candles, entryPrice: ask, resolution, now: Date.now(), lookback: 12 });
+    if (!plan.ok) {
+      return res.status(422).json({ ok: false, error: plan.reason, quote: {
+        bid, ask, ltp, quoteTimeMs: quoteTime * 1000,
+        quoteAgeSeconds: Number(((Date.now() - quoteTime * 1000) / 1000).toFixed(1))
+      } });
+    }
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, symbol, fetchedAt: new Date().toISOString(), quote: {
+      bid, ask, ltp, quoteTimeMs: quoteTime * 1000,
+      quoteAgeSeconds: Number(((Date.now() - quoteTime * 1000) / 1000).toFixed(1))
+    }, data: plan });
+  } catch (error) {
+    const statusCode = Number(error.statusCode) || 502;
+    return res.status(statusCode).json({
+      ok: false,
+      error: statusCode === 429 ? 'FYERS rate-limit cooldown active; retry after the stated cooldown.' : 'Unable to verify option quote and historical candles.',
+      detail: String(error.message || 'FYERS option risk request failed.').slice(0, 220)
     });
   }
 });
