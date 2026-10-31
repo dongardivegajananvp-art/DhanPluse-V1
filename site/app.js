@@ -1152,7 +1152,21 @@ async function scanTopVerifiedPatterns() {
     const moversResponse=await fetch(BACKEND_URL+'/api/market/movers',{headers:{Accept:'application/json'},cache:'no-store'});
     const movers=await moversResponse.json().catch(()=>({}));
     if(!moversResponse.ok||movers.ok!==true||!Array.isArray(movers.data))throw new Error(movers.error||'Verified movers are unavailable.');
-    const candidates=movers.data.filter(row=>row&&typeof row.symbol==='string'&&/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol)&&Number.isFinite(Number(row.price))&&Number(row.price)>0).slice(0,5);
+    if(movers.marketSession!=='OPEN')throw new Error('Market is closed. Live pattern scan is withheld; last-known prices are not scan candidates.');
+    const requestedCount=Number(movers.requestedSymbols),receivedCount=Number(movers.receivedSymbols);
+    const failedCount=Array.isArray(movers.failedSymbols)?movers.failedSymbols.length:0;
+    if(movers.partial===true||!Number.isInteger(requestedCount)||requestedCount<1||receivedCount!==requestedCount||movers.data.length!==requestedCount||failedCount>0){
+      throw new Error('Pattern scan blocked: FYERS returned incomplete F&O coverage ('+(Number.isFinite(receivedCount)?receivedCount:'unknown')+' / '+(Number.isFinite(requestedCount)?requestedCount:'unknown')+').');
+    }
+    const now=Date.now();
+    const verifiedRows=movers.data.filter(row=>{
+      if(!row||typeof row.symbol!=='string'||!/^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol))return false;
+      if(!Number.isFinite(Number(row.price))||Number(row.price)<=0||row.priceStatus!=='LIVE_QUOTE'||!row.priceAsOf)return false;
+      const age=Number(row.quoteAgeSeconds),timestamp=Date.parse(row.priceAsOf);
+      return Number.isFinite(age)&&age>=0&&age<=MAX_EQUITY_QUOTE_AGE_SECONDS&&Number.isFinite(timestamp)&&now-timestamp>=-30000&&now-timestamp<=MAX_EQUITY_QUOTE_AGE_SECONDS*1000;
+    });
+    if(verifiedRows.length!==requestedCount)throw new Error('Pattern scan blocked: only '+verifiedRows.length+' / '+requestedCount+' F&O quotes have fresh exchange timestamps.');
+    const candidates=verifiedRows.slice().sort((a,b)=>Math.abs(Number(b.changePct))-Math.abs(Number(a.changePct))).slice(0,5);
     if(!candidates.length)throw new Error('No verified stock candidates were returned by the backend.');
     const cards=[];
     for(let i=0;i<candidates.length;i++){
