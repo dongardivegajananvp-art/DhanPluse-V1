@@ -7,6 +7,75 @@ const BACKEND_URL = IS_ISOLATED_TEST_PREVIEW
 // The FYERS access token stays on the backend. This opaque session token only
 // authorizes this browser session to read protected dashboard APIs.
 const nativeFetch = window.fetch.bind(window);
+
+// FYERS 429/cooldown state is shared across tabs through localStorage.
+// This is a UI backoff only; the backend remains the authority for API limits.
+const FYERS_COOLDOWN_KEY = 'dhanpulse_fyers_cooldown_until_v1';
+function getFyersCooldownRemaining() {
+  let storedUntil = 0;
+  try { storedUntil = Number(localStorage.getItem(FYERS_COOLDOWN_KEY) || 0); } catch {}
+  return Math.max(0, Math.ceil((Math.max(storedUntil, window.__dhanPulseCooldownUntil || 0) - Date.now()) / 1000));
+}
+function renderFyersCooldown() {
+  const remaining = getFyersCooldownRemaining();
+  let notice = document.querySelector('#fyersCooldownNotice');
+  if (remaining > 0) {
+    if (!notice) {
+      notice = document.createElement('span');
+      notice.id = 'fyersCooldownNotice';
+      notice.className = 'market-pill';
+      notice.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;color:#ffd38a;border:1px solid #8a6633;background:#332714;font-size:11px;white-space:nowrap;';
+      const header = document.querySelector('.header-right');
+      if (header) header.insertBefore(notice, header.firstChild);
+    }
+    const hours = Math.floor(remaining / 3600);
+    const minutes = Math.floor((remaining % 3600) / 60);
+    const seconds = remaining % 60;
+    const duration = hours > 0
+      ? hours + 'h ' + String(minutes).padStart(2, '0') + 'm ' + String(seconds).padStart(2, '0') + 's'
+      : minutes + 'm ' + String(seconds).padStart(2, '0') + 's';
+    notice.textContent = 'FYERS cooling down · Retry in ' + duration;
+    notice.hidden = false;
+  } else if (notice) {
+    notice.remove();
+  }
+
+  document.querySelectorAll('main button').forEach(button => {
+    const description = ((button.id || '') + ' ' + (button.textContent || '')).toLowerCase();
+    const isDataRefresh = /refresh|load (equity|stock|market|quote|candle)|run scanner|scan (now|market|stocks)/.test(description);
+    if (!isDataRefresh) return;
+    if (remaining > 0 && !button.disabled) {
+      button.dataset.fyersCooldownDisabled = 'true';
+      button.disabled = true;
+      button.title = 'FYERS rate-limit cooldown is active.';
+    } else if (remaining === 0 && button.dataset.fyersCooldownDisabled === 'true') {
+      button.disabled = false;
+      delete button.dataset.fyersCooldownDisabled;
+      button.removeAttribute('title');
+    }
+  });
+}
+function activateFyersCooldown(payload, response) {
+  const detail = [payload && payload.detail, payload && payload.error, payload && payload.message].filter(Boolean).join(' ');
+  const match = detail.match(/(\d+)\s*seconds?/i);
+  const headerSeconds = Number(response && response.headers && response.headers.get('retry-after'));
+  const seconds = Math.max(1, Math.min(86400,
+    Number(payload && payload.retryAfterSeconds) || (Number.isFinite(headerSeconds) && headerSeconds > 0 ? headerSeconds : 0) ||
+    (match ? Number(match[1]) : 0) || 60
+  ));
+  const until = Date.now() + seconds * 1000;
+  window.__dhanPulseCooldownUntil = Math.max(window.__dhanPulseCooldownUntil || 0, until);
+  try {
+    const previous = Number(localStorage.getItem(FYERS_COOLDOWN_KEY) || 0);
+    localStorage.setItem(FYERS_COOLDOWN_KEY, String(Math.max(previous, until)));
+  } catch {}
+  renderFyersCooldown();
+}
+window.addEventListener('storage', event => {
+  if (event.key === FYERS_COOLDOWN_KEY) renderFyersCooldown();
+});
+window.setInterval(renderFyersCooldown, 1000);
+
 window.fetch = function(input, init = {}) {
   let url = '';
   try { url = new URL(typeof input === 'string' ? input : input.url, window.location.href).href; } catch {}
@@ -24,7 +93,13 @@ window.fetch = function(input, init = {}) {
     const session = sessionStorage.getItem('dhanpulse-dashboard-session-v1');
     if (session) headers.set('Authorization', 'Bearer ' + session);
   }
-  return nativeFetch(input, { ...init, headers });
+  return nativeFetch(input, { ...init, headers }).then(response => {
+    if (isBackend && response.status === 429) {
+      response.clone().json().then(payload => activateFyersCooldown(payload, response))
+        .catch(() => activateFyersCooldown({}, response));
+    }
+    return response;
+  });
 };
 
 const QUOTE_POLL_MS = 5000;
