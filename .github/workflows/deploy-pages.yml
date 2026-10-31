@@ -39,7 +39,7 @@ jobs:
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
           grep -q "UI build 2026-10-29" dist/site/index.html
-          grep -q "dhanpulse-shell-v94-fyers-cooldown" dist/site/sw.js
+          grep -q "dhanpulse-shell-v95-sureshot-option-risk" dist/site/sw.js
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
@@ -67,7 +67,7 @@ jobs:
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "dhanpulse-shell-v94-fyers-cooldown" <<< "$sw"
+          grep -q "dhanpulse-shell-v95-sureshot-option-risk" <<< "$sw"
           echo "PASS: ${app_url} serves the expected DhanPulse UI and service-worker cache build."
           backtest="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}backtest.js?v=20261027-fno-gap-selector2&deploy_smoke=$(date +%s)")"
           grep -Fq "DMA20 crossover + SwingLow/ATR stop" <<< "$backtest"
