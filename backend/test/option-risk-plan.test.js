@@ -45,7 +45,7 @@ test("blocks invalid or out-of-order OHLC data", () => {
 });
 
 test("blocks when swing-low is not below the ask entry", () => {
-  const rows = candles({ low: 101 });
+  const rows = candles().map(row => [row[0], 102, 103, 101, 102, 500]);
   const result = buildOptionRiskPlan({ candles: rows, entryPrice: 100, resolution: "5", now });
   assert.equal(result.ok, false);
   assert.match(result.reason, /swing-low/i);
