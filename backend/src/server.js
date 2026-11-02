@@ -34,16 +34,14 @@ const redirectUri = (process.env.FYERS_REDIRECT_URI || process.env.FYERS_REDIREC
 const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
 let chartStreamSymbol = null;
 
-// FIX: Build allowedOrigins robustly
-const rawAllowed = process.env.ALLOWED_ORIGIN || process.env.ALLOWED_ORIGINS || '';
-const allowedOrigins = new Set(
-  rawAllowed.split(',').map(x => x.trim()).filter(Boolean)
-);
-
-// Keep the production GitHub Pages origin; do not whitelist retired preview/test frontends.
-allowedOrigins.add('https://dongardivegajananvp-art.github.io');
-allowedOrigins.add('http://localhost:5173');
-allowedOrigins.add('http://localhost:3000');
+// Production is restricted to the original DhanPulse GitHub Pages frontend.
+// Localhost remains available for local development; retired preview/test hosts
+// are intentionally ignored even if stale ALLOWED_ORIGIN(S) values remain set.
+const allowedOrigins = new Set([
+  'https://dongardivegajananvp-art.github.io',
+  'http://localhost:5173',
+  'http://localhost:3000'
+]);
 
 if (redirectUri) {
   try {
