@@ -334,31 +334,26 @@ function validateOhlcCandles(candles, resolution) {
   return '';
 }
 
-function validateOptionChainPayload(payload) {
-  if (!payload || !Array.isArray(payload.optionsChain) || !payload.optionsChain.length) return 'Option-chain rows are missing; no option signal.';
-  // FYERS may include the underlying index as a special strike=-1 row; its LTP is spot, not an option premium.
-  const underlyingRow = payload.optionsChain.find(row => Number(row?.strike_price) === -1 && !String(row?.option_type || '').trim() && /-(INDEX|EQ)$/.test(String(row?.symbol || '')) && Number(row?.ltp) > 0);
-  const spot = Number(payload.optionsChain.find(row => Number(row?.underlying_price) > 0)?.underlying_price ?? payload.underlying_price ?? underlyingRow?.ltp);
-  if (!Number.isFinite(spot) || spot <= 0) return 'Verified underlying spot is missing from option-chain response.';
-  // FYERS option-chain legs do not document per-leg exchange timestamps or expiry.
-  // Expiry is inherited from the selected chain's expiryData; freshness is checked
-  // separately against /data/quotes for the actual candidate contract before a setup is issued.
+function validateOptionChainPayload(payload, verifiedUnderlyingSpot) {
+  if (!payload || !Array.isArray(payload.optionsChain) || !payload.optionsChain.length) return 'Option contract list is missing; no option signal.';
+  // The FYERS option-chain response has no documented exchange timestamp.
+  // Use it only to discover contract symbols/strikes/expiry. Spot comes from
+  // the separately validated FYERS underlying OHLC candles; option LTP/OI/
+  // volume/bid/ask from this response are deliberately ignored.
+  const spot = Number(verifiedUnderlyingSpot);
+  if (!Number.isFinite(spot) || spot <= 0) return 'Verified underlying candle close is missing; no option signal.';
   const chainExpiry = payload.expiryData?.[0]?.expiry ?? payload.expiry;
   const normalized = payload.optionsChain.map(row => {
-    if (!row || !Number.isFinite(Number(row.strike_price)) || Number(row.strike_price) <= 0) return null;
+    if (!row || !/^NSE:[A-Z0-9&-]{3,48}(CE|PE)$/.test(String(row.symbol || ''))) return null;
     const type = String(row.option_type || '').toUpperCase();
-    const ltp = Number(row.ltp), bid = Number(row.bid ?? row.bid_price ?? row.bidPrice), ask = Number(row.ask ?? row.ask_price ?? row.askPrice);
-    const oi = Number(row.oi), volume = Number(row.volume);
+    const strike = Number(row.strike_price);
     const expiry = row.expiry ?? row.expiry_date ?? row.expiryDate ?? chainExpiry;
-    if (!['CE','PE','CALL','PUT'].includes(type) || !Number.isFinite(ltp) || ltp <= 0 ||
-        !Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask < bid ||
-        !Number.isFinite(oi) || oi < 0 || !Number.isFinite(volume) || volume < 0 || !expiry) return null;
-    const spreadPct = ((ask - bid) / ((ask + bid) / 2)) * 100;
-    return { ...row, option_type: type === 'CALL' ? 'CE' : type === 'PUT' ? 'PE' : type,
-      strike_price: Number(row.strike_price), ltp, bid, ask, oi, volume, expiry: String(expiry),
-      spreadPct, quoteTimeMs: null, quoteAgeSeconds: null };
+    if (!['CE','PE','CALL','PUT'].includes(type) || !Number.isFinite(strike) || strike <= 0 || !expiry) return null;
+    return { symbol: String(row.symbol), strike_price: strike,
+      option_type: type === 'CALL' ? 'CE' : type === 'PUT' ? 'PE' : type,
+      expiry: String(expiry) };
   }).filter(Boolean);
-  if (!normalized.length) return 'No option row passed strike, expiry, bid/ask, OI and volume validation.';
+  if (!normalized.length) return 'No valid option contract descriptors passed symbol, strike, type and expiry validation.';
   return { spot, chain: normalized };
 }
 
@@ -1302,7 +1297,7 @@ async function loadSureshotSetup() {
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
   if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
   const symbol=symbolEl.value,resolution=resolutionEl.value;
-  status.textContent='Requesting verified FYERS OHLC candles and option-chain data…';
+  status.textContent='Requesting verified FYERS OHLC candles and contract descriptors…';
   cards.innerHTML='<div class="chart-empty">Checking conditions…</div>';
   chart.innerHTML='<div class="chart-empty">Loading verified candles…</div>';
   try{
@@ -1327,7 +1322,7 @@ async function loadSureshotSetup() {
     if(requestedExpiry)chainParams.set('timestamp',requestedExpiry);
     const optionResponse=await fetch(BACKEND_URL+'/api/fyers/options-chain?'+chainParams.toString(),{headers:{Accept:'application/json'},cache:'no-store'});
     const optionResult=await optionResponse.json().catch(()=>({}));
-    if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error([optionResult.error,optionResult.detail].filter(Boolean).join(' · ')||'Verified option-chain data unavailable; no entry plan generated.');
+    if(!optionResponse.ok||optionResult.ok!==true||!optionResult.data)throw new Error([optionResult.error,optionResult.detail].filter(Boolean).join(' · ')||'FYERS option contract descriptors unavailable; no entry plan generated.');
     const expiries=Array.isArray(optionResult.data.expiryData)?optionResult.data.expiryData:[];
     if(expiryEl&&expiries.length){
       const before=expiryEl.value;
@@ -1336,13 +1331,10 @@ async function loadSureshotSetup() {
       else if(requestedExpiry&&expiries.some(item=>String(item.expiry)===requestedExpiry))expiryEl.value=requestedExpiry;
       else if(expiries[0])expiryEl.value=String(expiries[0].expiry);
     }
-    const chainCheck=validateOptionChainPayload(optionResult.data);
+    const chainCheck=validateOptionChainPayload(optionResult.data,close);
     if(typeof chainCheck==='string')throw new Error(chainCheck);
     const chain=chainCheck.chain;
     const spot=chainCheck.spot;
-    const chainTimestamp=Date.parse(optionResult.chainTimestamp||'');
-    const chainAgeMs=Date.now()-chainTimestamp;
-    if(!Number.isFinite(chainTimestamp)||chainAgeMs<0||chainAgeMs>15000)throw new Error('Option-chain exchange timestamp is missing, stale, or invalid; no signal.');
     const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
     const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
     const typeEl=document.querySelector('#setupOptionType'),strikeEl=document.querySelector('#setupStrike');
@@ -1351,22 +1343,23 @@ async function loadSureshotSetup() {
     const type=requestedType||autoType;
     const atmIndex=atm===null?-1:strikes.indexOf(atm);
     const nearbyStrikes=new Set(atmIndex<0?[]:strikes.slice(Math.max(0,atmIndex-2),Math.min(strikes.length,atmIndex+3)));
-    const eligibleStrikes=[...new Set(chain.filter(x=>x&&['CE','PE'].includes(x.option_type)&&Number(x.strike_price)>0&&Number(x.ltp)>0).map(x=>String(x.strike_price)))].sort((a,b)=>Number(a)-Number(b));
+    const eligibleStrikes=[...new Set(chain.filter(x=>x&&['CE','PE'].includes(x.option_type)&&Number(x.strike_price)>0&&x.symbol).map(x=>String(x.strike_price)))].sort((a,b)=>Number(a)-Number(b));
     if(strikeEl){const before=strikeEl.value;strikeEl.innerHTML='<option value="">Auto nearest eligible strike</option>'+eligibleStrikes.map(s=>'<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+'</option>').join('');if(before&&eligibleStrikes.includes(before))strikeEl.value=before;}
     const chosenStrike=strikeEl&&strikeEl.value?Number(strikeEl.value):null;
     const sideAgrees=!!autoType&&(!requestedType||requestedType===autoType);
-    const legCandidates=type?chain.filter(x=>(chosenStrike!==null?Number(x.strike_price)===chosenStrike:nearbyStrikes.has(Number(x.strike_price)))&&x.option_type===type&&Number(x.ltp)>0&&x.spreadPct<=5&&x.oi>0&&x.volume>0):[];
-    // Prefer the most actively traded verified contract among the five nearest strikes,
-    // then use OI, spread, and ATM distance as deterministic tie-breakers.
-    legCandidates.sort((a,b)=>b.volume-a.volume||b.oi-a.oi||a.spreadPct-b.spreadPct||Math.abs(a.strike_price-spot)-Math.abs(b.strike_price-spot));
+    const legCandidates=type?chain.filter(x=>(chosenStrike!==null?Number(x.strike_price)===chosenStrike:nearbyStrikes.has(Number(x.strike_price)))&&x.option_type===type&&x.symbol):[];
+    // Chain rows provide contract descriptors only. Rank by distance to the
+    // verified underlying candle close; live premium/spread is checked later
+    // from the independently timestamped selected-contract quote endpoint.
+    legCandidates.sort((a,b)=>Math.abs(a.strike_price-spot)-Math.abs(b.strike_price-spot));
     const leg=legCandidates[0]||null;
-    // Reflect the exact contract selected by the verified liquidity filters in the UI.
+    // Reflect the exact contract selected from the descriptor list in the UI.
     // The selector must not remain on the misleading 'Auto' placeholder after a leg is chosen.
     if(leg&&strikeEl) strikeEl.value=String(leg.strike_price);
     if(!type||!leg||!sideAgrees){
-      const why=!type?'No directional breakout has been confirmed.':!sideAgrees?'Selected option side does not match the verified underlying breakout direction.':'No eligible contract passed strike, liquidity and spread checks.';
-      cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(why)+'</p><div class="data-row"><span>Selected strike</span><b>'+(chosenStrike===null?'Auto / not selected':formatPrice(chosenStrike))+'</b></div><div class="data-row"><span>Entry</span><b>BLOCKED</b></div><div class="data-row"><span>Target</span><b>BLOCKED</b></div><div class="data-row"><span>Stop loss</span><b>BLOCKED</b></div><div class="data-row"><span>Risk : Reward</span><b>—</b></div><p class="hint">A verified option chain alone is not a trade signal. Entry, target, stop loss and RR stay blocked until direction and contract checks pass.</p></article>';
-      status.textContent='NO TRADE · '+why+' Verified candles and option chain do not currently support an actionable setup.';
+      const why=!type?'No directional breakout has been confirmed.':!sideAgrees?'Selected option side does not match the verified underlying breakout direction.':'No contract descriptor matched the selected side and strike.';
+      cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">FILTERED</span></div><p>'+escapeHtml(why)+'</p><div class="data-row"><span>Selected strike</span><b>'+(chosenStrike===null?'Auto / not selected':formatPrice(chosenStrike))+'</b></div><div class="data-row"><span>Entry</span><b>BLOCKED</b></div><div class="data-row"><span>Target</span><b>BLOCKED</b></div><div class="data-row"><span>Stop loss</span><b>BLOCKED</b></div><div class="data-row"><span>Risk : Reward</span><b>—</b></div><p class="hint">Contract discovery alone is not a trade signal. Entry, target, stop loss and RR stay blocked until direction, fresh contract quote and completed option candles pass.</p></article>';
+      status.textContent='NO TRADE · '+why+' Verified candles and independently quoted option contracts do not currently support an actionable setup.';
       logEvent('Sureshot filtered setup: '+why,'info');return;
     }
     const riskResolution=['5','15','30','60'].includes(resolution)?resolution:'5';
@@ -1382,9 +1375,7 @@ async function loadSureshotSetup() {
     if(freshSpreadPct>5)throw new Error('Selected option contract spread exceeds 5%; no trade.');
     const entry=Number(planResult.data.entryPrice),stop=Number(planResult.data.stopLoss),target=Number(planResult.data.target),rr=Number(planResult.data.rr);
     if(![entry,stop,target,rr].every(Number.isFinite)||entry<=stop||target<=entry||rr<2)throw new Error('Option-candle risk plan failed the minimum 1:2 validation; no trade.');
-    const oi=displayNumber(leg.oi,0);
-    const volume=displayNumber(leg.volume,0);
-    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+Number(leg.strike_price)+' strike</h4><span class="signal-tone positive">'+bias+'</span></div><strong class="console-price">₹'+formatPrice(entry)+'</strong><div class="data-row"><span>Selected contract</span><b>'+escapeHtml(leg.symbol)+'</b></div><div class="data-row"><span>Entry reference (fresh ask)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (12-candle swing low)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (minimum 2R)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : '+rr.toFixed(2)+'</b></div><div class="data-row"><span>Risk per unit</span><b>₹'+formatPrice(planResult.data.riskPerUnit)+'</b></div><div class="data-row"><span>Option candles used</span><b>'+Number(planResult.data.candleCount)+' completed · '+riskResolution+' min</b></div><div class="data-row"><span>Quote age</span><b>'+Math.max(0,quoteAgeMs/1000).toFixed(1)+' sec</b></div><div class="data-row"><span>Bid / Ask</span><b>₹'+formatPrice(freshBid)+' / ₹'+formatPrice(freshAsk)+'</b></div><div class="data-row"><span>Spread</span><b>'+freshSpreadPct.toFixed(2)+'%</b></div><div class="data-row"><span>Expiry</span><b>'+escapeHtml(/^\\d{9,12}$/.test(String(leg.expiry))?new Date(Number(leg.expiry)*1000).toLocaleDateString('en-IN'):leg.expiry)+'</b></div><div class="data-row"><span>OI / Volume (chain)</span><b>'+oi+' / '+volume+'</b></div><p class="hint">Underlying confirmation: '+escapeHtml(reason)+' · Entry uses fresh FYERS ask; SL is the recent swing low from completed FYERS option candles; target is rounded up to at least 2R. This is a read-only candidate, not a guaranteed trade.</p></article>';
+    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>'+type+' · '+Number(leg.strike_price)+' strike</h4><span class="signal-tone positive">'+bias+'</span></div><strong class="console-price">₹'+formatPrice(entry)+'</strong><div class="data-row"><span>Selected contract</span><b>'+escapeHtml(leg.symbol)+'</b></div><div class="data-row"><span>Entry reference (fresh ask)</span><b>₹'+formatPrice(entry)+'</b></div><div class="data-row"><span>Stop-loss (12-candle swing low)</span><b>₹'+formatPrice(stop)+'</b></div><div class="data-row"><span>Target (minimum 2R)</span><b>₹'+formatPrice(target)+'</b></div><div class="data-row"><span>Planned Risk : Reward</span><b>1 : '+rr.toFixed(2)+'</b></div><div class="data-row"><span>Risk per unit</span><b>₹'+formatPrice(planResult.data.riskPerUnit)+'</b></div><div class="data-row"><span>Option candles used</span><b>'+Number(planResult.data.candleCount)+' completed · '+riskResolution+' min</b></div><div class="data-row"><span>Quote age</span><b>'+Math.max(0,quoteAgeMs/1000).toFixed(1)+' sec</b></div><div class="data-row"><span>Bid / Ask</span><b>₹'+formatPrice(freshBid)+' / ₹'+formatPrice(freshAsk)+'</b></div><div class="data-row"><span>Spread</span><b>'+freshSpreadPct.toFixed(2)+'%</b></div><div class="data-row"><span>Expiry</span><b>'+escapeHtml(/^\\d{9,12}$/.test(String(leg.expiry))?new Date(Number(leg.expiry)*1000).toLocaleDateString('en-IN'):leg.expiry)+'</b></div><div class="data-row"><span>Option-chain OI / Volume</span><b>NOT USED · timestamp undocumented</b></div><p class="hint">Underlying confirmation: '+escapeHtml(reason)+' · Entry uses fresh FYERS ask; SL is the recent swing low from completed FYERS option candles; target is rounded up to at least 2R. This is a read-only candidate, not a guaranteed trade.</p></article>';
     status.textContent='Candidate only · Fresh FYERS option quote and '+Number(planResult.data.candleCount)+' completed option candles verified at '+new Date(planResult.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+'. No order placed.';
     logEvent('Sureshot candidate built from verified OHLC zone and option-chain data.','info');
   }catch(error){

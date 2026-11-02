@@ -14,6 +14,7 @@ import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 import { buildOptionRiskPlan } from './option-risk-plan.js';
+import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -1327,23 +1328,19 @@ app.get('/api/fyers/options-chain', async (req, res) => {
     url.searchParams.set('greeks', '1');
     if (timestamp) url.searchParams.set('timestamp', timestamp);
     const result = await fyersReadOnlyGet(url);
-    const chainData = result && result.data;
-    const rawChainTimestamp = chainData?.timestamp ?? chainData?.tt ?? chainData?.exch_feed_time ??
-      chainData?.last_traded_time ?? chainData?.ltt ?? result?.timestamp ?? result?.tt ??
-      result?.exch_feed_time ?? result?.last_traded_time ?? result?.ltt;
-    const chainTimestamp = epochSeconds(rawChainTimestamp);
-    if (quoteTimestampStatus(chainTimestamp, Date.now(), 15) !== 'FRESH') {
-      return res.status(502).json({ ok: false,
-        status: chainTimestamp ? 'STALE' : 'TIME_UNVERIFIED',
-        error: 'Option-chain exchange timestamp is missing, stale, or unverified; chain data and dependent signals are blocked.' });
-    }
+    const discovery = normalizeOptionContractDiscovery(result?.data);
     res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, fetchedAt: new Date().toISOString(),
-      chainTimestamp: new Date(chainTimestamp * 1000).toISOString(), data: chainData });
+    return res.json({
+      ok: true,
+      contractDiscoveryOnly: true,
+      chainFreshness: 'UNVERIFIED',
+      notice: 'FYERS does not document an exchange timestamp for option-chain OI/volume/premium fields. Only contract identity, strike, side and expiry are returned; all actionable prices are verified separately.',
+      data: discovery
+    });
   } catch (error) {
     return res.status(error.statusCode || 502).json({
       ok: false,
-      error: error.statusCode === 401 ? 'Connect FYERS to view option-chain data.' : 'FYERS option-chain request failed.',
+      error: error.statusCode === 401 ? 'Connect FYERS to view option contract descriptors.' : 'FYERS option contract discovery failed.',
       detail: String(error.message || 'Upstream request failed.').slice(0, 220)
     });
   }
