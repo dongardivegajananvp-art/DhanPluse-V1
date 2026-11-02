@@ -1098,7 +1098,7 @@ function advancedScannerMarkup(tab) {
       '<p><a href="https://www.nseindia.com/all-reports" target="_blank" rel="noopener noreferrer">NSE All Reports ↗</a></p></div>';
   }
   if (tab === 'Sureshot CE/PE') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY CE/PE · OHLC zones + contract discovery; fresh premium checked separately</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50 · Index options</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse verified setup</button></div><div id="setupStatus" class="hint">A setup is shown only after verified underlying OHLC candles, contract descriptors, a fresh timestamped option quote and completed option candles. Chain OI/volume are not used. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY CE/PE · OHLC zones + contract discovery; fresh premium checked separately</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX">NIFTY 50 · Index options</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse selected setup</button><button class="secondary" id="scanSureshotUniverseBtn">Scan all F&amp;O + indices</button></div><div id="sureshotUniverseResults" class="console-section"><div class="chart-empty">Run a complete FYERS universe scan to rank the top three verified momentum candidates.</div></div><div id="setupStatus" class="hint">A setup is shown only after verified underlying OHLC candles, contract descriptors, a fresh timestamped option quote and completed option candles. Chain OI/volume are not used. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
   }
   if (tab === 'FII/DII Flow') {
     return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
@@ -1294,6 +1294,59 @@ async function loadSureshotStockUniverse() {
       (error.message || 'verified symbol master unavailable') + '. No stock prices or strikes were fabricated.';
   }
 }
+async function loadSureshotUniverseShortlist() {
+  if (currentTab !== 'Sureshot CE/PE') return;
+  const button = document.querySelector('#scanSureshotUniverseBtn');
+  const host = document.querySelector('#sureshotUniverseResults');
+  const status = document.querySelector('#setupStatus');
+  if (!host || (button && button.disabled)) return;
+  if (button) button.disabled = true;
+  host.innerHTML = '<div class="chart-empty">Checking complete FYERS F&amp;O quote coverage and all three live index ticks…</div>';
+  if (status) status.textContent = 'Full-universe scan running · no partial rankings accepted.';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/sureshot-shortlist', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || result.verified !== true ||
+        result.signalsAllowed !== false || !Array.isArray(result.data) || result.data.length !== 3) {
+      throw new Error(result.detail || result.error || 'A complete verified top-three shortlist was not returned.');
+    }
+    host.innerHTML = '<div class="console-section-head"><div><h4>Top 3 · FYERS momentum shortlist</h4><p>' +
+      escapeHtml(String(result.universeCount)) + ' NSE F&amp;O equities + 3 indices · ranked by absolute percentage change</p></div><span class="live-tag">VERIFIED SNAPSHOT</span></div>' +
+      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>Change</th><th>FYERS LTP</th><th>Quote age</th><th>Next step</th></tr></thead><tbody>' +
+      result.data.map(row => {
+        const change = Number(row.changePct);
+        const changeText = (change > 0 ? '+' : '') + change.toFixed(2) + '%';
+        const name = String(row.symbol || '').replace(/^NSE:/, '').replace(/^BSE:/, '').replace(/-EQ$/, '').replace(/-INDEX$/, '');
+        return '<tr><td><b>#' + Number(row.rank) + '</b></td><td><b>' + escapeHtml(name) + '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td class="' + (change > 0 ? 'positive-text' : change < 0 ? 'negative-text' : '') + '">' + changeText + '</td><td>₹' + formatPrice(Number(row.price)) + '</td><td>' + Number(row.quoteAgeSeconds).toFixed(1) + ' sec</td><td><button class="secondary" data-sureshot-symbol="' + escapeHtml(row.symbol) + '">Verify setup</button></td></tr>';
+      }).join('') + '</tbody></table></div><p class="hint">Momentum ranking only — not a CE/PE signal. Each row still needs verified directional candles, a listed expiry/strike, fresh option premium and completed option candles with RR ≥ 1:2. No order is placed.</p>';
+    host.querySelectorAll('[data-sureshot-symbol]').forEach(action => action.addEventListener('click', () => {
+      const select = document.querySelector('#setupSymbol');
+      if (select) {
+        select.value = action.dataset.sureshotSymbol;
+        if (select.value !== action.dataset.sureshotSymbol) {
+          const option = document.createElement('option');
+          option.value = action.dataset.sureshotSymbol;
+          option.textContent = action.dataset.sureshotSymbol;
+          select.appendChild(option);
+          select.value = action.dataset.sureshotSymbol;
+        }
+        void loadSureshotSetup();
+      }
+    }));
+    if (status) status.textContent = 'Top 3 momentum shortlist received from complete FYERS snapshot · ' +
+      result.universeCount + ' NSE F&amp;O equities + NIFTY, BANKNIFTY and SENSEX. Trade signals remain blocked until each option risk plan is independently verified.';
+  } catch (error) {
+    host.innerHTML = '<div class="console-section"><div class="console-section-head"><h4>NO TRADE · SCAN BLOCKED</h4><span class="signal-tone neutral">FYERS VERIFICATION</span></div><p>' +
+      escapeHtml(error.message || 'Verified full-universe snapshot unavailable.') +
+      '</p><p class="hint">No partial top-three ranking or stale fallback is shown.</p></div>';
+    if (status) status.textContent = 'Full-universe scan withheld · ' + (error.message || 'FYERS verification failed.');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 async function performSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
@@ -1986,6 +2039,8 @@ function bindTabActions() {
   const setupRefresh=document.querySelector('#refreshSetupBtn');
   if(currentTab==='Sureshot CE/PE') loadSureshotStockUniverse();
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
+  const scanSureshotUniverseBtn=document.querySelector('#scanSureshotUniverseBtn');
+  if(scanSureshotUniverseBtn) scanSureshotUniverseBtn.addEventListener('click',loadSureshotUniverseShortlist);
   const setupSymbol=document.querySelector('#setupSymbol');
   if(setupSymbol) setupSymbol.addEventListener('change',loadSureshotSetup);
   const advancedRefresh=document.querySelector('#refreshAdvancedBtn');
