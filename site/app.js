@@ -127,6 +127,8 @@ let fyersAuthState = 'NOT CONNECTED';
 let authInProgress = false;
 let deferredInstallPrompt = null;
 let optionRequestRunning = false;
+let sureshotRequestRunning = false;
+let sureshotRefreshPending = false;
 let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
 let latestQuotes = {};
@@ -1292,7 +1294,7 @@ async function loadSureshotStockUniverse() {
       (error.message || 'verified symbol master unavailable') + '. No stock prices or strikes were fabricated.';
   }
 }
-async function loadSureshotSetup() {
+async function performSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
   if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
@@ -1408,6 +1410,27 @@ async function loadSureshotSetup() {
     logEvent('Sureshot withheld signal because verified data or setup conditions were unavailable.','warn');
   }
 }
+async function loadSureshotSetup() {
+  if (sureshotRequestRunning) {
+    sureshotRefreshPending = true;
+    return;
+  }
+  sureshotRequestRunning = true;
+  const button = document.querySelector('#refreshSetupBtn');
+  if (button) button.disabled = true;
+  try {
+    await performSureshotSetup();
+  } finally {
+    sureshotRequestRunning = false;
+    const activeButton = document.querySelector('#refreshSetupBtn');
+    if (activeButton) activeButton.disabled = false;
+    if (sureshotRefreshPending) {
+      sureshotRefreshPending = false;
+      if (currentTab === 'Sureshot CE/PE') void loadSureshotSetup();
+    }
+  }
+}
+
 async function loadAdvancedScanner() {
   if(!['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(currentTab)) return;
   const status=document.querySelector('#advancedStatus'), table=document.querySelector('#advancedTable'), button=document.querySelector('#refreshAdvancedBtn');
