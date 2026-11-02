@@ -1325,6 +1325,16 @@ async function loadSureshotSetup() {
     if(!isRegularMarketSession()){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
     else if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
     else if(close<zones.demand.low&&close<previous){bias='PE WATCH';reason='Latest candle closed below the calculated buyer/demand-zone low.';}
+    // Do not spend another FYERS REST request discovering option contracts
+    // unless verified underlying candles have already confirmed CE or PE direction.
+    // This avoids unnecessary option-chain calls on neutral/closed-market scans
+    // and helps preserve the shared FYERS request budget.
+    if(bias==='NO TRADE'){
+      cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">NO DIRECTION</span></div><p>'+escapeHtml(reason)+'</p><div class="data-row"><span>Option-chain request</span><b>SKIPPED · NO CONFIRMED DIRECTION</b></div><div class="data-row"><span>Strike / premium</span><b>NOT REQUESTED</b></div><div class="data-row"><span>Entry / Stop-loss / Target / RR</span><b>BLOCKED</b></div><p class="hint">Underlying candles did not confirm a directional breakout. Option contract discovery is intentionally skipped to conserve FYERS API capacity. No trade values are inferred.</p></article>';
+      status.textContent='NO TRADE · '+reason+' Option-chain request skipped until a verified CE/PE direction is confirmed.';
+      logEvent('Sureshot: option-chain discovery skipped because verified underlying candles did not confirm direction.','info');
+      return;
+    }
     const expiryEl=document.querySelector('#setupExpiry');
     const requestedExpiry=expiryEl&&expiryEl.value?expiryEl.value:'';
     const chainParams=new URLSearchParams({symbol,strikecount:'10'});
