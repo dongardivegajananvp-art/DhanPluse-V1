@@ -54,6 +54,29 @@ test('Cloudflare 1015 blocks all FYERS Data API paths, not just one endpoint', a
   assert.equal(sent, 1, 'second endpoint must not reach upstream during the shared cooldown');
 });
 
+test('Cloudflare 1015 is detected when the code appears before Cloudflare', async () => {
+  for (const body of ['Error 1015: You are being rate limited', '1015 - Cloudflare rate limit']) {
+    let clock = 300_000;
+    let sent = 0;
+    const request = createFyersDataApiBudget({
+      now: () => clock,
+      sleep: async ms => { clock += ms; },
+      minIntervalMs: 0,
+      fetchImpl: async () => {
+        sent += 1;
+        return fakeResponse(429, body);
+      }
+    });
+
+    await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX');
+    await assert.rejects(
+      request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ'),
+      error => error.statusCode === 429 && /Data API cooldown active/.test(error.message)
+    );
+    assert.equal(sent, 1, '1015 response must activate the shared cooldown');
+  }
+});
+
 test('non-Data API endpoints are not counted against the Data API budget', async () => {
   let sent = 0;
   const request = createFyersDataApiBudget({
@@ -63,7 +86,6 @@ test('non-Data API endpoints are not counted against the Data API budget', async
   await request('https://api-t1.fyers.in/api/v3/holdings');
   assert.equal(sent, 1);
 });
-
 
 test('identical history reads are coalesced and briefly cached', async () => {
   let clock = 500_000;
