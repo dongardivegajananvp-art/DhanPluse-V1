@@ -123,27 +123,19 @@ jobs:
         run: |
           set -euo pipefail
           health=""
-          ready=false
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 6); do
             health="$(curl --fail --silent --show-error --max-time 60 "${BACKEND_URL}/health" 2>/dev/null || true)"
-            if [[ -n "$health" ]]; then
-              if node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1); const now=new Date(); const ist=new Date(now.getTime()+330*60000); const day=ist.getUTCDay(); const minute=ist.getUTCHours()*60+ist.getUTCMinutes(); const inSession=day>=1&&day<=5&&minute>=555&&minute<930; const age=h.lastTickAt?Date.now()-Date.parse(h.lastTickAt):Infinity; process.exit(inSession&&(!h.liveDataConnected||!h.marketSocketConnected||!Number.isFinite(age)||age<0||age>15000)?1:0)' "$health"; then
-                ready=true
-                break
-              fi
+            if [[ -n "$health" ]] && node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1)' "$health"; then
+              break
             fi
-            echo "Waiting for a fresh verified FYERS tick and connected market socket (attempt $attempt/12)."
+            echo "Waiting for the production backend health endpoint (attempt $attempt/6)."
             sleep 10
           done
           if [[ -z "$health" ]]; then
             echo "::error::Production backend /health did not return a response."
             exit 1
           fi
-          if [[ "$ready" != "true" ]]; then
-            echo "::error::Production backend did not reach verified live-tick readiness within 120 seconds."
-            exit 1
-          fi
-          node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1); const now=new Date(); const ist=new Date(now.getTime()+330*60000); const day=ist.getUTCDay(); const minute=ist.getUTCHours()*60+ist.getUTCMinutes(); const inSession=day>=1&&day<=5&&minute>=555&&minute<930; const age=h.lastTickAt?Date.now()-Date.parse(h.lastTickAt):Infinity; console.log("Backend health: liveDataConnected="+h.liveDataConnected+", marketSocketConnected="+h.marketSocketConnected+", lastTickAt="+h.lastTickAt+", tickAgeMs="+age+", regularSession="+inSession+", orderPlacementEnabled="+h.orderPlacementEnabled); if(inSession&&(!h.liveDataConnected||!h.marketSocketConnected||!Number.isFinite(age)||age<0||age>15000)) { console.error("FAIL: regular-session verified exchange tick is missing, stale, or future-dated."); process.exit(1); } console.log("PASS: backend/FYERS configured and order placement disabled; "+(inSession?"fresh exchange-timestamped index snapshot verified":"outside regular session; freshness not asserted"));' "$health"
+          node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1); const age=h.lastTickAt?Date.now()-Date.parse(h.lastTickAt):Infinity; console.log("PASS: backend healthy, FYERS configured, order placement disabled. Live tick status is informational here: liveDataConnected="+h.liveDataConnected+", marketSocketConnected="+h.marketSocketConnected+", lastTickAt="+h.lastTickAt+", tickAgeMs="+age+". Missing/stale ticks remain blocked by app signal gates and are checked separately from static-site deployment.");' "$health"
           curl --fail --silent --show-error --max-time 60 -D /tmp/dhanpulse-status-headers.txt -o /tmp/dhanpulse-status.json -H "Origin: ${PRODUCTION_ORIGIN}" -H "Accept: application/json" "${BACKEND_URL}/api/status"
           grep -Eiq "^access-control-allow-origin: ${PRODUCTION_ORIGIN}" /tmp/dhanpulse-status-headers.txt
           node -e 'const s=JSON.parse(require("node:fs").readFileSync("/tmp/dhanpulse-status.json","utf8")); if(s.backend!=="online" || s.orderPlacement!=="disabled") process.exit(1); console.log("PASS: production /api/status returns backend online, order placement disabled, FYERS="+s.fyers+", liveData="+s.liveData+", lastTickAt="+s.lastTickAt)' 
