@@ -130,3 +130,29 @@ test('option quote requests are never cached', async () => {
   await request(url);
   assert.equal(sent, 2, 'option premium quotes must always be fetched live');
 });
+
+
+test('cooldown status reports the real shared FYERS Data API backoff without exposing request data', async () => {
+  let clock = 600_000;
+  const request = createFyersDataApiBudget({
+    now: () => clock,
+    sleep: async ms => { clock += ms; },
+    minIntervalMs: 0,
+    cloudflareCooldownMs: 120_000,
+    fetchImpl: async () => fakeResponse(429, 'Cloudflare Error 1015')
+  });
+
+  const before = request.getStatus();
+  assert.equal(before.cooldownActive, false);
+  assert.equal(before.retryAfterSeconds, 0);
+  await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX');
+  const active = request.getStatus();
+  assert.equal(active.cooldownActive, true);
+  assert.equal(active.retryAfterSeconds, 120);
+  assert.equal(active.blockedUntil, new Date(clock + 120_000).toISOString());
+  clock += 30_000;
+  assert.equal(request.getStatus().retryAfterSeconds, 90);
+  clock += 90_000;
+  assert.equal(request.getStatus().cooldownActive, false);
+  assert.equal(request.getStatus().blockedUntil, null);
+});
