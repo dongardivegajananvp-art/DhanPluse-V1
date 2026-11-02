@@ -1,7 +1,7 @@
-// FYERS Data API limits can be stricter than the published plan limit because
-// multiple endpoints share the same upstream/IP-level throttling. Use a
-// conservative global budget and serialize all /data/* calls; do not retry
-// through a Cloudflare 1015 block. A 1015 cooldown is shared across endpoints.
+// FYERS Data API calls share upstream/IP-level throttling. Serialize requests,
+// coalesce identical in-flight reads, and briefly cache successful market-data
+// snapshots so UI refreshes do not create duplicate provider traffic.
+// Never retry a 429/Cloudflare 1015 automatically.
 export function createFyersDataApiBudget({
   fetchImpl = fetch,
   now = () => Date.now(),
@@ -10,62 +10,121 @@ export function createFyersDataApiBudget({
   minIntervalMs = 3000,
   windowMs = 60_000,
   cloudflareCooldownMs = 60 * 60_000,
-  rateLimitCooldownMs = 60_000
+  rateLimitCooldownMs = 60_000,
+  historyCacheMs = 10_000,
+  optionChainCacheMs = 5_000,
+  maxCacheEntries = 100
 } = {}) {
   let queue = Promise.resolve();
   let requestTimes = [];
   let lastRequestAt = 0;
   let blockedUntil = 0;
+  const responseCache = new Map();
+  const inFlight = new Map();
+
+  function cacheTtl(target) {
+    if (target.pathname === '/data/history') return historyCacheMs;
+    if (target.pathname === '/data/options-chain-v3') return optionChainCacheMs;
+    return 0; // Quotes must always be fetched live; never cache option premiums.
+  }
+
+  function makeResponse(entry, cacheAgeMs = 0) {
+    const headers = new Headers(entry.headers);
+    headers.set('X-DhanPulse-Cache', cacheAgeMs > 0 ? 'HIT' : 'MISS');
+    headers.set('X-DhanPulse-Cache-Age-Ms', String(Math.max(0, cacheAgeMs)));
+    return new Response(entry.body, { status: entry.status, statusText: entry.statusText, headers });
+  }
 
   async function run(url, init) {
-    const target = url instanceof URL ? url : new URL(String(url));
+    const target = url instanceof URL ? new URL(url.toString()) : new URL(String(url));
     if (target.hostname !== 'api-t1.fyers.in' || !target.pathname.startsWith('/data/')) {
       return fetchImpl(url, init);
     }
 
-    const current = queue.then(async () => {
-      let currentTime = now();
-      if (currentTime < blockedUntil) {
-        const error = new Error(`FYERS Data API cooldown active. Retry in about ${Math.ceil((blockedUntil - currentTime) / 1000)} seconds.`);
-        error.statusCode = 429;
-        throw error;
+    const method = String(init?.method || 'GET').toUpperCase();
+    const ttl = method === 'GET' ? cacheTtl(target) : 0;
+    const cacheKey = ttl > 0 ? target.toString() : null;
+    const currentTime = now();
+    if (cacheKey) {
+      const cached = responseCache.get(cacheKey);
+      if (cached && currentTime - cached.storedAt < ttl) {
+        return makeResponse(cached, currentTime - cached.storedAt);
       }
+      if (cached) responseCache.delete(cacheKey);
+      const pending = inFlight.get(cacheKey);
+      if (pending) {
+        const entry = await pending;
+        return makeResponse(entry, Math.max(0, now() - entry.storedAt));
+      }
+    }
 
-      while (true) {
-        currentTime = now();
-        requestTimes = requestTimes.filter(time => currentTime - time < windowMs);
-        const intervalWait = lastRequestAt ? Math.max(0, lastRequestAt + minIntervalMs - currentTime) : 0;
-        const windowWait = requestTimes.length >= maxRequestsPerMinute
-          ? Math.max(0, requestTimes[0] + windowMs - currentTime)
-          : 0;
-        const waitMs = Math.max(intervalWait, windowWait);
-        if (waitMs <= 0) break;
-        await sleep(waitMs);
-        if (now() < blockedUntil) {
-          const error = new Error(`FYERS Data API cooldown active. Retry in about ${Math.ceil((blockedUntil - now()) / 1000)} seconds.`);
+    const requestPromise = (async () => {
+      const current = queue.then(async () => {
+        let time = now();
+        if (time < blockedUntil) {
+          const error = new Error(`FYERS Data API cooldown active. Retry in about ${Math.ceil((blockedUntil - time) / 1000)} seconds.`);
           error.statusCode = 429;
           throw error;
         }
-      }
 
-      currentTime = now();
-      requestTimes.push(currentTime);
-      lastRequestAt = currentTime;
-      const response = await fetchImpl(url, init);
-      if (response.status === 429) {
-        const body = await response.clone().text().catch(() => '');
-        const retryAfter = Number(response.headers?.get?.('retry-after'));
-        const cloudflare1015 = /error\s*1015|cloudflare.{0,80}1015/i.test(body);
-        const cooldown = cloudflare1015
-          ? cloudflareCooldownMs
-          : Math.max(rateLimitCooldownMs, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0);
-        blockedUntil = Math.max(blockedUntil, now() + cooldown);
-      }
-      return response;
-    });
+        while (true) {
+          time = now();
+          requestTimes = requestTimes.filter(stamp => time - stamp < windowMs);
+          const intervalWait = lastRequestAt ? Math.max(0, lastRequestAt + minIntervalMs - time) : 0;
+          const windowWait = requestTimes.length >= maxRequestsPerMinute
+            ? Math.max(0, requestTimes[0] + windowMs - time)
+            : 0;
+          const waitMs = Math.max(intervalWait, windowWait);
+          if (waitMs <= 0) break;
+          await sleep(waitMs);
+          if (now() < blockedUntil) {
+            const error = new Error(`FYERS Data API cooldown active. Retry in about ${Math.ceil((blockedUntil - now()) / 1000)} seconds.`);
+            error.statusCode = 429;
+            throw error;
+          }
+        }
 
-    queue = current.catch(() => {});
-    return current;
+        time = now();
+        requestTimes.push(time);
+        lastRequestAt = time;
+        const response = await fetchImpl(url, init);
+        if (response.status === 429) {
+          const body = await response.clone().text().catch(() => '');
+          const retryAfter = Number(response.headers?.get?.('retry-after'));
+          const cloudflare1015 = /error\\s*1015|cloudflare.{0,80}1015/i.test(body);
+          const cooldown = cloudflare1015
+            ? cloudflareCooldownMs
+            : Math.max(rateLimitCooldownMs, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0);
+          blockedUntil = Math.max(blockedUntil, now() + cooldown);
+        }
+
+        if (cacheKey && response.ok) {
+          const body = await response.clone().text();
+          const entry = {
+            body, status: response.status, statusText: response.statusText,
+            headers: [...response.headers.entries()], storedAt: now()
+          };
+          responseCache.set(cacheKey, entry);
+          while (responseCache.size > maxCacheEntries) {
+            responseCache.delete(responseCache.keys().next().value);
+          }
+          return { ...entry, cacheEntry: true };
+        }
+        return { response };
+      });
+      queue = current.then(() => {}, () => {});
+      const result = await current;
+      return result.cacheEntry ? result : { response: result.response };
+    })();
+
+    if (cacheKey) inFlight.set(cacheKey, requestPromise);
+    try {
+      const result = await requestPromise;
+      if (result.cacheEntry) return makeResponse(result, 0);
+      return result.response;
+    } finally {
+      if (cacheKey && inFlight.get(cacheKey) === requestPromise) inFlight.delete(cacheKey);
+    }
   }
 
   return run;
