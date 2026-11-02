@@ -346,7 +346,7 @@ function validateOptionChainPayload(payload, verifiedUnderlyingSpot) {
   if (!Number.isFinite(spot) || spot <= 0) return 'Verified underlying candle close is missing; no option signal.';
   const chainExpiry = payload.expiryData?.[0]?.expiry ?? payload.expiry;
   const normalized = payload.optionsChain.map(row => {
-    if (!row || !/^NSE:[A-Z0-9&-]{3,48}(CE|PE)$/.test(String(row.symbol || ''))) return null;
+    if (!row || !/^(?:NSE|BSE):[A-Z0-9&-]{3,48}(CE|PE)$/.test(String(row.symbol || ''))) return null;
     const type = String(row.option_type || '').toUpperCase();
     const strike = Number(row.strike_price);
     const expiry = row.expiry ?? row.expiry_date ?? row.expiryDate ?? chainExpiry;
