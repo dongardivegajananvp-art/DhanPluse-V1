@@ -18,7 +18,7 @@ test("requires completed candles and blocks neutral/stale direction", () => {
   const neutral = deriveVerifiedUnderlyingDirection(candleRows, "5", now);
   assert.equal(neutral.ok, true);
   assert.equal(neutral.side, "CE");
-  const stale = deriveVerifiedUnderlyingDirection(candleRows.slice(0, 13), "5", now);
+  const stale = deriveVerifiedUnderlyingDirection(candleRows.slice(0, 12), "5", now);
   assert.equal(stale.ok, false);
 });
 
@@ -42,7 +42,7 @@ test("selects nearest strike only on matching exchange, side and nearest expiry"
 test("blocks stale option quotes and only accepts a fresh >=1:2 risk plan", () => {
   const direction = { ok: true, side: "CE", spot: 104, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
   const contract = { symbol: "NSE:ABC26NOV100CE", strike: 100, side: "CE", expiry: "1795651200" };
-  const quote = { bid: 19, ask: 20, lp: 19.5, tt: Math.floor((now - 1000) / 1000) };
+  const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now - 1000) / 1000) };
   const options = Array.from({ length: 14 }, (_, i) => [Math.floor((now - (14 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
   options[13][3] = 15;
   const result = buildVerifiedSureshotTradePlan({ underlyingSymbol: "NSE:ABC-EQ", direction, contract, quote, optionCandles: options, now });
