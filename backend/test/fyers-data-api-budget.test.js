@@ -63,3 +63,48 @@ test('non-Data API endpoints are not counted against the Data API budget', async
   await request('https://api-t1.fyers.in/api/v3/holdings');
   assert.equal(sent, 1);
 });
+
+
+test('identical history reads are coalesced and briefly cached', async () => {
+  let clock = 500_000;
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    now: () => clock,
+    minIntervalMs: 0,
+    historyCacheMs: 10_000,
+    fetchImpl: async () => {
+      sent += 1;
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return new Response(JSON.stringify({ s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] }), {
+        status: 200, headers: { 'content-type': 'application/json' }
+      });
+    }
+  });
+
+  const url = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX&resolution=5';
+  const [first, second] = await Promise.all([request(url), request(url)]);
+  assert.equal(sent, 1, 'concurrent identical reads should share one upstream request');
+  assert.deepEqual(await first.json(), await second.json());
+
+  const cached = await request(url);
+  assert.equal(sent, 1, 'successful history response should be reused within its short TTL');
+  assert.equal(cached.headers.get('x-dhanpulse-cache'), 'HIT');
+  clock += 10_001;
+  await request(url);
+  assert.equal(sent, 2, 'expired history cache must refresh from FYERS');
+});
+
+test('option quote requests are never cached', async () => {
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    minIntervalMs: 0,
+    fetchImpl: async () => {
+      sent += 1;
+      return new Response(JSON.stringify({ s: 'ok', d: [] }), { status: 200 });
+    }
+  });
+  const url = 'https://api-t1.fyers.in/data/quotes?symbols=NSE%3ANIFTY26NOV25000CE';
+  await request(url);
+  await request(url);
+  assert.equal(sent, 2, 'option premium quotes must always be fetched live');
+});
