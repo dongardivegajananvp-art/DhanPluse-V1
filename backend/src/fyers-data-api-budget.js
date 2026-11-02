@@ -28,9 +28,9 @@ export function createFyersDataApiBudget({
     return 0; // Quotes must always be fetched live; never cache option premiums.
   }
 
-  function makeResponse(entry, cacheAgeMs = 0) {
+  function makeResponse(entry, cacheAgeMs = 0, cacheHit = false) {
     const headers = new Headers(entry.headers);
-    headers.set('X-DhanPulse-Cache', cacheAgeMs > 0 ? 'HIT' : 'MISS');
+    headers.set('X-DhanPulse-Cache', cacheHit ? 'HIT' : 'MISS');
     headers.set('X-DhanPulse-Cache-Age-Ms', String(Math.max(0, cacheAgeMs)));
     return new Response(entry.body, { status: entry.status, statusText: entry.statusText, headers });
   }
@@ -48,13 +48,13 @@ export function createFyersDataApiBudget({
     if (cacheKey) {
       const cached = responseCache.get(cacheKey);
       if (cached && currentTime - cached.storedAt < ttl) {
-        return makeResponse(cached, currentTime - cached.storedAt);
+        return makeResponse(cached, currentTime - cached.storedAt, true);
       }
       if (cached) responseCache.delete(cacheKey);
       const pending = inFlight.get(cacheKey);
       if (pending) {
         const entry = await pending;
-        return makeResponse(entry, Math.max(0, now() - entry.storedAt));
+        return makeResponse(entry, Math.max(0, now() - entry.storedAt), true);
       }
     }
 
