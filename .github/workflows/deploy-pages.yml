@@ -123,14 +123,24 @@ jobs:
         run: |
           set -euo pipefail
           health=""
-          for attempt in $(seq 1 6); do
+          ready=false
+          for attempt in $(seq 1 12); do
             health="$(curl --fail --silent --show-error --max-time 60 "${BACKEND_URL}/health" 2>/dev/null || true)"
-            if [[ -n "$health" ]]; then break; fi
-            echo "Waiting for the production backend (attempt $attempt/6)."
+            if [[ -n "$health" ]]; then
+              if node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1); const now=new Date(); const ist=new Date(now.getTime()+330*60000); const day=ist.getUTCDay(); const minute=ist.getUTCHours()*60+ist.getUTCMinutes(); const inSession=day>=1&&day<=5&&minute>=555&&minute<930; const age=h.lastTickAt?Date.now()-Date.parse(h.lastTickAt):Infinity; process.exit(inSession&&(!h.liveDataConnected||!h.marketSocketConnected||!Number.isFinite(age)||age<0||age>15000)?1:0)' "$health"; then
+                ready=true
+                break
+              fi
+            fi
+            echo "Waiting for a fresh verified FYERS tick and connected market socket (attempt $attempt/12)."
             sleep 10
           done
           if [[ -z "$health" ]]; then
             echo "::error::Production backend /health did not return a response."
+            exit 1
+          fi
+          if [[ "$ready" != "true" ]]; then
+            echo "::error::Production backend did not reach verified live-tick readiness within 120 seconds."
             exit 1
           fi
           node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1); const now=new Date(); const ist=new Date(now.getTime()+330*60000); const day=ist.getUTCDay(); const minute=ist.getUTCHours()*60+ist.getUTCMinutes(); const inSession=day>=1&&day<=5&&minute>=555&&minute<930; const age=h.lastTickAt?Date.now()-Date.parse(h.lastTickAt):Infinity; console.log("Backend health: liveDataConnected="+h.liveDataConnected+", marketSocketConnected="+h.marketSocketConnected+", lastTickAt="+h.lastTickAt+", tickAgeMs="+age+", regularSession="+inSession+", orderPlacementEnabled="+h.orderPlacementEnabled); if(inSession&&(!h.liveDataConnected||!h.marketSocketConnected||!Number.isFinite(age)||age<0||age>15000)) { console.error("FAIL: regular-session verified exchange tick is missing, stale, or future-dated."); process.exit(1); } console.log("PASS: backend/FYERS configured and order placement disabled; "+(inSession?"fresh exchange-timestamped index snapshot verified":"outside regular session; freshness not asserted"));' "$health"
