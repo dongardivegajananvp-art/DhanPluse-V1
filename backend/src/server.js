@@ -1318,7 +1318,7 @@ app.get('/api/fyers/options-chain', async (req, res) => {
   if (!Number.isInteger(strikeCount) || strikeCount < 1 || strikeCount > 50) {
     return res.status(400).json({ ok: false, error: 'strikecount must be between 1 and 50.' });
   }
-  if (timestamp && !/^\\d{9,12}$/.test(timestamp)) {
+  if (timestamp && !/^\d{9,12}$/.test(timestamp)) {
     return res.status(400).json({ ok: false, error: 'Invalid expiry timestamp.' });
   }
   try {
