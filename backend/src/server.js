@@ -288,6 +288,7 @@ app.get('/api/status', (_req, res) => {
     liveData: streamConnected && snapshot ? 'streaming' : 'waiting-for-live-ticks',
     marketSocketConnected: streamConnected, authenticatedAt,
     lastTickAt: snapshot?.fetchedAt || null,
+    fyersDataApi: fetchWithFyersBudget.getStatus(),
     ...(streamError ? { marketDataMessage: streamError } : {}),
     orderPlacement: 'disabled',
     configCheck: { hasAppId: !!appId, hasSecret: !!appSecret, hasRedirect: !!redirectUri, redirectUri }
