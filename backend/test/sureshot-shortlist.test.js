@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { buildVerifiedSureshotShortlist } from "../src/sureshot-shortlist.js";
 
 const now = Date.parse("2026-11-02T07:00:00.000Z");
-const universe = Array.from({ length: 218 }, (_, i) => ({ symbol: `NSE:STOCK${i}-EQ` }));
+const universe = { data: Array.from({ length: 218 }, (_, i) => ({ symbol: `NSE:STOCK${i}-EQ` })) };
 const quoteSnapshot = {
   ok: true, verified: true, universeCount: 218, quotedCount: 218,
-  data: universe.map((row, i) => ({
+  data: universe.data.map((row, i) => ({
     n: row.symbol,
     v: { lp: 100 + i, chp: i - 100, tt: Math.floor((now - 5000) / 1000) }
   }))
@@ -44,7 +44,7 @@ test("blocks stale quotes and missing or stale index ticks", () => {
 });
 
 test("rejects duplicate F&O symbols", () => {
-  const duplicate = [...universe.slice(0, -1), universe[0]];
+  const duplicate = [...universe.data.slice(0, -1), universe.data[0]];
   assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot, universe: { data: duplicate }, indexTicks, now }),
     /fno_universe_contains_duplicate_symbols/);
 });
