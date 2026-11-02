@@ -16,6 +16,7 @@ import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 import { buildOptionRiskPlan } from './option-risk-plan.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
+import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -1079,6 +1080,72 @@ app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) =
     });
   } finally {
     if (stockQuotePromise === request) stockQuotePromise = null;
+  }
+});
+
+app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!accessToken) return res.status(401).json({ ok: false, signalsAllowed: false, error: "Connect FYERS first." });
+  if (!nseRegularSessionNow()) return res.status(409).json({
+    ok: false, signalsAllowed: false,
+    error: "Market session is closed; no actionable Sureshot scan is available."
+  });
+
+  try {
+    const universe = await getNseFnoEquityUniverse();
+    const indexSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"];
+    const indexTicks = new Map(indexSymbols.map(symbol => [symbol, latestTicks.get(symbol)]));
+    // Check index ticks before spending up to five FYERS equity-quote requests.
+    for (const symbol of indexSymbols) {
+      const tick = indexTicks.get(symbol);
+      const age = tick ? Date.now() - Date.parse(tick.updatedAt) : Infinity;
+      if (!tick || !Number.isFinite(age) || age < -5000 || age > 15000 ||
+          !Number.isFinite(Number(tick.ltp)) || Number(tick.ltp) <= 0 ||
+          !Number.isFinite(Number(tick.chp))) {
+        return res.status(409).json({
+          ok: false, signalsAllowed: false,
+          error: "Fresh exchange-timestamped NIFTY, BANKNIFTY and SENSEX ticks are all required; scan blocked.",
+          missingOrStaleIndex: symbol
+        });
+      }
+    }
+
+    let snapshot = stockQuoteCache.data &&
+      Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS
+      ? stockQuoteCache.data : null;
+    if (!snapshot) {
+      const remaining = stockQuoteCooldown.until - Date.now();
+      if (remaining > 0) {
+        res.set("Retry-After", String(Math.ceil(remaining / 1000)));
+        return res.status(429).json({
+          ok: false, signalsAllowed: false,
+          error: "FYERS F&O quote cooldown active; no upstream request sent.",
+          retryAfterSeconds: Math.ceil(remaining / 1000)
+        });
+      }
+      const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes());
+      try { snapshot = await request; }
+      finally { if (stockQuotePromise === request) stockQuotePromise = null; }
+    }
+
+    const result = buildVerifiedSureshotShortlist({
+      quoteSnapshot: snapshot, universe, indexTicks, now: Date.now(), limit: 3
+    });
+    return res.json({
+      ...result,
+      marketSession: "OPEN",
+      notice: "This is a verified momentum shortlist only, not an option trade signal. Each underlying still requires completed directional FYERS candles, a listed option contract, a fresh option quote and a valid >=1:2 risk plan. No orders are placed."
+    });
+  } catch (error) {
+    const status = Number(error.statusCode) || 503;
+    if (status === 429 && error.retryAfterSeconds) res.set("Retry-After", String(error.retryAfterSeconds));
+    return res.status(status).json({
+      ok: false, signalsAllowed: false,
+      error: status === 429
+        ? "FYERS rate-limit cooldown active; shortlist withheld."
+        : "Complete fresh FYERS F&O + index snapshot could not be verified; shortlist withheld.",
+      detail: String(error.message || "Verification failed.").slice(0, 180)
+    });
   }
 });
 
