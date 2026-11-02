@@ -15,6 +15,7 @@ import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 import { buildOptionRiskPlan } from './option-risk-plan.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
+import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -1349,7 +1350,7 @@ app.get('/api/fyers/options-chain', async (req, res) => {
 app.get('/api/fyers/option-quote', async (req, res) => {
   const symbol = String(req.query.symbol || '');
   // Read-only single-contract quote; this endpoint never places orders.
-  if (!/^NSE:[A-Z0-9&-]{3,48}$/.test(symbol) || !/(CE|PE)$/.test(symbol)) {
+  if (!isSupportedOptionContractSymbol(symbol)) {
     return res.status(400).json({ ok: false, error: 'Invalid NSE option contract symbol.' });
   }
   try {
@@ -1386,7 +1387,7 @@ app.get('/api/fyers/option-quote', async (req, res) => {
 app.get('/api/fyers/option-risk-plan', async (req, res) => {
   const symbol = String(req.query.symbol || '');
   const resolution = String(req.query.resolution || '5');
-  if (!/^NSE:[A-Z0-9&-]{3,48}(CE|PE)$/.test(symbol)) {
+  if (!isSupportedOptionContractSymbol(symbol)) {
     return res.status(400).json({ ok: false, error: 'A selected NSE option contract symbol is required.' });
   }
   if (!['5', '15', '30', '60'].includes(resolution)) {
