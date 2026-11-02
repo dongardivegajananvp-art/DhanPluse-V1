@@ -1296,6 +1296,7 @@ async function loadSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
   if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
+  let selectedContract=null;
   const symbol=symbolEl.value,resolution=resolutionEl.value;
   const cooldownSeconds=getFyersCooldownRemaining();
   if(cooldownSeconds>0){
@@ -1361,6 +1362,7 @@ async function loadSureshotSetup() {
     // from the independently timestamped selected-contract quote endpoint.
     legCandidates.sort((a,b)=>Math.abs(a.strike_price-spot)-Math.abs(b.strike_price-spot));
     const leg=legCandidates[0]||null;
+    if(leg) selectedContract={symbol:leg.symbol,strike:Number(leg.strike_price),side:leg.option_type,expiry:String(leg.expiry)};
     // Reflect the exact contract selected from the descriptor list in the UI.
     // The selector must not remain on the misleading 'Auto' placeholder after a leg is chosen.
     if(leg&&strikeEl) strikeEl.value=String(leg.strike_price);
@@ -1387,8 +1389,9 @@ async function loadSureshotSetup() {
     status.textContent='Candidate only · Fresh FYERS option quote and '+Number(planResult.data.candleCount)+' completed option candles verified at '+new Date(planResult.fetchedAt||Date.now()).toLocaleTimeString('en-IN')+'. No order placed.';
     logEvent('Sureshot candidate built from verified underlying OHLC, contract descriptors, fresh option quote and completed option candles.','info');
   }catch(error){
-    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">DATA / FILTER</span></div><p>'+escapeHtml(error.message||'Required verified data unavailable.')+'</p><p class="hint">No prices or signals were invented. Retry after the FYERS historical-data cooldown; contract discovery, selected-contract quote and option candles are verified as separate inputs.</p></article>';
-    status.textContent='No setup generated · '+(error.message||'Verified data unavailable.');
+    const contractBlock=selectedContract?'<div class="data-row"><span>Selected contract descriptor</span><b>'+escapeHtml(selectedContract.symbol)+'</b></div><div class="data-row"><span>Selected strike / side</span><b>'+formatPrice(selectedContract.strike)+' · '+escapeHtml(selectedContract.side)+'</b></div><div class="data-row"><span>Expiry</span><b>'+escapeHtml(selectedContract.expiry)+'</b></div><div class="data-row"><span>Fresh option quote</span><b>NOT VERIFIED</b></div>':'';
+    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">DATA / FILTER</span></div>'+contractBlock+'<p>'+escapeHtml(error.message||'Required verified data unavailable.')+'</p><div class="data-row"><span>Entry / Stop-loss / Target / RR</span><b>BLOCKED</b></div><p class="hint">A listed contract descriptor is not proof of a live option quote. No prices or signals were invented. Fresh selected-contract quote and completed option candles must both pass before an entry plan is shown.</p></article>';
+    status.textContent=(selectedContract?'Contract '+selectedContract.symbol+' identified; quote and risk plan blocked · ':'No setup generated · ')+(error.message||'Verified data unavailable.');
     // Keep a successfully rendered, verified candle chart visible when the separate option-chain/quote step fails.
     // Missing option data must block the trade plan, not erase valid underlying history.
     if(!chart.querySelector('svg,canvas')) chart.innerHTML='<div class="chart-empty">Verified candle chart is unavailable. Trade plan remains blocked until option data is verified.</div>';
