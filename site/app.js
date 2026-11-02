@@ -2006,12 +2006,14 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
           price: price,
           change: Number.isFinite(Number(item.v.ch)) ? Number(item.v.ch) : null,
           changePct: Number.isFinite(Number(item.v.chp)) ? Number(item.v.chp) : null,
+          // A server fetch time is not an exchange timestamp. Missing FYERS tick time
+          // must remain unverified and cannot make a quote appear fresh.
           receivedAt: Number.isFinite(Number(item.v.tt)) && Number(item.v.tt) > 0
             ? (Number(item.v.tt) > 1e12 ? Number(item.v.tt) : Number(item.v.tt) * 1000)
-            : (source === 'websocket' && Number.isFinite(Date.parse(fetchedAt)) ? Date.parse(fetchedAt) : 0),
+            : 0,
           sourceTime: Number.isFinite(Number(item.v.tt)) && Number(item.v.tt) > 0
             ? new Date(Number(item.v.tt) > 1e12 ? Number(item.v.tt) : Number(item.v.tt) * 1000).toISOString()
-            : (source === 'websocket' ? fetchedAt || null : null),
+            : null,
           source: source || 'unknown',
           streamConnected: streamConnected === true
         };
@@ -2067,12 +2069,21 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   if (source === 'last-known') {
     setStatus(isRegularMarketSession() ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
     setConnection('Last-known FYERS prices · fresh ticks unavailable', true);
+  } else if (!isRegularMarketSession()) {
+    setStatus('MARKET CLOSED · LAST KNOWN LTP');
+    setConnection('FYERS last-known quotes · market closed', true);
   } else if (source === 'websocket-recent' || streamConnected === false) {
     setStatus('LIVE DATA STALE');
     setConnection('Stream reconnecting · last verified prices', true);
   } else {
-    setStatus('FYERS QUOTES RECEIVED');
-    setConnection('FYERS Connected', false);
+    const allIndexTicksFresh = SYMBOLS.every(item => hasFreshLiveQuote(latestQuotes[item.symbol]));
+    if (allIndexTicksFresh) {
+      setStatus('FYERS QUOTES RECEIVED');
+      setConnection('FYERS Connected · fresh exchange ticks', false);
+    } else {
+      setStatus('LIVE DATA STALE');
+      setConnection('Socket connected · waiting for fresh exchange-timestamped ticks', true);
+    }
   }
   setFyersStatus('CONNECTED');
   setBackendStatus('ONLINE');
@@ -2447,8 +2458,12 @@ async function fetchLiveQuotes() {
     }
     if (data.source === 'websocket-recent' || data.streamConnected === false) {
       showMessage('Showing the last verified FYERS prices while the market socket reconnects. Signals remain blocked until fresh ticks resume.');
+    } else if (SYMBOLS.every(item => hasFreshLiveQuote(latestQuotes[item.symbol]))) {
+      showMessage('Fresh exchange-timestamped FYERS ticks received for NIFTY, BANK NIFTY and SENSEX.');
+    } else if (!isRegularMarketSession()) {
+      showMessage('Market is closed. Showing genuine last-known FYERS prices; live signals remain blocked.');
     } else {
-      showMessage('NIFTY, BANK NIFTY and SENSEX quotes received from the backend.');
+      showMessage('The socket may be connected, but fresh exchange-timestamped ticks for every index have not arrived. Signals remain blocked.');
     }
   } catch {
     markDashboardQuotesBlocked(Object.keys(latestQuotes).length ? 'STALE / LAST KNOWN · LIVE SIGNALS BLOCKED' : 'DATA MISSING · LIVE SIGNALS BLOCKED');
