@@ -515,7 +515,7 @@ async function fyersReadOnlyGet(url) {
     // Cloudflare Error 1015 is an upstream rate-limit block; Retry-After may
     // misleadingly be "0". Stop retrying this endpoint for an hour instead
     // of re-triggering the block every few minutes.
-    const cloudflare1015 = /error\s*1015|cloudflare.{0,80}1015/i.test(responseText);
+    const cloudflare1015 = /error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(responseText);
     const backoffMs = cloudflare1015
       ? FYERS_429_MAX_BACKOFF_MS
       : retryAfterSeconds > 0
