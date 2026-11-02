@@ -17,6 +17,7 @@ import { buildOptionRiskPlan } from './option-risk-plan.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
+import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -1145,6 +1146,181 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
         ? "FYERS rate-limit cooldown active; shortlist withheld."
         : "Complete fresh FYERS F&O + index snapshot could not be verified; shortlist withheld.",
       detail: String(error.message || "Verification failed.").slice(0, 180)
+    });
+  }
+});
+
+app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
+  if (!nseRegularSessionNow()) return res.status(409).json({
+    ok: false, scanComplete: false, signalsAllowed: false,
+    error: "Market session is closed; automatic actionable option plans are withheld."
+  });
+
+  try {
+    const universe = await getNseFnoEquityUniverse();
+    const indexSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"];
+    const indexTicks = new Map(indexSymbols.map(symbol => [symbol, latestTicks.get(symbol)]));
+    for (const symbol of indexSymbols) {
+      const tick = indexTicks.get(symbol);
+      const age = tick ? Date.now() - Date.parse(tick.updatedAt) : Infinity;
+      if (!tick || !Number.isFinite(age) || age < 0 || age > 15000 ||
+          !Number.isFinite(Number(tick.ltp)) || Number(tick.ltp) <= 0 ||
+          !Number.isFinite(Number(tick.chp))) {
+        return res.status(409).json({
+          ok: false, scanComplete: false, signalsAllowed: false,
+          error: "Fresh exchange-timestamped NIFTY, BANKNIFTY and SENSEX ticks are all required; automatic scan blocked.",
+          missingOrStaleIndex: symbol
+        });
+      }
+    }
+
+    let snapshot = stockQuoteCache.data &&
+      Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS
+      ? stockQuoteCache.data : null;
+    if (!snapshot) {
+      const remaining = stockQuoteCooldown.until - Date.now();
+      if (remaining > 0) {
+        res.set("Retry-After", String(Math.ceil(remaining / 1000)));
+        return res.status(429).json({
+          ok: false, scanComplete: false, signalsAllowed: false,
+          error: "FYERS F&O quote cooldown active; no upstream request sent.",
+          retryAfterSeconds: Math.ceil(remaining / 1000)
+        });
+      }
+      const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes());
+      try { snapshot = await request; }
+      finally { if (stockQuotePromise === request) stockQuotePromise = null; }
+    }
+
+    const shortlist = buildVerifiedSureshotShortlist({
+      quoteSnapshot: snapshot, universe, indexTicks, now: Date.now(), limit: 3
+    });
+    const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
+    const today = indiaNow.toISOString().slice(0, 10);
+    const from = new Date(Date.UTC(
+      indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 6
+    )).toISOString().slice(0, 10);
+    const results = [];
+
+    for (const candidate of shortlist.data) {
+      const base = {
+        rank: candidate.rank,
+        underlyingSymbol: candidate.symbol,
+        underlyingType: candidate.underlyingType,
+        changePct: candidate.changePct,
+        ltp: candidate.price,
+        quoteAgeSeconds: candidate.quoteAgeSeconds
+      };
+      try {
+        // Each candidate is processed sequentially: underlying history (1),
+        // option-chain descriptors (1), live option quote (1), option history (1).
+        const underlyingUrl = new URL("https://api-t1.fyers.in/data/history");
+        underlyingUrl.searchParams.set("symbol", candidate.symbol);
+        underlyingUrl.searchParams.set("resolution", "5");
+        underlyingUrl.searchParams.set("date_format", "1");
+        underlyingUrl.searchParams.set("range_from", from);
+        underlyingUrl.searchParams.set("range_to", today);
+        underlyingUrl.searchParams.set("cont_flag", "1");
+        const underlyingHistory = await fyersReadOnlyGet(underlyingUrl);
+        const direction = deriveVerifiedUnderlyingDirection(
+          Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [],
+          "5", Date.now()
+        );
+        if (!direction.ok || !direction.side) {
+          results.push({ ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
+          continue;
+        }
+
+        const chainUrl = new URL("https://api-t1.fyers.in/data/options-chain-v3");
+        chainUrl.searchParams.set("symbol", candidate.symbol);
+        chainUrl.searchParams.set("strikecount", "10");
+        chainUrl.searchParams.set("greeks", "1");
+        const chainResult = await fyersReadOnlyGet(chainUrl);
+        const discovery = normalizeOptionContractDiscovery(chainResult?.data);
+        const selected = selectNearestVerifiedOptionContract({
+          discovery, underlyingSymbol: candidate.symbol,
+          side: direction.side, spot: direction.spot, now: Date.now()
+        });
+        if (!selected.ok) {
+          results.push({ ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
+          continue;
+        }
+
+        const contract = selected.contract;
+        const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes");
+        quoteUrl.searchParams.set("symbols", contract.symbol);
+        const quoteResult = await fyersReadOnlyGet(quoteUrl);
+        const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d :
+          (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
+        const quoteRow = quoteRows.find(item =>
+          (item?.n || item?.symbol || item?.v?.symbol) === contract.symbol
+        );
+        const quote = quoteRow?.v || quoteRow;
+        if (!quote) {
+          results.push({ ...base, status: "NO TRADE", direction: direction.side, contract, reason: "FYERS returned no quote for the selected option contract." });
+          continue;
+        }
+
+        const optionHistoryUrl = new URL("https://api-t1.fyers.in/data/history");
+        optionHistoryUrl.searchParams.set("symbol", contract.symbol);
+        optionHistoryUrl.searchParams.set("resolution", "5");
+        optionHistoryUrl.searchParams.set("date_format", "1");
+        optionHistoryUrl.searchParams.set("range_from", from);
+        optionHistoryUrl.searchParams.set("range_to", today);
+        optionHistoryUrl.searchParams.set("cont_flag", "1");
+        const optionHistory = await fyersReadOnlyGet(optionHistoryUrl);
+        const plan = buildVerifiedSureshotTradePlan({
+          underlyingSymbol: candidate.symbol,
+          direction,
+          contract,
+          quote,
+          optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
+          resolution: "5",
+          now: Date.now()
+        });
+        if (!plan.ok) {
+          results.push({ ...base, status: "NO TRADE", direction: direction.side, contract, reason: plan.reason });
+          continue;
+        }
+        results.push({ ...base, status: "VERIFIED SETUP", plan });
+      } catch (error) {
+        const status = Number(error.statusCode) || 0;
+        if (status === 429 || status === 401) throw error;
+        results.push({
+          ...base, status: "NO TRADE",
+          reason: String(error.message || "Candidate verification failed.").slice(0, 180)
+        });
+      }
+    }
+
+    const verified = results.filter(item => item.status === "VERIFIED SETUP");
+    return res.json({
+      ok: true,
+      scanComplete: true,
+      signalsAllowed: verified.length > 0,
+      orderPlacement: "disabled",
+      readOnly: true,
+      source: "FYERS only",
+      rankedCandidateCount: shortlist.data.length,
+      verifiedSetupCount: verified.length,
+      bestSetup: verified[0] || null,
+      results,
+      notice: "Only fresh exchange-stamped FYERS quotes and completed OHLC candles are used. Option-chain response is used only for contract identity/strike/expiry; its premium, OI and volume are ignored. Entry is fresh ask, stop is the 12-candle swing low, target is at least 2R. No orders are placed."
+    });
+  } catch (error) {
+    const status = Number(error.statusCode) || 503;
+    if (status === 429 && error.retryAfterSeconds) res.set("Retry-After", String(error.retryAfterSeconds));
+    return res.status(status).json({
+      ok: false, scanComplete: false, signalsAllowed: false, orderPlacement: "disabled",
+      error: status === 429
+        ? "FYERS API cooldown/rate limit interrupted the automatic scan; all partial plans were discarded."
+        : status === 401
+          ? "FYERS session expired; reconnect and rerun the scan."
+          : "Automatic Top 3 trade-plan scan could not verify the complete required data.",
+      detail: String(error.message || "Verification failed.").slice(0, 180),
+      partialPlansDiscarded: true
     });
   }
 });
