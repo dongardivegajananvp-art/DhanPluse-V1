@@ -127,5 +127,16 @@ export function createFyersDataApiBudget({
     }
   }
 
+  run.getStatus = () => {
+    const currentTime = now();
+    const retryAfterSeconds = Math.max(0, Math.ceil((blockedUntil - currentTime) / 1000));
+    return {
+      cooldownActive: retryAfterSeconds > 0,
+      retryAfterSeconds,
+      blockedUntil: blockedUntil > currentTime ? new Date(blockedUntil).toISOString() : null,
+      queuedRequests: 0
+    };
+  };
+
   return run;
 }
