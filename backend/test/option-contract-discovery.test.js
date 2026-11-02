@@ -34,3 +34,26 @@ test("rejects missing or malformed contract descriptors", () => {
     optionsChain: [{ symbol: "NSE:ABC26NOV100PE", strike_price: 100, option_type: "PE" }]
   }), /no_valid_option_contract_descriptors/);
 });
+
+test("normalizes BSE SENSEX option contract descriptors alongside NSE contracts", () => {
+  const result = normalizeOptionContractDiscovery({
+    expiryData: [{ expiry: "1795651200", date: "2026-11-26" }],
+    optionsChain: [
+      { symbol: "NSE:RELIANCE26NOV2500CE", option_type: "CE", strike_price: 2500 },
+      { symbol: "BSE:SENSEX26NOV82000PE", option_type: "PE", strike_price: 82000 }
+    ]
+  });
+  assert.equal(result.optionsChain.length, 2);
+  assert.equal(result.optionsChain[1].symbol, "BSE:SENSEX26NOV82000PE");
+  assert.equal(result.optionsChain[1].option_type, "PE");
+});
+
+test("continues rejecting unsupported exchanges and malformed symbols", () => {
+  assert.throws(() => normalizeOptionContractDiscovery({
+    expiry: "1795651200",
+    optionsChain: [
+      { symbol: "MCX:GOLD26NOV100000CE", option_type: "CE", strike_price: 100000 },
+      { symbol: "BSE:SENSEX-INDEX", option_type: "CE", strike_price: 82000 }
+    ]
+  }), /no_valid_option_contract_descriptors/);
+});
