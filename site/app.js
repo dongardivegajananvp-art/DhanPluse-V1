@@ -55,21 +55,32 @@ function renderFyersCooldown() {
     }
   });
 }
-function activateFyersCooldown(payload, response) {
-  const detail = [payload && payload.detail, payload && payload.error, payload && payload.message].filter(Boolean).join(' ');
-  const match = detail.match(/(\d+)\s*seconds?/i);
-  const headerSeconds = Number(response && response.headers && response.headers.get('retry-after'));
-  const seconds = Math.max(1, Math.min(86400,
-    Number(payload && payload.retryAfterSeconds) || (Number.isFinite(headerSeconds) && headerSeconds > 0 ? headerSeconds : 0) ||
-    (match ? Number(match[1]) : 0) || 60
-  ));
-  const until = Date.now() + seconds * 1000;
-  window.__dhanPulseCooldownUntil = Math.max(window.__dhanPulseCooldownUntil || 0, until);
+async function syncFyersCooldownFromBackend() {
+  // A 429 can be endpoint-specific (for example /data/history) while other
+  // FYERS endpoints remain usable. Only the shared backend budget status may
+  // activate the app-wide refresh guard.
   try {
-    const previous = Number(localStorage.getItem(FYERS_COOLDOWN_KEY) || 0);
-    localStorage.setItem(FYERS_COOLDOWN_KEY, String(Math.max(previous, until)));
-  } catch {}
-  renderFyersCooldown();
+    const response = await nativeFetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    if (!response.ok) return;
+    const status = await response.json();
+    const budget = status && status.fyersDataApi;
+    const seconds = Number(budget && budget.retryAfterSeconds);
+    if (budget && budget.cooldownActive === true && Number.isFinite(seconds) && seconds > 0) {
+      const until = Date.now() + Math.min(86400, seconds) * 1000;
+      window.__dhanPulseCooldownUntil = until;
+      try { localStorage.setItem(FYERS_COOLDOWN_KEY, String(until)); } catch {}
+    } else {
+      // Clear legacy UI-only timers that were created from endpoint-local 429s.
+      window.__dhanPulseCooldownUntil = 0;
+      try { localStorage.removeItem(FYERS_COOLDOWN_KEY); } catch {}
+    }
+    renderFyersCooldown();
+  } catch {
+    // If status cannot be read, retain the existing guard rather than guessing.
+  }
+}
+function activateFyersCooldown() {
+  void syncFyersCooldownFromBackend();
 }
 window.addEventListener('storage', event => {
   if (event.key === FYERS_COOLDOWN_KEY) renderFyersCooldown();
