@@ -39,7 +39,7 @@ jobs:
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
           grep -q "UI build 2026-10-29" dist/site/index.html
-          grep -q "dhanpulse-shell-v95-sureshot-option-risk" dist/site/sw.js
+          grep -q "dhanpulse-shell-v96-sureshot-auto-top3" dist/site/sw.js
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
