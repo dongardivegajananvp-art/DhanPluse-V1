@@ -86,6 +86,8 @@ window.addEventListener('storage', event => {
   if (event.key === FYERS_COOLDOWN_KEY) renderFyersCooldown();
 });
 window.setInterval(renderFyersCooldown, 1000);
+// Reconcile any legacy browser-stored timer with the backend's authoritative budget on app startup.
+void syncFyersCooldownFromBackend();
 
 window.fetch = function(input, init = {}) {
   let url = '';
