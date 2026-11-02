@@ -11,9 +11,11 @@ function epochSeconds(value) {
 }
 
 function indiaDateKey(value) {
-  return new Intl.DateTimeFormat("en-CA", {
+  const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit"
-  }).format(new Date(value));
+  }).formatToParts(new Date(value));
+  const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return fields.year + "-" + fields.month + "-" + fields.day;
 }
 
 function expiryTime(value) {
