@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dhanpulse-shell-v96-sureshot-auto-top3';
+const CACHE_NAME = 'dhanpulse-shell-v97-ui-build-stamp';
 const SHELL = ['./', './index.html', './style.css?v=20261029-restore24-v2', './app.js?v=20261102-auto-top3-plans-v2', './journal.js?v=20261029-restore24-v2', './risk-calculator.js?v=20261029-restore24-v2', './backtest.js?v=20261029-restore24-v2', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
