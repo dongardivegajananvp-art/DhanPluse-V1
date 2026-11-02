@@ -7,7 +7,6 @@ import cors from 'cors';
 import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './gap-analysis.js';
 import { assertCompleteMoverSnapshot, assertFreshMoverSnapshot } from './movers-validation.js';
 import { quoteTimestampStatus } from './fresh-data-validation.js';
-import { isTrustedDhanPulsePreview } from './cors-origin-policy.js';
 import { getNseSessionWindow } from './market-data.js';
 import { buildFnoEquityUniverse } from './fno-universe.js';
 import { isAllowedChartSymbol } from './chart-symbol-validation.js';
@@ -41,12 +40,8 @@ const allowedOrigins = new Set(
   rawAllowed.split(',').map(x => x.trim()).filter(Boolean)
 );
 
-// Always allow your known frontends - including new Netlify
+// Keep the production GitHub Pages origin; do not whitelist retired preview/test frontends.
 allowedOrigins.add('https://dongardivegajananvp-art.github.io');
-allowedOrigins.add('https://spectacular-gaufre-b5c029.netlify.app');
-allowedOrigins.add('https://splendid-gelato-9c2566.netlify.app');
-allowedOrigins.add('https://dhanpulse-clean-test-ui.onrender.com');
-allowedOrigins.add('https://dhanpulse-ultimate-session-test-ui.onrender.com');
 allowedOrigins.add('http://localhost:5173');
 allowedOrigins.add('http://localhost:3000');
 
@@ -63,7 +58,7 @@ app.use(cors({
   origin(origin, callback) {
     // Allow no-origin (curl, health checks, Render)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.has(origin) || isTrustedDhanPulsePreview(origin)) return callback(null, true);
+    if (allowedOrigins.has(origin)) return callback(null, true);
     console.warn('CORS blocked origin:', origin);
     return callback(new Error('Origin not allowed'));
   },
