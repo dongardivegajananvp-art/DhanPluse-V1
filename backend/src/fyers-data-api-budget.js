@@ -91,7 +91,7 @@ export function createFyersDataApiBudget({
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
           const retryAfter = Number(response.headers?.get?.('retry-after'));
-          const cloudflare1015 = /error\\s*1015|cloudflare.{0,80}1015/i.test(body);
+          const cloudflare1015 = /error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body);
           const cooldown = cloudflare1015
             ? cloudflareCooldownMs
             : Math.max(rateLimitCooldownMs, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0);
