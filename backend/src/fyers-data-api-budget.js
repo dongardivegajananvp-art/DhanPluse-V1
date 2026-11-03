@@ -11,8 +11,11 @@ export function createFyersDataApiBudget({
   windowMs = 60_000,
   cloudflareCooldownMs = 60 * 60_000,
   rateLimitCooldownMs = 60_000,
-  historyCacheMs = 10_000,
-  optionChainCacheMs = 5_000,
+  // Reuse identical verified OHLC reads for three minutes. Sureshot's candle
+  // validators independently reject stale completed bars before any signal.
+  historyCacheMs = 3 * 60_000,
+  // Contract descriptors contain identity/expiry only (never premium/OI/volume).
+  optionChainCacheMs = 60_000,
   maxCacheEntries = 100
 } = {}) {
   let queue = Promise.resolve();

@@ -116,6 +116,41 @@ test('identical history reads are coalesced and briefly cached', async () => {
   assert.equal(sent, 2, 'expired history cache must refresh from FYERS');
 });
 
+test('verified history cache remains readable during a shared Cloudflare cooldown', async () => {
+  let clock = 550_000;
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    now: () => clock,
+    minIntervalMs: 0,
+    historyCacheMs: 180_000,
+    fetchImpl: async url => {
+      sent += 1;
+      if (String(url).includes('/data/quotes')) {
+        return new Response('Cloudflare Error 1015', { status: 429 });
+      }
+      return new Response(JSON.stringify({ s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] }), {
+        status: 200, headers: { 'content-type': 'application/json' }
+      });
+    }
+  });
+
+  const historyUrl = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX&resolution=5';
+  await request(historyUrl);
+  await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
+
+  const cached = await request(historyUrl);
+  assert.equal(sent, 2, 'a cache hit must not send another upstream request during cooldown');
+  assert.equal(cached.headers.get('x-dhanpulse-cache'), 'HIT');
+  assert.deepEqual(await cached.json(), { s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] });
+
+  clock += 180_001;
+  await assert.rejects(
+    request(historyUrl),
+    error => error.statusCode === 429 && /Data API cooldown active/.test(error.message)
+  );
+  assert.equal(sent, 2, 'an expired cache must remain blocked rather than probing Cloudflare early');
+});
+
 test('option quote requests are never cached', async () => {
   let sent = 0;
   const request = createFyersDataApiBudget({

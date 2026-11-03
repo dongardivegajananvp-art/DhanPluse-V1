@@ -500,27 +500,13 @@ app.get('/api/market/quotes', async (_req, res) => {
   });
 });
 
-// Rate-limit each FYERS REST endpoint independently. A 429 from the equity
-// Quotes API must not silently block an unrelated historical-candles request.
-// Each endpoint still backs off exponentially, so a throttled route is not
-// repeatedly hammered while other read-only routes can be diagnosed normally.
-const fyersRateLimits = new Map();
-const FYERS_429_INITIAL_BACKOFF_MS = 60_000;
-const FYERS_429_MAX_BACKOFF_MS = 60 * 60_000;
-
+// The shared Data API budget is the single cooldown authority. Check its
+// response cache before any upstream cooldown decision so safe cached OHLC
+// remains readable while a 1015 block prevents new requests.
 async function fyersReadOnlyGet(url) {
   if (!accessToken) {
     const error = new Error('Connect FYERS first.');
     error.statusCode = 401;
-    throw error;
-  }
-  const rateLimitKey = url instanceof URL ? url.pathname : new URL(String(url)).pathname;
-  const rateLimit = fyersRateLimits.get(rateLimitKey) || { until: 0, backoffMs: FYERS_429_INITIAL_BACKOFF_MS };
-  if (Date.now() < rateLimit.until) {
-    const waitSeconds = Math.ceil((rateLimit.until - Date.now()) / 1000);
-    const error = new Error(`FYERS rate-limit cooldown active for ${rateLimitKey}. Retry in about ${waitSeconds} seconds.`);
-    error.statusCode = 429;
-    error.retryAfterSeconds = waitSeconds;
     throw error;
   }
   const response = await fetchWithFyersBudget(url, {
@@ -535,24 +521,6 @@ async function fyersReadOnlyGet(url) {
   let data = {};
   try { data = responseText ? JSON.parse(responseText) : {}; } catch {}
   const retryAfterHeader = response.headers.get('retry-after');
-  if (response.status === 429) {
-    const retryAfterSeconds = retryAfterHeader && /^\d+(?:\.\d+)?$/.test(retryAfterHeader)
-      ? Math.ceil(Number(retryAfterHeader))
-      : 0;
-    // Cloudflare Error 1015 is an upstream rate-limit block; Retry-After may
-    // misleadingly be "0". Stop retrying this endpoint for an hour instead
-    // of re-triggering the block every few minutes.
-    const cloudflare1015 = /error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(responseText);
-    const backoffMs = cloudflare1015
-      ? FYERS_429_MAX_BACKOFF_MS
-      : retryAfterSeconds > 0
-        ? Math.max(rateLimit.backoffMs, retryAfterSeconds * 1000)
-        : rateLimit.backoffMs;
-    fyersRateLimits.set(rateLimitKey, {
-      until: Date.now() + backoffMs,
-      backoffMs: Math.min(Math.max(rateLimit.backoffMs * 2, backoffMs), FYERS_429_MAX_BACKOFF_MS)
-    });
-  }
   if (!response.ok || data.s !== 'ok') {
     // Include safe upstream diagnostics (never credentials) so quote failures
     // can be fixed from evidence instead of guessing at permissions or symbols.
@@ -565,8 +533,7 @@ async function fyersReadOnlyGet(url) {
     const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}${retryAfterHeader ? `, Retry-After ${retryAfterHeader}` : ''}): ${message}`.slice(0, 220));
     error.statusCode = response.status === 429 ? 429 : (response.status === 401 || data.code === -16 ? 401 : 502);
     if (response.status === 429) {
-      const activeLimit = fyersRateLimits.get(rateLimitKey);
-      error.retryAfterSeconds = Math.max(1, Math.ceil(((activeLimit?.until || Date.now() + FYERS_429_INITIAL_BACKOFF_MS) - Date.now()) / 1000));
+      error.retryAfterSeconds = fetchWithFyersBudget.getStatus().retryAfterSeconds;
     }
     console.warn('FYERS read-only request failed:', JSON.stringify({
       path: url.pathname,
@@ -578,7 +545,6 @@ async function fyersReadOnlyGet(url) {
     }));
     throw error;
   }
-  fyersRateLimits.delete(rateLimitKey);
   return data;
 }
 
