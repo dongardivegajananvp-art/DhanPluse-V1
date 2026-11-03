@@ -75,6 +75,9 @@ const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const dashboardSessions = new Map();
 const DASHBOARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 let marketSocket = null;
+let marketReconnectTimer = null;
+let marketReconnectAttempt = 0;
+const MARKET_SOCKET_RECONNECT_FALLBACK_MS = 20_000;
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
@@ -128,6 +131,9 @@ function parseTick(raw) {
 }
 
 function startMarketDataStream(token) {
+  if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
+  marketReconnectTimer = null;
+  marketReconnectAttempt = 0;
   streamError = '';
   streamConnected = false;
   latestTicks.clear();
@@ -142,6 +148,9 @@ function startMarketDataStream(token) {
       if (marketSocket !== socket) return;
       streamConnected = true;
       streamError = '';
+      marketReconnectAttempt = 0;
+      if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
+      marketReconnectTimer = null;
       console.log('FYERS market socket connected; subscribing to baseline indices and selected chart symbol.');
       try {
         socket.mode(socket.FullMode);
@@ -206,6 +215,26 @@ function startMarketDataStream(token) {
       streamConnected = false;
       const safeReason = reason == null ? '' : String(reason).slice(0, 160);
       console.warn('FYERS market socket closed:', JSON.stringify({ code: code ?? null, reason: safeReason || null }));
+      if (marketReconnectTimer || accessToken !== token) return;
+      marketReconnectAttempt += 1;
+      const retryDelayMs = MARKET_SOCKET_RECONNECT_FALLBACK_MS;
+      streamError = 'FYERS market socket disconnected; controlled reconnect is pending.';
+      console.warn('FYERS socket reconnect fallback scheduled:', JSON.stringify({
+        attempt: marketReconnectAttempt, retryDelayMs
+      }));
+      marketReconnectTimer = setTimeout(() => {
+        marketReconnectTimer = null;
+        if (marketSocket !== socket || accessToken !== token || streamConnected) return;
+        try {
+          if (typeof socket.isConnected === 'function' && socket.isConnected()) return;
+          console.warn('FYERS socket reconnect fallback executing:', JSON.stringify({ attempt: marketReconnectAttempt }));
+          socket.connect();
+        } catch (error) {
+          streamError = 'FYERS market socket reconnect attempt failed.';
+          console.error('FYERS socket reconnect fallback failed:', String(error?.message || error).slice(0, 200));
+        }
+      }, retryDelayMs);
+      if (typeof marketReconnectTimer.unref === 'function') marketReconnectTimer.unref();
     });
     if (typeof socket.autoreconnect === 'function') socket.autoreconnect(50);
     socket.connect();
