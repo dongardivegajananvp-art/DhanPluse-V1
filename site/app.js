@@ -42,7 +42,7 @@ function renderFyersCooldown() {
 
   document.querySelectorAll('main button').forEach(button => {
     const description = ((button.id || '') + ' ' + (button.textContent || '')).toLowerCase();
-    const isDataRefresh = /refresh|load (equity|stock|market|quote|candle)|run scanner|scan (now|market|stocks)|top 3|strike scan/.test(description);
+    const isDataRefresh = /refresh|load (equity|stock|market|quote|candle)|run scanner|scan (now|market|stocks)/.test(description);
     if (!isDataRefresh) return;
     if (remaining > 0 && !button.disabled) {
       button.dataset.fyersCooldownDisabled = 'true';
