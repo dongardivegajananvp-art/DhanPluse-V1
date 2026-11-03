@@ -12,20 +12,23 @@ const quoteSnapshot = {
   }))
 };
 const indexTicks = new Map([
-  ["NSE:NIFTY50-INDEX", { ltp: 24000, chp: 999, updatedAt: new Date(now - 1000).toISOString() }],
-  ["NSE:NIFTYBANK-INDEX", { ltp: 52000, chp: -888, updatedAt: new Date(now - 1000).toISOString() }],
-  ["BSE:SENSEX-INDEX", { ltp: 79000, chp: 777, updatedAt: new Date(now - 1000).toISOString() }]
+  ["NSE:NIFTY50-INDEX", { ltp: 24000, chp: 0.9, updatedAt: new Date(now - 1000).toISOString() }],
+  ["NSE:NIFTYBANK-INDEX", { ltp: 52000, chp: -1.2, updatedAt: new Date(now - 1000).toISOString() }],
+  ["BSE:SENSEX-INDEX", { ltp: 79000, chp: 0.7, updatedAt: new Date(now - 1000).toISOString() }]
 ]);
 
-test("ranks top three only from complete fresh F&O quotes and all index ticks", () => {
+test("ranks top three across complete fresh F&O quotes and all three live indices", () => {
   const result = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now });
   assert.equal(result.data.length, 3);
-  assert.equal(result.candidateCount, 218);
+  assert.equal(result.candidateCount, 221);
+  assert.equal(result.universeCount, 221);
   assert.equal(result.data[0].symbol, "NSE:STOCK217-EQ");
   assert.equal(result.data[0].rank, 1);
   assert.equal(result.signalsAllowed, false);
-  assert.equal(result.data.every(row => row.underlyingType === "FNO_EQUITY"), true);
-  assert.equal(result.data.some(row => row.underlyingType === "INDEX"), false);
+  assert.equal(result.data.some(row => row.underlyingType === "INDEX"), true);
+  assert.equal(result.data.some(row => row.symbol === "NSE:NIFTY50-INDEX"), true);
+  assert.equal(result.data.some(row => row.symbol === "NSE:NIFTYBANK-INDEX"), true);
+  assert.equal(result.data.some(row => row.symbol === "BSE:SENSEX-INDEX"), false);
 });
 
 test("blocks incomplete F&O quote coverage", () => {
@@ -34,7 +37,7 @@ test("blocks incomplete F&O quote coverage", () => {
     /complete_verified_fno_quote_snapshot_required/);
 });
 
-test("blocks stale quotes and missing or stale index ticks", () => {
+test("blocks stale quotes and missing, null-change or stale index ticks", () => {
   const stale = structuredClone(quoteSnapshot);
   stale.data[0].v.tt = Math.floor((now - 31000) / 1000);
   assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: stale, universe, indexTicks, now }),
@@ -42,6 +45,10 @@ test("blocks stale quotes and missing or stale index ticks", () => {
   const missingIndex = new Map(indexTicks);
   missingIndex.delete("BSE:SENSEX-INDEX");
   assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks: missingIndex, now }),
+    /all_three_fresh_exchange_stamped_index_ticks_required/);
+  const nullChange = new Map(indexTicks);
+  nullChange.set("BSE:SENSEX-INDEX", { ...indexTicks.get("BSE:SENSEX-INDEX"), chp: null });
+  assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks: nullChange, now }),
     /all_three_fresh_exchange_stamped_index_ticks_required/);
 });
 
