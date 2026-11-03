@@ -76,7 +76,7 @@ export function fnoQuoteSnapshotToMoversPayload(snapshot, symbols, now = Date.no
     data.push({
       symbol,
       price: Number(value.lp),
-      change: Number.isFinite(Number(value.ch)) ? Number(value.ch) : null,
+      change: value.ch != null && Number.isFinite(Number(value.ch)) ? Number(value.ch) : null,
       changePct: Number(value.chp),
       previousClose: null,
       priceAsOf: new Date(stamp).toISOString(),
