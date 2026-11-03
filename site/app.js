@@ -1553,14 +1553,9 @@ async function performSureshotSetup() {
   if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
   let selectedContract=null;
   const symbol=symbolEl.value,resolution=resolutionEl.value;
-  const cooldownSeconds=getFyersCooldownRemaining();
-  if(cooldownSeconds>0){
-    const mins=Math.floor(cooldownSeconds/60),secs=cooldownSeconds%60;
-    status.textContent='FYERS historical-data cooldown active · retry in '+mins+'m '+String(secs).padStart(2,'0')+'s. No new REST request sent; existing verified data, if any, remains unchanged.';
-    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>NO TRADE</h4><span class="signal-tone neutral">COOLDOWN</span></div><p>Fresh underlying candles cannot be requested during the FYERS cooldown. No option strike, premium, entry, stop-loss or target will be inferred from index ticks or stale data.</p></article>';
-    if(!chart.querySelector('svg,canvas')) chart.innerHTML='<div class="chart-empty">Verified candle chart unavailable during FYERS historical-data cooldown. Trade plan remains blocked.</div>';
-    return;
-  }
+  // Allow the backend to serve an identical, recently verified candle-cache hit
+  // during a shared FYERS cooldown. Cache misses remain blocked upstream; the
+  // directional and option-risk validators still require fresh exchange data.
   status.textContent='Requesting verified FYERS OHLC candles and contract descriptors…';
   cards.innerHTML='<div class="chart-empty">Checking conditions…</div>';
   chart.innerHTML='<div class="chart-empty">Loading verified candles…</div>';
