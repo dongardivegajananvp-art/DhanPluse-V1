@@ -156,3 +156,25 @@ test('cooldown status reports the real shared FYERS Data API backoff without exp
   assert.equal(request.getStatus().cooldownActive, false);
   assert.equal(request.getStatus().blockedUntil, null);
 });
+
+test('default FYERS pacing stays below the documented Standard plan limits', async () => {
+  let clock = 700_000;
+  const sentAt = [];
+  const request = createFyersDataApiBudget({
+    now: () => clock,
+    sleep: async ms => { clock += ms; },
+    fetchImpl: async () => {
+      sentAt.push(clock);
+      return fakeResponse();
+    }
+  });
+
+  for (let index = 0; index < 41; index += 1) {
+    await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATEST' + index + '-EQ');
+  }
+
+  assert.equal(sentAt.length, 41);
+  assert.ok(sentAt[1] - sentAt[0] >= 1250, 'requests must be spaced by at least 1.25 seconds');
+  assert.ok(sentAt[39] - sentAt[0] < 60_000, '40 requests should fit within the conservative rolling-minute budget');
+  assert.ok(sentAt[40] - sentAt[0] >= 60_000, 'the 41st request must wait for the rolling-minute window');
+});
