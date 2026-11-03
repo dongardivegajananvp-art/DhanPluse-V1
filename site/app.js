@@ -148,6 +148,7 @@ let authInProgress = false;
 let deferredInstallPrompt = null;
 let optionRequestRunning = false;
 let sureshotRequestRunning = false;
+let sureshotRetryAtNextSession = false;
 let sureshotRefreshPending = false;
 let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
@@ -1562,6 +1563,7 @@ async function loadSureshotUniverseShortlist() {
           (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
           (plan ? '' : '<tr><td colspan="10" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
       }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS option quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. No orders are placed.</p>';
+    sureshotRetryAtNextSession = false;
     if (status) status.textContent = verified.length
       ? (result.candidateUniverseComplete
         ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s). Best valid setup is ranked first.'
@@ -1569,12 +1571,28 @@ async function loadSureshotUniverseShortlist() {
       : 'Full-universe scan complete · NO TRADE. No candidate passed every direction, contract, fresh quote, candle and ≥1:2 risk check.';
 
   } catch (error) {
+    if (/Market session is closed/i.test(String(error.message || ''))) {
+      const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
+      const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      const minutes = Number(fields.hour) * 60 + Number(fields.minute);
+      sureshotRetryAtNextSession = ['Sat', 'Sun'].includes(fields.weekday) || minutes >= 930 || minutes < 555;
+      if (status && sureshotRetryAtNextSession) status.textContent = 'Market closed · Sureshot will automatically retry when the next regular session opens.';
+    }
     host.innerHTML = '<div class="console-section"><div class="console-section-head"><h4>NO TRADE · FULL-UNIVERSE SCAN BLOCKED</h4><span class="signal-tone neutral">FYERS VERIFICATION</span></div><p>' +
       escapeHtml(error.message || 'Complete verified full-universe scan unavailable.') +
       '</p><p class="hint">All partial plans are discarded. No stale fallback, sample price or partial ranking is shown as actionable.</p></div>';
     if (status) status.textContent = 'Full-universe scan withheld · ' + (error.message || 'FYERS verification failed.');
   } finally { if (button) button.disabled = false; }
 }
+// If the tab was opened before the exchange session, retry once when regular
+// hours begin. Rate-limit/auth failures do not trigger automatic retry loops.
+window.setInterval(() => {
+  if (!sureshotRetryAtNextSession || currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession()) return;
+  const button = document.querySelector('#scanSureshotUniverseBtn');
+  if (button && button.disabled) return;
+  sureshotRetryAtNextSession = false;
+  void loadSureshotUniverseShortlist();
+}, 15000);
 async function performSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
