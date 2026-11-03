@@ -1175,8 +1175,8 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
   if (!nseRegularSessionNow()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Market session is closed; actionable option plans are withheld." });
   if (sureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "A Sureshot batch is already running." });
-  const scanId = String(req.query.scanId || "");
-  const offset = Number(req.query.offset ?? 0);
+  let scanId = String(req.query.scanId || "");
+  let offset = Number(req.query.offset ?? 0);
   if (!Number.isInteger(offset) || offset < 0) return res.status(400).json({ ok: false, scanComplete: false, error: "Invalid scan offset." });
   if (scanId && (!sureshotScanState || scanId !== sureshotScanState.id ||
       Date.now() - sureshotScanState.createdAt > SURESHOT_SCAN_TTL_MS ||
@@ -1184,8 +1184,13 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     sureshotScanState = null;
     return res.status(409).json({ ok: false, scanComplete: false, error: "Scan cursor expired or out of sequence. Start a fresh scan." });
   }
+  // If the app was backgrounded or reloaded between batches, resume the
+  // server-held cursor instead of leaving the user stuck with a 409 for 30 min.
   if (!scanId && sureshotScanState && Date.now() - sureshotScanState.createdAt <= SURESHOT_SCAN_TTL_MS) {
-    return res.status(409).json({ ok: false, scanComplete: false, error: "A full-universe scan is already in progress." });
+    scanId = sureshotScanState.id;
+    offset = sureshotScanState.nextOffset;
+  } else if (!scanId && sureshotScanState) {
+    sureshotScanState = null;
   }
   sureshotAutoPlansInFlight = true;
   try {
