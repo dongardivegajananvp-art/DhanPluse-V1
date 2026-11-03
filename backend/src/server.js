@@ -1224,7 +1224,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (_req,
     }
 
     const shortlist = buildVerifiedSureshotShortlist({
-      quoteSnapshot: snapshot, universe, indexTicks, now: Date.now(), limit: 3
+      quoteSnapshot: snapshot, universe, indexTicks, now: Date.now(), limit: SURESHOT_CANDIDATE_SCAN_LIMIT
     });
     const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
     const today = indiaNow.toISOString().slice(0, 10);
