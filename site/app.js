@@ -1488,7 +1488,7 @@ async function loadSureshotUniverseShortlist() {
   host.innerHTML = '<div class="chart-empty">Starting full eligible NSE F&O scan in small sequential FYERS batches…</div>';
   if (status) status.textContent = 'Full-universe scan starting. The backend retains scan progress if this app is backgrounded or reopened.';
   try {
-    let result = null, scanId = '', offset = 0, total = 0, batchNumber = 0;
+    let result = null, scanId = '', offset = 0, total = 0, batchNumber = 0, progressRows = [];
     while (!result) {
       const query = scanId ? '?' + new URLSearchParams({ scanId, offset: String(offset) }) : '';
       const response = await fetch(BACKEND_URL + '/api/market/sureshot-auto-plans' + query, {
@@ -1505,11 +1505,23 @@ async function loadSureshotUniverseShortlist() {
       scanId = payload.scanId;
       offset = payload.nextOffset;
       total = Number(payload.totalCandidateCount);
+      progressRows = Array.isArray(payload.scannedCandidates) ? payload.scannedCandidates : progressRows;
       batchNumber += 1;
-      if (status) status.textContent = 'Full-universe FYERS scan · ' + offset + ' / ' + total +
-        ' candidates checked · batch ' + batchNumber + '. Sequential requests protect FYERS API capacity.';
-      host.innerHTML = '<div class="chart-empty">FYERS verified scan progress: <b>' + offset + ' / ' + total +
-        '</b> candidates checked. Continuing through the ranked eligible F&O universe…</div>';
+      if (status) status.textContent = 'FYERS full-universe scan · ' + offset + ' / ' + total +
+        ' candidates checked · batch ' + batchNumber + '. Showing each checked symbol below.';
+      host.innerHTML = '<div class="console-section-head"><div><h4>Live scan progress · NSE F&O universe</h4><p>' +
+        offset + ' / ' + total + ' candidates checked · ' + (total ? Math.round(offset / total * 100) : 0) +
+        '% · ranked by FYERS % move</p></div><span class="live-tag">SCANNING</span></div>' +
+        '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Symbol</th><th>Move</th><th>Direction</th><th>Check</th><th>Reason</th></tr></thead><tbody>' +
+        progressRows.map(row => {
+          const move = Number(row.changePct);
+          return '<tr><td>#' + Number(row.rank) + '</td><td><b>' +
+            escapeHtml(String(row.underlyingSymbol || '').replace(/^NSE:/, '').replace(/^BSE:/, '').replace(/-EQ$/, '').replace(/-INDEX$/, '')) +
+            '</b></td><td>' + (Number.isFinite(move) ? (move > 0 ? '+' : '') + move.toFixed(2) + '%' : '—') +
+            '</td><td>' + escapeHtml(row.direction || '—') + '</td><td>' +
+            (row.status === 'NO TRADE' ? '<span class="signal-tone neutral">CHECKED</span>' : escapeHtml(row.status || 'CHECKING')) +
+            '</td><td>' + escapeHtml(row.reason || 'Direction / option contract / premium / RR verification passed to next stage.') + '</td></tr>';
+        }).join('') + '</tbody></table></div><p class="hint">A setup appears only after fresh option quote and completed option candles pass the 1:2 risk check. No sample prices or partial trade signals.</p>';
     }
     if (!Array.isArray(result.results) || result.scannedCandidateCount !== result.results.length ||
         (!result.candidateUniverseComplete && result.stopReason !== 'FIRST_VERIFIED_SETUP_FOUND')) {
