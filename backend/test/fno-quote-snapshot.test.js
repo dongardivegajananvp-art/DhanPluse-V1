@@ -35,7 +35,7 @@ test("incomplete, stale, duplicate, or non-live movers rows are never shared", (
   assert.equal(moversPayloadToFnoQuoteSnapshot({ ...movers, partial: true }, symbols, now), null);
   assert.equal(moversPayloadToFnoQuoteSnapshot({ ...movers, receivedSymbols: 1 }, symbols, now), null);
   const stale = structuredClone(movers);
-  stale.data[0].priceAsOf = new Date(now - 121000).toISOString();
+  stale.data[0].priceAsOf = new Date(now - 31000).toISOString();
   assert.equal(moversPayloadToFnoQuoteSnapshot(stale, symbols, now), null);
   const duplicate = structuredClone(movers);
   duplicate.data[1].symbol = duplicate.data[0].symbol;
