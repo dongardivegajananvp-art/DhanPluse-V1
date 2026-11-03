@@ -1488,17 +1488,9 @@ async function loadSureshotUniverseShortlist() {
   host.innerHTML = '<div class="chart-empty">Running automatic Top 3 scan: fresh FYERS underlying candles → CE/PE → nearest expiry/strike → fresh option quote → completed option candles…</div>';
   if (status) status.textContent = 'Automatic scan running sequentially to respect FYERS API limits. Partial plans are never shown.';
   try {
-    // Prime the complete fresh F&O quote snapshot in its own request so
-    // the subsequent multi-candidate risk scan can reuse the 30-second cache.
-    const preflightResponse = await fetch(BACKEND_URL + '/api/market/sureshot-shortlist', {
-      headers: { Accept: 'application/json' }, cache: 'no-store'
-    });
-    const preflight = await preflightResponse.json().catch(() => ({}));
-    if (!preflightResponse.ok || preflight.ok !== true || preflight.verified !== true ||
-        preflight.signalsAllowed !== false || !Array.isArray(preflight.data) || preflight.data.length !== 3) {
-      throw new Error(preflight.detail || preflight.error || 'Complete fresh FYERS F&O shortlist could not be verified.');
-    }
-    if (status) status.textContent = 'Complete F&O snapshot verified. Now checking underlying direction, option contracts, live premiums and completed risk candles sequentially…';
+    // The auto-plans endpoint already builds and validates the complete
+    // F&O shortlist internally. Avoid a duplicate preflight request; one click
+    // should execute one authoritative scan and share its verified snapshot.
     const response = await fetch(BACKEND_URL + '/api/market/sureshot-auto-plans', {
       headers: { Accept: 'application/json' }, cache: 'no-store'
     });
