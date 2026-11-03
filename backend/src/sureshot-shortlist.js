@@ -25,7 +25,7 @@ export function buildVerifiedSureshotShortlist({
   maxIndexTickAgeMs = 15_000,
   limit = 5
 }) {
-  if (!Number.isFinite(now) || !Number.isInteger(limit) || limit < 1 || limit > 5) {
+  if (!Number.isFinite(now) || !Number.isInteger(limit) || limit < 1 || limit > 250) {
     throw new Error("invalid_shortlist_parameters");
   }
   if (!quoteSnapshot || quoteSnapshot.ok !== true || quoteSnapshot.verified !== true ||
