@@ -1198,6 +1198,7 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
   }
 });
 
+let sureshotAutoPlansInFlight = false;
 app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (_req, res) => {
   res.set("Cache-Control", "no-store");
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
@@ -1205,6 +1206,12 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (_req,
     ok: false, scanComplete: false, signalsAllowed: false,
     error: "Market session is closed; automatic actionable option plans are withheld."
   });
+  // Prevent duplicate taps/requests from launching repeated full-universe FYERS scans.
+  if (sureshotAutoPlansInFlight) return res.status(409).json({
+    ok: false, scanComplete: false, signalsAllowed: false,
+    error: "A Sureshot scan is already running; duplicate scan request was not sent upstream."
+  });
+  sureshotAutoPlansInFlight = true;
 
   try {
     const universe = await getNseFnoEquityUniverse();
@@ -1370,6 +1377,8 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (_req,
       detail: String(error.message || "Verification failed.").slice(0, 180),
       partialPlansDiscarded: true
     });
+  } finally {
+    sureshotAutoPlansInFlight = false;
   }
 });
 
