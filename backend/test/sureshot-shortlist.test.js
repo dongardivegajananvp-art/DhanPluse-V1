@@ -34,7 +34,7 @@ test("blocks incomplete F&O quote coverage", () => {
 
 test("blocks stale quotes and missing or stale index ticks", () => {
   const stale = structuredClone(quoteSnapshot);
-  stale.data[0].v.tt = Math.floor((now - 121000) / 1000);
+  stale.data[0].v.tt = Math.floor((now - 31000) / 1000);
   assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: stale, universe, indexTicks, now }),
     /stale_or_invalid_fno_quote_snapshot/);
   const missingIndex = new Map(indexTicks);
