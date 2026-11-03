@@ -17,18 +17,16 @@ const indexTicks = new Map([
   ["BSE:SENSEX-INDEX", { ltp: 79000, chp: 777, updatedAt: new Date(now - 1000).toISOString() }]
 ]);
 
-test("ranks Top 5 from the complete fresh F&O universe and includes individually fresh indices", () => {
-  const result = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now });
-  assert.equal(result.data.length, 5);
+test("ranks the complete fresh F&O universe and includes individually fresh indices", () => {
+  const result = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now, limit: 250 });
+  assert.equal(result.data.length, 221);
   assert.equal(result.candidateCount, 221);
   assert.equal(result.universeCount, 221);
   assert.equal(result.data[0].symbol, "NSE:NIFTY50-INDEX");
   assert.equal(result.data[0].rank, 1);
   assert.equal(result.signalsAllowed, false);
-  assert.deepEqual(result.data.map(row => row.symbol), ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX", "NSE:STOCK217-EQ", "NSE:STOCK216-EQ"]);
-  assert.deepEqual(result.data.map(row => row.symbol), [
-    "NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"
-  ]);
+  assert.deepEqual(result.data.slice(0, 5).map(row => row.symbol), ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX", "NSE:STOCK217-EQ", "NSE:STOCK216-EQ"]);
+  assert.equal(result.data.at(-1).rank, 221);
 });
 
 test("blocks incomplete F&O quote coverage", () => {
