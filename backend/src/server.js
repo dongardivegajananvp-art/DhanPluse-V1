@@ -1186,19 +1186,8 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (_req,
     const universe = await getNseFnoEquityUniverse();
     const indexSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"];
     const indexTicks = new Map(indexSymbols.map(symbol => [symbol, latestTicks.get(symbol)]));
-    for (const symbol of indexSymbols) {
-      const tick = indexTicks.get(symbol);
-      const age = tick ? Date.now() - Date.parse(tick.updatedAt) : Infinity;
-      if (!tick || !Number.isFinite(age) || age < 0 || age > 15000 ||
-          !Number.isFinite(Number(tick.ltp)) || Number(tick.ltp) <= 0 ||
-          !Number.isFinite(Number(tick.chp))) {
-        return res.status(409).json({
-          ok: false, scanComplete: false, signalsAllowed: false,
-          error: "Fresh exchange-timestamped NIFTY, BANKNIFTY and SENSEX ticks are all required; automatic scan blocked.",
-          missingOrStaleIndex: symbol
-        });
-      }
-    }
+    // Index ticks are optional individual candidates. They must be fresh to
+    // enter ranking, but stale/missing index ticks do not block F&O equities.
 
     // Reuse a complete, still-fresh F&O snapshot already collected by Movers.
     // The converter revalidates full symbol coverage and exchange timestamps.
