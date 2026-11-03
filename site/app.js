@@ -1485,7 +1485,7 @@ async function loadSureshotUniverseShortlist() {
   const status = document.querySelector('#setupStatus');
   if (!host || (button && button.disabled)) return;
   if (button) button.disabled = true;
-  host.innerHTML = '<div class="chart-empty">Running automatic Top 3 scan: fresh FYERS underlying candles → CE/PE → nearest expiry/strike → fresh option quote → completed option candles…</div>';
+  host.innerHTML = '<div class="chart-empty">Running automatic Top 5 scan: fresh FYERS underlying candles → CE/PE → nearest expiry/strike → fresh option quote → completed option candles…</div>';
   if (status) status.textContent = 'Automatic scan running sequentially to respect FYERS API limits. Partial plans are never shown.';
   try {
     // The auto-plans endpoint already builds and validates the complete
@@ -1496,9 +1496,9 @@ async function loadSureshotUniverseShortlist() {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || result.ok !== true || result.scanComplete !== true ||
-        !Array.isArray(result.results) || result.results.length !== 3 ||
+        !Array.isArray(result.results) || result.results.length !== 5 ||
         result.orderPlacement !== 'disabled') {
-      throw new Error(result.detail || result.error || 'Complete verified Top 3 scan was not returned.');
+      throw new Error(result.detail || result.error || 'Complete verified Top 5 scan was not returned.');
     }
     const verified = result.results.filter(row => row.status === 'VERIFIED SETUP');
     const best = result.bestSetup;
@@ -1536,12 +1536,12 @@ async function loadSureshotUniverseShortlist() {
       }).join('') + '</tbody></table></div><p class="hint">Only independently timestamped FYERS quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. No orders are placed.</p>';
     if (status) status.textContent = verified.length
       ? 'Scan complete · ' + verified.length + ' verified setup(s). #1 best is ranked by the original FYERS momentum shortlist. Read-only; order placement disabled.'
-      : 'Scan complete · NO TRADE. None of the three candidates passed every direction, contract, quote, candle and ≥1:2 risk check.';
+      : 'Scan complete · NO TRADE. None of the five candidates passed every direction, contract, quote, candle and ≥1:2 risk check.';
   } catch (error) {
     host.innerHTML = '<div class="console-section"><div class="console-section-head"><h4>NO TRADE · AUTOMATIC SCAN BLOCKED</h4><span class="signal-tone neutral">FYERS VERIFICATION</span></div><p>' +
-      escapeHtml(error.message || 'Complete verified Top 3 plans unavailable.') +
+      escapeHtml(error.message || 'Complete verified Top 5 plans unavailable.') +
       '</p><p class="hint">All partial plans are discarded. No stale fallback, sample price or partial ranking is shown as actionable.</p></div>';
-    if (status) status.textContent = 'Automatic Top 3 scan withheld · ' + (error.message || 'FYERS verification failed.');
+    if (status) status.textContent = 'Automatic Top 5 scan withheld · ' + (error.message || 'FYERS verification failed.');
   } finally {
     if (button) button.disabled = false;
   }
@@ -2236,6 +2236,9 @@ function bindTabActions() {
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
   const scanSureshotUniverseBtn=document.querySelector('#scanSureshotUniverseBtn');
   if(scanSureshotUniverseBtn) scanSureshotUniverseBtn.addEventListener('click',loadSureshotUniverseShortlist);
+  // Run one bounded Top 5 scan whenever the user opens the Sureshot tab.
+  // The backend blocks actionable scans outside market hours or without fresh FYERS data.
+  if(scanSureshotUniverseBtn) loadSureshotUniverseShortlist();
   const setupSymbol=document.querySelector('#setupSymbol');
   if(setupSymbol) setupSymbol.addEventListener('change',loadSureshotSetup);
   const advancedRefresh=document.querySelector('#refreshAdvancedBtn');
