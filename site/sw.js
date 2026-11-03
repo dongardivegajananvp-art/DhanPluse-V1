@@ -1,5 +1,5 @@
-const CACHE_NAME = 'dhanpulse-shell-v99-cooldown-startup-reconcile';
-const SHELL = ['./', './index.html', './style.css?v=20261029-restore24-v2', './app.js?v=20261102-cooldown-startup-reconcile-v2', './journal.js?v=20261029-restore24-v2', './risk-calculator.js?v=20261029-restore24-v2', './backtest.js?v=20261029-restore24-v2', './manifest.webmanifest', './dhanpulse-icon.svg'];
+const CACHE_NAME = 'dhanpulse-shell-v100-fyers-cooldown-persist';
+const SHELL = ['./', './index.html', './style.css?v=20261029-restore24-v2', './app.js?v=20261103-browser-last-known-cache-v1', './journal.js?v=20261029-restore24-v2', './risk-calculator.js?v=20261029-restore24-v2', './backtest.js?v=20261029-restore24-v2', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
