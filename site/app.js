@@ -539,6 +539,60 @@ function stockExplorerMarkup() {
     '<div id="stockExplorerStatus" class="hint">Requesting a verified FYERS equity snapshot…</div><div id="stockExplorerResults" class="explorer-grid"></div><p class="hint">Index cards use the live stream; Stock Explorer refreshes its F&O equity universe from the daily FYERS symbol master, with a validated configured fallback if that master is unavailable. After-hours prices are last-known quotes, not live ticks. Unavailable symbols remain unavailable.</p></div>';
 }
 
+const STOCK_EXPLORER_CACHE_KEY = 'dhanpulse.stockExplorer.lastKnown.v1';
+const STOCK_EXPLORER_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function normalizeStockExplorerCacheRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  const now = Date.now();
+  return rows.filter(row => {
+    const tradedAt = Date.parse(String(row && row.priceAsOf || ''));
+    const price = Number(row && row.price);
+    return row && row.verified === true && typeof row.symbol === 'string' &&
+      /^NSE:[A-Z0-9&-]+-EQ$/.test(row.symbol) && Number.isFinite(price) && price > 0 &&
+      Number.isFinite(tradedAt) && tradedAt > 0 && tradedAt <= now + 5000 &&
+      now - tradedAt <= STOCK_EXPLORER_CACHE_MAX_AGE_MS;
+  }).map(row => {
+    const tradedAt = Date.parse(row.priceAsOf);
+    return {
+      symbol: row.symbol,
+      price: Number(row.price),
+      changePct: row.changePct == null || !Number.isFinite(Number(row.changePct)) ? null : Number(row.changePct),
+      priceAsOf: new Date(tradedAt).toISOString(),
+      quoteAgeSeconds: Math.max(0, Math.floor((now - tradedAt) / 1000)),
+      priceStatus: 'LAST_KNOWN_PRICE',
+      verified: true,
+      source: row.source || 'FYERS browser last-known cache'
+    };
+  });
+}
+
+function saveStockExplorerLastKnownCache(rows) {
+  const normalized = normalizeStockExplorerCacheRows(rows);
+  if (!normalized.length) return;
+  try {
+    const previous = JSON.parse(localStorage.getItem(STOCK_EXPLORER_CACHE_KEY) || '[]');
+    const bySymbol = new Map();
+    for (const row of Array.isArray(previous) ? normalizeStockExplorerCacheRows(previous) : []) bySymbol.set(row.symbol, row);
+    for (const row of normalized) {
+      const old = bySymbol.get(row.symbol);
+      if (!old || Date.parse(row.priceAsOf) >= Date.parse(old.priceAsOf)) bySymbol.set(row.symbol, row);
+    }
+    localStorage.setItem(STOCK_EXPLORER_CACHE_KEY, JSON.stringify([...bySymbol.values()]));
+  } catch {
+    // Browser storage may be disabled or full; quote display must still work.
+  }
+}
+
+function loadStockExplorerLastKnownCache() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(STOCK_EXPLORER_CACHE_KEY) || '[]');
+    return normalizeStockExplorerCacheRows(cached);
+  } catch {
+    return [];
+  }
+}
+
 let stockExplorerRequestRunning = false;
 let stockExplorerCanRank = false;
 
@@ -615,6 +669,9 @@ async function loadStockExplorerQuotes() {
       row && typeof row.symbol === 'string' &&
       Number.isFinite(Number(row.price)) && Number(row.price) > 0
     );
+    // Persist only authenticated FYERS rows with valid exchange timestamps.
+    // These are display-only on future loads and never authorize ranking/signals.
+    saveStockExplorerLastKnownCache(result.data);
     const count = Number(result.receivedSymbols ?? stockExplorerMoverRows.length);
     const requested = Number(result.requestedSymbols ?? count);
     const missingSymbols = Array.isArray(result.failedSymbols) ? result.failedSymbols : [];
@@ -698,11 +755,28 @@ async function loadStockExplorerQuotes() {
         (fallbackError.message || 'unknown error'), 'warn');
     }
     if (!fallbackDisplayed) {
-      renderStockExplorerResults();
-      status.textContent = 'Equity quote request failed: ' + (error.message || 'FYERS snapshot unavailable.') +
-        ' Last-known FYERS prices are also unavailable. Retry after the backend cooldown. ' +
-        'Any retained prices are not a current full-universe ranking. No prices were fabricated.';
-      logEvent('Stock Explorer equity snapshot failed: ' + (error.message || 'unknown error'), 'warn');
+      const browserCachedRows = loadStockExplorerLastKnownCache();
+      if (browserCachedRows.length) {
+        stockExplorerMoverRows = browserCachedRows;
+        renderStockExplorerResults();
+        const coverage = stockExplorerUniverseSymbols.length
+          ? browserCachedRows.length + '/' + stockExplorerUniverseSymbols.length
+          : String(browserCachedRows.length) + ' cached';
+        const newest = browserCachedRows.reduce((latest, row) =>
+          Math.max(latest, Date.parse(row.priceAsOf)), 0);
+        status.textContent = 'FYERS live quotes unavailable: ' + (error.message || 'cooldown') +
+          '. Showing ' + coverage + ' previously verified FYERS prices saved in this browser; newest exchange time ' +
+          (newest ? new Date(newest).toLocaleString('en-IN', {dateStyle:'medium',timeStyle:'short'}) : 'unavailable') +
+          '. LAST KNOWN · NOT LIVE · NOT A FULL-UNIVERSE RANKING · SIGNALS BLOCKED. Cache expires after 7 days.';
+        logEvent('Stock Explorer displayed ' + browserCachedRows.length +
+          ' exchange-timestamped browser-cached FYERS prices; live ranking/signals remain blocked.', 'warn');
+      } else {
+        renderStockExplorerResults();
+        status.textContent = 'Equity quote request failed: ' + (error.message || 'FYERS snapshot unavailable.') +
+          ' No backend or browser-cached last-known FYERS prices are available. Retry after the backend cooldown. ' +
+          'Any retained prices are not a current full-universe ranking. No prices were fabricated.';
+        logEvent('Stock Explorer equity snapshot failed: ' + (error.message || 'unknown error'), 'warn');
+      }
     }
   } finally {
     stockExplorerRequestRunning = false;
