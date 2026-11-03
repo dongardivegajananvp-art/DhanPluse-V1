@@ -1144,7 +1144,7 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
     }
 
     const result = buildVerifiedSureshotShortlist({
-      quoteSnapshot: snapshot, universe, indexTicks, now: Date.now(), limit: 3
+      quoteSnapshot: snapshot, universe, indexTicks, now: Date.now(), limit: SURESHOT_CANDIDATE_SCAN_LIMIT
     });
     return res.json({
       ...result,
@@ -1164,6 +1164,9 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
   }
 });
 
+// Scan a small ranked fallback set: enough to avoid missing a valid setup just outside
+// the first three movers, while bounding FYERS history/chain/quote requests.
+const SURESHOT_CANDIDATE_SCAN_LIMIT = 5;
 let sureshotAutoPlansInFlight = false;
 app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (_req, res) => {
   res.set("Cache-Control", "no-store");
@@ -1330,6 +1333,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (_req,
       readOnly: true,
       source: "FYERS only",
       rankedCandidateCount: shortlist.candidateCount,
+      scannedCandidateCount: shortlist.data.length,
       verifiedSetupCount: verified.length,
       bestSetup: verified[0] || null,
       results,
@@ -1344,7 +1348,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (_req,
         ? "FYERS API cooldown/rate limit interrupted the automatic scan; all partial plans were discarded."
         : status === 401
           ? "FYERS session expired; reconnect and rerun the scan."
-          : "Automatic Top 3 trade-plan scan could not verify the complete required data.",
+          : "Automatic ranked-candidate trade-plan scan could not verify the complete required data.",
       detail: String(error.message || "Verification failed.").slice(0, 180),
       partialPlansDiscarded: true
     });
