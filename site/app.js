@@ -648,11 +648,62 @@ async function loadStockExplorerQuotes() {
       '; live=' + liveCount + '; last-known=' + lastKnownCount + '; stale/unverified=' + staleCount +
       '; missing=' + missing.length + ').', result.partial ? 'warn' : 'info');
   } catch (error) {
+    // The live movers request can fail during FYERS cooldown. Try the existing
+    // display-only endpoint once; it may serve its in-memory cache without an
+    // upstream request. Last-known prices must never become a live ranking.
     stockExplorerCanRank = false;
-    renderStockExplorerResults();
-    status.textContent = 'Equity quote request failed: ' + (error.message || 'FYERS snapshot unavailable.') +
-      ' Tap Refresh equity quotes to retry. Any retained prices are not a current full-universe ranking. No prices were fabricated.';
-    logEvent('Stock Explorer equity snapshot failed: ' + (error.message || 'unknown error'), 'warn');
+    let fallbackDisplayed = false;
+    try {
+      const lastResponse = await fetch(BACKEND_URL + '/api/market/last-known-stock-quotes', {
+        headers: { Accept: 'application/json' }, cache: 'no-store'
+      });
+      const lastKnown = await lastResponse.json().catch(() => ({}));
+      const rows = Array.isArray(lastKnown.data) ? lastKnown.data.filter(row => {
+        const tradedAt = Date.parse(String(row && row.priceAsOf || ''));
+        return row && row.verified === true && typeof row.symbol === 'string' &&
+          /^NSE:.+-EQ$/.test(row.symbol) && Number.isFinite(Number(row.price)) &&
+          Number(row.price) > 0 && Number.isFinite(tradedAt) && tradedAt > 0 &&
+          tradedAt <= Date.now() + 5000;
+      }) : [];
+      if (lastResponse.ok && lastKnown.ok === true && rows.length > 0) {
+        stockExplorerMoverRows = rows.map(row => {
+          const tradedAt = Date.parse(row.priceAsOf);
+          return {
+            symbol: row.symbol,
+            price: Number(row.price),
+            changePct: row.changePct == null || !Number.isFinite(Number(row.changePct)) ? null : Number(row.changePct),
+            priceAsOf: new Date(tradedAt).toISOString(),
+            quoteAgeSeconds: Number.isFinite(Number(row.quoteAgeSeconds))
+              ? Math.max(0, Number(row.quoteAgeSeconds))
+              : Math.max(0, Math.floor((Date.now() - tradedAt) / 1000)),
+            priceStatus: 'LAST_KNOWN_PRICE',
+            verified: true,
+            source: row.source || 'FYERS last-known quote'
+          };
+        });
+        renderStockExplorerResults();
+        const total = Number(lastKnown.universeCount);
+        const coverage = Number.isFinite(total) && total > 0
+          ? stockExplorerMoverRows.length + '/' + total
+          : String(stockExplorerMoverRows.length) + ' returned';
+        status.textContent = 'LIVE equity quotes unavailable: ' + (error.message || 'FYERS cooldown') +
+          '. Showing ' + coverage + ' exchange-timestamped FYERS LAST-KNOWN prices only. ' +
+          'NOT LIVE · NOT A FULL-UNIVERSE RANKING · SIGNALS BLOCKED. Missing symbols remain blank.';
+        logEvent('Stock Explorer live quote request failed; displayed ' + stockExplorerMoverRows.length +
+          ' display-only FYERS last-known prices. Full ranking and signals remain blocked.', 'warn');
+        fallbackDisplayed = true;
+      }
+    } catch (fallbackError) {
+      logEvent('Stock Explorer last-known display fallback unavailable: ' +
+        (fallbackError.message || 'unknown error'), 'warn');
+    }
+    if (!fallbackDisplayed) {
+      renderStockExplorerResults();
+      status.textContent = 'Equity quote request failed: ' + (error.message || 'FYERS snapshot unavailable.') +
+        ' Last-known FYERS prices are also unavailable. Retry after the backend cooldown. ' +
+        'Any retained prices are not a current full-universe ranking. No prices were fabricated.';
+      logEvent('Stock Explorer equity snapshot failed: ' + (error.message || 'unknown error'), 'warn');
+    }
   } finally {
     stockExplorerRequestRunning = false;
     if (button) button.disabled = false;
@@ -699,18 +750,18 @@ function renderStockExplorerResults() {
     const priceTime=mover&&mover.priceAsOf?new Date(mover.priceAsOf).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'exchange trade time unavailable';
     const priceAsOfMs=mover&&mover.priceAsOf?Date.parse(mover.priceAsOf):NaN;
     const currentQuoteAgeMs=Number.isFinite(priceAsOfMs)?Date.now()-priceAsOfMs:Infinity;
-    const moverStatus=!mover?'':marketClosed?'LAST_KNOWN_PRICE'
+    const moverStatus=!mover?'':mover.priceStatus==='LAST_KNOWN_PRICE'?'LAST_KNOWN_PRICE'
       :mover.priceStatus==='TIME_UNVERIFIED'?'TIME_UNVERIFIED'
       :mover.priceStatus!=='LIVE_QUOTE'?'STALE_QUOTE'
       :Number.isFinite(currentQuoteAgeMs)&&currentQuoteAgeMs>=0&&currentQuoteAgeMs<=MAX_EQUITY_QUOTE_AGE_SECONDS*1000?'LIVE_QUOTE':'STALE_QUOTE';
     const priceLabel=mover
-      ? (moverStatus==='LIVE_QUOTE'?'LIVE FYERS QUOTE':moverStatus==='LAST_KNOWN_PRICE'?'LAST KNOWN PRICE':moverStatus==='STALE_QUOTE'?'STALE QUOTE':'QUOTE TIME UNKNOWN')
+      ? (moverStatus==='LIVE_QUOTE'?'LIVE FYERS QUOTE':moverStatus==='LAST_KNOWN_PRICE'?'LAST KNOWN · NOT LIVE':moverStatus==='STALE_QUOTE'?'STALE QUOTE':'QUOTE TIME UNKNOWN')
       : (fresh?'LIVE INDEX QUOTE':quote?(marketClosed?'LAST KNOWN INDEX PRICE':'STALE / RECONNECTING INDEX QUOTE'):'DATA PENDING');
     const changeLabel=changePct!==null?'<span class="'+(changePct>=0?'positive-text':'negative-text')+'">'+(changePct>0?'+':'')+changePct.toFixed(2)+'%</span>':'<span class="muted-text">Change unavailable</span>';
     const indexTime=quote&&quote.sourceTime&&Number.isFinite(Date.parse(quote.sourceTime))?new Date(quote.sourceTime).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}):'exchange trade time unavailable';
     const detail=mover
       ? (moverStatus==='LIVE_QUOTE'?'Fresh exchange-timestamped FYERS quote · '+priceTime
-        : moverStatus==='LAST_KNOWN_PRICE'?'Market closed · last known FYERS price · '+priceTime
+        : moverStatus==='LAST_KNOWN_PRICE'?'Last-known FYERS exchange quote · display-only, not live · '+priceTime
         : moverStatus==='STALE_QUOTE'?'Quote timestamp is stale · '+priceTime
         :'FYERS returned a price but its exchange timestamp is unavailable; freshness is unverified')
       : (quote?(fresh?'Fresh exchange-timestamped FYERS index quote · '+indexTime:marketClosed?'Market closed · last known FYERS index price · '+indexTime:'Last received FYERS index price; live freshness is not verified · '+indexTime):x.note);
