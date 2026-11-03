@@ -73,14 +73,9 @@ export function buildVerifiedSureshotShortlist({
         !Number.isFinite(timestampMs) || ageMs < -5000 || ageMs > maxIndexTickAgeMs) {
       throw new Error("all_three_fresh_exchange_stamped_index_ticks_required");
     }
-    candidates.push({
-      symbol,
-      underlyingType: "INDEX",
-      price,
-      changePct,
-      exchangeTime: new Date(timestampMs).toISOString(),
-      quoteAgeSeconds: Math.max(0, Number((ageMs / 1000).toFixed(1)))
-    });
+    // Index ticks are freshness gates only. Auto Top 3 must always be
+    // selected from the NSE F&O equity universe, never from index symbols.
+
   }
 
   candidates.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct) ||
