@@ -1,5 +1,5 @@
 const CACHE_NAME = 'dhanpulse-shell-v102-sureshot-top5-live';
-const SHELL = ['./', './index.html', './style.css?v=20261029-restore24-v2', './app.js?v=20261103-sureshot-top5-live-v3', './journal.js?v=20261029-restore24-v2', './risk-calculator.js?v=20261029-restore24-v2', './backtest.js?v=20261029-restore24-v2', './manifest.webmanifest', './dhanpulse-icon.svg'];
+const SHELL = ['./', './index.html', './style.css?v=20261029-restore24-v2', './app.js?v=20261103-sureshot-full-universe-v4', './journal.js?v=20261029-restore24-v2', './risk-calculator.js?v=20261029-restore24-v2', './backtest.js?v=20261029-restore24-v2', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
