@@ -26,7 +26,7 @@ export function moversPayloadToFnoQuoteSnapshot(payload, symbols, now = Date.now
     if (!row || !expected.has(row.symbol) || seen.has(row.symbol) ||
         row.priceStatus !== "LIVE_QUOTE" || !isFinitePositive(row.price) ||
         !Number.isFinite(Number(row.changePct)) ||
-        !isCurrentExchangeTime(row.priceAsOf, now, 120000)) return null;
+        !isCurrentExchangeTime(row.priceAsOf, now, 30000)) return null;
     seen.add(row.symbol);
     data.push({
       n: row.symbol,
