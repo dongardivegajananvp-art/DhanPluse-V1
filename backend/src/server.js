@@ -1260,21 +1260,30 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         if (status === 429 || status === 401) throw error;
         batchResults.push({ ...base, status: "NO TRADE", reason: String(error.message || "Candidate verification failed.").slice(0, 180) });
       }
+      // Ranked order means the first fully verified setup is the fastest valid
+      // candidate. Stop there rather than spending minutes probing lower ranks.
+      if (batchResults.some(item => item.status === "VERIFIED SETUP")) break;
     }
     state.results.push(...batchResults);
-    state.nextOffset += batch.length;
-    const scanComplete = state.nextOffset >= state.candidates.length;
+    state.nextOffset += batchResults.length;
+    const universeComplete = state.nextOffset >= state.candidates.length;
+    const firstVerifiedFound = state.results.some(item => item.status === "VERIFIED SETUP");
+    const scanComplete = universeComplete || firstVerifiedFound;
     if (!scanComplete) return res.json({ ok: true, scanComplete: false, batchComplete: true,
       orderPlacement: "disabled", scanId: state.id, nextOffset: state.nextOffset,
       scannedCandidateCount: state.results.length, rankedCandidateCount: state.rankedCandidateCount,
-      totalCandidateCount: state.candidates.length, batchSize: batch.length });
+      totalCandidateCount: state.candidates.length, batchSize: batchResults.length });
     const results = state.results;
     const verified = results.filter(item => item.status === "VERIFIED SETUP");
-    const payload = { ok: true, scanComplete: true, signalsAllowed: verified.length > 0,
+    const payload = { ok: true, scanComplete: true, candidateUniverseComplete: universeComplete,
+      stopReason: universeComplete ? "ALL_CANDIDATES_CHECKED" : "FIRST_VERIFIED_SETUP_FOUND",
+      signalsAllowed: verified.length > 0,
       orderPlacement: "disabled", readOnly: true, source: "FYERS only",
       rankedCandidateCount: state.rankedCandidateCount, scannedCandidateCount: results.length,
       verifiedSetupCount: verified.length, bestSetup: verified[0] || null, results,
-      notice: "Full eligible FYERS NSE F&O universe plus individually fresh NIFTY/BANKNIFTY/SENSEX ticks scanned in ranked batches. Fresh option quotes and completed OHLC candles only; no orders are placed." };
+      notice: universeComplete
+        ? "Full eligible FYERS NSE F&O universe plus individually fresh NIFTY/BANKNIFTY/SENSEX ticks checked in ranked batches. Fresh option quotes and completed OHLC candles only; no orders are placed."
+        : "A fully verified setup was found in ranked order; scan stopped early to avoid unnecessary API calls. Remaining lower-ranked candidates were not checked. Fresh option quotes and completed OHLC candles only; no orders are placed." };
     sureshotScanState = null;
     return res.json(payload);
   } catch (error) {
