@@ -12,17 +12,19 @@ const quoteSnapshot = {
   }))
 };
 const indexTicks = new Map([
-  ["NSE:NIFTY50-INDEX", { ltp: 24000, chp: 0.8, updatedAt: new Date(now - 1000).toISOString() }],
-  ["NSE:NIFTYBANK-INDEX", { ltp: 52000, chp: -1.1, updatedAt: new Date(now - 1000).toISOString() }],
-  ["BSE:SENSEX-INDEX", { ltp: 79000, chp: 0.4, updatedAt: new Date(now - 1000).toISOString() }]
+  ["NSE:NIFTY50-INDEX", { ltp: 24000, chp: 999, updatedAt: new Date(now - 1000).toISOString() }],
+  ["NSE:NIFTYBANK-INDEX", { ltp: 52000, chp: -888, updatedAt: new Date(now - 1000).toISOString() }],
+  ["BSE:SENSEX-INDEX", { ltp: 79000, chp: 777, updatedAt: new Date(now - 1000).toISOString() }]
 ]);
 
 test("ranks top three only from complete fresh F&O quotes and all index ticks", () => {
   const result = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now });
   assert.equal(result.data.length, 3);
+  assert.equal(result.candidateCount, 218);
   assert.equal(result.data[0].symbol, "NSE:STOCK217-EQ");
   assert.equal(result.data[0].rank, 1);
   assert.equal(result.signalsAllowed, false);
+  assert.equal(result.data.every(row => row.underlyingType === "FNO_EQUITY"), true);
   assert.equal(result.data.some(row => row.underlyingType === "INDEX"), false);
 });
 
