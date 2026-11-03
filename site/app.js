@@ -65,12 +65,19 @@ async function syncFyersCooldownFromBackend() {
     const status = await response.json();
     const budget = status && status.fyersDataApi;
     const seconds = Number(budget && budget.retryAfterSeconds);
-    if (budget && budget.cooldownActive === true && Number.isFinite(seconds) && seconds > 0) {
-      const until = Date.now() + Math.min(86400, seconds) * 1000;
+    let storedUntil = 0;
+    try { storedUntil = Number(localStorage.getItem(FYERS_COOLDOWN_KEY) || 0); } catch {}
+    const backendUntil = budget && budget.cooldownActive === true && Number.isFinite(seconds) && seconds > 0
+      ? Date.now() + Math.min(86400, seconds) * 1000
+      : 0;
+    // Keep the longer confirmed cooldown across Render restarts/deploys. The
+    // backend's in-memory timer resets on restart, but a Cloudflare 1015 block
+    // is upstream/IP-level and must not be probed early by the browser.
+    const until = Math.max(storedUntil, backendUntil, Number(window.__dhanPulseCooldownUntil) || 0);
+    if (until > Date.now()) {
       window.__dhanPulseCooldownUntil = until;
       try { localStorage.setItem(FYERS_COOLDOWN_KEY, String(until)); } catch {}
     } else {
-      // Clear legacy UI-only timers that were created from endpoint-local 429s.
       window.__dhanPulseCooldownUntil = 0;
       try { localStorage.removeItem(FYERS_COOLDOWN_KEY); } catch {}
     }
