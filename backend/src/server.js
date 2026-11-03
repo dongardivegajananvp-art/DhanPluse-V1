@@ -111,7 +111,7 @@ function parseTick(raw) {
     const ltp = Number(item.ltp ?? item.lp ?? item.v?.lp);
     if (!(allowedSymbols.includes(symbol) || symbol === chartStreamSymbol) || !Number.isFinite(ltp) || ltp <= 0) continue;
     const exchangeTime = epochSeconds(
-      item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt
+      item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt ?? item.v?.exch_feed_time ?? item.v?.last_traded_time ?? item.v?.ltt ?? item.v?.tt
     );
     if (!exchangeTime) {
       if (shouldLogSocketDiagnostic(lastRejectedDiagnosticAt, symbol)) {
@@ -188,7 +188,7 @@ function startMarketDataStream(token) {
           .slice(0, 5)
           .map(x => ({
             symbol: x.symbol || x.n,
-            exchangeTimestampPresent: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt))
+            exchangeTimestampPresent: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt ?? x.v?.exch_feed_time ?? x.v?.last_traded_time ?? x.v?.ltt ?? x.v?.tt))
           }));
         if (summary.length) {
           console.log('FYERS verified index tick accepted:', JSON.stringify({ acceptedCount, ticks: summary }));
@@ -201,7 +201,7 @@ function startMarketDataStream(token) {
             symbol: x.symbol || x.n,
             type: x.type || null,
             hasLtp: x.ltp != null || x.lp != null || x.v?.lp != null,
-            hasExchangeTimestamp: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt))
+            hasExchangeTimestamp: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt ?? x.v?.exch_feed_time ?? x.v?.last_traded_time ?? x.v?.ltt ?? x.v?.tt))
           }))));
         }
       }
