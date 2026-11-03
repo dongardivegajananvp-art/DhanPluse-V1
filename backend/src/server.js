@@ -1231,6 +1231,11 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (_req,
       }
     }
 
+    // Reuse a complete, still-fresh F&O snapshot already collected by Movers.
+    // The converter revalidates full symbol coverage and exchange timestamps.
+    if (!stockQuoteCache.data || Date.now() - stockQuoteCache.fetchedAt >= STOCK_QUOTE_CACHE_MS) {
+      syncFnoQuoteCacheFromMoversPayload(moversSnapshotCache?.payload, universe.data.map(item => item.symbol));
+    }
     let snapshot = stockQuoteCache.data &&
       Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS
       ? stockQuoteCache.data : null;
