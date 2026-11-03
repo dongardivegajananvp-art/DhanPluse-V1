@@ -1277,7 +1277,12 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     if (!scanComplete) return res.json({ ok: true, scanComplete: false, batchComplete: true,
       orderPlacement: "disabled", scanId: state.id, nextOffset: state.nextOffset,
       scannedCandidateCount: state.results.length, rankedCandidateCount: state.rankedCandidateCount,
-      totalCandidateCount: state.candidates.length, batchSize: batchResults.length });
+      totalCandidateCount: state.candidates.length, batchSize: batchResults.length,
+      scannedCandidates: state.results.map(item => ({
+        rank: item.rank, underlyingSymbol: item.underlyingSymbol, underlyingType: item.underlyingType,
+        changePct: item.changePct, status: item.status, direction: item.direction || null,
+        reason: item.reason || null
+      })) });
     const results = state.results;
     const verified = results.filter(item => item.status === "VERIFIED SETUP");
     const payload = { ok: true, scanComplete: true, candidateUniverseComplete: universeComplete,
