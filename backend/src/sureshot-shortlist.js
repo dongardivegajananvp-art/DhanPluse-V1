@@ -12,8 +12,8 @@ function quoteTimestampMs(value) {
 }
 
 /**
- * Rank a complete FYERS F&O equity snapshot plus all three fresh index ticks.
- * This is only a market-momentum shortlist; it deliberately does not create
+ * Rank a complete FYERS F&O equity snapshot plus any independently fresh index ticks.
+ * Missing/stale index ticks do not block verified F&O equities. This shortlist does not create
  * a directional option signal or any entry/SL/target values.
  */
 export function buildVerifiedSureshotShortlist({
@@ -23,9 +23,9 @@ export function buildVerifiedSureshotShortlist({
   now = Date.now(),
   maxEquityQuoteAgeMs = 30_000,
   maxIndexTickAgeMs = 15_000,
-  limit = 3
+  limit = 5
 }) {
-  if (!Number.isFinite(now) || !Number.isInteger(limit) || limit < 1 || limit > 3) {
+  if (!Number.isFinite(now) || !Number.isInteger(limit) || limit < 1 || limit > 5) {
     throw new Error("invalid_shortlist_parameters");
   }
   if (!quoteSnapshot || quoteSnapshot.ok !== true || quoteSnapshot.verified !== true ||
@@ -69,14 +69,11 @@ export function buildVerifiedSureshotShortlist({
     const ageMs = now - timestampMs;
     const price = Number(tick?.ltp);
     const changePct = Number(tick?.chp);
+    // An index is a candidate only when its own WebSocket tick is fresh and
+    // exchange-stamped. A missing index tick must never suppress valid F&O stocks.
     if (!tick || tick.chp == null || !Number.isFinite(price) || price <= 0 ||
         !Number.isFinite(changePct) || !Number.isFinite(timestampMs) ||
-        ageMs < -5000 || ageMs > maxIndexTickAgeMs) {
-      throw new Error("all_three_fresh_exchange_stamped_index_ticks_required");
-    }
-    // Include the three index underlyings in the same momentum ranking as
-    // F&O equities. Their websocket exchange timestamps remain the freshness
-    // authority; no REST index quote is added to the request budget.
+        ageMs < -5000 || ageMs > maxIndexTickAgeMs) continue;
     candidates.push({
       symbol,
       underlyingType: "INDEX",
@@ -91,11 +88,11 @@ export function buildVerifiedSureshotShortlist({
     a.symbol.localeCompare(b.symbol));
   return {
     ok: true,
-    source: "FYERS complete NSE F&O quote snapshot + FYERS WebSocket index ticks",
+    source: "FYERS complete NSE F&O quote snapshot + individually fresh FYERS WebSocket index ticks",
     verified: true,
-    universeCount: requested.size + INDEX_SYMBOLS.length,
+    universeCount: requested.size + candidates.filter(row => row.underlyingType === "INDEX").length,
     candidateCount: candidates.length,
-    rankedBy: "absolute FYERS percentage change; F&O equities and NIFTY/BANKNIFTY/SENSEX indices",
+    rankedBy: "absolute FYERS percentage change; complete F&O equities plus individually fresh NIFTY/BANKNIFTY/SENSEX ticks",
     signalsAllowed: false,
     data: candidates.slice(0, limit).map((row, index) => ({ rank: index + 1, ...row }))
   };
