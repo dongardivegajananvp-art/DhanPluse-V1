@@ -69,13 +69,22 @@ export function buildVerifiedSureshotShortlist({
     const ageMs = now - timestampMs;
     const price = Number(tick?.ltp);
     const changePct = Number(tick?.chp);
-    if (!tick || !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct) ||
-        !Number.isFinite(timestampMs) || ageMs < -5000 || ageMs > maxIndexTickAgeMs) {
+    if (!tick || tick.chp == null || !Number.isFinite(price) || price <= 0 ||
+        !Number.isFinite(changePct) || !Number.isFinite(timestampMs) ||
+        ageMs < -5000 || ageMs > maxIndexTickAgeMs) {
       throw new Error("all_three_fresh_exchange_stamped_index_ticks_required");
     }
-    // Index ticks are freshness gates only. Auto Top 3 must always be
-    // selected from the NSE F&O equity universe, never from index symbols.
-
+    // Include the three index underlyings in the same momentum ranking as
+    // F&O equities. Their websocket exchange timestamps remain the freshness
+    // authority; no REST index quote is added to the request budget.
+    candidates.push({
+      symbol,
+      underlyingType: "INDEX",
+      price,
+      changePct,
+      exchangeTime: new Date(timestampMs).toISOString(),
+      quoteAgeSeconds: Math.max(0, Number((ageMs / 1000).toFixed(1)))
+    });
   }
 
   candidates.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct) ||
@@ -84,9 +93,9 @@ export function buildVerifiedSureshotShortlist({
     ok: true,
     source: "FYERS complete NSE F&O quote snapshot + FYERS WebSocket index ticks",
     verified: true,
-    universeCount: requested.size,
+    universeCount: requested.size + INDEX_SYMBOLS.length,
     candidateCount: candidates.length,
-    rankedBy: "absolute FYERS percentage change; momentum shortlist only",
+    rankedBy: "absolute FYERS percentage change; F&O equities and NIFTY/BANKNIFTY/SENSEX indices",
     signalsAllowed: false,
     data: candidates.slice(0, limit).map((row, index) => ({ rank: index + 1, ...row }))
   };
