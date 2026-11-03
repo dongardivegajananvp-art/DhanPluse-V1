@@ -17,9 +17,9 @@ const indexTicks = new Map([
   ["BSE:SENSEX-INDEX", { ltp: 79000, chp: 777, updatedAt: new Date(now - 1000).toISOString() }]
 ]);
 
-test("ranks top three across complete fresh F&O quotes and all three live indices", () => {
+test("ranks Top 5 from the complete fresh F&O universe and includes individually fresh indices", () => {
   const result = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now });
-  assert.equal(result.data.length, 3);
+  assert.equal(result.data.length, 5);
   assert.equal(result.candidateCount, 221);
   assert.equal(result.universeCount, 221);
   assert.equal(result.data[0].symbol, "NSE:NIFTY50-INDEX");
@@ -37,19 +37,21 @@ test("blocks incomplete F&O quote coverage", () => {
     /complete_verified_fno_quote_snapshot_required/);
 });
 
-test("blocks stale quotes and missing, null-change or stale index ticks", () => {
+test("blocks stale equity quotes but skips missing, null-change or stale index ticks", () => {
   const stale = structuredClone(quoteSnapshot);
   stale.data[0].v.tt = Math.floor((now - 31000) / 1000);
   assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: stale, universe, indexTicks, now }),
     /stale_or_invalid_fno_quote_snapshot/);
   const missingIndex = new Map(indexTicks);
   missingIndex.delete("BSE:SENSEX-INDEX");
-  assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks: missingIndex, now }),
-    /all_three_fresh_exchange_stamped_index_ticks_required/);
+  const missingResult = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks: missingIndex, now, limit: 5 });
+  assert.equal(missingResult.data.length, 5);
+  assert.equal(missingResult.data.every(row => row.underlyingType === "FNO_EQUITY"), true);
   const nullChange = new Map(indexTicks);
   nullChange.set("BSE:SENSEX-INDEX", { ...indexTicks.get("BSE:SENSEX-INDEX"), chp: null });
-  assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks: nullChange, now }),
-    /all_three_fresh_exchange_stamped_index_ticks_required/);
+  const nullChangeResult = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks: nullChange, now, limit: 5 });
+  assert.equal(nullChangeResult.data.length, 5);
+  assert.equal(nullChangeResult.data.every(row => row.underlyingType === "FNO_EQUITY"), true);
 });
 
 test("rejects duplicate F&O symbols", () => {
