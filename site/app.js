@@ -1485,27 +1485,42 @@ async function loadSureshotUniverseShortlist() {
   const status = document.querySelector('#setupStatus');
   if (!host || (button && button.disabled)) return;
   if (button) button.disabled = true;
-  host.innerHTML = '<div class="chart-empty">Running automatic Top 5 scan: fresh FYERS underlying candles → CE/PE → nearest expiry/strike → fresh option quote → completed option candles…</div>';
-  if (status) status.textContent = 'Automatic scan running sequentially to respect FYERS API limits. Partial plans are never shown.';
+  host.innerHTML = '<div class="chart-empty">Starting full eligible NSE F&O scan in small sequential FYERS batches…</div>';
+  if (status) status.textContent = 'Full-universe scan starting. Keep this tab open; partial plans stay hidden until all candidates are checked.';
   try {
-    // The auto-plans endpoint already builds and validates the complete
-    // F&O shortlist internally. Avoid a duplicate preflight request; one click
-    // should execute one authoritative scan and share its verified snapshot.
-    const response = await fetch(BACKEND_URL + '/api/market/sureshot-auto-plans', {
-      headers: { Accept: 'application/json' }, cache: 'no-store'
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || result.ok !== true || result.scanComplete !== true ||
-        !Array.isArray(result.results) || result.results.length !== 5 ||
-        result.orderPlacement !== 'disabled') {
-      throw new Error(result.detail || result.error || 'Complete verified Top 5 scan was not returned.');
+    let result = null, scanId = '', offset = 0, total = 0, batchNumber = 0;
+    while (!result) {
+      const query = scanId ? '?' + new URLSearchParams({ scanId, offset: String(offset) }) : '';
+      const response = await fetch(BACKEND_URL + '/api/market/sureshot-auto-plans' + query, {
+        headers: { Accept: 'application/json' }, cache: 'no-store'
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok !== true || payload.orderPlacement !== 'disabled') {
+        throw new Error(payload.detail || payload.error || 'Full-universe FYERS scan was blocked.');
+      }
+      if (payload.scanComplete === true) { result = payload; break; }
+      if (payload.batchComplete !== true || !payload.scanId || !Number.isInteger(payload.nextOffset)) {
+        throw new Error('Backend did not return a valid full-universe scan cursor.');
+      }
+      scanId = payload.scanId;
+      offset = payload.nextOffset;
+      total = Number(payload.totalCandidateCount);
+      batchNumber += 1;
+      if (status) status.textContent = 'Full-universe FYERS scan · ' + offset + ' / ' + total +
+        ' candidates checked · batch ' + batchNumber + '. Sequential requests protect FYERS API capacity.';
+      host.innerHTML = '<div class="chart-empty">FYERS verified scan progress: <b>' + offset + ' / ' + total +
+        '</b> candidates checked. Continuing through the complete eligible F&O universe…</div>';
+    }
+    if (!Array.isArray(result.results) || result.results.length !== Number(result.rankedCandidateCount) ||
+        result.scannedCandidateCount !== result.results.length) {
+      throw new Error('The full eligible universe was not completely scanned; partial results are withheld.');
     }
     const verified = result.results.filter(row => row.status === 'VERIFIED SETUP');
     const best = result.bestSetup;
-    host.innerHTML = '<div class="console-section-head"><div><h4>Automatic Top 5 · FYERS verified scan</h4><p>' +
-      Number(result.verifiedSetupCount) + ' verified trade plan(s) from ' + Number(result.rankedCandidateCount) +
-      ' ranked candidates · read-only</p></div><span class="' + (verified.length ? 'live-tag' : 'signal-tone neutral') + '">' +
-      (verified.length ? 'RISK VERIFIED' : 'NO TRADE') + '</span></div>' +
+    host.innerHTML = '<div class="console-section-head"><div><h4>Full NSE F&O universe · FYERS verified scan</h4><p>' +
+      Number(result.scannedCandidateCount) + ' / ' + Number(result.rankedCandidateCount) + ' ranked candidates checked · ' +
+      Number(result.verifiedSetupCount) + ' verified plan(s) · read-only</p></div><span class="' +
+      (verified.length ? 'live-tag' : 'signal-tone neutral') + '">' + (verified.length ? 'RISK VERIFIED' : 'NO TRADE') + '</span></div>' +
       (best ? '<article class="console-section"><div class="console-section-head"><h4>#1 BEST VERIFIED SETUP</h4><span class="signal-tone positive">' +
         escapeHtml(best.plan.direction) + '</span></div><strong class="console-price">₹' + formatPrice(best.plan.risk.entryPrice) +
         '</strong><div class="data-row"><span>Underlying</span><b>' + escapeHtml(best.underlyingSymbol) +
@@ -1520,33 +1535,30 @@ async function loadSureshotUniverseShortlist() {
         Number(best.plan.risk.candleCount) + ' · 5 min</b></div></article>' : '') +
       '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>Move</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>Target</th><th>RR</th></tr></thead><tbody>' +
       result.results.map(row => {
-        const plan = row.plan;
-        const move = Number(row.changePct);
+        const plan = row.plan, move = Number(row.changePct);
         const moveText = (move > 0 ? '+' : '') + move.toFixed(2) + '%';
-        return '<tr><td><b>#' + Number(row.rank) + '</b></td><td><b>' + escapeHtml(String(row.underlyingSymbol || '').replace(/^NSE:/, '').replace(/^BSE:/, '').replace(/-EQ$/, '').replace(/-INDEX$/, '')) +
+        return '<tr><td><b>#' + Number(row.rank) + '</b></td><td><b>' +
+          escapeHtml(String(row.underlyingSymbol || '').replace(/^NSE:/, '').replace(/^BSE:/, '').replace(/-EQ$/, '').replace(/-INDEX$/, '')) +
           '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td>' + moveText + '</td><td>' +
           (plan ? '<span class="signal-tone positive">VERIFIED</span>' : '<span class="signal-tone neutral">NO TRADE</span>') +
           '</td><td>' + (plan ? escapeHtml(plan.direction) : '—') + '</td><td>' +
           (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '—') +
-          '</td><td>' + (plan ? '₹' + formatPrice(plan.risk.entryPrice) : '—') +
-          '</td><td>' + (plan ? '₹' + formatPrice(plan.risk.stopLoss) : '—') +
-          '</td><td>' + (plan ? '₹' + formatPrice(plan.risk.target) : '—') +
-          '</td><td>' + (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
+          '</td><td>' + (plan ? '₹' + formatPrice(plan.risk.entryPrice) : '—') + '</td><td>' +
+          (plan ? '₹' + formatPrice(plan.risk.stopLoss) : '—') + '</td><td>' +
+          (plan ? '₹' + formatPrice(plan.risk.target) : '—') + '</td><td>' +
+          (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
           (plan ? '' : '<tr><td colspan="10" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
-      }).join('') + '</tbody></table></div><p class="hint">Only independently timestamped FYERS quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. No orders are placed.</p>';
+      }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS option quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. No orders are placed.</p>';
     if (status) status.textContent = verified.length
-      ? 'Scan complete · ' + verified.length + ' verified setup(s). #1 best is ranked by the original FYERS momentum shortlist. Read-only; order placement disabled.'
-      : 'Scan complete · NO TRADE. None of the five candidates passed every direction, contract, quote, candle and ≥1:2 risk check.';
+      ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s). Best valid setup is ranked first. Read-only; order placement disabled.'
+      : 'Full-universe scan complete · NO TRADE. No candidate passed every direction, contract, fresh quote, candle and ≥1:2 risk check.';
   } catch (error) {
-    host.innerHTML = '<div class="console-section"><div class="console-section-head"><h4>NO TRADE · AUTOMATIC SCAN BLOCKED</h4><span class="signal-tone neutral">FYERS VERIFICATION</span></div><p>' +
-      escapeHtml(error.message || 'Complete verified Top 5 plans unavailable.') +
+    host.innerHTML = '<div class="console-section"><div class="console-section-head"><h4>NO TRADE · FULL-UNIVERSE SCAN BLOCKED</h4><span class="signal-tone neutral">FYERS VERIFICATION</span></div><p>' +
+      escapeHtml(error.message || 'Complete verified full-universe scan unavailable.') +
       '</p><p class="hint">All partial plans are discarded. No stale fallback, sample price or partial ranking is shown as actionable.</p></div>';
-    if (status) status.textContent = 'Automatic Top 5 scan withheld · ' + (error.message || 'FYERS verification failed.');
-  } finally {
-    if (button) button.disabled = false;
-  }
+    if (status) status.textContent = 'Full-universe scan withheld · ' + (error.message || 'FYERS verification failed.');
+  } finally { if (button) button.disabled = false; }
 }
-
 async function performSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
