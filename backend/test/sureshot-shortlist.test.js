@@ -25,7 +25,7 @@ test("ranks Top 5 from the complete fresh F&O universe and includes individually
   assert.equal(result.data[0].symbol, "NSE:NIFTY50-INDEX");
   assert.equal(result.data[0].rank, 1);
   assert.equal(result.signalsAllowed, false);
-  assert.equal(result.data.every(row => row.underlyingType === "INDEX"), true);
+  assert.deepEqual(result.data.map(row => row.symbol), ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX", "NSE:STOCK217-EQ", "NSE:STOCK216-EQ"]);
   assert.deepEqual(result.data.map(row => row.symbol), [
     "NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"
   ]);
@@ -46,12 +46,12 @@ test("blocks stale equity quotes but skips missing, null-change or stale index t
   missingIndex.delete("BSE:SENSEX-INDEX");
   const missingResult = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks: missingIndex, now, limit: 5 });
   assert.equal(missingResult.data.length, 5);
-  assert.equal(missingResult.data.every(row => row.underlyingType === "FNO_EQUITY"), true);
+  assert.equal(missingResult.data.some(row => row.symbol === "BSE:SENSEX-INDEX"), false);
   const nullChange = new Map(indexTicks);
   nullChange.set("BSE:SENSEX-INDEX", { ...indexTicks.get("BSE:SENSEX-INDEX"), chp: null });
   const nullChangeResult = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks: nullChange, now, limit: 5 });
   assert.equal(nullChangeResult.data.length, 5);
-  assert.equal(nullChangeResult.data.every(row => row.underlyingType === "FNO_EQUITY"), true);
+  assert.equal(nullChangeResult.data.some(row => row.symbol === "BSE:SENSEX-INDEX"), false);
 });
 
 test("rejects duplicate F&O symbols", () => {
