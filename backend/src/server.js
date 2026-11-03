@@ -929,9 +929,8 @@ const STOCK_QUOTE_BATCH_SIZE = 50;
 
 // Stock Explorer/movers and Sureshot must share one verified F&O snapshot.
 // Otherwise switching tabs can spend the same five FYERS quote calls twice.
-function syncMoversCacheFromFnoQuoteSnapshot(snapshot) {
-  const symbols = fnoUniverseCache.data?.data?.map(item => item.symbol) || [];
-  if (!symbols.length || symbols.length !== moversSymbols.length ||
+function syncMoversCacheFromFnoQuoteSnapshot(snapshot, symbols = moversSymbols) {
+  if (!Array.isArray(symbols) || !symbols.length || symbols.length !== moversSymbols.length ||
       symbols.some(symbol => !moversSymbols.includes(symbol))) return false;
   const payload = fnoQuoteSnapshotToMoversPayload(snapshot, symbols, Date.now());
   if (!payload) return false;
@@ -939,9 +938,8 @@ function syncMoversCacheFromFnoQuoteSnapshot(snapshot) {
   return true;
 }
 
-function syncFnoQuoteCacheFromMoversPayload(payload) {
-  const symbols = fnoUniverseCache.data?.data?.map(item => item.symbol) || [];
-  if (!symbols.length || symbols.length !== moversSymbols.length ||
+function syncFnoQuoteCacheFromMoversPayload(payload, symbols = moversSymbols) {
+  if (!Array.isArray(symbols) || !symbols.length || symbols.length !== moversSymbols.length ||
       symbols.some(symbol => !moversSymbols.includes(symbol))) return false;
   const snapshot = moversPayloadToFnoQuoteSnapshot(payload, symbols, Date.now());
   if (!snapshot) return false;
@@ -1072,7 +1070,7 @@ async function loadVerifiedFnoStockQuotes() {
     universeCount: symbols.length, quotedCount: data.length, data, missingSymbols
   };
   stockQuoteCache = { fetchedAt: Date.now(), data: result };
-  syncMoversCacheFromFnoQuoteSnapshot(result);
+  syncMoversCacheFromFnoQuoteSnapshot(result, master.data.map(item => item.symbol));
   stockQuoteCooldown = { until: 0, backoffMs: 30000 };
   return result;
 }
@@ -1141,6 +1139,9 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
 
   try {
     const universe = await getNseFnoEquityUniverse();
+    if (!stockQuoteCache.data || Date.now() - stockQuoteCache.fetchedAt >= STOCK_QUOTE_CACHE_MS) {
+      syncFnoQuoteCacheFromMoversPayload(moversSnapshotCache?.payload, universe.data.map(item => item.symbol));
+    }
     const indexSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"];
     const indexTicks = new Map(indexSymbols.map(symbol => [symbol, latestTicks.get(symbol)]));
     // Check index ticks before spending up to five FYERS equity-quote requests.
