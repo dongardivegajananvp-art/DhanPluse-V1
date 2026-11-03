@@ -1043,7 +1043,7 @@ async function loadVerifiedFnoStockQuotes() {
       const v = item.v;
       const lp = Number(v.lp), tt = Number(v.tt), ch = Number(v.ch), chp = Number(v.chp);
       const stamp = tt > 0 ? tt * 1000 : 0;
-      if (Number.isFinite(lp) && lp > 0 && Number.isFinite(chp) && stamp > 0 && Math.abs(now - stamp) <= 120000) {
+      if (Number.isFinite(lp) && lp > 0 && Number.isFinite(chp) && stamp > 0 && Math.abs(now - stamp) <= 30000) {
         data.push({ n: item.n, v: { lp, ch: Number.isFinite(ch) ? ch : null, chp, tt }, verified: true });
       }
     }
@@ -1066,7 +1066,7 @@ async function loadVerifiedFnoStockQuotes() {
   const result = {
     ok: true, source: "FYERS quotes API", verified: true, fetchedAt: new Date().toISOString(),
     marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED",
-    freshnessLimitSeconds: 120, universe: "FYERS current NSE F&O equity symbol master",
+    freshnessLimitSeconds: 30, universe: "FYERS current NSE F&O equity symbol master",
     universeCount: symbols.length, quotedCount: data.length, data, missingSymbols
   };
   stockQuoteCache = { fetchedAt: Date.now(), data: result };
@@ -1081,7 +1081,7 @@ app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) =
   // Reuse the last successful snapshot while its exchange timestamps remain fresh.
   if (stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS) {
     const cache = stockQuoteCache.data;
-    const fresh = cache.data.filter(item => Math.abs(Date.now() - Number(item.v.tt) * 1000) <= 120000);
+    const fresh = cache.data.filter(item => Math.abs(Date.now() - Number(item.v.tt) * 1000) <= 30000);
     if (fresh.length) return res.json({ ...cache, marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED", data: fresh, quotedCount: fresh.length, cached: true, fetchedAt: new Date(stockQuoteCache.fetchedAt).toISOString() });
   }
 
