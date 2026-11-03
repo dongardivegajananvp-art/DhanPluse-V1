@@ -16,6 +16,7 @@ import { buildOptionRiskPlan } from './option-risk-plan.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
+import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 
 const require = createRequire(import.meta.url);
@@ -925,6 +926,28 @@ let stockQuotePromise = null;
 let stockQuoteCooldown = { until: 0, backoffMs: 30000 };
 const STOCK_QUOTE_CACHE_MS = 30000;
 const STOCK_QUOTE_BATCH_SIZE = 50;
+
+// Stock Explorer/movers and Sureshot must share one verified F&O snapshot.
+// Otherwise switching tabs can spend the same five FYERS quote calls twice.
+function syncMoversCacheFromFnoQuoteSnapshot(snapshot) {
+  const symbols = fnoUniverseCache.data?.data?.map(item => item.symbol) || [];
+  if (!symbols.length || symbols.length !== moversSymbols.length ||
+      symbols.some(symbol => !moversSymbols.includes(symbol))) return false;
+  const payload = fnoQuoteSnapshotToMoversPayload(snapshot, symbols, Date.now());
+  if (!payload) return false;
+  moversSnapshotCache = { cachedAt: Date.parse(payload.fetchedAt), payload };
+  return true;
+}
+
+function syncFnoQuoteCacheFromMoversPayload(payload) {
+  const symbols = fnoUniverseCache.data?.data?.map(item => item.symbol) || [];
+  if (!symbols.length || symbols.length !== moversSymbols.length ||
+      symbols.some(symbol => !moversSymbols.includes(symbol))) return false;
+  const snapshot = moversPayloadToFnoQuoteSnapshot(payload, symbols, Date.now());
+  if (!snapshot) return false;
+  stockQuoteCache = { fetchedAt: Date.parse(snapshot.fetchedAt), data: snapshot };
+  return true;
+}
 const STOCK_QUOTE_BATCH_PAUSE_MS = 1200;
 async function getNseFnoEquityUniverse() {
   if (fnoUniverseCache.data && Date.now() - fnoUniverseCache.fetchedAt < 24 * 60 * 60 * 1000) return fnoUniverseCache.data;
@@ -1049,6 +1072,7 @@ async function loadVerifiedFnoStockQuotes() {
     universeCount: symbols.length, quotedCount: data.length, data, missingSymbols
   };
   stockQuoteCache = { fetchedAt: Date.now(), data: result };
+  syncMoversCacheFromFnoQuoteSnapshot(result);
   stockQuoteCooldown = { until: 0, backoffMs: 30000 };
   return result;
 }
@@ -1444,6 +1468,10 @@ app.get('/api/market/movers', async (_req, res) => {
   if (!accessToken) return res.status(401).json({ ok: false, error: 'Connect FYERS first to load market movers.' });
 
   await refreshMoversUniverse();
+  if ((!moversSnapshotCache || Date.now() - moversSnapshotCache.cachedAt >= MOVERS_CACHE_TTL_MS) &&
+      stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS) {
+    syncMoversCacheFromFnoQuoteSnapshot(stockQuoteCache.data);
+  }
   if (moversSnapshotCache && Date.now() - moversSnapshotCache.cachedAt < MOVERS_CACHE_TTL_MS) {
     const now = Date.now();
     const marketOpen = nseRegularSessionNow();
@@ -1462,6 +1490,7 @@ app.get('/api/market/movers', async (_req, res) => {
         return res.status(502).json({ ok: false, error: error.message, staleSymbols: error.staleSymbols || [] });
       }
     }
+    syncFnoQuoteCacheFromMoversPayload({ ...cachedPayload, data });
     res.set('Cache-Control', 'no-store');
     return res.json({ ...cachedPayload, data, cached: true });
   }
@@ -1562,6 +1591,7 @@ app.get('/api/market/movers', async (_req, res) => {
     }
     const payload = await moversSnapshotInFlight;
     moversSnapshotCache = { cachedAt: Date.now(), payload };
+    syncFnoQuoteCacheFromMoversPayload(payload);
     res.set('Cache-Control', 'no-store');
     return res.json(payload);
   } catch (error) {
