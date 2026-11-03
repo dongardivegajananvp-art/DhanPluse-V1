@@ -21,7 +21,7 @@ export function buildVerifiedSureshotShortlist({
   universe,
   indexTicks,
   now = Date.now(),
-  maxEquityQuoteAgeMs = 120_000,
+  maxEquityQuoteAgeMs = 30_000,
   maxIndexTickAgeMs = 15_000,
   limit = 3
 }) {
