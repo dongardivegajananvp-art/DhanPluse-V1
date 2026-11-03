@@ -1511,15 +1511,16 @@ async function loadSureshotUniverseShortlist() {
       host.innerHTML = '<div class="chart-empty">FYERS verified scan progress: <b>' + offset + ' / ' + total +
         '</b> candidates checked. Continuing through the complete eligible F&O universe…</div>';
     }
-    if (!Array.isArray(result.results) || result.results.length !== Number(result.rankedCandidateCount) ||
-        result.scannedCandidateCount !== result.results.length) {
-      throw new Error('The full eligible universe was not completely scanned; partial results are withheld.');
+    if (!Array.isArray(result.results) || result.scannedCandidateCount !== result.results.length ||
+        (!result.candidateUniverseComplete && result.stopReason !== 'FIRST_VERIFIED_SETUP_FOUND')) {
+      throw new Error('The full-universe search did not finish or find a fully verified setup; partial results are withheld.');
     }
     const verified = result.results.filter(row => row.status === 'VERIFIED SETUP');
     const best = result.bestSetup;
-    host.innerHTML = '<div class="console-section-head"><div><h4>Full NSE F&O universe · FYERS verified scan</h4><p>' +
-      Number(result.scannedCandidateCount) + ' / ' + Number(result.rankedCandidateCount) + ' ranked candidates checked · ' +
-      Number(result.verifiedSetupCount) + ' verified plan(s) · read-only</p></div><span class="' +
+    host.innerHTML = '<div class="console-section-head"><div><h4>' +
+      (result.candidateUniverseComplete ? 'Full NSE F&O universe · FYERS verified scan' : 'Sureshot · first verified setup found') +
+      '</h4><p>' + Number(result.scannedCandidateCount) + ' / ' + Number(result.rankedCandidateCount) +
+      ' ranked candidates checked · ' + Number(result.verifiedSetupCount) + ' verified plan(s) · read-only</p></div><span class="' +
       (verified.length ? 'live-tag' : 'signal-tone neutral') + '">' + (verified.length ? 'RISK VERIFIED' : 'NO TRADE') + '</span></div>' +
       (best ? '<article class="console-section"><div class="console-section-head"><h4>#1 BEST VERIFIED SETUP</h4><span class="signal-tone positive">' +
         escapeHtml(best.plan.direction) + '</span></div><strong class="console-price">₹' + formatPrice(best.plan.risk.entryPrice) +
@@ -1550,8 +1551,11 @@ async function loadSureshotUniverseShortlist() {
           (plan ? '' : '<tr><td colspan="10" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
       }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS option quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. No orders are placed.</p>';
     if (status) status.textContent = verified.length
-      ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s). Best valid setup is ranked first. Read-only; order placement disabled.'
+      ? (result.candidateUniverseComplete
+        ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s). Best valid setup is ranked first.'
+        : 'First verified setup found after checking ' + result.scannedCandidateCount + ' / ' + result.rankedCandidateCount + ' ranked candidates. Lower-ranked candidates were not scanned.')
       : 'Full-universe scan complete · NO TRADE. No candidate passed every direction, contract, fresh quote, candle and ≥1:2 risk check.';
+
   } catch (error) {
     host.innerHTML = '<div class="console-section"><div class="console-section-head"><h4>NO TRADE · FULL-UNIVERSE SCAN BLOCKED</h4><span class="signal-tone neutral">FYERS VERIFICATION</span></div><p>' +
       escapeHtml(error.message || 'Complete verified full-universe scan unavailable.') +
