@@ -121,8 +121,8 @@ function parseTick(raw) {
     }
     latestTicks.set(symbol, {
       symbol, ltp,
-      ch: Number.isFinite(Number(item.ch)) ? Number(item.ch) : null,
-      chp: Number.isFinite(Number(item.chp)) ? Number(item.chp) : null,
+      ch: item.ch == null || !Number.isFinite(Number(item.ch)) ? null : Number(item.ch),
+      chp: item.chp == null || !Number.isFinite(Number(item.chp)) ? null : Number(item.chp),
       updatedAt: new Date(exchangeTime * 1000).toISOString(),
       receivedAt: new Date().toISOString()
     });
