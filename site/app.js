@@ -2169,7 +2169,7 @@ function render(tab) {
   if (tab === 'Charts & Patterns') { const scan=document.querySelector('#scanPatternsBtn'); if(scan) scan.onclick=scanTopVerifiedPatterns; }
   if (tab === 'Technical Indicators') loadTechnicalIndicators();
   if (tab === 'Gainers & Losers') loadMovers();
-  if (tab === 'Sureshot CE/PE') loadSureshotSetup();
+  if (tab === 'Sureshot CE/PE') { loadSureshotSetup(); loadSureshotUniverseShortlist(); }
   if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(tab)) { loadAdvancedScanner(); loadAdvancedChartUniverse(); }
   if (tab === 'Charts & Patterns') loadCandles();
   if (tab === 'Option Chain') loadOptionChain();
@@ -2236,9 +2236,6 @@ function bindTabActions() {
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
   const scanSureshotUniverseBtn=document.querySelector('#scanSureshotUniverseBtn');
   if(scanSureshotUniverseBtn) scanSureshotUniverseBtn.addEventListener('click',loadSureshotUniverseShortlist);
-  // Run one bounded Top 5 scan whenever the user opens the Sureshot tab.
-  // The backend blocks actionable scans outside market hours or without fresh FYERS data.
-  if(scanSureshotUniverseBtn) loadSureshotUniverseShortlist();
   const setupSymbol=document.querySelector('#setupSymbol');
   if(setupSymbol) setupSymbol.addEventListener('change',loadSureshotSetup);
   const advancedRefresh=document.querySelector('#refreshAdvancedBtn');
