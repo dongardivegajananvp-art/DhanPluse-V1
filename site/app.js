@@ -622,13 +622,52 @@ async function loadStockExplorerQuotes() {
     } catch (universeError) {
       logEvent('Stock Explorer F&O universe request failed: ' + (universeError.message || 'unknown error'), 'warn');
     }
-    const response = await fetch(BACKEND_URL + '/api/market/movers', {
+    // Stock Explorer must use the dedicated full NSE F&O quote endpoint.
+    // /api/market/movers is a smaller scanner universe and is not full F&O coverage.
+    const response = await fetch(BACKEND_URL + '/api/market/stock-quotes', {
       headers: { Accept: 'application/json' }, cache: 'no-store'
     });
-    let result = await response.json().catch(() => ({}));
-    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
-      throw new Error(result.detail || result.error || 'FYERS equity snapshot unavailable.');
+    const quoteSnapshot = await response.json().catch(() => ({}));
+    if (!response.ok || quoteSnapshot.ok !== true || !Array.isArray(quoteSnapshot.data)) {
+      throw new Error(quoteSnapshot.detail || quoteSnapshot.error || 'Complete FYERS NSE F&O quote snapshot unavailable.');
     }
+    const quoteNow = Date.now();
+    const requestedSymbols = Number(quoteSnapshot.universeCount);
+    const normalizedRows = quoteSnapshot.data.map(item => {
+      const value = item && item.v;
+      const timestampSeconds = Number(value && value.tt);
+      const timestampMs = timestampSeconds > 0 ? timestampSeconds * 1000 : NaN;
+      const ageSeconds = Number.isFinite(timestampMs) ? (quoteNow - timestampMs) / 1000 : NaN;
+      const validTime = Number.isFinite(timestampMs) && timestampMs > 0 && ageSeconds >= -5;
+      const marketOpen = quoteSnapshot.marketSession === 'OPEN';
+      const priceStatus = !marketOpen ? 'LAST_KNOWN_PRICE'
+        : !validTime ? 'TIME_UNVERIFIED'
+        : ageSeconds <= MAX_EQUITY_QUOTE_AGE_SECONDS ? 'LIVE_QUOTE' : 'STALE_QUOTE';
+      return {
+        symbol: item && item.n,
+        price: Number(value && value.lp),
+        change: value && value.ch != null && Number.isFinite(Number(value.ch)) ? Number(value.ch) : null,
+        changePct: value && value.chp != null && Number.isFinite(Number(value.chp)) ? Number(value.chp) : null,
+        priceAsOf: validTime ? new Date(timestampMs).toISOString() : null,
+        quoteAgeSeconds: validTime ? Math.max(0, ageSeconds) : null,
+        priceStatus,
+        verified: item && item.verified === true,
+        source: quoteSnapshot.source || 'FYERS quotes API'
+      };
+    }).filter(row => row.symbol && Number.isFinite(row.price) && row.price > 0);
+    const returnedSymbols = new Set(normalizedRows.map(row => row.symbol));
+    const expectedSymbols = stockExplorerUniverseSymbols.map(item => item.symbol);
+    const derivedMissing = expectedSymbols.filter(symbol => !returnedSymbols.has(symbol));
+    const failedSymbols = [...new Set([...(Array.isArray(quoteSnapshot.missingSymbols) ? quoteSnapshot.missingSymbols : []), ...derivedMissing])];
+    let result = {
+      ...quoteSnapshot,
+      universe: 'FYERS-NSE-FO-symbol-master',
+      requestedSymbols: Number.isFinite(requestedSymbols) ? requestedSymbols : expectedSymbols.length,
+      receivedSymbols: normalizedRows.length,
+      partial: quoteSnapshot.partial === true || normalizedRows.length !== (Number.isFinite(requestedSymbols) ? requestedSymbols : expectedSymbols.length),
+      failedSymbols,
+      data: normalizedRows
+    };
     if (result.marketSession === 'CLOSED' || result.data.length === 0) {
       const lastResponse = await fetch(BACKEND_URL + '/api/market/last-known-stock-quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const lastKnown = await lastResponse.json().catch(() => ({}));
