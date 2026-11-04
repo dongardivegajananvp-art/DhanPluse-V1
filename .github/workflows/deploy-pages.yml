@@ -39,8 +39,8 @@ jobs:
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
           grep -q "Sureshot CE/PE" dist/site/index.html
-          grep -q "dhanpulse-shell-v113-sureshot-reconnect-visible" dist/site/sw.js
-          grep -q "app.js?v=20261104-sureshot-reconnect-v2" dist/site/index.html
+          grep -q "dhanpulse-shell-v114-sureshot-reconnect-wired" dist/site/sw.js
+          grep -q "app.js?v=20261104-sureshot-reconnect-v3" dist/site/index.html
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
@@ -57,7 +57,7 @@ jobs:
           html=""
           for attempt in $(seq 1 12); do
             html="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}?deploy_smoke=$(date +%s)" 2>/dev/null || true)"
-            if [[ -n "$html" ]] && grep -q "Sureshot CE/PE" <<< "$html" && grep -q "style.css?v=20261104-sureshot-only-v1" <<< "$html" && grep -q "app.js?v=20261104-sureshot-reconnect-v2" <<< "$html"; then
+            if [[ -n "$html" ]] && grep -q "Sureshot CE/PE" <<< "$html" && grep -q "style.css?v=20261104-sureshot-only-v1" <<< "$html" && grep -q "app.js?v=20261104-sureshot-reconnect-v3" <<< "$html"; then
               break
             fi
             echo "Waiting for the deployed Pages asset to become visible (attempt $attempt/12)."
@@ -68,7 +68,7 @@ jobs:
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "dhanpulse-shell-v113-sureshot-reconnect-visible" <<< "$sw"
+          grep -q "dhanpulse-shell-v114-sureshot-reconnect-wired" <<< "$sw"
           echo "PASS: ${app_url} serves the expected DhanPulse UI and service-worker cache build."
           backtest="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}backtest.js?v=20261027-fno-gap-selector2&deploy_smoke=$(date +%s)")"
           grep -q "Sureshot CE/PE" <<< "$html"
