@@ -2347,6 +2347,8 @@ function bindTabActions() {
     const connectButton = event.target instanceof Element ? event.target.closest('#sureshotFyersConnectBtn') : null;
     if (connectButton) { event.preventDefault(); startFyersLogin(); }
   });
+  const sureshotFyersConnectBtn=document.querySelector('#sureshotFyersConnectBtn');
+  if(sureshotFyersConnectBtn) sureshotFyersConnectBtn.addEventListener('click',startFyersLogin);
   const setupRefresh=document.querySelector('#refreshSetupBtn');
   if(currentTab==='Sureshot CE/PE') loadSureshotStockUniverse();
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
