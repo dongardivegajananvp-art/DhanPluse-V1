@@ -394,6 +394,10 @@ app.get('/api/status', (_req, res) => {
 });
 
 function requireDashboardSession(req, res, next) {
+  // The official FYERS NSE F&O instrument master is public reference data.
+  // Exempt only this read-only GET endpoint; all quotes, candles, options,
+  // portfolio and signal endpoints remain protected by the dashboard session.
+  if (req.method === 'GET' && req.path === '/fno-universe') return next();
   const header = String(req.get('authorization') || '');
   const match = /^Bearer ([a-f0-9]{64})$/.exec(header);
   const token = match ? match[1] : '';
