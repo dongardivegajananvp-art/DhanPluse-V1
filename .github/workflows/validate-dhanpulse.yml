@@ -61,6 +61,43 @@ jobs:
       - name: Verify backend dependency graph
         working-directory: backend
         run: npm audit --omit=dev --audit-level=high
+      - name: Verify production backend health and CORS
+        env:
+          BACKEND_URL: https://dhanpluse-v1.onrender.com
+          PRODUCTION_ORIGIN: https://dongardivegajananvp-art.github.io
+        run: |
+          set -euo pipefail
+          health=""
+          for attempt in $(seq 1 6); do
+            health="$(curl --fail --silent --show-error --max-time 60 "${BACKEND_URL}/health" 2>/dev/null || true)"
+            if [[ -n "$health" ]] && node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1)' "$health"; then
+              break
+            fi
+            echo "Waiting for the original production backend (attempt $attempt/6)."
+            sleep 10
+          done
+          if [[ -z "$health" ]]; then
+            echo "::error::Production backend /health did not return a valid response."
+            exit 1
+          fi
+          node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1); console.log("PASS: original backend healthy, FYERS configured, order placement disabled. Live tick fields: connected="+h.liveDataConnected+", socket="+h.marketSocketConnected+", lastTickAt="+h.lastTickAt)' "$health"
+          curl --fail --silent --show-error --max-time 60 -D /tmp/dhanpulse-allowed-headers.txt -o /tmp/dhanpulse-status.json -H "Origin: ${PRODUCTION_ORIGIN}" -H "Accept: application/json" "${BACKEND_URL}/api/status"
+          grep -Eiq "^access-control-allow-origin: ${PRODUCTION_ORIGIN}" /tmp/dhanpulse-allowed-headers.txt
+          node -e 'const s=JSON.parse(require("node:fs").readFileSync("/tmp/dhanpulse-status.json","utf8")); if(s.backend!=="online" || s.orderPlacement!=="disabled") process.exit(1); console.log("PASS: production /api/status returns online and read-only state.")'
+          preflight_status="$(curl --silent --show-error --max-time 60 -D /tmp/dhanpulse-preflight-headers.txt -o /dev/null -w "%{http_code}" -X OPTIONS -H "Origin: ${PRODUCTION_ORIGIN}" -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: authorization,content-type" "${BACKEND_URL}/api/status")"
+          if [[ "$preflight_status" != "204" && "$preflight_status" != "200" ]]; then
+            echo "::error::Production CORS preflight failed (HTTP ${preflight_status})."
+            exit 1
+          fi
+          grep -Eiq "^access-control-allow-origin: ${PRODUCTION_ORIGIN}" /tmp/dhanpulse-preflight-headers.txt
+          grep -Eiq "^access-control-allow-methods:.*GET" /tmp/dhanpulse-preflight-headers.txt
+          grep -Eiq "^access-control-allow-headers:.*authorization" /tmp/dhanpulse-preflight-headers.txt
+          denied_status="$(curl --silent --show-error --max-time 60 -D /tmp/dhanpulse-denied-headers.txt -o /tmp/dhanpulse-denied.json -w "%{http_code}" -H "Origin: https://untrusted.example" -H "Accept: application/json" "${BACKEND_URL}/api/status")"
+          if [[ "$denied_status" != "403" ]] || grep -Eiq "^access-control-allow-origin:" /tmp/dhanpulse-denied-headers.txt; then
+            echo "::error::Production CORS did not reject an unrelated origin (HTTP ${denied_status})."
+            exit 1
+          fi
+          echo "PASS: original Pages origin allowed, preflight accepted, unrelated origin rejected."
       - name: Verify deployed test-backend CORS (PR #42 only)
         if: github.event_name == 'pull_request' && github.event.pull_request.number == 42
         env:
