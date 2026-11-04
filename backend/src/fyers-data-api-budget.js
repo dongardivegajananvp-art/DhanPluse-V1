@@ -65,8 +65,10 @@ export function createFyersDataApiBudget({
       const current = queue.then(async () => {
         let time = now();
         if (time < blockedUntil) {
-          const error = new Error(`FYERS Data API cooldown active. Retry in about ${Math.ceil((blockedUntil - time) / 1000)} seconds.`);
+          const retryAfterSeconds = Math.max(1, Math.ceil((blockedUntil - time) / 1000));
+          const error = new Error(`FYERS Data API cooldown active. Retry in about ${retryAfterSeconds} seconds.`);
           error.statusCode = 429;
+          error.retryAfterSeconds = retryAfterSeconds;
           throw error;
         }
 
@@ -81,8 +83,10 @@ export function createFyersDataApiBudget({
           if (waitMs <= 0) break;
           await sleep(waitMs);
           if (now() < blockedUntil) {
-            const error = new Error(`FYERS Data API cooldown active. Retry in about ${Math.ceil((blockedUntil - now()) / 1000)} seconds.`);
+            const retryAfterSeconds = Math.max(1, Math.ceil((blockedUntil - now()) / 1000));
+            const error = new Error(`FYERS Data API cooldown active. Retry in about ${retryAfterSeconds} seconds.`);
             error.statusCode = 429;
+            error.retryAfterSeconds = retryAfterSeconds;
             throw error;
           }
         }
