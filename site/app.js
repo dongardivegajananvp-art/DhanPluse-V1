@@ -131,6 +131,7 @@ window.fetch = function(input, init = {}) {
         signalsAllowed: false,
         scanComplete: false,
         error: 'FYERS Data API cooldown active; request suppressed locally.',
+        stage: pathname === '/api/market/sureshot-auto-plans' ? 'VERIFY_FNO_QUOTES' : 'QUOTE_SNAPSHOT',
         retryAfterSeconds,
         partialQuotesDiscarded: true
       }), {
