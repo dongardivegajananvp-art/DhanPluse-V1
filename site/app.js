@@ -1697,7 +1697,7 @@ async function loadSureshotUniverseShortlist() {
         ' · ' + formatPrice(best.plan.contract.strike) + '</b></div><div class="data-row"><span>Entry / Stop-loss / Target</span><b>₹' +
         formatPrice(best.plan.risk.entryPrice) + ' / ₹' + formatPrice(best.plan.risk.stopLoss) + ' / ₹' +
         formatPrice(best.plan.risk.target) + '</b></div><div class="data-row"><span>Risk : Reward</span><b>1 : ' +
-        Number(best.plan.risk.rr).toFixed(2) + '</b></div><div class="data-row"><span>Fresh option quote age / spread</span><b>' +
+        Number(best.plan.risk.rr).toFixed(2) + '</b></div><div class="data-row"><span>Lot size / quantity (1 lot)</span><b>' + Number(best.plan.risk.lotSize) + ' units</b></div><div class="data-row"><span>Total risk for 1 lot</span><b>₹' + formatPrice(best.plan.risk.riskPerLot) + '</b></div><div class="data-row"><span>Potential reward for 1 lot</span><b>₹' + formatPrice(best.plan.risk.rewardPerLot) + '</b></div><div class="data-row"><span>Premium value for 1 lot</span><b>₹' + formatPrice(best.plan.risk.premiumPerLot) + '</b></div><div class="data-row"><span>Fresh option quote age / spread</span><b>' +
         Number(best.plan.quote.quoteAgeSeconds).toFixed(1) + ' sec / ' + Number(best.plan.quote.spreadPct).toFixed(2) +
         '%</b></div><div class="data-row"><span>Completed option candles</span><b>' +
         Number(best.plan.risk.candleCount) + ' · 5 min</b></div></article>' : '') +
@@ -1716,7 +1716,7 @@ async function loadSureshotUniverseShortlist() {
           (plan ? '₹' + formatPrice(plan.risk.target) : '—') + '</td><td>' +
           (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
           (plan ? '' : '<tr><td colspan="10" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
-      }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS option quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. No orders are placed.</p>';
+      }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS option quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. One-lot rupee risk uses official FYERS contract sizing; brokerage, taxes and slippage are excluded. No orders are placed.</p>';
     sureshotRetryAtNextSession = false;
     if (status) status.textContent = verified.length
       ? (result.candidateUniverseComplete
