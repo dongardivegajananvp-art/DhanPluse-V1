@@ -118,7 +118,7 @@ export function selectNearestVerifiedOptionContract({
 
 export function buildVerifiedSureshotTradePlan({
   underlyingSymbol, direction, contract, quote, optionCandles,
-  resolution = "5", now = Date.now(), maxSpreadPct = 5
+  resolution = "5", now = Date.now(), maxSpreadPct = 5, lotSize, tickSize = 0.05
 }) {
   if (!direction?.ok || !["CE", "PE"].includes(direction.side) ||
       !underlyingSymbol || !contract?.symbol || !quote || !Array.isArray(optionCandles)) {
@@ -164,7 +164,7 @@ export function buildVerifiedSureshotTradePlan({
     return { ok: false, reason: "Option bid/ask spread exceeds the configured " + maxSpreadPct + "% limit; trade blocked." };
   }
   const risk = buildOptionRiskPlan({
-    candles: optionCandles, entryPrice: ask, resolution, now, lookback: 12
+    candles: optionCandles, entryPrice: ask, lotSize, tickSize, resolution, now, lookback: 12
   });
   if (!risk.ok || risk.rr < 2) return { ok: false, reason: risk.reason || "Minimum 1:2 risk/reward was not met." };
   return {
