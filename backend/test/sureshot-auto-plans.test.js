@@ -33,6 +33,7 @@ test("blocks a contract whose exchange, side, symbol suffix or strike does not m
     { ...base, symbol: "BSE:ABC26NOV100CE" },
     { ...base, symbol: "NSE:ABC26NOV100PE" },
     { ...base, strike: 0 },
+    { ...base, strike: 105 },
     { ...base, expiry: "" }
   ]) {
     const result = buildVerifiedSureshotTradePlan({
