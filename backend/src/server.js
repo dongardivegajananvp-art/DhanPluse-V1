@@ -82,6 +82,11 @@ const MARKET_SOCKET_RECONNECT_FALLBACK_MS = 20_000;
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
+// Track overall market-data activity separately from per-symbol freshness.
+// An unchanged index may legitimately emit no new tick; that must not reset
+// a healthy socket while the other subscribed indices are still updating.
+let lastAnyMarketTickAt = 0;
+let marketSocketConnectedAt = 0;
 const lastTickDiagnosticAt = new Map();
 const lastRejectedDiagnosticAt = new Map();
 const lastControlDiagnosticAt = new Map();
@@ -126,6 +131,7 @@ function parseTick(raw) {
       updatedAt: new Date(exchangeTime * 1000).toISOString(),
       receivedAt: new Date().toISOString()
     });
+    lastAnyMarketTickAt = Date.now();
     acceptedCount += 1;
   }
   return acceptedCount;
@@ -175,6 +181,7 @@ function startMarketDataStream(token) {
       if (marketSocket !== socket) return;
       streamConnected = true;
       streamError = '';
+      marketSocketConnectedAt = Date.now();
       marketReconnectAttempt = 0;
       if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
       marketReconnectTimer = null;
@@ -283,19 +290,21 @@ function startMarketDataStream(token) {
 const marketSocketWatchdog = setInterval(() => {
   if (!accessToken || !marketSocket || !streamConnected || !nseRegularSessionNow()) return;
   const now = Date.now();
-  const staleSymbols = allowedSymbols.filter(symbol => {
-    const tick = latestTicks.get(symbol);
-    const receivedAt = tick ? Date.parse(tick.receivedAt) : NaN;
-    return !Number.isFinite(receivedAt) || now - receivedAt > 45_000;
-  });
-  if (!staleSymbols.length) return;
+  // Do not reconnect because one quiet index has not changed. Keep per-index
+  // exchange-timestamp freshness checks in liveSnapshot()/signal validation;
+  // reconnect only when the entire subscribed feed has gone silent.
+  const lastActivityAt = lastAnyMarketTickAt || marketSocketConnectedAt;
+  const feedSilentForMs = lastActivityAt ? now - lastActivityAt : Infinity;
+  const SOCKET_SILENCE_THRESHOLD_MS = 120_000;
+  if (feedSilentForMs <= SOCKET_SILENCE_THRESHOLD_MS) return;
   streamConnected = false;
-  streamError = 'FYERS market socket stopped delivering fresh index ticks; reconnecting.';
-  console.warn('FYERS market socket watchdog detected stale feed:', JSON.stringify({
-    staleSymbols,
-    thresholdMs: 45_000
+  streamError = 'FYERS market socket stopped delivering all index ticks; reconnecting.';
+  console.warn('FYERS market socket watchdog detected total feed silence:', JSON.stringify({
+    feedSilentForMs,
+    thresholdMs: SOCKET_SILENCE_THRESHOLD_MS,
+    lastAnyMarketTickAt: lastAnyMarketTickAt ? new Date(lastAnyMarketTickAt).toISOString() : null
   }));
-  scheduleMarketSocketFallback(marketSocket, 'stale market feed');
+  scheduleMarketSocketFallback(marketSocket, 'total market feed silence');
 }, 15_000);
 marketSocketWatchdog.unref?.();
 
