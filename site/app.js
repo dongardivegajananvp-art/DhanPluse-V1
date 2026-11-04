@@ -1571,7 +1571,7 @@ async function loadSureshotUniverseShortlist() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok !== true || payload.orderPlacement !== 'disabled') {
-        throw new Error(payload.detail || payload.error || 'Full-universe FYERS scan was blocked.');
+        throw new Error([payload.stage ? 'Blocked at ' + String(payload.stage).replace(/_/g, ' ').toLowerCase() : '', payload.detail || payload.error || 'Full-universe FYERS scan was blocked.'].filter(Boolean).join(' · '));
       }
       if (payload.scanComplete === true) { result = payload; break; }
       if (payload.batchComplete !== true || !payload.scanId || !Number.isInteger(payload.nextOffset)) {
