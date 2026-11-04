@@ -54,4 +54,4 @@
     }, 0);
   });
 })();
-</script><script>if ("serviceWorker" in navigator && location.protocol === "https:") { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {})); }</script></body></html>
+</script><script>if ("serviceWorker" in navigator && location.protocol === "https:") { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js?v=20261104-sureshot-reconnect-v3", { updateViaCache: "none" }).then(registration => registration.update()).catch(() => {})); }</script></body></html>
