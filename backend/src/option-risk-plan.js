@@ -4,7 +4,7 @@
  * recent completed-candle swing low; the target is at least 2R. No fallback
  * prices or synthetic candles are permitted.
  */
-export function buildOptionRiskPlan({ candles, entryPrice, resolution = "5", now = Date.now(), lookback = 12 }) {
+export function buildOptionRiskPlan({ candles, entryPrice, lotSize, tickSize = 0.05, resolution = "5", now = Date.now(), lookback = 12 }) {
   const intervalMinutes = Number(resolution);
   if (!Number.isFinite(intervalMinutes) || ![5, 15, 30, 60].includes(intervalMinutes)) {
     return { ok: false, reason: "Unsupported option-candle interval." };
@@ -13,6 +13,10 @@ export function buildOptionRiskPlan({ candles, entryPrice, resolution = "5", now
     return { ok: false, reason: "At least 12 option candles are required for a risk plan." };
   }
   const entry = Number(entryPrice);
+  const lots = Number(lotSize);
+  const tick = Number(tickSize);
+  if (!Number.isInteger(lots) || lots <= 0) return { ok: false, reason: "A verified positive FYERS contract lot size is required." };
+  if (!Number.isFinite(tick) || tick <= 0 || tick > 100) return { ok: false, reason: "A valid FYERS contract tick size is required." };
   if (!Number.isFinite(entry) || entry <= 0 || !Number.isFinite(now)) {
     return { ok: false, reason: "A valid independently verified option ask price is required." };
   }
@@ -42,9 +46,8 @@ export function buildOptionRiskPlan({ candles, entryPrice, resolution = "5", now
   }
   const window = completed.slice(-lookback);
   const swingLow = Math.min(...window.map(row => row.low));
-  // NSE option premiums use a ₹0.05 tick. Round the stop down and target up,
-  // so rounding can never reduce the planned reward below 2R.
-  const tick = 0.05;
+  // Use the selected contract's official FYERS symbol-master tick size.
+  // Round the stop down and target up so rounding cannot reduce reward below 2R.
   const stopLoss = Math.floor((swingLow + 1e-9) / tick) * tick;
   if (!(stopLoss > 0 && stopLoss < entry)) {
     return { ok: false, reason: "Recent option swing-low does not sit below the verified ask entry; no valid long-option risk plan." };
@@ -69,6 +72,12 @@ export function buildOptionRiskPlan({ candles, entryPrice, resolution = "5", now
     target: roundedTarget,
     riskPerUnit: round(actualRisk),
     rewardPerUnit: round(actualReward),
+    lotSize: lots,
+    quantity: lots,
+    lots: 1,
+    riskPerLot: round(actualRisk * lots),
+    rewardPerLot: round(actualReward * lots),
+    premiumPerLot: round(roundedEntry * lots),
     rr: Number(rr.toFixed(2)),
     candleCount: window.length,
     lookback,
