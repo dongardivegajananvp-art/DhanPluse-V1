@@ -128,13 +128,21 @@ export function buildVerifiedSureshotTradePlan({
   const contractSymbol = String(contract.symbol);
   const contractSide = String(contract.side || "").toUpperCase();
   const contractStrike = Number(contract.strike);
+  const contractExpiryMs = expiryTime(contract.expiry);
+  const contractExpiryDate = Number.isFinite(contractExpiryMs) ? indiaDateKey(contractExpiryMs) : "";
   if (!["NSE", "BSE"].includes(underlyingExchange) ||
       !contractSymbol.startsWith(underlyingExchange + ":") ||
       !/^(?:NSE|BSE):[A-Z0-9&-]{3,48}(CE|PE)$/.test(contractSymbol) ||
       contractSide !== direction.side || !contractSymbol.endsWith(direction.side) ||
       !Number.isFinite(contractStrike) || contractStrike <= 0 ||
-      contract.expiry == null || String(contract.expiry).trim() === "") {
-    return { ok: false, reason: "Selected option contract identity does not match the underlying exchange, direction, strike or expiry." };
+      !contractExpiryDate || contractExpiryDate < indiaDateKey(now)) {
+    return { ok: false, reason: "Selected option contract identity is invalid or its expiry has passed." };
+  }
+  if (!Number.isFinite(Number(direction.spot)) || Number(direction.spot) <= 0 ||
+      !Number.isFinite(Date.parse(direction.latestCandleAt)) ||
+      Date.parse(direction.latestCandleAt) > now + 5000 ||
+      now - Date.parse(direction.latestCandleAt) > Number(resolution) * 60_000 * 4) {
+    return { ok: false, reason: "Underlying direction is missing a valid, recent completed-candle timestamp or spot price." };
   }
   if (!Number.isFinite(maxSpreadPct) || maxSpreadPct <= 0) {
     return { ok: false, reason: "Maximum option spread threshold is invalid." };
@@ -150,7 +158,7 @@ export function buildVerifiedSureshotTradePlan({
   }
   const spreadPct = ((ask - bid) / ((ask + bid) / 2)) * 100;
   if (!Number.isFinite(spreadPct) || spreadPct > maxSpreadPct) {
-    return { ok: false, reason: "Option bid/ask spread exceeds 5%; trade blocked." };
+    return { ok: false, reason: "Option bid/ask spread exceeds the configured " + maxSpreadPct + "% limit; trade blocked." };
   }
   const risk = buildOptionRiskPlan({
     candles: optionCandles, entryPrice: ask, resolution, now, lookback: 12
