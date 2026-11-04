@@ -39,8 +39,8 @@ jobs:
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
           grep -q "Sureshot CE/PE" dist/site/index.html
-          grep -q "dhanpulse-shell-v110-sureshot-minimal" dist/site/sw.js
-          grep -q "app.js?v=20261104-sureshot-only-v1" dist/site/index.html
+          grep -q "dhanpulse-shell-v111-sureshot-clean" dist/site/sw.js
+          grep -q "app.js?v=20261104-sureshot-only-v2" dist/site/index.html
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
