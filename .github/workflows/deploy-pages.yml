@@ -57,23 +57,22 @@ jobs:
           html=""
           for attempt in $(seq 1 12); do
             html="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}?deploy_smoke=$(date +%s)" 2>/dev/null || true)"
-            if [[ -n "$html" ]] && grep -q "UI build 2026-11-02" <<< "$html" && grep -q "style.css?v=20261029-restore24-v2" <<< "$html" && grep -q "app.js?v=20261104-sureshot-focused-cooldown-v1" <<< "$html"; then
+            if [[ -n "$html" ]] && grep -q "Sureshot CE/PE" <<< "$html" && grep -q "style.css?v=20261104-sureshot-only-v1" <<< "$html" && grep -q "app.js?v=20261104-sureshot-only-v1" <<< "$html"; then
               break
             fi
             echo "Waiting for the deployed Pages asset to become visible (attempt $attempt/12)."
             sleep 10
           done
-          if [[ -z "$html" ]] || ! grep -q "UI build 2026-11-02" <<< "$html" || ! grep -q "style.css?v=20261029-restore24-v2" <<< "$html"; then
+          if [[ -z "$html" ]] || ! grep -q "Sureshot CE/PE" <<< "$html" || ! grep -q "style.css?v=20261104-sureshot-only-v1" <<< "$html"; then
             echo "::error::The original /site/ URL did not serve the expected DhanPulse UI build."
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "dhanpulse-shell-v106-sureshot-next-open-retry" <<< "$sw"
+          grep -q "dhanpulse-shell-v108-sureshot-only" <<< "$sw"
           echo "PASS: ${app_url} serves the expected DhanPulse UI and service-worker cache build."
           backtest="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}backtest.js?v=20261027-fno-gap-selector2&deploy_smoke=$(date +%s)")"
-          grep -Fq "DMA20 crossover + SwingLow/ATR stop" <<< "$backtest"
-          grep -Fq "0.35*atr14[i]" <<< "$backtest"
-          echo "PASS: deployed Backtesting JavaScript includes the DMA20/SwingLow/ATR strategy."
+          grep -q "Sureshot CE/PE" <<< "$html"
+          echo "PASS: original /site/ serves the single-tab Sureshot workspace."
       - name: Sureshot-only browser smoke test
         env:
           APP_URL: ${{ steps.deployment.outputs.page_url }}
@@ -97,12 +96,22 @@ jobs:
             const tabs = page.locator('#nav button[data-tab]');
             const names = await tabs.evaluateAll(items => items.map(item => item.getAttribute('data-tab')));
             if (names.length !== 1 || names[0] !== 'Sureshot CE/PE') throw new Error('Expected exactly one Sureshot CE/PE tab; found ' + names.length + ': ' + names.join(', '));
+            let scanRequests = 0;
+            await page.route('**/api/market/sureshot-auto-plans**', async route => {
+              scanRequests += 1;
+              await route.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'Test-only controlled rate-limit response', stage: 'VERIFY_FNO_QUOTES', retryAfterSeconds: 60 }) });
+            });
             await page.locator('#nav button[data-tab="Sureshot CE/PE"]').click();
             await page.waitForFunction(() => document.querySelector('#pageTitle')?.textContent?.trim() === 'Sureshot CE/PE', { timeout: 5000 });
+            await page.waitForTimeout(1500);
+            if (scanRequests !== 0) throw new Error('Sureshot must not scan automatically on tab open.');
             await page.waitForSelector('#scanSureshotUniverseBtn', { timeout: 5000 });
             await page.waitForSelector('#sureshotUniverseResults', { timeout: 5000 });
+            await page.locator('#scanSureshotUniverseBtn').click();
+            await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent?.includes('VERIFY FNO QUOTES'), { timeout: 5000 });
+            if (scanRequests !== 1) throw new Error('Manual Sureshot scan did not issue exactly one controlled API request.');
             if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join(' | '));
-            console.log('PASS: original /site/ exposes only Sureshot CE/PE and renders its full-universe scan controls without page errors.');
+            console.log('PASS: one visible tab; no automatic scan on open; manual scan issues one request and handles FYERS rate-limit safely.');
             await browser.close();
           })().catch(error => { console.error(error); process.exit(1); });
           NODE
