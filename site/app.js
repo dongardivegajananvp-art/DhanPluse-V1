@@ -1681,11 +1681,25 @@ async function performSureshotSetup() {
     const candles=candleResult.data;
     const candleError=validateOhlcCandles(candles,resolution);
     if(candleError)throw new Error(candleError);
+    const lastCandle=candles[candles.length-1];
+    const candleEpoch=Number(lastCandle[0]);
+    const candleTimeMs=candleEpoch>1e12?candleEpoch:candleEpoch*1000;
+    if(!Number.isFinite(candleTimeMs)||candleTimeMs<=0||candleTimeMs>Date.now()+5000)throw new Error('Latest FYERS candle has an invalid or future exchange timestamp; chart and signals are blocked.');
+    const candleDate=new Date(candleTimeMs);
+    const exchangeDate=candleDate.toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+    const todayExchangeDate=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+    const candleAgeMinutes=(Date.now()-candleTimeMs)/60000;
+    const intervalMinutes=resolution==='D'?1440:Number(resolution);
+    const maxOpenAgeMinutes=resolution==='D'?390:Math.max(15,intervalMinutes*2+5);
+    if(isRegularMarketSession()&&(exchangeDate!==todayExchangeDate||candleAgeMinutes>maxOpenAgeMinutes)){
+      throw new Error('STALE FYERS CHART · latest candle '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' is not current for the open session. Old-session chart and signals are blocked.');
+    }
     const zones=deriveSureshotZones(candles);
     if(!zones)throw new Error('At least 12 verified candles are needed before zones can be calculated.');
-    const lastCandle=candles[candles.length-1],close=Number(lastCandle[4]),previous=Number(candles[candles.length-2][4]);
+    const close=Number(lastCandle[4]),previous=Number(candles[candles.length-2][4]);
     chart.innerHTML=sureshotZoneChart(candles,zones.supply,zones.demand);
-    summary.textContent='Calculated from '+candles.length+' verified FYERS candles · Supply '+formatPrice(zones.supply.low)+'–'+formatPrice(zones.supply.high)+' · Buyer/demand '+formatPrice(zones.demand.low)+'–'+formatPrice(zones.demand.high)+'. Zones are heuristic and may change as candles update.';
+    const candleFreshnessLabel=isRegularMarketSession()?'CURRENT SESSION · '+candleAgeMinutes.toFixed(1)+' min old':'MARKET CLOSED · LAST AVAILABLE SESSION';
+    summary.textContent='Latest FYERS candle: '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' · '+candleFreshnessLabel+' · '+candles.length+' verified candles · Supply '+formatPrice(zones.supply.low)+'–'+formatPrice(zones.supply.high)+' · Buyer/demand '+formatPrice(zones.demand.low)+'–'+formatPrice(zones.demand.high)+'. Zones are heuristic; the chart is not a live-moving feed.';
     let bias='NO TRADE',reason='Price is inside the mapped zones or has not confirmed a breakout.';
     if(!isRegularMarketSession()){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
     else if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
