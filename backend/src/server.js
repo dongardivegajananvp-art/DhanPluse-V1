@@ -258,7 +258,7 @@ function liveSnapshot() {
   const ticks = allowedSymbols.map(symbol => latestTicks.get(symbol));
   if (ticks.some(tick => !tick)) return null;
   const now = Date.now();
-  if (ticks.some(tick => quoteTimestampStatus(Date.parse(tick.updatedAt) / 1000, now, 15) !== 'FRESH')) return null;
+  if (ticks.some(tick => quoteTimestampStatus(Date.parse(tick.updatedAt) / 1000, now, 30) !== 'FRESH')) return null;
   return {
     ok: true,
     fetchedAt: new Date(Math.max(...ticks.map(tick => Date.parse(tick.updatedAt)))).toISOString(),
