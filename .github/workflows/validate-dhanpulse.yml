@@ -61,6 +61,13 @@ jobs:
       - name: Verify backend dependency graph
         working-directory: backend
         run: npm audit --omit=dev --audit-level=high
+      - name: Report full dependency audit details
+        working-directory: backend
+        continue-on-error: true
+        run: |
+          npm audit --json > /tmp/dhanpulse-full-audit.json || audit_status=$?
+          node --input-type=commonjs -e 'const fs=require("node:fs"); const p="/tmp/dhanpulse-full-audit.json"; if(!fs.existsSync(p)){console.log("Full audit report unavailable; npm audit command did not produce JSON."); process.exit(0)} const a=JSON.parse(fs.readFileSync(p,"utf8")); console.log("Full dependency audit totals:",JSON.stringify(a.metadata?.vulnerabilities||{})); for(const [name,v] of Object.entries(a.vulnerabilities||{})){console.log(JSON.stringify({package:name,severity:v.severity,range:v.range,fixAvailable:v.fixAvailable,via:(v.via||[]).map(x=>typeof x==="string"?x:{name:x.name,title:x.title,url:x.url,range:x.range})}))}'
+          echo "Full audit command exit code: ${audit_status:-0} (diagnostic only; production audit remains enforced above)."
       - name: Verify production backend health and CORS
         env:
           BACKEND_URL: https://dhanpluse-v1.onrender.com
