@@ -3,7 +3,7 @@
  * symbol master. Never infer lot size or tick size from the underlying.
  */
 export function getVerifiedOptionContractMetadata(symbol, foMaster) {
-  if (typeof symbol !== "string" || !/^NSE:[A-Z0-9&-]+\\d{6,12}\\d+(?:\\.\\d+)?(?:CE|PE)$/.test(symbol) ||
+  if (typeof symbol !== "string" || !/^NSE:[A-Z0-9&-]+(?:CE|PE)$/.test(symbol) ||
       !foMaster || typeof foMaster !== "object" || Array.isArray(foMaster)) return null;
   const item = foMaster[symbol];
   if (!item || Number(item.tradeStatus) !== 1 || !["CE", "PE"].includes(item.optType)) return null;
