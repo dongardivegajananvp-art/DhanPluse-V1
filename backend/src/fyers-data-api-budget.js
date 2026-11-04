@@ -49,6 +49,12 @@ export function createFyersDataApiBudget({
     const method = String(init?.method || 'GET').toUpperCase();
     const ttl = method === 'GET' ? cacheTtl(target) : 0;
     const cacheKey = ttl > 0 ? target.toString() : null;
+    // Quote responses (including option premiums) are never cached, but
+    // identical concurrent GETs share one in-flight upstream request.
+    const quoteFlightKey = method === 'GET' && target.pathname === '/data/quotes'
+      ? 'quote:' + target.toString()
+      : null;
+    const inFlightKey = cacheKey || quoteFlightKey;
     const currentTime = now();
     if (cacheKey) {
       const cached = responseCache.get(cacheKey);
@@ -56,11 +62,14 @@ export function createFyersDataApiBudget({
         return makeResponse(cached, currentTime - cached.storedAt, true);
       }
       if (cached) responseCache.delete(cacheKey);
-      const pending = inFlight.get(cacheKey);
-      if (pending) {
-        const entry = await pending;
-        return makeResponse(entry, Math.max(0, now() - entry.storedAt), true);
+    }
+    const pending = inFlightKey && inFlight.get(inFlightKey);
+    if (pending) {
+      const result = await pending;
+      if (result.cacheEntry) {
+        return makeResponse(result, Math.max(0, now() - result.storedAt), true);
       }
+      return result.response.clone();
     }
 
     const requestPromise = (async () => {
@@ -107,15 +116,20 @@ export function createFyersDataApiBudget({
           blockedUntil = Math.max(blockedUntil, now() + cooldown);
         }
 
-        if (cacheKey && response.ok) {
+        if ((cacheKey && response.ok) || quoteFlightKey) {
           const body = await response.clone().text();
           const entry = {
             body, status: response.status, statusText: response.statusText,
             headers: [...response.headers.entries()], storedAt: now()
           };
-          responseCache.set(cacheKey, entry);
-          while (responseCache.size > maxCacheEntries) {
-            responseCache.delete(responseCache.keys().next().value);
+          // Only successful history/option-chain responses persist in cache.
+          // Quotes are serialized for concurrent callers and immediately
+          // evicted from inFlight when the request settles.
+          if (cacheKey && response.ok) {
+            responseCache.set(cacheKey, entry);
+            while (responseCache.size > maxCacheEntries) {
+              responseCache.delete(responseCache.keys().next().value);
+            }
           }
           return { ...entry, cacheEntry: true };
         }
@@ -126,13 +140,13 @@ export function createFyersDataApiBudget({
       return result.cacheEntry ? result : { response: result.response };
     })();
 
-    if (cacheKey) inFlight.set(cacheKey, requestPromise);
+    if (inFlightKey) inFlight.set(inFlightKey, requestPromise);
     try {
       const result = await requestPromise;
       if (result.cacheEntry) return makeResponse(result, 0);
       return result.response;
     } finally {
-      if (cacheKey && inFlight.get(cacheKey) === requestPromise) inFlight.delete(cacheKey);
+      if (inFlightKey && inFlight.get(inFlightKey) === requestPromise) inFlight.delete(inFlightKey);
     }
   }
 

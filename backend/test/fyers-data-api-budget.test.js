@@ -5,7 +5,11 @@ import { createFyersDataApiBudget } from '../src/fyers-data-api-budget.js';
 function fakeResponse(status = 200, body = '', retryAfter = null) {
   return {
     status,
-    headers: { get: name => name.toLowerCase() === 'retry-after' ? retryAfter : null },
+    headers: {
+      get: name => name.toLowerCase() === 'retry-after' ? retryAfter : null,
+      entries: () => []
+    },
+    statusText: status === 200 ? 'OK' : 'Too Many Requests',
     clone: () => ({ text: async () => body })
   };
 }
@@ -166,6 +170,28 @@ test('option quote requests are never cached', async () => {
   assert.equal(sent, 2, 'option premium quotes must always be fetched live');
 });
 
+
+
+test('identical concurrent quote reads share one upstream request but are not cached', async () => {
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    minIntervalMs: 0,
+    fetchImpl: async () => {
+      sent += 1;
+      await new Promise(resolve => setTimeout(resolve, 10));
+      return new Response(JSON.stringify({ s: 'ok', d: [{ n: 'NSE:TEST-EQ', v: { lp: 123.45, tt: 1 } }] }), {
+        status: 200, headers: { 'content-type': 'application/json' }
+      });
+    }
+  });
+  const url = 'https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATEST-EQ';
+  const [first, second] = await Promise.all([request(url), request(url)]);
+  assert.equal(sent, 1, 'concurrent identical quote reads should share one live response');
+  assert.deepEqual(await first.json(), await second.json());
+
+  await request(url);
+  assert.equal(sent, 2, 'a later quote read must reach FYERS again; quote/premium data is never cached');
+});
 
 test('cooldown status reports the real shared FYERS Data API backoff without exposing request data', async () => {
   let clock = 600_000;
