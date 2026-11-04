@@ -13,6 +13,7 @@ import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 import { buildOptionRiskPlan } from './option-risk-plan.js';
+import { getVerifiedOptionContractMetadata as resolveOptionContractMetadata } from './option-contract-metadata.js';
 import { isFyersAuthRejected } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
@@ -1003,6 +1004,37 @@ let stockQuoteCooldown = { until: 0, backoffMs: 30000 };
 const STOCK_QUOTE_CACHE_MS = 30000;
 const STOCK_QUOTE_BATCH_SIZE = 50;
 
+// Contract sizing is reference data from FYERS' official NSE_FO symbol master.
+// Cache once per day; never infer a lot size from the underlying or option chain.
+let optionContractMasterCache = { fetchedAt: 0, data: null };
+let optionContractMasterPromise = null;
+async function getFyersOptionContractMetadata(symbol) {
+  if (optionContractMasterCache.data && Date.now() - optionContractMasterCache.fetchedAt < 24 * 60 * 60 * 1000) {
+    return resolveOptionContractMetadata(symbol, optionContractMasterCache.data);
+  }
+  if (!optionContractMasterPromise) {
+    optionContractMasterPromise = (async () => {
+      const response = await fetchWithFyersBudget("https://public.fyers.in/sym_details/NSE_FO_sym_master.json", {
+        signal: AbortSignal.timeout(45000)
+      });
+      if (!response.ok) throw new Error("FYERS NSE_FO symbol master unavailable; lot-size risk is blocked.");
+      const master = await response.json();
+      if (!master || typeof master !== "object" || Array.isArray(master)) {
+        throw new Error("FYERS NSE_FO symbol master format is invalid; lot-size risk is blocked.");
+      }
+      optionContractMasterCache = { fetchedAt: Date.now(), data: master };
+      return master;
+    })();
+  }
+  try {
+    const master = await optionContractMasterPromise;
+    return resolveOptionContractMetadata(symbol, master);
+  } finally {
+    optionContractMasterPromise = null;
+  }
+}
+
+
 // Stock Explorer/movers and Sureshot must share one verified F&O snapshot.
 // Otherwise switching tabs can spend the same five FYERS quote calls twice.
 function syncMoversCacheFromFnoQuoteSnapshot(snapshot, symbols = moversSymbols) {
@@ -1751,6 +1783,10 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
     return res.status(409).json({ ok: false, error: 'Market is closed; no actionable option risk plan is generated.' });
   }
   try {
+    const contractMetadata = await getFyersOptionContractMetadata(symbol);
+    if (!contractMetadata) {
+      return res.status(422).json({ ok: false, error: "The selected option contract is not active or its official FYERS lot size / tick size is unavailable." });
+    }
     const quoteUrl = new URL('https://api-t1.fyers.in/data/quotes');
     quoteUrl.searchParams.set('symbols', symbol);
     const historyUrl = new URL('https://api-t1.fyers.in/data/history');
@@ -1781,7 +1817,7 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
       return res.status(502).json({ ok: false, error: 'Selected option bid/ask/LTP quote is missing, invalid or older than 15 seconds.' });
     }
     const candles = Array.isArray(historyResult?.candles) ? historyResult.candles : [];
-    const plan = buildOptionRiskPlan({ candles, entryPrice: ask, resolution, now: Date.now(), lookback: 12 });
+    const plan = buildOptionRiskPlan({ candles, entryPrice: ask, lotSize: contractMetadata.lotSize, tickSize: contractMetadata.tickSize, resolution, now: Date.now(), lookback: 12 });
     if (!plan.ok) {
       return res.status(422).json({ ok: false, error: plan.reason, quote: {
         bid, ask, ltp, quoteTimeMs: quoteTime * 1000,
@@ -1789,7 +1825,7 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
       } });
     }
     res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, symbol, fetchedAt: new Date().toISOString(), quote: {
+    return res.json({ ok: true, symbol, contract: contractMetadata, fetchedAt: new Date().toISOString(), quote: {
       bid, ask, ltp, quoteTimeMs: quoteTime * 1000,
       quoteAgeSeconds: Number(((Date.now() - quoteTime * 1000) / 1000).toFixed(1))
     }, data: plan });
