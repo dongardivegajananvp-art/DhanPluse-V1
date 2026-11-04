@@ -108,7 +108,6 @@ void syncFyersCooldownFromBackend();
 // cooldown is active. WebSocket ticks, cached last-known data, symbol masters,
 // auth/status, and NSE institutional-flow reads remain available.
 const FYERS_DATA_API_PATHS = new Set([
-  '/api/market/quotes',
   '/api/market/stock-quotes',
   '/api/market/candles',
   '/api/market/movers',
