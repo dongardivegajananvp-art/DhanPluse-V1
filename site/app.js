@@ -323,6 +323,39 @@ function setConnection(message, muted) {
   el.classList.toggle('muted', muted !== false);
 }
 
+async function refreshSocketStatusDuringCooldown() {
+  // /api/status is backend health metadata, not a FYERS Data API quote request.
+  // Keep the socket indicator independent from REST quote/candle/option availability.
+  try {
+    const response = await fetch(BACKEND_URL + '/api/status', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store'
+    });
+    if (!response.ok) return;
+    const status = await response.json().catch(() => ({}));
+    if (status.fyers === 'connected') setFyersStatus('CONNECTED');
+    if (status.backend === 'online') setBackendStatus('ONLINE');
+    const tickAt = Date.parse(status.lastTickAt || '');
+    const tickAge = Date.now() - tickAt;
+    const freshTick = Number.isFinite(tickAt) && tickAge >= 0 && tickAge <= 15000;
+    if (status.marketSocketConnected === true && freshTick) {
+      setConnection('FYERS WebSocket connected · fresh index ticks · REST cooldown', false);
+      const detail = document.querySelector('.metrics .metric:first-child small');
+      if (detail) detail.textContent = 'WebSocket ticks fresh · REST quotes/options cooling down';
+    } else if (status.marketSocketConnected === true) {
+      setConnection('FYERS WebSocket connected · waiting for fresh ticks · REST cooldown', true);
+      const detail = document.querySelector('.metrics .metric:first-child small');
+      if (detail) detail.textContent = 'Socket connected · latest tick is not fresh';
+    } else {
+      setConnection('FYERS WebSocket disconnected · REST cooldown', true);
+      const detail = document.querySelector('.metrics .metric:first-child small');
+      if (detail) detail.textContent = 'Market socket disconnected · REST quotes/options cooling down';
+    }
+  } catch {
+    // Preserve the existing connection state if even the lightweight status endpoint fails.
+  }
+}
+
 function formatPrice(value) {
   return Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -2785,7 +2818,9 @@ async function fetchLiveQuotes() {
       quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, 15000), QUOTE_POLL_MAX_MS);
       markDashboardQuotesBlocked('FYERS RATE LIMIT · LIVE SIGNALS BLOCKED');
       setStatus('FYERS RATE LIMIT — WAITING');
-      showMessage('FYERS rate limit is active. The dashboard is backing off and will not force REST quote polling.', true);
+      setConnection('Checking FYERS WebSocket separately from REST cooldown…', true);
+      refreshSocketStatusDuringCooldown();
+      showMessage('FYERS Data API rate limit is active. The dashboard is backing off; WebSocket connection status is checked separately and no REST quote polling is forced.', true);
       return;
     }
     if (!response.ok || data.ok !== true || !Array.isArray(data.data)) {
