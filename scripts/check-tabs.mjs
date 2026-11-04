@@ -9,7 +9,7 @@ const navTabs = [...navBlock[1].matchAll(/data-tab="([^"]+)"/g)]
 if (navTabs.length !== 2 || navTabs[0] !== 'Sureshot CE/PE' || navTabs[1] !== 'FYERS Connection') {
   throw new Error('Expected exactly two visible tabs (Sureshot CE/PE, FYERS Connection); found: ' + navTabs.join(', '));
 }
-if (!navBlock[1].includes('class="active"') || !navBlock[1].includes('data-tab="Sureshot CE/PE" class="active"')) {
+if (!navBlock[1].includes('class="active"') || !navBlock[1].includes('class="active" data-tab="Sureshot CE/PE"')) {
   throw new Error('Sureshot CE/PE must be the active initial tab.');
 }
 if (app.includes('sureshotFyersConnectBtn')) throw new Error('FYERS connect button must not be rendered on the Sureshot tab.');
