@@ -18,7 +18,7 @@ import { isFyersAuthRejected } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
-import { canScheduleMarketSocketFallback, getMarketSocketReconnectDelay } from './market-socket-recovery.js';
+import { canScheduleMarketSocketFallback, getMarketSocketReconnectDelay, buildMarketSocketSubscriptionSymbols } from './market-socket-recovery.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 
@@ -211,10 +211,11 @@ function startMarketDataStream(token) {
         // Re-apply mode and subscriptions on every connect event. A TCP/WebSocket
         // reconnect does not guarantee that the provider retained subscriptions.
         socket.mode(socket.FullMode);
-        socket.subscribe([...allowedSymbols, ...(chartStreamSymbol && !allowedSymbols.includes(chartStreamSymbol) ? [chartStreamSymbol] : [])]);
+        const subscriptionSymbols = buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStreamSymbol);
+        socket.subscribe(subscriptionSymbols);
         console.log('FYERS baseline market socket subscription request sent.', JSON.stringify({
           connectionNumber: socketConnectCount,
-          symbols: [...allowedSymbols, ...(chartStreamSymbol && !allowedSymbols.includes(chartStreamSymbol) ? [chartStreamSymbol] : [])]
+          symbols: subscriptionSymbols
         }));
       } catch (error) {
         streamConnected = false;
