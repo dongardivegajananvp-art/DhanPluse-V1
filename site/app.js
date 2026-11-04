@@ -109,7 +109,9 @@ void syncFyersCooldownFromBackend();
 // auth/status, and NSE institutional-flow reads remain available.
 const FYERS_DATA_API_PATHS = new Set([
   '/api/market/stock-quotes',
-  '/api/market/candles',
+  // Candle reads are allowed through during cooldown so the backend can serve
+  // an identical verified history-cache hit. Cache misses remain blocked by
+  // the shared FYERS Data API budget; no stale candle is treated as fresh.
   '/api/market/movers',
   '/api/market/sureshot-shortlist',
   '/api/market/sureshot-auto-plans'
