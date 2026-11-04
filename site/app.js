@@ -2979,7 +2979,8 @@ nav.addEventListener('click', event => {
 });
 document.querySelector('#settingsBtn')?.addEventListener('click', () => render('FYERS Settings'));
 
-render('Dashboard');
+try { localStorage.removeItem('dhanpulse-watchlist-v1'); localStorage.removeItem('dhanpulse-price-alerts'); } catch {}
+render('Sureshot CE/PE');
 testBackend();
 exchangeAuthCode();
 logEvent('DhanPulse console initialised.', 'info');

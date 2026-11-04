@@ -96,13 +96,13 @@ jobs:
             if (!response || !response.ok()) throw new Error('Original /site/ page did not return HTTP success');
             const tabs = page.locator('#nav button[data-tab]');
             const names = await tabs.evaluateAll(items => items.map(item => item.getAttribute('data-tab')));
-            if (names.length !== 24) throw new Error('Expected original 24-tab navigation to remain intact; found ' + names.length);
+            if (names.length !== 1 || names[0] !== 'Sureshot CE/PE') throw new Error('Expected exactly one Sureshot CE/PE tab; found ' + names.length + ': ' + names.join(', '));
             await page.locator('#nav button[data-tab="Sureshot CE/PE"]').click();
             await page.waitForFunction(() => document.querySelector('#pageTitle')?.textContent?.trim() === 'Sureshot CE/PE', { timeout: 5000 });
             await page.waitForSelector('#scanSureshotUniverseBtn', { timeout: 5000 });
             await page.waitForSelector('#sureshotUniverseResults', { timeout: 5000 });
             if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join(' | '));
-            console.log('PASS: original /site/ keeps all 24 tabs and Sureshot CE/PE tab renders its full-universe scan controls without page errors.');
+            console.log('PASS: original /site/ exposes only Sureshot CE/PE and renders its full-universe scan controls without page errors.');
             await browser.close();
           })().catch(error => { console.error(error); process.exit(1); });
           NODE
