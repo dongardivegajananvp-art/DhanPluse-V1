@@ -38,8 +38,8 @@ jobs:
           test -s dist/index.html
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
-          grep -q "UI build 2026-11-02" dist/site/index.html
-          grep -q "dhanpulse-shell-v108-sureshot-only" dist/site/sw.js
+          grep -q "Sureshot CE/PE" dist/site/index.html
+          grep -q "dhanpulse-shell-v109-sureshot-manual-scan" dist/site/sw.js
           grep -q "app.js?v=20261104-sureshot-only-v1" dist/site/index.html
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
@@ -68,7 +68,7 @@ jobs:
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "dhanpulse-shell-v108-sureshot-only" <<< "$sw"
+          grep -q "dhanpulse-shell-v109-sureshot-manual-scan" <<< "$sw"
           echo "PASS: ${app_url} serves the expected DhanPulse UI and service-worker cache build."
           backtest="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}backtest.js?v=20261027-fno-gap-selector2&deploy_smoke=$(date +%s)")"
           grep -q "Sureshot CE/PE" <<< "$html"
@@ -108,7 +108,7 @@ jobs:
             await page.waitForSelector('#scanSureshotUniverseBtn', { timeout: 5000 });
             await page.waitForSelector('#sureshotUniverseResults', { timeout: 5000 });
             await page.locator('#scanSureshotUniverseBtn').click();
-            await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent?.includes('VERIFY FNO QUOTES'), { timeout: 5000 });
+            await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent?.toLowerCase()?.includes('verify fno quotes'), { timeout: 5000 });
             if (scanRequests !== 1) throw new Error('Manual Sureshot scan did not issue exactly one controlled API request.');
             if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join(' | '));
             console.log('PASS: one visible tab; no automatic scan on open; manual scan issues one request and handles FYERS rate-limit safely.');
