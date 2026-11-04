@@ -32,3 +32,17 @@ test("resolves BSE SENSEX option sizing from the BSE_FO master", () => {
     symbol: bseSymbol, side: "CE", strike: 82000, expiryDate: "1795651200", lotSize: 20, tickSize: 0.05
   });
 });
+
+test("uses each underlying contract's own lot size, never a shared/default lot", () => {
+  const reliance = "NSE:RELIANCE2611262500CE";
+  const nifty = "NSE:NIFTY26112625000CE";
+  const banknifty = "NSE:BANKNIFTY26112656000CE";
+  const perContractMaster = {
+    [reliance]: { tradeStatus: 1, optType: "CE", strikePrice: 2500, expiryDate: "1795651200", minLotSize: 250, tickSize: 0.05 },
+    [nifty]: { tradeStatus: 1, optType: "CE", strikePrice: 25000, expiryDate: "1795651200", minLotSize: 25, tickSize: 0.05 },
+    [banknifty]: { tradeStatus: 1, optType: "CE", strikePrice: 56000, expiryDate: "1795651200", minLotSize: 15, tickSize: 0.05 }
+  };
+  assert.equal(getVerifiedOptionContractMetadata(reliance, perContractMaster).lotSize, 250);
+  assert.equal(getVerifiedOptionContractMetadata(nifty, perContractMaster).lotSize, 25);
+  assert.equal(getVerifiedOptionContractMetadata(banknifty, perContractMaster).lotSize, 15);
+});
