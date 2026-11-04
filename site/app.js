@@ -65,8 +65,6 @@ async function syncFyersCooldownFromBackend() {
     const status = await response.json();
     const budget = status && status.fyersDataApi;
     const seconds = Number(budget && budget.retryAfterSeconds);
-    let storedUntil = 0;
-    try { storedUntil = Number(localStorage.getItem(FYERS_COOLDOWN_KEY) || 0); } catch {}
     const backendUntil = budget && budget.cooldownActive === true && Number.isFinite(seconds) && seconds > 0
       ? Date.now() + Math.min(86400, seconds) * 1000
       : 0;
