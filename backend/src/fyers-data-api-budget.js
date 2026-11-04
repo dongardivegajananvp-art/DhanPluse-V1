@@ -9,7 +9,9 @@ export function createFyersDataApiBudget({
   maxRequestsPerMinute = 40,
   minIntervalMs = 1250,
   windowMs = 60_000,
-  cloudflareCooldownMs = 60 * 60_000,
+  // Use a short, single-probe backoff instead of freezing the workstation for an hour.
+  // A 1015 still blocks signals; the next request is only attempted after this pause.
+  cloudflareCooldownMs = 5 * 60_000,
   rateLimitCooldownMs = 60_000,
   // Reuse identical verified OHLC reads for three minutes. Sureshot's candle
   // validators independently reject stale completed bars before any signal.
