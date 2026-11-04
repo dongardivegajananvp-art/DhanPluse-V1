@@ -2840,22 +2840,28 @@ async function fetchLiveQuotes() {
         } catch {}
       }
       if (response.status === 401) {
+        // A Render restart clears the backend's in-memory FYERS access token and
+        // dashboard-session map. Discard the now-invalid browser session instead
+        // of repeatedly polling protected routes and leaving the UI in "Waiting".
+        sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
         latestQuotes = {};
-        setStatus('FYERS LOGIN REQUIRED');
-        setFyersStatus('NOT CONNECTED');
-        setConnection('Not connected', true);
+        quotePollDelay = 30000;
+        setStatus('FYERS RECONNECT REQUIRED');
+        setFyersStatus('SESSION EXPIRED');
+        setConnection('Backend session lost · reconnect FYERS', true);
         document.querySelectorAll('.metrics .metric').forEach((metric, index) => {
           if (index >= 1 && index <= 3) {
             const value = metric.querySelector('strong');
             const detail = metric.querySelector('small');
             if (value) { value.textContent = '—'; value.classList.add('muted'); }
-            if (detail) detail.textContent = 'No authenticated quote available';
+            if (detail) detail.textContent = 'Reconnect FYERS to resume verified quotes';
           }
         });
         const staleUpdate = document.querySelector('#lastUpdate');
         if (staleUpdate) { staleUpdate.textContent = '—'; staleUpdate.classList.add('muted'); }
         updateDynamicPanel();
-        showMessage('FYERS is not authenticated. Open FYERS Settings to connect.', true);
+        showMessage('The backend FYERS session was lost (commonly after a backend restart). Your old browser session is no longer valid. Open FYERS Settings and tap Connect FYERS; live signals stay blocked until fresh exchange-timestamped ticks return.', true);
+        logEvent('Backend FYERS session expired; cleared the invalid browser session and requested a fresh login.', 'warn');
       } else if (response.status === 503) {
         quotePollDelay = 5000;
         markDashboardQuotesBlocked(Object.keys(latestQuotes).length ? 'STALE / LAST KNOWN · LIVE SIGNALS BLOCKED' : 'DATA MISSING · WAITING FOR VERIFIED TICKS');
