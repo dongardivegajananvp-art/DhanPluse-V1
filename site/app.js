@@ -70,6 +70,15 @@ async function syncFyersCooldownFromBackend() {
     const backendUntil = budget && budget.cooldownActive === true && Number.isFinite(seconds) && seconds > 0
       ? Date.now() + Math.min(86400, seconds) * 1000
       : 0;
+    // Preserve a single Sureshot retry for the end of the backend-confirmed
+    // provider cooldown. The scan interval below waits for regular market hours
+    // and for the visible cooldown guard to clear before making one request.
+    if (backendUntil > Date.now()) {
+      window.__dhanPulseSureshotRetryAt = Math.max(
+        Number(window.__dhanPulseSureshotRetryAt) || 0,
+        backendUntil + 2000
+      );
+    }
     // Keep the longer confirmed cooldown across Render restarts/deploys. The
     // backend's in-memory timer resets on restart, but a Cloudflare 1015 block
     // is upstream/IP-level and must not be probed early by the browser.
@@ -1584,13 +1593,18 @@ async function loadSureshotUniverseShortlist() {
     if (status) status.textContent = 'Full-universe scan withheld · ' + (error.message || 'FYERS verification failed.');
   } finally { if (button) button.disabled = false; }
 }
-// If the tab was opened before the exchange session, retry once when regular
-// hours begin. Rate-limit/auth failures do not trigger automatic retry loops.
+// Resume Sureshot once after a backend-confirmed FYERS cooldown expires.
+// A backgrounded mobile tab may pause timers; this interval catches up when it
+// becomes active again. Never poll the provider during the cooldown.
 window.setInterval(() => {
-  if (!sureshotRetryAtNextSession || currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession()) return;
+  if (currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession()) return;
+  const cooldownRetryAt = Number(window.__dhanPulseSureshotRetryAt) || 0;
+  const cooldownRetryDue = cooldownRetryAt > 0 && Date.now() >= cooldownRetryAt;
+  if (!sureshotRetryAtNextSession && !cooldownRetryDue) return;
   const button = document.querySelector('#scanSureshotUniverseBtn');
   if (button && button.disabled) return;
   sureshotRetryAtNextSession = false;
+  if (cooldownRetryDue) window.__dhanPulseSureshotRetryAt = 0;
   void loadSureshotUniverseShortlist();
 }, 15000);
 async function performSureshotSetup() {
