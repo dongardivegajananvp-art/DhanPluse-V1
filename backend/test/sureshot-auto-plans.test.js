@@ -22,6 +22,43 @@ test("requires completed candles and blocks neutral/stale direction", () => {
   assert.equal(stale.ok, false);
 });
 
+test("blocks a contract whose exchange, side, symbol suffix or strike does not match", () => {
+  const direction = { ok: true, side: "CE", spot: 104, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
+  const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now - 1000) / 1000) };
+  const options = Array.from({ length: 14 }, (_, i) => [Math.floor((now - (14 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
+  options[13][3] = 15;
+  const base = { symbol: "NSE:ABC26NOV100CE", strike: 100, side: "CE", expiry: "1795651200" };
+  for (const contract of [
+    { ...base, side: "PE" },
+    { ...base, symbol: "BSE:ABC26NOV100CE" },
+    { ...base, symbol: "NSE:ABC26NOV100PE" },
+    { ...base, strike: 0 },
+    { ...base, expiry: "" }
+  ]) {
+    const result = buildVerifiedSureshotTradePlan({
+      underlyingSymbol: "NSE:ABC-EQ", direction, contract, quote, optionCandles: options, now
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /contract identity/i);
+  }
+});
+
+test("blocks future-dated option quotes and invalid spread thresholds", () => {
+  const direction = { ok: true, side: "CE", spot: 104, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
+  const contract = { symbol: "NSE:ABC26NOV100CE", strike: 100, side: "CE", expiry: "1795651200" };
+  const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now + 1000) / 1000) };
+  const options = Array.from({ length: 14 }, (_, i) => [Math.floor((now - (14 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
+  options[13][3] = 15;
+  assert.equal(buildVerifiedSureshotTradePlan({
+    underlyingSymbol: "NSE:ABC-EQ", direction, contract, quote, optionCandles: options, now
+  }).ok, false);
+  assert.equal(buildVerifiedSureshotTradePlan({
+    underlyingSymbol: "NSE:ABC-EQ", direction, contract,
+    quote: { ...quote, tt: Math.floor((now - 1000) / 1000) },
+    optionCandles: options, now, maxSpreadPct: 0
+  }).ok, false);
+});
+
 test("selects nearest strike only on matching exchange, side and nearest expiry", () => {
   const discovery = {
     expiryData: [
