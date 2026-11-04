@@ -1386,7 +1386,13 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         const discovery = normalizeOptionContractDiscovery(chainResult?.data);
         const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now() });
         if (!selected.ok) { batchResults.push({ ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason }); continue; }
-        const contract = selected.contract;
+        const contractSizing = await getFyersOptionContractMetadata(selected.contract.symbol);
+        if (!contractSizing) {
+          batchResults.push({ ...base, status: "NO TRADE", direction: direction.side, contract: selected.contract,
+            reason: "Official FYERS lot size or tick size is unavailable for the selected option contract." });
+          continue;
+        }
+        const contract = { ...selected.contract, lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize };
         scanStage = "VERIFY_OPTION_QUOTE";
         const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes"); quoteUrl.searchParams.set("symbols", contract.symbol);
         const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: "sureshot" });
@@ -1402,7 +1408,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot" });
         scanStage = "BUILD_RISK_PLAN";
         const plan = buildVerifiedSureshotTradePlan({ underlyingSymbol: candidate.symbol, direction, contract, quote,
-          optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5", now: Date.now() });
+          optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5", lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, now: Date.now() });
         batchResults.push(plan.ok ? { ...base, status: "VERIFIED SETUP", plan } :
           { ...base, status: "NO TRADE", direction: direction.side, contract, reason: plan.reason });
       } catch (error) {
