@@ -182,6 +182,7 @@ function startMarketDataStream(token) {
       streamConnected = true;
       streamError = '';
       marketSocketConnectedAt = Date.now();
+      lastAnyMarketTickAt = 0;
       marketReconnectAttempt = 0;
       if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
       marketReconnectTimer = null;
