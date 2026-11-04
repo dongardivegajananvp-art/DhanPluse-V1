@@ -22,7 +22,7 @@ export function buildVerifiedSureshotShortlist({
   indexTicks,
   now = Date.now(),
   maxEquityQuoteAgeMs = 30_000,
-  maxIndexTickAgeMs = 15_000,
+  maxIndexTickAgeMs = 30_000,
   limit = 5
 }) {
   if (!Number.isFinite(now) || !Number.isInteger(limit) || limit < 1 || limit > 250) {
