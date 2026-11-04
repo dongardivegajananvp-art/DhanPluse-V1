@@ -196,6 +196,63 @@ let sureshotRefreshPending = false;
 let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
 let latestQuotes = {};
+
+const LAST_KNOWN_INDEX_CACHE_KEY = 'dhanpulse-fyers-last-known-index-v1';
+
+function saveLastKnownIndexQuotes() {
+  try {
+    const previous = JSON.parse(localStorage.getItem(LAST_KNOWN_INDEX_CACHE_KEY) || '{}');
+    const cache = previous && typeof previous === 'object' ? previous : {};
+    SYMBOLS.forEach(item => {
+      const quote = latestQuotes[item.symbol];
+      if (!quote || !Number.isFinite(quote.price) || quote.price <= 0 ||
+          !Number.isFinite(quote.receivedAt) || quote.receivedAt <= 0 ||
+          quote.receivedAt > Date.now() + 60000 ||
+          !['websocket', 'websocket-recent', 'last-known'].includes(quote.source)) return;
+      const old = cache[item.symbol];
+      if (!old || Number(old.receivedAt) <= quote.receivedAt) {
+        cache[item.symbol] = {
+          price: quote.price,
+          change: Number.isFinite(quote.change) ? quote.change : null,
+          changePct: Number.isFinite(quote.changePct) ? quote.changePct : null,
+          receivedAt: quote.receivedAt,
+          source: 'FYERS'
+        };
+      }
+    });
+    localStorage.setItem(LAST_KNOWN_INDEX_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Storage may be disabled; live quote display must continue to work.
+  }
+}
+
+function restoreLastKnownIndexQuotes() {
+  try {
+    const cache = JSON.parse(localStorage.getItem(LAST_KNOWN_INDEX_CACHE_KEY) || '{}');
+    if (!cache || typeof cache !== 'object') return false;
+    const rows = SYMBOLS.flatMap(item => {
+      const row = cache[item.symbol];
+      const timestamp = Number(row && row.receivedAt);
+      const price = Number(row && row.price);
+      if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(timestamp) ||
+          timestamp <= 0 || timestamp > Date.now() + 60000) return [];
+      return [{ n: item.symbol, v: {
+        lp: price, tt: Math.floor(timestamp / 1000),
+        ...(Number.isFinite(Number(row.change)) ? { ch: Number(row.change) } : {}),
+        ...(Number.isFinite(Number(row.changePct)) ? { chp: Number(row.changePct) } : {})
+      }}];
+    });
+    if (!rows.length) return false;
+    const restored = updateQuoteCards(rows, null, 'last-known', false);
+    if (restored) {
+      setStatus(isRegularMarketSession() ? 'LIVE DATA UNAVAILABLE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
+      showMessage('Showing the last verified FYERS index prices saved on this device. Exchange timestamps are preserved; this display is not live and signals remain blocked.');
+    }
+    return restored;
+  } catch {
+    return false;
+  }
+}
 let historyBySymbol = {};
 // The historical OHLC baseline is kept separate from the currently forming candle.
 let dashboardCandleState = null;
@@ -2421,6 +2478,7 @@ function bindTabActions() {
 }
 
 function markDashboardQuotesBlocked(message) {
+  if (source !== 'last-known') saveLastKnownIndexQuotes();
   const metrics = document.querySelectorAll('.metrics .metric');
   SYMBOLS.forEach((item, index) => {
     const metric = metrics[index + 1];
@@ -2462,6 +2520,7 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   SYMBOLS.forEach(item => {
     const next = map[item.symbol];
     if (!next) return; // Missing symbols stay unavailable; they must not hide other verified quotes.
+    // Persist only timestamped FYERS-origin quotes; browser cache is display-only.
     const old = latestQuotes[item.symbol];
     latestQuotes[item.symbol] = next;
     const history = historyBySymbol[item.symbol];
@@ -2504,6 +2563,9 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   if (source === 'last-known') {
     setStatus(isRegularMarketSession() ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
     setConnection('Last-known FYERS prices · fresh ticks unavailable', true);
+  } else if (source === 'last-known' && isRegularMarketSession()) {
+    setStatus('LIVE DATA STALE · LAST KNOWN');
+    setConnection('Saved FYERS last-known prices · display only', true);
   } else if (!isRegularMarketSession()) {
     setStatus('MARKET CLOSED · LAST KNOWN LTP');
     setConnection('FYERS last-known quotes · market closed', true);
@@ -3004,6 +3066,7 @@ document.querySelector('#settingsBtn')?.addEventListener('click', () => render('
 
 try { localStorage.removeItem('dhanpulse-watchlist-v1'); localStorage.removeItem('dhanpulse-price-alerts'); localStorage.removeItem('dhanpulse-trade-journal-v1'); } catch {}
 render('Sureshot CE/PE');
+restoreLastKnownIndexQuotes();
 testBackend();
 exchangeAuthCode();
 logEvent('DhanPulse console initialised.', 'info');
