@@ -1,5 +1,5 @@
-const CACHE_NAME = 'dhanpulse-shell-v112-sureshot-reconnect';
-const SHELL = ['./', './index.html', './style.css?v=20261104-sureshot-only-v1', './app.js?v=20261104-sureshot-reconnect-v1', './manifest.webmanifest', './dhanpulse-icon.svg'];
+const CACHE_NAME = 'dhanpulse-shell-v113-sureshot-reconnect-visible';
+const SHELL = ['./', './index.html', './style.css?v=20261104-sureshot-only-v1', './app.js?v=20261104-sureshot-reconnect-v2', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
