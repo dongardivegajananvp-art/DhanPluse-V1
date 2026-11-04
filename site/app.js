@@ -155,6 +155,24 @@ window.fetch = function(input, init = {}) {
     if (session) headers.set('Authorization', 'Bearer ' + session);
   }
   return nativeFetch(input, { ...init, headers }).then(response => {
+    if (isBackend && response.status === 401 && !publicPaths.includes(pathname)) {
+      const hadSession = !!sessionStorage.getItem('dhanpulse-dashboard-session-v1');
+      if (hadSession) {
+        sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
+        setFyersStatus('RECONNECT REQUIRED');
+        setConnection('FYERS session expired · reconnect required', true);
+        const setupStatus = document.querySelector('#setupStatus');
+        if (setupStatus) setupStatus.textContent = 'FYERS session expired. Reconnect FYERS before requesting a new verified setup.';
+        const reconnectNotice = document.querySelector('#fyersReconnectNotice');
+        if (!reconnectNotice && featureContent) {
+          const notice = document.createElement('p');
+          notice.id = 'fyersReconnectNotice';
+          notice.className = 'hint';
+          notice.textContent = 'FYERS session expired. Open FYERS Connection and reconnect to restore verified market data.';
+          featureContent.prepend(notice);
+        }
+      }
+    }
     if (isBackend && response.status === 429 &&
         response.headers.get('X-DhanPulse-Cooldown-Guard') !== 'local') {
       response.clone().json().then(payload => activateFyersCooldown(payload, response))
