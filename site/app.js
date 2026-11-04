@@ -182,6 +182,7 @@ const featureContent = document.querySelector('#featureContent');
 
 let quoteTimer = null;
 let quotePollDelay = QUOTE_POLL_MS;
+let quotePollingPausedForRateLimit = false;
 let quoteRequestRunning = false;
 let dashboardCandleRequestRunning = false;
 let backendHealthState = 'CHECKING';
@@ -2248,7 +2249,7 @@ function render(tab) {
       else if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(currentTab)) loadAdvancedScanner();
       else if (currentTab === 'Gainers & Losers') loadMovers();
       else if (currentTab === 'Option Chain') loadOptionChain();
-      else fetchLiveQuotes();
+      else fetchLiveQuotes(true);
     });
   }
   if (tab === 'Dashboard') { featureContent.innerHTML = dashboardMarkup(); loadFnoChartUniverse(); }
@@ -2797,15 +2798,23 @@ async function startFyersLogin() {
   }
 }
 
-async function fetchLiveQuotes() {
-  if (quoteRequestRunning) return;
+async function fetchLiveQuotes(force = false) {
+  if (force) {
+    quotePollingPausedForRateLimit = false;
+    if (quoteTimer) window.clearTimeout(quoteTimer);
+    quoteTimer = null;
+  }
+  if (quotePollingPausedForRateLimit || quoteRequestRunning) return;
   quoteRequestRunning = true;
   try {
     const response = await fetch(BACKEND_URL + '/api/market/quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
     if (response.status === 429) {
-      const retrySeconds = Number(data.retryAfterSeconds) || 30;
-      quotePollDelay = Math.min(Math.max((retrySeconds + 2) * 1000, 15000), QUOTE_POLL_MAX_MS);
+      // Do not schedule another REST probe when the provider has rate-limited us.
+      // Automatic retries were re-triggering Cloudflare 1015 as soon as the local
+      // five-minute backoff expired, making the cooldown appear endless.
+      quotePollingPausedForRateLimit = true;
+      quotePollDelay = QUOTE_POLL_MAX_MS;
       markDashboardQuotesBlocked('FYERS RATE LIMIT · LIVE SIGNALS BLOCKED');
       setStatus('FYERS RATE LIMIT — WAITING');
       setConnection('Checking FYERS WebSocket separately from REST cooldown…', true);
@@ -2889,7 +2898,7 @@ async function fetchLiveQuotes() {
   } finally {
     quoteRequestRunning = false;
     if (quoteTimer) window.clearTimeout(quoteTimer);
-    quoteTimer = window.setTimeout(fetchLiveQuotes, quotePollDelay);
+    quoteTimer = quotePollingPausedForRateLimit ? null : window.setTimeout(fetchLiveQuotes, quotePollDelay);
   }
 }
 
@@ -2925,7 +2934,7 @@ async function exchangeAuthCode() {
     setBackendStatus('ONLINE');
     logEvent('FYERS authentication succeeded; checking live quotes.', 'info');
     showMessage('FYERS authentication succeeded. Verifying live quotes…');
-    await fetchLiveQuotes();
+    await fetchLiveQuotes(true);
   } catch (error) {
     setStatus('FYERS AUTH FAILED');
     setFyersStatus('AUTH FAILED');
