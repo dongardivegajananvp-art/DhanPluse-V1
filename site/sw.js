@@ -1,5 +1,5 @@
-const CACHE_NAME = 'dhanpulse-shell-v119-last-known-ltp-v1';
-const SHELL = ['./', './index.html', './style.css?v=20261104-sureshot-only-v1', './app.js?v=20261104-last-known-ltp-v1', './manifest.webmanifest', './dhanpulse-icon.svg'];
+const CACHE_NAME = 'dhanpulse-shell-v120-sureshot-live-auto-v1';
+const SHELL = ['./', './index.html', './style.css?v=20261104-sureshot-only-v1', './app.js?v=20261104-sureshot-live-auto-v1', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
