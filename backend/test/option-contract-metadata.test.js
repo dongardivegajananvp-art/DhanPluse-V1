@@ -22,3 +22,13 @@ test("rejects unknown, inactive, malformed and incomplete contract master rows",
   assert.equal(getVerifiedOptionContractMetadata("NSE:RELIANCE2611262500PE", master), null);
   assert.equal(getVerifiedOptionContractMetadata("BSE:RELIANCE2611262500CE", master), null);
 });
+
+test("resolves BSE SENSEX option sizing from the BSE_FO master", () => {
+  const bseSymbol = "BSE:SENSEX26112682000CE";
+  const bseMaster = {
+    [bseSymbol]: { tradeStatus: "1", optType: "CE", strikePrice: 82000, expiryDate: "1795651200", minLotSize: 20, tickSize: 0.05 }
+  };
+  assert.deepEqual(getVerifiedOptionContractMetadata(bseSymbol, bseMaster), {
+    symbol: bseSymbol, side: "CE", strike: 82000, expiryDate: "1795651200", lotSize: 20, tickSize: 0.05
+  });
+});
