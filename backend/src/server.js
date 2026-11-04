@@ -1015,14 +1015,21 @@ async function getFyersOptionContractMetadata(symbol) {
   }
   if (!optionContractMasterPromise) {
     optionContractMasterPromise = (async () => {
-      const response = await fetchWithFyersBudget("https://public.fyers.in/sym_details/NSE_FO_sym_master.json", {
-        signal: AbortSignal.timeout(45000)
-      });
-      if (!response.ok) throw new Error("FYERS NSE_FO symbol master unavailable; lot-size risk is blocked.");
-      const master = await response.json();
-      if (!master || typeof master !== "object" || Array.isArray(master)) {
+      const [nseResponse, bseResponse] = await Promise.all([
+        fetchWithFyersBudget("https://public.fyers.in/sym_details/NSE_FO_sym_master.json", { signal: AbortSignal.timeout(45000) }),
+        fetchWithFyersBudget("https://public.fyers.in/sym_details/BSE_FO_sym_master.json", { signal: AbortSignal.timeout(45000) }).catch(() => null)
+      ]);
+      if (!nseResponse.ok) throw new Error("FYERS NSE_FO symbol master unavailable; lot-size risk is blocked.");
+      const nseMaster = await nseResponse.json();
+      if (!nseMaster || typeof nseMaster !== "object" || Array.isArray(nseMaster)) {
         throw new Error("FYERS NSE_FO symbol master format is invalid; lot-size risk is blocked.");
       }
+      let bseMaster = {};
+      if (bseResponse?.ok) {
+        const candidate = await bseResponse.json().catch(() => null);
+        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) bseMaster = candidate;
+      }
+      const master = { ...nseMaster, ...bseMaster };
       optionContractMasterCache = { fetchedAt: Date.now(), data: master };
       return master;
     })();
