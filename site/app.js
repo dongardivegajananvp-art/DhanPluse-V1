@@ -105,6 +105,17 @@ window.setInterval(renderFyersCooldown, 1000);
 // Reconcile any legacy browser-stored timer with the backend's authoritative budget on app startup.
 void syncFyersCooldownFromBackend();
 
+// Suppress only FYERS Data-API-backed REST routes while a confirmed provider
+// cooldown is active. WebSocket ticks, cached last-known data, symbol masters,
+// auth/status, and NSE institutional-flow reads remain available.
+const FYERS_DATA_API_PATHS = new Set([
+  '/api/market/quotes',
+  '/api/market/stock-quotes',
+  '/api/market/candles',
+  '/api/market/movers',
+  '/api/market/sureshot-shortlist',
+  '/api/market/sureshot-auto-plans'
+]);
 window.fetch = function(input, init = {}) {
   let url = '';
   try { url = new URL(typeof input === 'string' ? input : input.url, window.location.href).href; } catch {}
@@ -112,6 +123,26 @@ window.fetch = function(input, init = {}) {
   const isBackend = url.startsWith(BACKEND_URL + '/');
   const publicPaths = ['/health', '/api/status', '/api/fyers/auth/start', '/api/fyers/auth/exchange'];
   const pathname = isBackend ? new URL(url).pathname : '';
+  if (isBackend && FYERS_DATA_API_PATHS.has(pathname)) {
+    const retryAfterSeconds = getFyersCooldownRemaining();
+    if (retryAfterSeconds > 0) {
+      return Promise.resolve(new Response(JSON.stringify({
+        ok: false,
+        signalsAllowed: false,
+        scanComplete: false,
+        error: 'FYERS Data API cooldown active; request suppressed locally.',
+        retryAfterSeconds,
+        partialQuotesDiscarded: true
+      }), {
+        status: 429,
+        headers: {
+          'Content-Type': 'application/json',
+          'Retry-After': String(retryAfterSeconds),
+          'X-DhanPulse-Cooldown-Guard': 'local'
+        }
+      }));
+    }
+  }
   // Never initiate OAuth from an isolated preview until its redirect URI is
   // independently verified. This prevents a test page from sending auth flow
   // to a production-configured callback by mistake.
@@ -123,7 +154,8 @@ window.fetch = function(input, init = {}) {
     if (session) headers.set('Authorization', 'Bearer ' + session);
   }
   return nativeFetch(input, { ...init, headers }).then(response => {
-    if (isBackend && response.status === 429) {
+    if (isBackend && response.status === 429 &&
+        response.headers.get('X-DhanPulse-Cooldown-Guard') !== 'local') {
       response.clone().json().then(payload => activateFyersCooldown(payload, response))
         .catch(() => activateFyersCooldown({}, response));
     }
