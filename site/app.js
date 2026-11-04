@@ -2478,7 +2478,6 @@ function bindTabActions() {
 }
 
 function markDashboardQuotesBlocked(message) {
-  if (source !== 'last-known') saveLastKnownIndexQuotes();
   const metrics = document.querySelectorAll('.metrics .metric');
   SYMBOLS.forEach((item, index) => {
     const metric = metrics[index + 1];
@@ -2563,9 +2562,6 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   if (source === 'last-known') {
     setStatus(isRegularMarketSession() ? 'LIVE DATA STALE · LAST KNOWN' : 'MARKET CLOSED · LAST KNOWN LTP');
     setConnection('Last-known FYERS prices · fresh ticks unavailable', true);
-  } else if (source === 'last-known' && isRegularMarketSession()) {
-    setStatus('LIVE DATA STALE · LAST KNOWN');
-    setConnection('Saved FYERS last-known prices · display only', true);
   } else if (!isRegularMarketSession()) {
     setStatus('MARKET CLOSED · LAST KNOWN LTP');
     setConnection('FYERS last-known quotes · market closed', true);
@@ -2589,6 +2585,7 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
     lastUpdate.textContent = fetchedAt && Number.isFinite(Date.parse(fetchedAt)) ? new Date(fetchedAt).toLocaleTimeString('en-IN') : new Date().toLocaleTimeString('en-IN');
     lastUpdate.classList.remove('muted');
   }
+  if (source !== 'last-known') saveLastKnownIndexQuotes();
   // Avoid flooding the console log on every 1.5-second refresh.
   updateDynamicPanel();
   updateDashboardLiveCandle();
