@@ -111,9 +111,12 @@ test("blocks stale option quotes and only accepts a fresh >=1:2 risk plan", () =
   const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now - 1000) / 1000) };
   const options = Array.from({ length: 14 }, (_, i) => [Math.floor((now - (14 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
   options[13][3] = 15;
-  const result = buildVerifiedSureshotTradePlan({ underlyingSymbol: "NSE:ABC-EQ", direction, contract, quote, optionCandles: options, now });
+  const result = buildVerifiedSureshotTradePlan({ underlyingSymbol: "NSE:ABC-EQ", direction, contract, quote, optionCandles: options, lotSize: 25, tickSize: 0.05, now });
   assert.equal(result.ok, true);
   assert.ok(result.risk.rr >= 2);
-  const stale = buildVerifiedSureshotTradePlan({ underlyingSymbol: "NSE:ABC-EQ", direction, contract, quote: { ...quote, tt: Math.floor((now - 16000) / 1000) }, optionCandles: options, now });
+  assert.equal(result.risk.lotSize, 25);
+  assert.equal(result.risk.quantity, 25);
+  assert.equal(result.risk.riskPerLot, result.risk.riskPerUnit * 25);
+  const stale = buildVerifiedSureshotTradePlan({ underlyingSymbol: "NSE:ABC-EQ", direction, contract, quote: { ...quote, tt: Math.floor((now - 16000) / 1000) }, optionCandles: options, lotSize: 25, tickSize: 0.05, now });
   assert.equal(stale.ok, false);
 });
