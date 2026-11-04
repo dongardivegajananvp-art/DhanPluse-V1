@@ -39,8 +39,8 @@ jobs:
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
           grep -q "UI build 2026-11-02" dist/site/index.html
-          grep -q "dhanpulse-shell-v106-sureshot-next-open-retry" dist/site/sw.js
-          grep -q "app.js?v=20261104-sureshot-focused-cooldown-v1" dist/site/index.html
+          grep -q "dhanpulse-shell-v108-sureshot-only" dist/site/sw.js
+          grep -q "app.js?v=20261104-sureshot-only-v1" dist/site/index.html
       - name: Upload static site
         uses: actions/upload-pages-artifact@v3
         with:
