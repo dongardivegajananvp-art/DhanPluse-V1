@@ -132,7 +132,7 @@ function parseTick(raw) {
 }
 
 function scheduleMarketSocketFallback(socket, reason = 'socket interruption') {
-  if (!socket || marketReconnectTimer || !accessToken) return;
+  if (!socket || marketReconnectTimer || !accessToken || streamConnected) return;
   const delay = MARKET_SOCKET_RECONNECT_FALLBACK_MS;
   marketReconnectTimer = setTimeout(() => {
     marketReconnectTimer = null;
