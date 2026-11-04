@@ -219,8 +219,12 @@ function startMarketDataStream(token) {
         }));
       } catch (error) {
         streamConnected = false;
-        streamError = 'Could not subscribe to FYERS index symbols.';
+        streamError = 'Could not subscribe to FYERS index symbols; controlled recovery is pending.';
         console.error('FYERS market socket subscription failed:', String(error?.message || error).slice(0, 240));
+        // A successful WebSocket handshake is not enough: if restoring the
+        // baseline/chart subscriptions fails, retry through the same single
+        // market-hours controller instead of remaining connected-but-empty.
+        scheduleMarketSocketFallback(socket, 'subscription restoration failed');
       }
     });
     socket.on('message', message => {
@@ -300,8 +304,11 @@ function startMarketDataStream(token) {
     socket.connect();
   } catch (error) {
     streamConnected = false;
-    streamError = 'Could not start the FYERS market data socket.';
+    streamError = 'Could not start the FYERS market data socket; controlled recovery is pending.';
     console.error('FYERS market socket startup failed:', String(error?.message || error).slice(0, 240));
+    // Cover synchronous SDK startup/connect failures as well as emitted close
+    // and error events; the retry helper prevents duplicate timers.
+    if (marketSocket) scheduleMarketSocketFallback(marketSocket, 'socket startup failed');
   }
 }
 
