@@ -1159,10 +1159,11 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
   }
 });
 
-// Rank the complete FYERS F&O universe, but verify option plans only for the top 10 movers.
-// A 250-candidate option-chain/quote/history crawl can consume hundreds of REST calls
-// and trigger Cloudflare 1015 before a usable setup is found.
-const SURESHOT_UNIVERSE_SCAN_LIMIT = 10;
+// Rank the complete FYERS F&O universe, but verify option plans only for the top 5 movers.
+// Each candidate can require four Data API reads (underlying candles, option chain,
+// live option quote, option candles). Five candidates bound the scan to ~20 reads
+// plus the shared F&O snapshot, leaving headroom under the rolling API budget.
+const SURESHOT_UNIVERSE_SCAN_LIMIT = 5;
 const SURESHOT_BATCH_SIZE = 5;
 const SURESHOT_SCAN_TTL_MS = 30 * 60 * 1000;
 let sureshotAutoPlansInFlight = false;
@@ -1289,7 +1290,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       rankedCandidateCount: state.rankedCandidateCount, scannedCandidateCount: results.length,
       verifiedSetupCount: verified.length, bestSetup: verified[0] || null, results,
       notice: universeComplete
-        ? "The complete FYERS NSE F&O universe was ranked from a verified quote snapshot; option-plan verification was limited to the top 10 ranked candidates plus individually fresh NIFTY/BANKNIFTY/SENSEX ticks. Fresh option quotes and completed OHLC candles only; no orders are placed."
+        ? "The complete FYERS NSE F&O universe was ranked from a verified quote snapshot; option-plan verification was limited to the top 5 ranked candidates plus individually fresh NIFTY/BANKNIFTY/SENSEX ticks. Fresh option quotes and completed OHLC candles only; no orders are placed."
         : "A fully verified setup was found in ranked order; scan stopped early to avoid unnecessary API calls. Remaining lower-ranked candidates were not checked. Fresh option quotes and completed OHLC candles only; no orders are placed." };
     sureshotScanState = null;
     return res.json(payload);
