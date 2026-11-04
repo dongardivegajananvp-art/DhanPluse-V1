@@ -72,10 +72,11 @@ async function syncFyersCooldownFromBackend() {
     // provider cooldown. The scan interval below waits for regular market hours
     // and for the visible cooldown guard to clear before making one request.
     if (backendUntil > Date.now()) {
-      window.__dhanPulseSureshotRetryAt = Math.max(
-        Number(window.__dhanPulseSureshotRetryAt) || 0,
-        backendUntil + 2000
-      );
+      window.__dhanPulseSureshotRetryAt = backendUntil + 2000;
+    } else {
+      // A restarted backend has cleared its in-memory budget; discard any
+      // obsolete browser retry deadline and allow one controlled fresh probe.
+      window.__dhanPulseSureshotRetryAt = 0;
     }
     // The backend is the source of truth after a deploy/restart. Do not let an
     // obsolete browser-persisted 60-minute timer outlive the current backend
