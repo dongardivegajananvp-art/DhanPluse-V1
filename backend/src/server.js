@@ -1118,21 +1118,8 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
     }
     const indexSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"];
     const indexTicks = new Map(indexSymbols.map(symbol => [symbol, latestTicks.get(symbol)]));
-    // Check index ticks before spending up to five FYERS equity-quote requests.
-    for (const symbol of indexSymbols) {
-      const tick = indexTicks.get(symbol);
-      const age = tick ? Date.now() - Date.parse(tick.updatedAt) : Infinity;
-      if (!tick || !Number.isFinite(age) || age < -5000 || age > 15000 ||
-          !Number.isFinite(Number(tick.ltp)) || Number(tick.ltp) <= 0 ||
-          !Number.isFinite(Number(tick.chp))) {
-        return res.status(409).json({
-          ok: false, signalsAllowed: false,
-          error: "Fresh exchange-timestamped NIFTY, BANKNIFTY and SENSEX ticks are all required; scan blocked.",
-          missingOrStaleIndex: symbol
-        });
-      }
-    }
-
+    // Index ticks are optional shortlist candidates. A missing/stale index must
+    // not block a complete, independently verified NSE F&O equity scan.
     let snapshot = stockQuoteCache.data &&
       Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS
       ? stockQuoteCache.data : null;
