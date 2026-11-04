@@ -145,6 +145,7 @@ function startMarketDataStream(token) {
     }
     const socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
     marketSocket = socket;
+    let initialSocketSubscriptionSent = false;
     socket.on('connect', () => {
       if (marketSocket !== socket) return;
       streamConnected = true;
@@ -152,14 +153,19 @@ function startMarketDataStream(token) {
       marketReconnectAttempt = 0;
       if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
       marketReconnectTimer = null;
-      console.log('FYERS market socket connected; subscribing to baseline indices and selected chart symbol.');
-      try {
-        socket.mode(socket.FullMode);
-        socket.subscribe([...allowedSymbols, ...(chartStreamSymbol && !allowedSymbols.includes(chartStreamSymbol) ? [chartStreamSymbol] : [])]);
-        console.log('FYERS market socket subscription request sent.');
-      } catch (error) {
-        streamError = 'Could not subscribe to FYERS index symbols.';
-        console.error('FYERS market socket subscription failed:', String(error?.message || error).slice(0, 240));
+      if (!initialSocketSubscriptionSent) {
+        console.log('FYERS market socket connected; sending initial baseline subscription.');
+        try {
+          socket.mode(socket.FullMode);
+          socket.subscribe([...allowedSymbols, ...(chartStreamSymbol && !allowedSymbols.includes(chartStreamSymbol) ? [chartStreamSymbol] : [])]);
+          initialSocketSubscriptionSent = true;
+          console.log('FYERS initial market socket subscription request sent.');
+        } catch (error) {
+          streamError = 'Could not subscribe to FYERS index symbols.';
+          console.error('FYERS market socket subscription failed:', String(error?.message || error).slice(0, 240));
+        }
+      } else {
+        console.log('FYERS market socket reconnected; retaining SDK-managed subscriptions.');
       }
     });
     socket.on('message', message => {
@@ -215,27 +221,12 @@ function startMarketDataStream(token) {
       if (marketSocket !== socket) return;
       streamConnected = false;
       const safeReason = reason == null ? '' : String(reason).slice(0, 160);
-      console.warn('FYERS market socket closed:', JSON.stringify({ code: code ?? null, reason: safeReason || null }));
-      if (marketReconnectTimer || accessToken !== token) return;
-      marketReconnectAttempt += 1;
-      const retryDelayMs = MARKET_SOCKET_RECONNECT_FALLBACK_MS;
-      streamError = 'FYERS market socket disconnected; controlled reconnect is pending.';
-      console.warn('FYERS socket reconnect fallback scheduled:', JSON.stringify({
-        attempt: marketReconnectAttempt, retryDelayMs
+      streamError = 'FYERS market socket disconnected; SDK auto-reconnect is active.';
+      console.warn('FYERS market socket closed:', JSON.stringify({
+        code: code ?? null,
+        reason: safeReason || null,
+        sdkAutoReconnect: true
       }));
-      marketReconnectTimer = setTimeout(() => {
-        marketReconnectTimer = null;
-        if (marketSocket !== socket || accessToken !== token || streamConnected) return;
-        try {
-          if (typeof socket.isConnected === 'function' && socket.isConnected()) return;
-          console.warn('FYERS socket reconnect fallback executing:', JSON.stringify({ attempt: marketReconnectAttempt }));
-          socket.connect();
-        } catch (error) {
-          streamError = 'FYERS market socket reconnect attempt failed.';
-          console.error('FYERS socket reconnect fallback failed:', String(error?.message || error).slice(0, 200));
-        }
-      }, retryDelayMs);
-      if (typeof marketReconnectTimer.unref === 'function') marketReconnectTimer.unref();
     });
     if (typeof socket.autoreconnect === 'function') socket.autoreconnect(50);
     socket.connect();
