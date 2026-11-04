@@ -2343,8 +2343,10 @@ function bindTabActions() {
     deferredInstallPrompt = null;
     showMessage('If installation was accepted, DhanPulse is available from your device app launcher.');
   });
-  const sureshotFyersConnectBtn=document.querySelector('#sureshotFyersConnectBtn');
-  if(sureshotFyersConnectBtn) sureshotFyersConnectBtn.addEventListener('click',startFyersLogin);
+  document.addEventListener('click', event => {
+    const connectButton = event.target instanceof Element ? event.target.closest('#sureshotFyersConnectBtn') : null;
+    if (connectButton) { event.preventDefault(); startFyersLogin(); }
+  });
   const setupRefresh=document.querySelector('#refreshSetupBtn');
   if(currentTab==='Sureshot CE/PE') loadSureshotStockUniverse();
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
