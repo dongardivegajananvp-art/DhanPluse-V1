@@ -145,7 +145,7 @@ function startMarketDataStream(token) {
     }
     const socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
     marketSocket = socket;
-    let initialSocketSubscriptionSent = false;
+    let socketConnectCount = 0;
     socket.on('connect', () => {
       if (marketSocket !== socket) return;
       streamConnected = true;
@@ -153,19 +153,24 @@ function startMarketDataStream(token) {
       marketReconnectAttempt = 0;
       if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
       marketReconnectTimer = null;
-      if (!initialSocketSubscriptionSent) {
-        console.log('FYERS market socket connected; sending initial baseline subscription.');
-        try {
-          socket.mode(socket.FullMode);
-          socket.subscribe([...allowedSymbols, ...(chartStreamSymbol && !allowedSymbols.includes(chartStreamSymbol) ? [chartStreamSymbol] : [])]);
-          initialSocketSubscriptionSent = true;
-          console.log('FYERS initial market socket subscription request sent.');
-        } catch (error) {
-          streamError = 'Could not subscribe to FYERS index symbols.';
-          console.error('FYERS market socket subscription failed:', String(error?.message || error).slice(0, 240));
-        }
-      } else {
-        console.log('FYERS market socket reconnected; retaining SDK-managed subscriptions.');
+      socketConnectCount += 1;
+      console.log('FYERS market socket connected; restoring baseline subscription.', JSON.stringify({
+        connectionNumber: socketConnectCount,
+        reconnect: socketConnectCount > 1
+      }));
+      try {
+        // Re-apply mode and subscriptions on every connect event. A TCP/WebSocket
+        // reconnect does not guarantee that the provider retained subscriptions.
+        socket.mode(socket.FullMode);
+        socket.subscribe([...allowedSymbols, ...(chartStreamSymbol && !allowedSymbols.includes(chartStreamSymbol) ? [chartStreamSymbol] : [])]);
+        console.log('FYERS baseline market socket subscription request sent.', JSON.stringify({
+          connectionNumber: socketConnectCount,
+          symbols: [...allowedSymbols, ...(chartStreamSymbol && !allowedSymbols.includes(chartStreamSymbol) ? [chartStreamSymbol] : [])]
+        }));
+      } catch (error) {
+        streamConnected = false;
+        streamError = 'Could not subscribe to FYERS index symbols.';
+        console.error('FYERS market socket subscription failed:', String(error?.message || error).slice(0, 240));
       }
     });
     socket.on('message', message => {
@@ -192,10 +197,17 @@ function startMarketDataStream(token) {
         const summary = frames.filter(x => x && typeof x === 'object' && allowedSymbols.includes(x.symbol || x.n))
           .filter(x => shouldLogSocketDiagnostic(lastTickDiagnosticAt, x.symbol || x.n))
           .slice(0, 5)
-          .map(x => ({
-            symbol: x.symbol || x.n,
-            exchangeTimestampPresent: Boolean(epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt ?? x.v?.exch_feed_time ?? x.v?.last_traded_time ?? x.v?.ltt ?? x.v?.tt))
-          }));
+          .map(x => {
+            const exchangeTime = epochSeconds(x.exch_feed_time ?? x.last_traded_time ?? x.ltt ?? x.tt ?? x.v?.exch_feed_time ?? x.v?.last_traded_time ?? x.v?.ltt ?? x.v?.tt);
+            const ageSeconds = exchangeTime ? Number(((Date.now() / 1000) - exchangeTime).toFixed(1)) : null;
+            return {
+              symbol: x.symbol || x.n,
+              exchangeTimestampPresent: Boolean(exchangeTime),
+              exchangeTimestamp: exchangeTime ? new Date(exchangeTime * 1000).toISOString() : null,
+              exchangeAgeSeconds: ageSeconds,
+              freshness: ageSeconds === null || ageSeconds < 0 ? 'TIME_UNVERIFIED' : ageSeconds <= 30 ? 'FRESH' : 'STALE'
+            };
+          });
         if (summary.length) {
           console.log('FYERS verified index tick accepted:', JSON.stringify({ acceptedCount, ticks: summary }));
         }
@@ -302,6 +314,18 @@ app.get('/api/status', (_req, res) => {
     liveData: streamConnected && snapshot ? 'streaming' : 'waiting-for-live-ticks',
     marketSocketConnected: streamConnected, authenticatedAt,
     lastTickAt: snapshot?.fetchedAt || null,
+    indexTickStatus: allowedSymbols.map(symbol => {
+      const tick = latestTicks.get(symbol);
+      const exchangeTime = tick ? Date.parse(tick.updatedAt) / 1000 : null;
+      const ageSeconds = Number.isFinite(exchangeTime) ? Number((Date.now() / 1000 - exchangeTime).toFixed(1)) : null;
+      return {
+        symbol,
+        exchangeTimestamp: tick?.updatedAt || null,
+        receivedAt: tick?.receivedAt || null,
+        ageSeconds,
+        freshness: ageSeconds === null || ageSeconds < 0 ? 'TIME_UNVERIFIED' : ageSeconds <= 30 ? 'FRESH' : 'STALE'
+      };
+    }),
     fyersDataApi: fetchWithFyersBudget.getStatus(),
     ...(streamError ? { marketDataMessage: streamError } : {}),
     orderPlacement: 'disabled',
