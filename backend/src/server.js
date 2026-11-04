@@ -425,59 +425,23 @@ app.get('/api/market/last-known-quotes', async (_req, res) => {
     Number.isFinite(Date.parse(tick.updatedAt))
   );
   let source = 'FYERS WebSocket last-known tick';
-  if (rows.length !== allowedSymbols.length && sureshotAutoPlansInFlight) {
-    return res.status(503).json({
-      ok: false, source: 'last-known', error: 'Sureshot scan has priority; last-known REST refresh is paused.',
-      data: rows, marketOpen, signalsAllowed: false, retryAfterSeconds: 5
-    });
-  }
   if (rows.length !== allowedSymbols.length) {
-    if (!accessToken) {
-      return res.status(401).json({ ok: false, source: 'last-known',
-        error: 'Connect FYERS to retrieve the last known exchange prices.',
-        data: [], marketOpen, signalsAllowed: false });
-    }
-    try {
-      const url = new URL('https://api-t1.fyers.in/data/quotes');
-      url.searchParams.set('symbols', allowedSymbols.join(','));
-      const response = await fetchWithFyersBudget(url, {
-        headers: { Authorization: appId + ':' + accessToken, Accept: 'application/json' },
-        cache: 'no-store', signal: AbortSignal.timeout(12000)
-      });
-      const body = await response.json().catch(() => ({}));
-      if (response.status === 429) return res.status(429).json({
-        ok: false, source: 'last-known', error: 'FYERS rate limit active; last-known prices could not be retrieved.',
-        data: [], marketOpen, signalsAllowed: false,
-        retryAfterSeconds: Math.max(30, Number(response.headers.get('retry-after')) || 60)
-      });
-      if (!response.ok || body.s !== 'ok' || !Array.isArray(body.d)) {
-        return res.status(response.status === 401 ? 401 : 502).json({
-          ok: false, source: 'last-known', error: 'FYERS did not return a verifiable last-known index snapshot.',
-          data: [], marketOpen, signalsAllowed: false
-        });
-      }
-      rows = allowedSymbols.map(symbol => {
-        const item = body.d.find(row => row && row.n === symbol && row.v);
-        const v = item?.v, ltp = Number(v?.lp);
-        const rawTime = v?.tt ?? v?.ltt ?? v?.exch_feed_time;
-        const n = Number(rawTime);
-        const timeMs = Number.isFinite(n) && n > 0 ? (n > 1e12 ? n : n * 1000) : Date.parse(String(rawTime || ''));
-        if (!Number.isFinite(ltp) || ltp <= 0 || !Number.isFinite(timeMs) || timeMs <= 0 || timeMs > Date.now() + 5000) return null;
-        return { symbol, ltp, updatedAt: new Date(timeMs).toISOString(),
-          ch: v.ch == null || !Number.isFinite(Number(v.ch)) ? null : Number(v.ch),
-          chp: v.chp == null || !Number.isFinite(Number(v.chp)) ? null : Number(v.chp) };
-      });
-      if (rows.some(row => !row)) return res.status(502).json({
-        ok: false, source: 'last-known', error: 'FYERS quote is missing a valid price or exchange timestamp; values withheld.',
-        data: [], marketOpen, signalsAllowed: false
-      });
-      source = 'FYERS quotes API last-known snapshot';
-    } catch (error) {
-      return res.status(502).json({ ok: false, source: 'last-known',
-        error: 'Could not retrieve last-known FYERS index prices.',
-        detail: String(error.message || 'Upstream request failed').slice(0, 160),
-        data: [], marketOpen, signalsAllowed: false });
-    }
+    // Index display must never fall back to FYERS REST quotes. When the socket
+    // has not supplied every allowed index tick, wait for WebSocket data instead
+    // of re-triggering Cloudflare 1015 on each dashboard refresh.
+    console.warn('FYERS WebSocket index snapshot incomplete; REST fallback suppressed.', JSON.stringify({
+      received: rows.map(tick => tick.symbol),
+      expected: allowedSymbols
+    }));
+    return res.status(503).json({
+      ok: false,
+      source: 'FYERS WebSocket last-known tick',
+      error: 'Waiting for complete verified FYERS WebSocket index ticks; REST fallback is disabled.',
+      data: rows,
+      marketOpen,
+      signalsAllowed: false,
+      retryAfterSeconds: 5
+    });
   }
   const newestTickAt = Math.max(...rows.map(tick => Date.parse(tick.updatedAt)));
   const oldestTickAt = Math.min(...rows.map(tick => Date.parse(tick.updatedAt)));
