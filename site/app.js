@@ -1686,13 +1686,25 @@ async function performSureshotSetup() {
     const candleTimeMs=candleEpoch>1e12?candleEpoch:candleEpoch*1000;
     if(!Number.isFinite(candleTimeMs)||candleTimeMs<=0||candleTimeMs>Date.now()+5000)throw new Error('Latest FYERS candle has an invalid or future exchange timestamp; chart and signals are blocked.');
     const candleDate=new Date(candleTimeMs);
-    const exchangeDate=candleDate.toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
-    const todayExchangeDate=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+    const istDateParts=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+    const istPart=name=>istDateParts.find(part=>part.type===name)?.value||'';
+    const todayExchangeDate=istPart('year')+'-'+istPart('month')+'-'+istPart('day');
+    const candleParts=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(candleDate);
+    const candlePart=name=>candleParts.find(part=>part.type===name)?.value||'';
+    const exchangeDate=candlePart('year')+'-'+candlePart('month')+'-'+candlePart('day');
+    const istWeekday=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Kolkata',weekday:'short'}).format(new Date());
+    const weekdayTradingDay=!['Sat','Sun'].includes(istWeekday);
     const candleAgeMinutes=(Date.now()-candleTimeMs)/60000;
     const intervalMinutes=resolution==='D'?1440:Number(resolution);
     const maxOpenAgeMinutes=resolution==='D'?390:Math.max(15,intervalMinutes*2+5);
-    if(isRegularMarketSession()&&(exchangeDate!==todayExchangeDate||candleAgeMinutes>maxOpenAgeMinutes)){
-      throw new Error('STALE FYERS CHART · latest candle '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' is not current for the open session. Old-session chart and signals are blocked.');
+    // On weekdays, require a candle stamped with today's IST session even after
+    // the close. This prevents yesterday's cached/history response being presented
+    // as today's chart. On weekends, retain the last available weekday session.
+    if(weekdayTradingDay&&exchangeDate!==todayExchangeDate){
+      throw new Error('STALE FYERS CHART · latest candle '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' is from an earlier session; no candle from today ('+todayExchangeDate+') was returned. Old-session chart and zones are blocked.');
+    }
+    if(isRegularMarketSession()&&candleAgeMinutes>maxOpenAgeMinutes){
+      throw new Error('STALE FYERS CHART · latest candle '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' is too old for the open session. Chart and signals are blocked.');
     }
     const zones=deriveSureshotZones(candles);
     if(!zones)throw new Error('At least 12 verified candles are needed before zones can be calculated.');
