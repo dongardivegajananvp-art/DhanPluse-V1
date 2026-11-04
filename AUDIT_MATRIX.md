@@ -1,113 +1,45 @@
-# DhanPulse Navigation and Feature Audit Matrix
+# DhanPulse production acceptance matrix
 
-Audit date: 2026-10-28 (Asia/Kolkata)
-Scope: source-level review of the original `main` branch plus production deployment and backend-log evidence. This matrix separates automated/source checks from live feature acceptance; a passing deployment is not proof that every trading module is functionally correct.
+Audit updated: 2026-11-04 (Asia/Kolkata)  
+Production scope: original DhanPulse only — exactly two tabs: **Sureshot CE/PE** and **FYERS Connect**. No preview/test UI is part of production.
 
-## Navigation / regression
+## Release safety rules
 
-- [x] Current `site/index.html` contains 24 visible navigation buttons; `scripts/check-tabs.mjs` asserts 24 unique tabs, descriptions, and renderer routes.
-- [x] Latest recorded GitHub Actions run `40505682253` completed all listed deployment, original `/site/` URL, browser smoke-test, backend-health and CORS steps successfully.
-- [x] Render production service `DhanPluse-V1` is configured to deploy from the original repository `main` branch; latest recorded deployment is live.
-- [ ] Do not interpret source-level route checks or smoke tests as full functional verification of every scanner, chart, option-chain, or turnover calculation.
-- [ ] Production live-session acceptance remains incomplete for the blockers listed below. No claim of complete feature-level acceptance is made.
-- [x] Added CI check that the navigation and tab-description registry each contain the same 24 unique tabs.
-- [x] Added CI regression checks for preview-to-test backend routing, production default routing, and preview OAuth blocking.
-- [x] Fixed an over-escaped preview hostname matcher discovered during offline source review; regression test now exercises a realistic preview hostname and a non-preview hostname.
-- [x] Hardened live mover validation to block empty/malformed snapshots and added unit tests for those cases.
-- [x] Kept Gap-Up/Down and existing PWA assets.
-- [x] Order placement remains disabled.
-- [ ] Browser/mobile end-to-end click-through on the deployed test UI.
+- FYERS is the only market-data source. No Yahoo, mock, demo, or synthetic prices/candles.
+- Live status requires valid, fresh exchange timestamps. Missing, stale, partial, or unverified data blocks a signal.
+- After market close, last-known FYERS values must be labelled as last-known, never live.
+- Order placement remains disabled; all workflows are read-only.
+- A green build or backend `/health` response is not proof of fresh market ticks or a verified Sureshot setup.
 
-## Tab-by-tab status
+## Current two-tab checks
 
-| Tab | Static audit result | Remaining production gate |
+| Area | Current implementation / status | Acceptance still required |
 |---|---|---|
-| Dashboard | Index quote snapshot requires all configured index symbols; live index freshness is 15 seconds; stale/last-known/error labels now explicitly block live interpretation. | Verify OAuth + continuous WebSocket exchange ticks in a regular market session. |
-| Stock Explorer | Equity rows use 30-second exchange timestamps; full ranking is blocked unless all requested symbols are fresh and coverage is complete. Backend now rejects stale/unverified live full-universe snapshots. | Verify actual FYERS NSE F&O master count, rate-limit recovery, and complete coverage live. |
-| NIFTY | Uses shared index WebSocket quote state and 15-second signal gate. | Verify real exchange timestamps and reconnect behavior. |
-| BANKNIFTY | Uses shared index WebSocket quote state and 15-second signal gate. | Verify real exchange timestamps and reconnect behavior. |
-| Watchlist | Equity rows use the 30-second policy and do not claim a full-exchange universe. | Confirm the supported symbol universe and test stale/disconnect transitions in browser. |
-| Sureshot CE/PE | Requires validated OHLC and a separately timestamped selected-contract quote. Current chain endpoint blocks if it cannot find an exchange timestamp. | Official FYERS option-chain response schema does not document a response exchange timestamp. Do not infer one from request/fetch time. Chain freshness/OI/volume provenance remains unverified; keep dependent signal blocked until a trustworthy source is added. Validate strike, expiry, spread and RR live. |
-| Breakout Scanner | Fresh quote checks are 30 seconds; a quote snapshot alone is not proof of a technical breakout. | Verify all expected F&O symbols and candle-derived pattern rules; test stale/partial input blocks. |
-| Momentum Scanner | Fresh quote checks are 30 seconds; configured-universe limitations are disclosed. | Verify full F&O coverage and amount/value ranking semantics against actual exchange data. |
-| Zero-to-Hero | Requires verified underlying/option inputs for candidate generation; stale inputs are intended to block. | Validate selection logic, active strike quantity, risk/reward, and no-signal behavior live. |
-| FII/DII Flow | Explicitly shows unavailable without a verified timestamped source; no fabricated figures. | Remains unavailable until a reliable source and timestamp are integrated. |
-| Market Activity | Uses fresh equity snapshot and blocks complete metrics/ranking when the snapshot is partial or stale. | Verify breadth/volatility/volume source coverage and rate-limit behavior in live session. |
-| Charts & Patterns | OHLC validator checks values, ordering, future timestamps, and interval-specific staleness. | Verify candle alignment and latest expected candle against FYERS live-session data. |
-| Gap-Up/Down | Historical gap calculations use validated FYERS OHLC history and are descriptive, not forecasts. Current implementation does not calculate same-day ₹2,000 crore traded value or rank qualifying stocks. | FYERS Quotes documents `volume` but not traded turnover/value. Do not label volume × price as exchange turnover. A verified turnover source and session-complete coverage are required before this filter can pass. |
-| Gainers & Losers | Equity quote rows use the 30-second policy; current UI discloses a selected large-cap universe. | Full NSE F&O ranking remains blocked until complete symbol-master coverage is verified. |
-| Option Chain | Backend/frontend currently require an explicit exchange-chain timestamp no older than 15 seconds; absent timestamp blocks display. | FYERS public Option Chain response schema lists contract fields (including LTP, bid/ask, OI and volume) but does not document an exchange timestamp field. Therefore the current gate may block valid FYERS responses; do not bypass it with server fetch time. Need an independently timestamped source or documented provenance before enabling chain-dependent signals. |
-| Technical Indicators | Calculations depend on validated OHLC candles. | Validate current candle freshness and indicator values against a live FYERS chart. |
-| AI Signals | Index-derived signal gate requires fresh WebSocket quotes; no signal when the required inputs are stale/missing. | Test every signal path, data loss, market close, and recovery in live session. |
-| Holdings & Positions | Read-only authenticated endpoints; failed calls render unavailable rather than invented rows. | Verify real API update time, session expiry, empty account response, and account-data errors. |
-| Price Alerts | Browser-local alerts are triggered only by fresh connected WebSocket ticks. | Test stale tick, disconnect, duplicate tick, and reload behavior. |
-| FYERS Settings | Health and authentication are not treated as proof of fresh market data; order placement remains disabled. | Resolve `redirectUrl mismatch` with exact portal/backend URI match and successful callback. |
-| Logs | Frontend event log shows local app events; it is not represented as a full server audit log. | Confirm no tokens/secrets are exposed in browser or server logs. |
-| Trade Journal | Paper/journal workflow; no live market price is required to display saved journal entries. | Regression-test saved entries, validation, and rule-review flows. |
-| Capital Protection | Risk calculator only; does not place orders. | Regression-test sizing, max-loss limits, and 1:2 reward/risk calculations. |
-| Backtesting | Uses historical candles and is not a live prediction. | Verify historical data labelling, candle integrity, result math, and no live-signal crossover. |
+| Sureshot CE/PE | Underlying direction uses completed FYERS candles. Option-chain response is used only for contract identity (symbol, strike, side, expiry); its undocumented LTP/OI/volume fields are discarded. Selected option bid/ask/LTP must independently pass the 15-second quote gate and option candles must pass OHLC/freshness and 1:2 risk checks. | Real-session browser test with FYERS login: verify selected contract, fresh quote timestamp, option candles, entry/SL/target/RR and blocked states on stale or incomplete data. |
+| FYERS Connect | OAuth/session and backend status are separate from live-feed proof. Order placement remains disabled. | Verify actual FYERS callback and authenticated session in the production browser; verify disconnect/reconnect and expiry behavior. |
+| Market socket | Fallback reconnect is restricted to regular NSE hours. If the socket remains down at market open, the 15-second watchdog initiates a controlled recovery attempt. The timer rechecks market hours before reconnecting. | Observe a full live session and confirm fresh exchange timestamps, stable socket, and recovery after an induced/real disconnect. |
+| Backend | Original Render service only. `/health` reports process/config state plus whether a complete fresh index snapshot exists; it is not a substitute for live acceptance. | Confirm production health, CORS from the original Pages origin, and live tick timestamps during market hours. |
+| Pages deployment | Pages artifact names include both workflow run ID and run attempt, avoiding retry collisions on the default artifact name. | Fresh custom workflow run must pass deploy, published `/site/` URL smoke, browser smoke, backend health and CORS checks. |
+| Tabs | Exactly two production tabs; do not restore the retired 24-tab navigation. | CI and browser smoke must continue to assert exactly two tabs. |
 
-## Release blockers (must pass before production deploy)
+## Option-chain freshness decision
 
-1. Latest GitHub Actions run must pass syntax, tab-parity, PWA-asset and backend tests.
-2. Test UI click-through must cover all 24 tabs without console errors.
-3. FYERS OAuth callback must succeed with exact redirect URI match.
-4. A regular market-session test must verify exchange timestamps and continuous WebSocket reconnect/recovery.
-5. Full F&O symbol master coverage, rate-limit cooldown and partial-snapshot blocking must be verified.
-6. Option-chain source must provide a verifiable exchange timestamp; otherwise it stays blocked.
-7. Historical candle freshness, derived-signal gates, account endpoint failures, and post-close LAST KNOWN labels must pass.
-8. Production deployment is not authorized by a green CI run alone. Do not merge/deploy while live-session gates are unverified.
-9. Confirm in a real browser that PR #40 preview sends API requests only to the test backend and receives CORS responses. OAuth initiation remains blocked until the test redirect URI is verified.
+FYERS' documented option-chain response does not provide a trustworthy exchange timestamp for chain LTP/OI/volume fields. Those fields are therefore not used for liquidity ranking or signals. The endpoint returns contract descriptors only and explicitly labels chain freshness as `UNVERIFIED`. Sureshot independently verifies the selected contract's live quote (bid/ask/LTP with exchange timestamp no older than 15 seconds) and completed option OHLC candles. Do not replace these checks with HTTP fetch time or weaken them to make a setup appear.
 
-## Production runtime and deployment evidence (checked 2026-10-26)
+This is a safe separation of responsibilities, not proof that the option-chain response itself is fresh. If a future feature needs chain OI/volume or premium ranking, it remains blocked until FYERS documents trustworthy timestamp/provenance for those fields.
 
-- Render production logs contain two upstream FYERS `/data/quotes` HTTP 429 / Cloudflare Error 1015 events: `2026-10-23T06:20:18Z` and `2026-10-23T08:33:14Z`. This confirms a real rate-limit incident; these log entries alone do not prove successful recovery after cooldown. Do not infer quote coverage from backend health.
-- Production backend Render service remains on `main`; latest confirmed live deploy is commit `8ae4b4f` (2026-10-23). PR #42 (`consolidate/one-canonical-ultimate`, HEAD `cbad93c`) is still an open draft and is not deployed to production.
-- Current Render test UIs are on `test-ultimate-session-fix` and `clean-rebuild`; the test backend is also on `clean-rebuild`. The PR #40 Netlify deploy preview now routes to `https://dhanpulse-clean-test.onrender.com`; non-preview hosts retain `https://dhanpluse-v1.onrender.com`. The isolated preview blocks FYERS OAuth start until its exact test redirect URI is verified.
-- The test backend CORS allowlist deployment is live on the test service only. GitHub Actions run #406 passed on head `58c1033`, including JavaScript syntax, PWA asset checks, the 24-tab render-route audit, preview isolation checks, offline OAuth source checks, strict CORS-origin policy unit tests, backend unit tests, and dependency audit. The Netlify deploy preview status is green for the same head. These checks validate code/build properties, not browser network behavior.
-- Remaining next step: real browser/mobile verification of the deployed preview's API destination, CORS preflight/response, console errors, and all 24 tab click-through. This environment could not establish a browser session or resolve the public preview/backend hosts; that is a tooling/network limitation, not proof that the services are down. No production environment variables or services were changed during this check.
+## Evidence and remaining release gates
 
+1. JavaScript syntax, backend unit tests, dependency checks, tab count and PWA asset checks must pass in the latest main-branch validation run.
+2. Custom Pages workflow must pass on a fresh run, including original `/site/` URL smoke and backend CORS smoke.
+3. Original Render backend must remain live; test services must never be used as production.
+4. Market-hours tick evidence must include fresh exchange timestamps for NIFTY, BANKNIFTY and SENSEX, not merely a connected socket or authenticated backend.
+5. Full live-market acceptance requires a real FYERS-authenticated browser session during NSE hours. After-hours checks cannot substitute.
+6. Sureshot must produce either a fully verified plan (contract, quote, candles, entry, stop, target, RR >= 1:2) or a clear NO TRADE reason. No stale/partial data may produce a signal.
+7. Order placement must remain disabled.
 
+## Operational notes
 
-## Offline CORS policy regression tests (2026-10-24)
-
-Extracted the numbered Netlify preview-origin matcher into `backend/src/cors-origin-policy.js` and added unit tests that accept only the exact DhanPulse deploy-preview hostname pattern while rejecting unrelated Netlify sites, lookalike domains, malformed build IDs, non-HTTPS origins, and non-string values. The server now uses the tested helper. This validates origin-matching logic offline; it does not prove that a deployed browser preflight or CORS response succeeds.
-
-## Newly found offline regression — tab renderer wiring (2026-10-24)
-
-A deeper source audit found that several tabs had navigation labels and descriptions but fell through to the generic log-list renderer. Fixed the render dispatcher to connect each of the 24 tabs to its intended renderer, including Stock Explorer, NIFTY/BANKNIFTY, Watchlist, Market Activity, FII/DII Flow, Option Chain, Technical Indicators, Alerts and Logs. Market Activity now also initiates its verified-snapshot loader on tab entry. Index workspaces use the existing quote-focus renderer; no prices are fabricated.
-
-Extended `scripts/check-tabs.mjs` so CI checks that all 24 navigation tabs have a render route, not just a navigation button and description. This is a source-level regression check; it does not substitute for interactive browser/mobile click-through, visual layout checks, or console inspection.
-
-## Offline FYERS OAuth / redirect review (2026-10-24)
-
-Static source review completed without starting a live authorization:
-- The backend constructs the FYERS authorization URL using the exact `FYERS_REDIRECT_URI` environment value and requests an authorization code.
-- Each login start creates a cryptographically random state; the backend accepts it once and expires it after 10 minutes.
-- The callback reads FYERS's `auth_code` and `state`, removes the query string from the visible URL before exchanging the code, and stores only the opaque dashboard session token in browser `sessionStorage`.
-- The app secret is used only in the backend's app-id hash; no browser-side app secret reference was found.
-- Isolated Netlify previews block OAuth initiation until their redirect URI is separately verified.
-- Added `scripts/check-oauth-offline.mjs` to enforce these source-level invariants in CI.
-
-Still unverified: the actual value of `FYERS_REDIRECT_URI` on the test service, the exact callback URL registered in the FYERS developer portal, whether FYERS returns `auth_code` plus the expected `state` to that URL, and a successful real callback. No live authorization was attempted. The prior `redirectUrl mismatch` cannot be declared fixed from source inspection alone.
-
-## Changes made on this branch
-
-- Locked the shared fresh-data policy.
-- Tightened frontend equity freshness to 30 seconds.
-- Added shared timestamp validation for index, equity and option-chain paths.
-- Revalidated mover cache timestamps and block live full-universe rankings when any quote is stale or timestamp-unverified.
-- Require all expected index quotes before applying a dashboard snapshot; explicitly label stale/blocked dashboard data.
-- Restored all 24 navigation buttons and added a CI parity test.
-
-
-## Evidence-driven blocker review (2026-10-28)
-
-Reviewed the current backend handlers against the official FYERS API v3 documentation:
-
-- Option Chain endpoint: https://fyers.in/api-docs/v3/api/market-data/ — documented request parameter `timestamp` selects option-chain data at a requested timestamp/expiry context; the documented response fields do not identify a trustworthy exchange-response timestamp. The current backend's `chainTimestamp` check searches undocumented candidate properties and correctly blocks if none is present. Do not replace this with `fetchedAt` or local server time: that only proves when the HTTP response arrived, not when its OI/volume values were observed.
-- Quotes endpoint: https://fyers.in/api-docs/v3/api/market-data/quotes/ — documents `volume`, LTP, OHLC and related quote fields, but not traded turnover/value. `volume × LTP` or `volume × close` is an estimate, not authoritative exchange turnover, and must not be used to certify the user's ₹2,000 crore threshold.
-- FYERS Transaction Info documents `tradeValue` for trades on the authenticated account, not the full exchange-wide traded value for each stock. It cannot safely substitute for a market-wide ₹2,000 crore turnover ranking.
-- Contract quote route independently checks LTP, bid, ask and a quote timestamp within 15 seconds. That is useful for a selected contract quote, but it does not establish freshness of the option-chain OI/volume snapshot itself.
-- The code has not been changed to weaken either safety gate. Option-chain-dependent signals remain blocked when chain timestamp provenance is unavailable; the ₹2,000 crore same-day turnover filter remains unimplemented until a trustworthy turnover source is available.
-- The 24-tab checks prove navigation/description/render-route wiring and the recorded automated smoke test, not the correctness of all calculations, visual behavior, or live-market feature outputs. A real browser/mobile click-through and a regular-session FYERS acceptance run remain required.
+- After-hours socket reconnects are intentionally suppressed. At the next NSE session, the watchdog can recover a disconnected socket.
+- The original Render health-check path is not configured in Render's service settings; if the dashboard exposes this setting, use `/health`. This does not prove live market data.
+- Old test services/branches and alternate deployment files are not production. Do not delete or alter them as part of a production fix unless their ownership and dependencies are checked first.
