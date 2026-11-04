@@ -6,6 +6,8 @@ on:
     paths:
       - "site/**"
       - "index.html"
+      - "backend/**"
+      - "scripts/**"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
