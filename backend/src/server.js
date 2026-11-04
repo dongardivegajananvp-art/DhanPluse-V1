@@ -1215,14 +1215,18 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     sureshotScanState = null;
   }
   sureshotAutoPlansInFlight = true;
+  let scanStage = "LOAD_FNO_UNIVERSE";
+  console.info("Sureshot scan started:", JSON.stringify({ resumed: Boolean(scanId), offset }));
   try {
     if (!scanId) {
+      scanStage = "LOAD_FNO_UNIVERSE";
       const universe = await getNseFnoEquityUniverse();
       const indexSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"];
       const indexTicks = new Map(indexSymbols.map(symbol => [symbol, latestTicks.get(symbol)]));
       if (!stockQuoteCache.data || Date.now() - stockQuoteCache.fetchedAt >= STOCK_QUOTE_CACHE_MS) {
         syncFnoQuoteCacheFromMoversPayload(moversSnapshotCache?.payload, universe.data.map(item => item.symbol));
       }
+      scanStage = "VERIFY_FNO_QUOTES";
       let snapshot = stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS
         ? stockQuoteCache.data : null;
       if (!snapshot) {
@@ -1235,9 +1239,11 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes({ priority: "sureshot" }));
         try { snapshot = await request; } finally { if (stockQuotePromise === request) stockQuotePromise = null; }
       }
+      scanStage = "RANK_FNO_UNIVERSE";
       const ranked = buildVerifiedSureshotShortlist({
         quoteSnapshot: snapshot, universe, indexTicks, now: Date.now(), limit: SURESHOT_UNIVERSE_SCAN_LIMIT
       });
+      console.info("Sureshot F&O shortlist verified:", JSON.stringify({ universeCount: universe.count, quotedCount: snapshot.quotedCount, rankedCandidateCount: ranked.candidateCount, selectedForOptionVerification: ranked.data.length }));
       sureshotScanState = { id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
         candidates: ranked.data, rankedCandidateCount: ranked.candidateCount, nextOffset: 0, results: [] };
     }
@@ -1257,9 +1263,11 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         underlyingUrl.searchParams.set("symbol", candidate.symbol); underlyingUrl.searchParams.set("resolution", "5");
         underlyingUrl.searchParams.set("date_format", "1"); underlyingUrl.searchParams.set("range_from", from);
         underlyingUrl.searchParams.set("range_to", today); underlyingUrl.searchParams.set("cont_flag", "1");
+        scanStage = "VERIFY_UNDERLYING_CANDLES";
         const underlyingHistory = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot" });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [], "5", Date.now());
         if (!direction.ok || !direction.side) { batchResults.push({ ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." }); continue; }
+        scanStage = "DISCOVER_OPTION_CONTRACT";
         const chainUrl = new URL("https://api-t1.fyers.in/data/options-chain-v3");
         chainUrl.searchParams.set("symbol", candidate.symbol); chainUrl.searchParams.set("strikecount", "10"); chainUrl.searchParams.set("greeks", "1");
         const chainResult = await fyersReadOnlyGet(chainUrl, { priority: "sureshot" });
@@ -1267,6 +1275,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now() });
         if (!selected.ok) { batchResults.push({ ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason }); continue; }
         const contract = selected.contract;
+        scanStage = "VERIFY_OPTION_QUOTE";
         const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes"); quoteUrl.searchParams.set("symbols", contract.symbol);
         const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: "sureshot" });
         const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
@@ -1277,7 +1286,9 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         optionHistoryUrl.searchParams.set("symbol", contract.symbol); optionHistoryUrl.searchParams.set("resolution", "5");
         optionHistoryUrl.searchParams.set("date_format", "1"); optionHistoryUrl.searchParams.set("range_from", from);
         optionHistoryUrl.searchParams.set("range_to", today); optionHistoryUrl.searchParams.set("cont_flag", "1");
+        scanStage = "VERIFY_OPTION_CANDLES";
         const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot" });
+        scanStage = "BUILD_RISK_PLAN";
         const plan = buildVerifiedSureshotTradePlan({ underlyingSymbol: candidate.symbol, direction, contract, quote,
           optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5", now: Date.now() });
         batchResults.push(plan.ok ? { ...base, status: "VERIFIED SETUP", plan } :
@@ -1307,6 +1318,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       })) });
     const results = state.results;
     const verified = results.filter(item => item.status === "VERIFIED SETUP");
+    console.info("Sureshot scan completed:", JSON.stringify({ scannedCandidateCount: results.length, rankedCandidateCount: state.rankedCandidateCount, verifiedSetupCount: verified.length, stopReason: universeComplete ? "ALL_CANDIDATES_CHECKED" : "FIRST_VERIFIED_SETUP_FOUND" }));
     const payload = { ok: true, scanComplete: true, candidateUniverseComplete: universeComplete,
       stopReason: universeComplete ? "ALL_CANDIDATES_CHECKED" : "FIRST_VERIFIED_SETUP_FOUND",
       signalsAllowed: verified.length > 0,
@@ -1321,8 +1333,9 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
   } catch (error) {
     const status = Number(error.statusCode) || 503;
     if (status === 429 && error.retryAfterSeconds) res.set("Retry-After", String(error.retryAfterSeconds));
+    console.warn("Sureshot scan blocked:", JSON.stringify({ stage: scanStage, status, retryAfterSeconds: Number(error.retryAfterSeconds) || null, detail: String(error.message || "Verification failed.").slice(0, 180) }));
     sureshotScanState = null;
-    return res.status(status).json({ ok: false, scanComplete: false, signalsAllowed: false, orderPlacement: "disabled",
+    return res.status(status).json({ ok: false, scanComplete: false, signalsAllowed: false, orderPlacement: "disabled", stage: scanStage,
       error: status === 429 ? "FYERS API cooldown/rate limit interrupted the full-universe scan; all partial plans were discarded."
         : status === 401 ? "FYERS session expired; reconnect and rerun the scan."
         : status === 409 ? String(error.message || "Market session closed; full-universe scan blocked.")
