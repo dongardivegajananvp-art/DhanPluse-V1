@@ -1234,7 +1234,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         if (remaining > 0) {
           res.set("Retry-After", String(Math.ceil(remaining / 1000)));
           return res.status(429).json({ ok: false, scanComplete: false, signalsAllowed: false,
-            error: "FYERS F&O quote cooldown active; no upstream request sent.", retryAfterSeconds: Math.ceil(remaining / 1000) });
+            error: "FYERS F&O quote cooldown active; no upstream request sent.", stage: scanStage, retryAfterSeconds: Math.ceil(remaining / 1000) });
         }
         const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes({ priority: "sureshot" }));
         try { snapshot = await request; } finally { if (stockQuotePromise === request) stockQuotePromise = null; }
