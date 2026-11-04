@@ -1,0 +1,24 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { getVerifiedOptionContractMetadata } from "../src/option-contract-metadata.js";
+
+const symbol = "NSE:RELIANCE2611262500CE";
+const master = {
+  [symbol]: { tradeStatus: 1, optType: "CE", strikePrice: 2500, expiryDate: "1795651200", minLotSize: 250, tickSize: 0.05 }
+};
+
+test("reads lot size and tick size from the exact active FYERS option contract", () => {
+  assert.deepEqual(getVerifiedOptionContractMetadata(symbol, master), {
+    symbol, side: "CE", strike: 2500, expiryDate: "1795651200", lotSize: 250, tickSize: 0.05
+  });
+});
+
+test("rejects unknown, inactive, malformed and incomplete contract master rows", () => {
+  assert.equal(getVerifiedOptionContractMetadata(symbol, {}), null);
+  assert.equal(getVerifiedOptionContractMetadata(symbol, { [symbol]: { ...master[symbol], tradeStatus: 0 } }), null);
+  assert.equal(getVerifiedOptionContractMetadata(symbol, { [symbol]: { ...master[symbol], minLotSize: 0 } }), null);
+  assert.equal(getVerifiedOptionContractMetadata(symbol, { [symbol]: { ...master[symbol], tickSize: 0 } }), null);
+  assert.equal(getVerifiedOptionContractMetadata(symbol, { [symbol]: { ...master[symbol], optType: "XX" } }), null);
+  assert.equal(getVerifiedOptionContractMetadata("NSE:RELIANCE2611262500PE", master), null);
+  assert.equal(getVerifiedOptionContractMetadata("BSE:RELIANCE2611262500CE", master), null);
+});
