@@ -4,7 +4,7 @@ import {
   canScheduleMarketSocketFallback,
   getMarketSocketReconnectDelay,
   buildMarketSocketSubscriptionSymbols
-} from "./market-socket-recovery.js";
+} from "../src/market-socket-recovery.js";
 
 test("socket fallback is scheduled only during market hours with a disconnected authenticated socket", () => {
   assert.equal(canScheduleMarketSocketFallback({ sessionOpen: true, hasToken: true, hasSocket: true, connected: false, timerPending: false }), true);
