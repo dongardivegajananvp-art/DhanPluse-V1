@@ -134,6 +134,9 @@ function parseTick(raw) {
       receivedAt: new Date().toISOString()
     });
     lastAnyMarketTickAt = Date.now();
+    // Reset retry backoff only after a real accepted market tick, not merely
+    // a WebSocket handshake that may immediately drop again.
+    marketReconnectAttempt = 0;
     acceptedCount += 1;
   }
   return acceptedCount;
@@ -195,7 +198,6 @@ function startMarketDataStream(token) {
       streamError = '';
       marketSocketConnectedAt = Date.now();
       lastAnyMarketTickAt = 0;
-      marketReconnectAttempt = 0;
       if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
       marketReconnectTimer = null;
       socketConnectCount += 1;
@@ -304,8 +306,8 @@ function startMarketDataStream(token) {
 // This check is limited to regular NSE market hours and never calls REST.
 const marketSocketWatchdog = setInterval(() => {
   if (!accessToken || !marketSocket || !nseRegularSessionNow()) return;
-  // If the SDK remains disconnected after the close, wait until the next
-  // regular NSE session before starting one controlled fallback attempt.
+  // If the socket remains disconnected after the close, wait for regular NSE
+  // hours and then use the single controlled reconnect policy.
   if (!streamConnected) {
     scheduleMarketSocketFallback(marketSocket, 'market session recovery');
     return;
