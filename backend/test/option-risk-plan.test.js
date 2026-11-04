@@ -12,7 +12,7 @@ function candles({ low = 95, count = 13, lastStart = now - 5 * 60_000 } = {}) {
 }
 
 test("builds a 1:2-or-better option risk plan from completed candles", () => {
-  const result = buildOptionRiskPlan({ candles: candles(), entryPrice: 100, resolution: "5", now });
+  const result = buildOptionRiskPlan({ lotSize: 25, candles: candles(), entryPrice: 100, resolution: "5", now });
   assert.equal(result.ok, true);
   assert.equal(result.entryPrice, 100);
   assert.equal(result.stopLoss, 95);
@@ -23,14 +23,14 @@ test("builds a 1:2-or-better option risk plan from completed candles", () => {
 
 test("blocks a forming latest candle and insufficient completed history", () => {
   const rows = candles({ count: 12, lastStart: now });
-  const result = buildOptionRiskPlan({ candles: rows, entryPrice: 100, resolution: "5", now });
+  const result = buildOptionRiskPlan({ lotSize: 25, candles: rows, entryPrice: 100, resolution: "5", now });
   assert.equal(result.ok, false);
   assert.match(result.reason, /completed option candles/i);
 });
 
 test("blocks stale completed option candles", () => {
   const rows = candles({ lastStart: now - 60 * 60_000 });
-  const result = buildOptionRiskPlan({ candles: rows, entryPrice: 100, resolution: "5", now });
+  const result = buildOptionRiskPlan({ lotSize: 25, candles: rows, entryPrice: 100, resolution: "5", now });
   assert.equal(result.ok, false);
   assert.match(result.reason, /stale/i);
 });
@@ -39,26 +39,47 @@ test("blocks invalid or out-of-order OHLC data", () => {
   const rows = candles();
   rows[4] = [...rows[4]];
   rows[4][2] = 90;
-  const result = buildOptionRiskPlan({ candles: rows, entryPrice: 100, resolution: "5", now });
+  const result = buildOptionRiskPlan({ lotSize: 25, candles: rows, entryPrice: 100, resolution: "5", now });
   assert.equal(result.ok, false);
   assert.match(result.reason, /invalid/i);
 });
 
 test("blocks when swing-low is not below the ask entry", () => {
   const rows = candles().map(row => [row[0], 102, 103, 101, 102, 500]);
-  const result = buildOptionRiskPlan({ candles: rows, entryPrice: 100, resolution: "5", now });
+  const result = buildOptionRiskPlan({ lotSize: 25, candles: rows, entryPrice: 100, resolution: "5", now });
   assert.equal(result.ok, false);
   assert.match(result.reason, /swing-low/i);
 });
 
+test("requires an official lot size and calculates one-lot rupee exposure", () => {
+  const rows = candles();
+  const missing = buildOptionRiskPlan({ candles: rows, entryPrice: 100, resolution: "5", now });
+  assert.equal(missing.ok, false);
+  assert.match(missing.reason, /lot size/i);
+  const result = buildOptionRiskPlan({ candles: rows, entryPrice: 100, lotSize: 25, tickSize: 0.05, resolution: "5", now });
+  assert.equal(result.ok, true);
+  assert.equal(result.quantity, 25);
+  assert.equal(result.lots, 1);
+  assert.equal(result.lotSize, 25);
+  assert.equal(result.riskPerLot, result.riskPerUnit * 25);
+  assert.equal(result.rewardPerLot, result.rewardPerUnit * 25);
+  assert.equal(result.premiumPerLot, 2500);
+});
+
+test("rejects invalid lot sizes and tick sizes", () => {
+  const rows = candles();
+  assert.equal(buildOptionRiskPlan({ candles: rows, entryPrice: 100, lotSize: 0, now }).ok, false);
+  assert.equal(buildOptionRiskPlan({ candles: rows, entryPrice: 100, lotSize: 25, tickSize: 0, now }).ok, false);
+});
+
 test("rejects unsupported intervals and invalid entries", () => {
-  assert.equal(buildOptionRiskPlan({ candles: candles(), entryPrice: 100, resolution: "D", now }).ok, false);
-  assert.equal(buildOptionRiskPlan({ candles: candles(), entryPrice: 0, resolution: "5", now }).ok, false);
+  assert.equal(buildOptionRiskPlan({ lotSize: 25, candles: candles(), entryPrice: 100, resolution: "D", now }).ok, false);
+  assert.equal(buildOptionRiskPlan({ lotSize: 25, candles: candles(), entryPrice: 0, resolution: "5", now }).ok, false);
 });
 
 test("rounds stop down and target up without reducing the 1:2 reward", () => {
   const rows = candles({ low: 94.97 });
-  const result = buildOptionRiskPlan({ candles: rows, entryPrice: 100.03, resolution: "5", now });
+  const result = buildOptionRiskPlan({ lotSize: 25, candles: rows, entryPrice: 100.03, resolution: "5", now });
   assert.equal(result.ok, true);
   assert.equal(result.entryPrice, 100.03);
   assert.equal(result.stopLoss, 94.95);
@@ -69,13 +90,13 @@ test("rounds stop down and target up without reducing the 1:2 reward", () => {
 test("rejects future-dated and duplicate option candle timestamps", () => {
   const future = candles();
   future[12] = [Math.floor((now + 60_000) / 1000), 100, 102, 95, 101, 500];
-  const futureResult = buildOptionRiskPlan({ candles: future, entryPrice: 100, resolution: "5", now });
+  const futureResult = buildOptionRiskPlan({ lotSize: 25, candles: future, entryPrice: 100, resolution: "5", now });
   assert.equal(futureResult.ok, false);
   assert.match(futureResult.reason, /future|out-of-order/i);
 
   const duplicate = candles();
   duplicate[12] = [...duplicate[11]];
-  const duplicateResult = buildOptionRiskPlan({ candles: duplicate, entryPrice: 100, resolution: "5", now });
+  const duplicateResult = buildOptionRiskPlan({ lotSize: 25, candles: duplicate, entryPrice: 100, resolution: "5", now });
   assert.equal(duplicateResult.ok, false);
   assert.match(duplicateResult.reason, /duplicated|out-of-order/i);
 });
