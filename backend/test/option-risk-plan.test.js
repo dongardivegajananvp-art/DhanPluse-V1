@@ -55,3 +55,27 @@ test("rejects unsupported intervals and invalid entries", () => {
   assert.equal(buildOptionRiskPlan({ candles: candles(), entryPrice: 100, resolution: "D", now }).ok, false);
   assert.equal(buildOptionRiskPlan({ candles: candles(), entryPrice: 0, resolution: "5", now }).ok, false);
 });
+
+test("rounds stop down and target up without reducing the 1:2 reward", () => {
+  const rows = candles({ low: 94.97 });
+  const result = buildOptionRiskPlan({ candles: rows, entryPrice: 100.03, resolution: "5", now });
+  assert.equal(result.ok, true);
+  assert.equal(result.entryPrice, 100.03);
+  assert.equal(result.stopLoss, 94.95);
+  assert.ok(result.target >= result.entryPrice + 2 * (result.entryPrice - result.stopLoss));
+  assert.ok(result.rr >= 2);
+});
+
+test("rejects future-dated and duplicate option candle timestamps", () => {
+  const future = candles();
+  future[12] = [Math.floor((now + 60_000) / 1000), 100, 102, 95, 101, 500];
+  const futureResult = buildOptionRiskPlan({ candles: future, entryPrice: 100, resolution: "5", now });
+  assert.equal(futureResult.ok, false);
+  assert.match(futureResult.reason, /future|out-of-order/i);
+
+  const duplicate = candles();
+  duplicate[12] = [...duplicate[11]];
+  const duplicateResult = buildOptionRiskPlan({ candles: duplicate, entryPrice: 100, resolution: "5", now });
+  assert.equal(duplicateResult.ok, false);
+  assert.match(duplicateResult.reason, /duplicated|out-of-order/i);
+});
