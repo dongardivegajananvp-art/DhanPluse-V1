@@ -2946,6 +2946,7 @@ async function fetchLiveQuotes(force = false) {
         const staleUpdate = document.querySelector('#lastUpdate');
         if (staleUpdate) { staleUpdate.textContent = '—'; staleUpdate.classList.add('muted'); }
         updateDynamicPanel();
+        restoreLastKnownIndexQuotes();
         showMessage('The backend FYERS session was lost (commonly after a backend restart). Your old browser session is no longer valid. Open FYERS Settings and tap Connect FYERS; live signals stay blocked until fresh exchange-timestamped ticks return.', true);
         logEvent('Backend FYERS session expired; cleared the invalid browser session and requested a fresh login.', 'warn');
       } else if (response.status === 503) {
