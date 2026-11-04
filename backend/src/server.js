@@ -450,7 +450,10 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
       return res.status(401).json({ error: 'FYERS authentication failed.', detail: data.message || data.error || 'Please check FYERS settings.' });
     }
     accessToken = data.access_token;
-    dashboardSessions.clear();
+    // Keep other valid browser/PWA dashboard sessions alive when this browser
+    // completes a fresh OAuth login. Clearing the whole map made one tab's
+    // reconnect invalidate every other tab's bearer token, producing a false
+    // connect/disconnect loop and 401s on protected F&O endpoints.
     const dashboardSessionToken = crypto.randomBytes(32).toString('hex');
     dashboardSessions.set(dashboardSessionToken, { createdAt: Date.now(), lastSeenAt: Date.now() });
     authenticatedAt = new Date().toISOString();
