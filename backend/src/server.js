@@ -16,6 +16,7 @@ import { buildOptionRiskPlan } from './option-risk-plan.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
+import { canScheduleMarketSocketFallback } from './market-socket-recovery.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 
@@ -138,11 +139,17 @@ function parseTick(raw) {
 }
 
 function scheduleMarketSocketFallback(socket, reason = 'socket interruption') {
-  if (!socket || marketReconnectTimer || !accessToken || streamConnected) return;
+  if (!canScheduleMarketSocketFallback({
+    sessionOpen: nseRegularSessionNow(),
+    hasToken: Boolean(accessToken),
+    hasSocket: Boolean(socket),
+    connected: streamConnected,
+    timerPending: Boolean(marketReconnectTimer)
+  })) return;
   const delay = MARKET_SOCKET_RECONNECT_FALLBACK_MS;
   marketReconnectTimer = setTimeout(() => {
     marketReconnectTimer = null;
-    if (marketSocket !== socket || streamConnected) return;
+    if (marketSocket !== socket || streamConnected || !nseRegularSessionNow()) return;
     console.warn('FYERS market socket SDK reconnect has not recovered; retrying the same socket instance.', JSON.stringify({
       reason,
       delayMs: delay,
@@ -289,7 +296,13 @@ function startMarketDataStream(token) {
 // Detect a half-open market socket that never emits a close/error event.
 // This check is limited to regular NSE market hours and never calls REST.
 const marketSocketWatchdog = setInterval(() => {
-  if (!accessToken || !marketSocket || !streamConnected || !nseRegularSessionNow()) return;
+  if (!accessToken || !marketSocket || !nseRegularSessionNow()) return;
+  // If the SDK remains disconnected after the close, wait until the next
+  // regular NSE session before starting one controlled fallback attempt.
+  if (!streamConnected) {
+    scheduleMarketSocketFallback(marketSocket, 'market session recovery');
+    return;
+  }
   const now = Date.now();
   // Do not reconnect because one quiet index has not changed. Keep per-index
   // exchange-timestamp freshness checks in liveSnapshot()/signal validation;
