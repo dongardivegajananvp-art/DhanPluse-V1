@@ -128,7 +128,7 @@ export function buildVerifiedSureshotTradePlan({
   const contractSymbol = String(contract.symbol);
   const contractSide = String(contract.side || "").toUpperCase();
   const contractStrike = Number(contract.strike);
-  const symbolStrikeMatch = contractSymbol.match(/(\\d+)(?:CE|PE)$/);
+  const symbolStrikeMatch = contractSymbol.match(/(\d+)(?:CE|PE)$/);
   const symbolStrike = symbolStrikeMatch ? Number(symbolStrikeMatch[1]) : NaN;
   const contractExpiryMs = expiryTime(contract.expiry);
   const contractExpiryDate = Number.isFinite(contractExpiryMs) ? indiaDateKey(contractExpiryMs) : "";
