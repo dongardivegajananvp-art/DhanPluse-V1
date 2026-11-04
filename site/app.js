@@ -1804,7 +1804,13 @@ async function performSureshotSetup() {
     if(typeof chainCheck==='string')throw new Error(chainCheck);
     const chain=chainCheck.chain;
     const spot=chainCheck.spot;
-    const strikes=[...new Set(chain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
+    // Lock every strike and contract choice to the exact expiry selected in the UI.
+    // FYERS may return descriptors for more than one expiry; never let a nearby
+    // strike from a different expiry silently become the selected contract.
+    const chosenExpiry=String(expiryEl&&expiryEl.value?expiryEl.value:(expiries[0]?.expiry??''));
+    const expiryChain=chain.filter(x=>String(x.expiry)===chosenExpiry);
+    if(!chosenExpiry||!expiryChain.length)throw new Error('No contract descriptors were returned for the selected expiry; no trade.');
+    const strikes=[...new Set(expiryChain.map(x=>Number(x.strike_price)).filter(x=>Number.isFinite(x)&&x>0))];
     const atm=strikes.length?strikes.reduce((best,x)=>Math.abs(x-spot)<Math.abs(best-spot)?x:best,strikes[0]):null;
     const typeEl=document.querySelector('#setupOptionType'),strikeEl=document.querySelector('#setupStrike');
     const autoType=bias==='CE WATCH'?'CE':bias==='PE WATCH'?'PE':null;
@@ -1812,11 +1818,11 @@ async function performSureshotSetup() {
     const type=requestedType||autoType;
     const atmIndex=atm===null?-1:strikes.indexOf(atm);
     const nearbyStrikes=new Set(atmIndex<0?[]:strikes.slice(Math.max(0,atmIndex-2),Math.min(strikes.length,atmIndex+3)));
-    const eligibleStrikes=[...new Set(chain.filter(x=>x&&['CE','PE'].includes(x.option_type)&&Number(x.strike_price)>0&&x.symbol).map(x=>String(x.strike_price)))].sort((a,b)=>Number(a)-Number(b));
+    const eligibleStrikes=[...new Set(expiryChain.filter(x=>x&&['CE','PE'].includes(x.option_type)&&Number(x.strike_price)>0&&x.symbol).map(x=>String(x.strike_price)))].sort((a,b)=>Number(a)-Number(b));
     if(strikeEl){const before=strikeEl.value;strikeEl.innerHTML='<option value="">Auto nearest eligible strike</option>'+eligibleStrikes.map(s=>'<option value="'+escapeHtml(s)+'">'+escapeHtml(s)+'</option>').join('');if(before&&eligibleStrikes.includes(before))strikeEl.value=before;}
     const chosenStrike=strikeEl&&strikeEl.value?Number(strikeEl.value):null;
     const sideAgrees=!!autoType&&(!requestedType||requestedType===autoType);
-    const legCandidates=type?chain.filter(x=>(chosenStrike!==null?Number(x.strike_price)===chosenStrike:nearbyStrikes.has(Number(x.strike_price)))&&x.option_type===type&&x.symbol):[];
+    const legCandidates=type?expiryChain.filter(x=>(chosenStrike!==null?Number(x.strike_price)===chosenStrike:nearbyStrikes.has(Number(x.strike_price)))&&x.option_type===type&&x.symbol):[];
     // Chain rows provide contract descriptors only. Rank by distance to the
     // verified underlying candle close; live premium/spread is checked later
     // from the independently timestamped selected-contract quote endpoint.
