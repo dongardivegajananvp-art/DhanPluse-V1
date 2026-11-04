@@ -6,10 +6,16 @@ const navBlock = html.match(/<nav id="nav">([\s\S]*?)<\/nav>/);
 if (!navBlock) throw new Error('Navigation block #nav is missing.');
 const navTabs = [...navBlock[1].matchAll(/data-tab="([^"]+)"/g)]
   .map(match => match[1].replace(/&amp;/g, '&'));
-if (navTabs.length !== 1 || navTabs[0] !== 'Sureshot CE/PE') {
-  throw new Error('Expected exactly one visible tab, Sureshot CE/PE; found: ' + navTabs.join(', '));
+if (navTabs.length !== 2 || navTabs[0] !== 'Sureshot CE/PE' || navTabs[1] !== 'FYERS Connection') {
+  throw new Error('Expected exactly two visible tabs (Sureshot CE/PE, FYERS Connection); found: ' + navTabs.join(', '));
 }
-if (!navBlock[1].includes('class="active"')) throw new Error('Sureshot CE/PE must be the active tab.');
+if (!navBlock[1].includes('class="active"') || !navBlock[1].includes('data-tab="Sureshot CE/PE" class="active"')) {
+  throw new Error('Sureshot CE/PE must be the active initial tab.');
+}
+if (app.includes('sureshotFyersConnectBtn')) throw new Error('FYERS connect button must not be rendered on the Sureshot tab.');
+if (!app.includes("else if (tab === 'FYERS Connection') featureContent.innerHTML = settingsMarkup();")) {
+  throw new Error('Dedicated FYERS Connection tab renderer is missing.');
+}
 if (!app.includes("render('Sureshot CE/PE');")) throw new Error('Sureshot CE/PE must be the initial workspace.');
 const renderStart = app.indexOf('function render(tab) {');
 const renderEnd = app.indexOf('\nfunction bindTabActions', renderStart);
@@ -27,5 +33,5 @@ if (!app.includes("sessionStorage.getItem('dhanpulse-dashboard-session-v1')") ||
     !app.includes("const FYERS_COOLDOWN_KEY")) {
   throw new Error('FYERS session and cooldown protections must remain intact.');
 }
-console.log('PASS: exactly one visible tab (Sureshot CE/PE); Sureshot renderer and shortlist loader retained.');
+console.log('PASS: exactly two visible tabs (Sureshot CE/PE, FYERS Connection); connection controls are separated from Sureshot.');
 console.log('PASS: legacy watchlist/alert browser data cleared; FYERS session and rate-limit guard preserved.');
