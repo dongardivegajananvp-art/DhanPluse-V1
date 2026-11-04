@@ -94,7 +94,7 @@ jobs:
           npm install --no-audit --no-fund playwright
           npx playwright install --with-deps chromium
           cat > ui-smoke.cjs <<'NODE'
-          const { chromium } = require('playwright');
+          const { chromium, devices } = require('playwright');
           (async () => {
             const browser = await chromium.launch({ headless: true });
             const page = await browser.newPage();
@@ -135,6 +135,30 @@ jobs:
             if (scanRequests !== 1) throw new Error('Manual Sureshot scan did not issue exactly one controlled API request.');
             if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join(' | '));
             console.log('PASS: exactly two tabs; connect controls only on FYERS Connection; no automatic Sureshot scan; manual scan issues one request and handles rate-limit safely.');
+            await page.close();
+
+            // Exercise the production shell at a real Android-sized touch viewport.
+            const mobile = await browser.newContext({ ...devices['Pixel 7'] });
+            const mobilePage = await mobile.newPage();
+            const mobileErrors = [];
+            mobilePage.on('pageerror', error => mobileErrors.push(error.message));
+            await mobilePage.route('**/api/status', async route => route.fulfill({
+              status: 200, contentType: 'application/json',
+              body: JSON.stringify({ backend: 'online', fyers: 'not-connected', liveData: 'waiting-for-live-ticks',
+                marketSocketConnected: false, fyersDataApi: { cooldownActive: false, retryAfterSeconds: 0 }, orderPlacement: 'disabled' })
+            }));
+            const mobileResponse = await mobilePage.goto(appUrl + '?android_smoke=' + Date.now(), { waitUntil: 'networkidle', timeout: 60000 });
+            if (!mobileResponse || !mobileResponse.ok()) throw new Error('Android-sized PWA page did not return HTTP success');
+            const mobileTabs = mobilePage.locator('#nav button[data-tab]');
+            if (await mobileTabs.count() !== 2) throw new Error('Android viewport did not render exactly two production tabs');
+            if (await mobilePage.locator('link[rel="manifest"]').count() !== 1) throw new Error('PWA manifest link is missing on Android viewport');
+            await mobilePage.locator('#nav button[data-tab="FYERS Connection"]').tap();
+            await mobilePage.waitForSelector('#connectFyersBtn', { state: 'visible', timeout: 5000 });
+            await mobilePage.locator('#nav button[data-tab="Sureshot CE/PE"]').tap();
+            await mobilePage.waitForSelector('#scanSureshotUniverseBtn', { timeout: 5000 });
+            if (mobileErrors.length) throw new Error('Android viewport page errors: ' + mobileErrors.join(' | '));
+            console.log('PASS: Pixel 7 touch viewport loads PWA shell, switches both tabs, and has no uncaught browser errors.');
+            await mobile.close();
             await browser.close();
           })().catch(error => { console.error(error); process.exit(1); });
           NODE
