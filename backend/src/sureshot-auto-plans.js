@@ -128,6 +128,8 @@ export function buildVerifiedSureshotTradePlan({
   const contractSymbol = String(contract.symbol);
   const contractSide = String(contract.side || "").toUpperCase();
   const contractStrike = Number(contract.strike);
+  const symbolStrikeMatch = contractSymbol.match(/(\\d+)(?:CE|PE)$/);
+  const symbolStrike = symbolStrikeMatch ? Number(symbolStrikeMatch[1]) : NaN;
   const contractExpiryMs = expiryTime(contract.expiry);
   const contractExpiryDate = Number.isFinite(contractExpiryMs) ? indiaDateKey(contractExpiryMs) : "";
   if (!["NSE", "BSE"].includes(underlyingExchange) ||
@@ -135,6 +137,7 @@ export function buildVerifiedSureshotTradePlan({
       !/^(?:NSE|BSE):[A-Z0-9&-]{3,48}(CE|PE)$/.test(contractSymbol) ||
       contractSide !== direction.side || !contractSymbol.endsWith(direction.side) ||
       !Number.isFinite(contractStrike) || contractStrike <= 0 ||
+      !Number.isFinite(symbolStrike) || Math.abs(symbolStrike - contractStrike) > 0.0001 ||
       !contractExpiryDate || contractExpiryDate < indiaDateKey(now)) {
     return { ok: false, reason: "Selected option contract identity is invalid or its expiry has passed." };
   }
