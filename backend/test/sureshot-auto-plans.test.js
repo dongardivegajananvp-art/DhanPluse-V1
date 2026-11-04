@@ -43,6 +43,34 @@ test("blocks a contract whose exchange, side, symbol suffix or strike does not m
   }
 });
 
+test("blocks expired contracts and stale or future underlying direction", () => {
+  const direction = { ok: true, side: "CE", spot: 104, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
+  const contract = { symbol: "NSE:ABC26NOV100CE", strike: 100, side: "CE", expiry: "1795651200" };
+  const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now - 1000) / 1000) };
+  const options = Array.from({ length: 14 }, (_, i) => [Math.floor((now - (14 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
+  options[13][3] = 15;
+  const expired = buildVerifiedSureshotTradePlan({
+    underlyingSymbol: "NSE:ABC-EQ", direction,
+    contract: { ...contract, expiry: String(Math.floor((now - 86400_000) / 1000)) },
+    quote, optionCandles: options, now
+  });
+  assert.equal(expired.ok, false);
+  assert.match(expired.reason, /expiry has passed/i);
+  const staleDirection = buildVerifiedSureshotTradePlan({
+    underlyingSymbol: "NSE:ABC-EQ",
+    direction: { ...direction, latestCandleAt: new Date(now - 30 * 60_000).toISOString() },
+    contract, quote, optionCandles: options, now
+  });
+  assert.equal(staleDirection.ok, false);
+  assert.match(staleDirection.reason, /underlying direction/i);
+  const futureDirection = buildVerifiedSureshotTradePlan({
+    underlyingSymbol: "NSE:ABC-EQ",
+    direction: { ...direction, latestCandleAt: new Date(now + 60_000).toISOString() },
+    contract, quote, optionCandles: options, now
+  });
+  assert.equal(futureDirection.ok, false);
+});
+
 test("blocks future-dated option quotes and invalid spread thresholds", () => {
   const direction = { ok: true, side: "CE", spot: 104, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
   const contract = { symbol: "NSE:ABC26NOV100CE", strike: 100, side: "CE", expiry: "1795651200" };
