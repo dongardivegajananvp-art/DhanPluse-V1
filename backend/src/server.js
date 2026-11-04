@@ -410,6 +410,12 @@ app.get('/api/market/last-known-quotes', async (_req, res) => {
     Number.isFinite(Date.parse(tick.updatedAt))
   );
   let source = 'FYERS WebSocket last-known tick';
+  if (rows.length !== allowedSymbols.length && sureshotAutoPlansInFlight) {
+    return res.status(503).json({
+      ok: false, source: 'last-known', error: 'Sureshot scan has priority; last-known REST refresh is paused.',
+      data: rows, marketOpen, signalsAllowed: false, retryAfterSeconds: 5
+    });
+  }
   if (rows.length !== allowedSymbols.length) {
     if (!accessToken) {
       return res.status(401).json({ ok: false, source: 'last-known',
@@ -1330,6 +1336,12 @@ app.get("/api/market/last-known-stock-quotes", requireDashboardSession, async (_
   if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first.", data: [], signalsAllowed: false });
   if (lastKnownStockCache.data && Date.now() - lastKnownStockCache.fetchedAt < LAST_KNOWN_STOCK_CACHE_MS) {
     return res.json({ ...lastKnownStockCache.data, marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED", cached: true, cacheAgeSeconds: Math.floor((Date.now() - lastKnownStockCache.fetchedAt) / 1000) });
+  }
+  if (sureshotAutoPlansInFlight) {
+    return res.status(503).json({
+      ok: false, error: "Sureshot scan has priority; last-known stock REST refresh is paused.",
+      data: [], signalsAllowed: false, retryAfterSeconds: 5
+    });
   }
   const request = lastKnownStockPromise || (lastKnownStockPromise = (async () => {
     const universe = await getNseFnoEquityUniverse();
