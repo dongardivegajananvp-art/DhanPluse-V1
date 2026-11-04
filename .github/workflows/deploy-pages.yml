@@ -186,3 +186,13 @@ jobs:
           curl --fail --silent --show-error --max-time 60 -D /tmp/dhanpulse-status-headers.txt -o /tmp/dhanpulse-status.json -H "Origin: ${PRODUCTION_ORIGIN}" -H "Accept: application/json" "${BACKEND_URL}/api/status"
           grep -Eiq "^access-control-allow-origin: ${PRODUCTION_ORIGIN}" /tmp/dhanpulse-status-headers.txt
           node -e 'const s=JSON.parse(require("node:fs").readFileSync("/tmp/dhanpulse-status.json","utf8")); if(s.backend!=="online" || s.orderPlacement!=="disabled") process.exit(1); console.log("PASS: production /api/status returns backend online, order placement disabled, FYERS="+s.fyers+", liveData="+s.liveData+", lastTickAt="+s.lastTickAt)' 
+          denied_status="$(curl --silent --show-error --max-time 60 -D /tmp/dhanpulse-denied-headers.txt -o /tmp/dhanpulse-denied.json -w "%{http_code}" -H "Origin: https://untrusted.example" -H "Accept: application/json" "${BACKEND_URL}/api/status")"
+          if [[ "$denied_status" != "403" ]]; then
+            echo "::error::Unexpected origin was not rejected by production CORS (HTTP ${denied_status})."
+            exit 1
+          fi
+          if grep -Eiq "^access-control-allow-origin:" /tmp/dhanpulse-denied-headers.txt; then
+            echo "::error::Unexpected origin received an allow-origin header."
+            exit 1
+          fi
+          echo "PASS: production CORS allows the original Pages origin and rejects an unrelated origin."
