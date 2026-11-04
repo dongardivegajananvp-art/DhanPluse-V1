@@ -16,7 +16,7 @@ import { buildOptionRiskPlan } from './option-risk-plan.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
-import { canScheduleMarketSocketFallback } from './market-socket-recovery.js';
+import { canScheduleMarketSocketFallback, getMarketSocketReconnectDelay } from './market-socket-recovery.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 
@@ -80,6 +80,7 @@ let marketSocket = null;
 let marketReconnectTimer = null;
 let marketReconnectAttempt = 0;
 const MARKET_SOCKET_RECONNECT_FALLBACK_MS = 20_000;
+const MARKET_SOCKET_RECONNECT_MAX_MS = 120_000;
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
@@ -146,24 +147,28 @@ function scheduleMarketSocketFallback(socket, reason = 'socket interruption') {
     connected: streamConnected,
     timerPending: Boolean(marketReconnectTimer)
   })) return;
-  const delay = MARKET_SOCKET_RECONNECT_FALLBACK_MS;
+  const delay = getMarketSocketReconnectDelay(
+    marketReconnectAttempt,
+    MARKET_SOCKET_RECONNECT_FALLBACK_MS,
+    MARKET_SOCKET_RECONNECT_MAX_MS
+  );
   marketReconnectTimer = setTimeout(() => {
     marketReconnectTimer = null;
     if (marketSocket !== socket || streamConnected || !nseRegularSessionNow()) return;
-    console.warn('FYERS market socket SDK reconnect has not recovered; retrying the same socket instance.', JSON.stringify({
+    marketReconnectAttempt += 1;
+    console.warn('FYERS market socket controlled reconnect attempt.', JSON.stringify({
       reason,
       delayMs: delay,
-      retry: marketReconnectAttempt + 1
+      retry: marketReconnectAttempt
     }));
-    marketReconnectAttempt += 1;
     try {
-      // Reuse the existing FYERS socket instance: FYERS permits one Data Socket
-      // per user, and the SDK's own autoreconnect remains enabled.
+      // One reconnect controller owns retries. The FYERS SDK auto-reconnect is
+      // deliberately not enabled, avoiding competing SDK and app retry loops.
+      // Reuse the same Data Socket instance and restore subscriptions on connect.
       socket.connect();
-      scheduleMarketSocketFallback(socket, 'fallback retry still awaiting connect');
     } catch (error) {
-      console.error('FYERS market socket fallback reconnect failed:', String(error?.message || error).slice(0, 240));
-      scheduleMarketSocketFallback(socket, 'fallback connect threw');
+      console.error('FYERS market socket reconnect failed:', String(error?.message || error).slice(0, 240));
+      scheduleMarketSocketFallback(socket, 'manual reconnect threw');
     }
   }, delay);
   marketReconnectTimer.unref?.();
@@ -267,7 +272,7 @@ function startMarketDataStream(token) {
     socket.on('error', error => {
       if (marketSocket !== socket) return;
       streamConnected = false;
-      streamError = 'FYERS market data socket reported an error; reconnecting.';
+      streamError = 'FYERS market data socket reported an error; controlled recovery is pending.';
       console.error('FYERS market socket error:', String(error?.message || error).slice(0, 240));
       scheduleMarketSocketFallback(socket, 'socket error');
     });
@@ -275,16 +280,18 @@ function startMarketDataStream(token) {
       if (marketSocket !== socket) return;
       streamConnected = false;
       const safeReason = reason == null ? '' : String(reason).slice(0, 160);
-      streamError = 'FYERS market socket disconnected; SDK auto-reconnect and fallback are active.';
+      streamError = 'FYERS market socket disconnected; controlled recovery is pending.';
       console.warn('FYERS market socket closed:', JSON.stringify({
         code: code ?? null,
         reason: safeReason || null,
-        sdkAutoReconnect: true,
+        sdkAutoReconnect: false,
+        retryPolicy: 'single-controller-exponential-backoff',
         fallbackAfterMs: MARKET_SOCKET_RECONNECT_FALLBACK_MS
       }));
       scheduleMarketSocketFallback(socket, 'socket close');
     });
-    if (typeof socket.autoreconnect === 'function') socket.autoreconnect(50);
+    // Do not enable SDK auto-reconnect here: the backend owns one bounded,
+    // market-hours-only reconnect controller to prevent competing retry loops.
     socket.connect();
   } catch (error) {
     streamConnected = false;
