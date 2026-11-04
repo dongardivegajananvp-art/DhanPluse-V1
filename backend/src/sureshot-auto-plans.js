@@ -120,9 +120,24 @@ export function buildVerifiedSureshotTradePlan({
   underlyingSymbol, direction, contract, quote, optionCandles,
   resolution = "5", now = Date.now(), maxSpreadPct = 5
 }) {
-  if (!direction?.ok || !direction.side || !contract?.symbol ||
-      !quote || !Array.isArray(optionCandles)) {
+  if (!direction?.ok || !["CE", "PE"].includes(direction.side) ||
+      !underlyingSymbol || !contract?.symbol || !quote || !Array.isArray(optionCandles)) {
     return { ok: false, reason: "Underlying direction, contract, fresh quote and option candles are all required." };
+  }
+  const underlyingExchange = String(underlyingSymbol).split(":")[0];
+  const contractSymbol = String(contract.symbol);
+  const contractSide = String(contract.side || "").toUpperCase();
+  const contractStrike = Number(contract.strike);
+  if (!["NSE", "BSE"].includes(underlyingExchange) ||
+      !contractSymbol.startsWith(underlyingExchange + ":") ||
+      !/^(?:NSE|BSE):[A-Z0-9&-]{3,48}(CE|PE)$/.test(contractSymbol) ||
+      contractSide !== direction.side || !contractSymbol.endsWith(direction.side) ||
+      !Number.isFinite(contractStrike) || contractStrike <= 0 ||
+      contract.expiry == null || String(contract.expiry).trim() === "") {
+    return { ok: false, reason: "Selected option contract identity does not match the underlying exchange, direction, strike or expiry." };
+  }
+  if (!Number.isFinite(maxSpreadPct) || maxSpreadPct <= 0) {
+    return { ok: false, reason: "Maximum option spread threshold is invalid." };
   }
   const quoteTime = epochSeconds(quote.ltt ?? quote.tt ?? quote.exch_feed_time);
   const ageMs = quoteTime ? now - quoteTime * 1000 : Infinity;
