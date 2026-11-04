@@ -79,10 +79,10 @@ async function syncFyersCooldownFromBackend() {
         backendUntil + 2000
       );
     }
-    // Keep the longer confirmed cooldown across Render restarts/deploys. The
-    // backend's in-memory timer resets on restart, but a Cloudflare 1015 block
-    // is upstream/IP-level and must not be probed early by the browser.
-    const until = Math.max(storedUntil, backendUntil, Number(window.__dhanPulseCooldownUntil) || 0);
+    // The backend is the source of truth after a deploy/restart. Do not let an
+    // obsolete browser-persisted 60-minute timer outlive the current backend
+    // budget; a fresh 429 will establish a new bounded cooldown if 1015 remains.
+    const until = backendUntil;
     if (until > Date.now()) {
       window.__dhanPulseCooldownUntil = until;
       try { localStorage.setItem(FYERS_COOLDOWN_KEY, String(until)); } catch {}
