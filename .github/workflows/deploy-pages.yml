@@ -106,12 +106,13 @@ jobs:
             await page.waitForTimeout(1500);
             if (scanRequests !== 0) throw new Error('Sureshot must not scan automatically on tab open.');
             await page.waitForSelector('#scanSureshotUniverseBtn', { timeout: 5000 });
+            await page.waitForSelector('#sureshotFyersConnectBtn', { state: 'visible', timeout: 5000 });
             await page.waitForSelector('#sureshotUniverseResults', { timeout: 5000 });
             await page.locator('#scanSureshotUniverseBtn').click();
             await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent?.toLowerCase()?.includes('verify fno quotes'), { timeout: 5000 });
             if (scanRequests !== 1) throw new Error('Manual Sureshot scan did not issue exactly one controlled API request.');
             if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join(' | '));
-            console.log('PASS: one visible tab; no automatic scan on open; manual scan issues one request and handles FYERS rate-limit safely.');
+            console.log('PASS: one visible tab; FYERS reconnect control visible; no automatic scan on open; manual scan issues one request and handles FYERS rate-limit safely.');
             await browser.close();
           })().catch(error => { console.error(error); process.exit(1); });
           NODE
