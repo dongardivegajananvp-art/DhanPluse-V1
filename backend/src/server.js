@@ -987,9 +987,11 @@ async function getNseFnoEquityUniverse() {
   try { return await fnoUniversePromise; }
   finally { fnoUniversePromise = null; }
 }
-app.get("/api/market/fno-universe", requireDashboardSession, async (_req, res) => {
+// The FYERS instrument masters are public reference data, not account data.
+ // Keep this discovery endpoint independent of the per-browser dashboard session:
+ // chart/stock selection must remain available even when OAuth needs reconnecting.
+app.get("/api/market/fno-universe", async (_req, res) => {
   res.set("Cache-Control", "no-store");
-  if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
   try {
     const universe = await getNseFnoEquityUniverse();
     res.json({
