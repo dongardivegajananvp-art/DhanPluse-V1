@@ -13,6 +13,7 @@ import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 import { buildOptionRiskPlan } from './option-risk-plan.js';
+import { isFyersAuthRejected } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
@@ -577,6 +578,26 @@ app.get('/api/market/quotes', async (_req, res) => {
 // The shared Data API budget is the single cooldown authority. Check its
 // response cache before any upstream cooldown decision so safe cached OHLC
 // remains readable while a 1015 block prevents new requests.
+function invalidateFyersSession(reason) {
+  if (!accessToken) return;
+  accessToken = '';
+  authenticatedAt = null;
+  streamConnected = false;
+  streamError = 'FYERS access token was rejected or expired. Reconnect FYERS.';
+  latestTicks.clear();
+  dashboardSessions.clear();
+  if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
+  marketReconnectTimer = null;
+  const expiredSocket = marketSocket;
+  marketSocket = null;
+  if (expiredSocket) {
+    try { expiredSocket.close(); } catch {}
+  }
+  recordDiagnostic('warn', 'fyers_session_invalidated', {
+    reason: String(reason || 'FYERS authentication rejected').slice(0, 160)
+  });
+}
+
 async function fyersReadOnlyGet(url, { priority = 'normal' } = {}) {
   // While a Sureshot scan is active, keep unrelated Data API traffic from
   // competing for the same account/IP budget. Existing in-flight reads finish;
@@ -594,9 +615,10 @@ async function fyersReadOnlyGet(url, { priority = 'normal' } = {}) {
     error.statusCode = 401;
     throw error;
   }
+  const requestAccessToken = accessToken;
   const response = await fetchWithFyersBudget(url, {
     method: 'GET',
-    headers: { Authorization: appId + ':' + accessToken, Accept: 'application/json' },
+    headers: { Authorization: appId + ':' + requestAccessToken, Accept: 'application/json' },
     cache: 'no-store',
     signal: AbortSignal.timeout(12000)
   });
@@ -617,6 +639,9 @@ async function fyersReadOnlyGet(url, { priority = 'normal' } = {}) {
       : (responseText ? responseText.replace(/\s+/g, ' ').slice(0, 150) : 'FYERS API returned no error message.');
     const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}${retryAfterHeader ? `, Retry-After ${retryAfterHeader}` : ''}): ${message}`.slice(0, 220));
     error.statusCode = response.status === 429 ? 429 : (response.status === 401 || data.code === -16 ? 401 : 502);
+    if (isFyersAuthRejected(response.status, data.code) && accessToken === requestAccessToken) {
+      invalidateFyersSession(message);
+    }
     if (response.status === 429) {
       error.retryAfterSeconds = fetchWithFyersBudget.getStatus().retryAfterSeconds;
     }
