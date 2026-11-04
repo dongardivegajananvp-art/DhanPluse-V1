@@ -1,6 +1,7 @@
 /**
- * Resolve the selected option's contract sizing from the official FYERS NSE_FO
- * symbol master. Never infer lot size or tick size from the underlying.
+ * Resolve sizing for this exact option ticker from its exchange-specific FYERS
+ * derivative master. Different underlyings/contracts may have different lot sizes.
+ * Never infer lot size or tick size from the underlying or another contract.
  */
 export function getVerifiedOptionContractMetadata(symbol, foMaster) {
   if (typeof symbol !== "string" || !/^(?:NSE|BSE):[A-Z0-9&-]+(?:CE|PE)$/.test(symbol) ||
