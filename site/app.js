@@ -2965,7 +2965,7 @@ nav.addEventListener('click', event => {
 });
 document.querySelector('#settingsBtn')?.addEventListener('click', () => render('FYERS Settings'));
 
-try { localStorage.removeItem('dhanpulse-watchlist-v1'); localStorage.removeItem('dhanpulse-price-alerts'); } catch {}
+try { localStorage.removeItem('dhanpulse-watchlist-v1'); localStorage.removeItem('dhanpulse-price-alerts'); localStorage.removeItem('dhanpulse-trade-journal-v1'); } catch {}
 render('Sureshot CE/PE');
 testBackend();
 exchangeAuthCode();
