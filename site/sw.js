@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dhanpulse-shell-v109-sureshot-manual-scan';
+const CACHE_NAME = 'dhanpulse-shell-v110-sureshot-minimal';
 const SHELL = ['./', './index.html', './style.css?v=20261104-sureshot-only-v1', './app.js?v=20261104-sureshot-only-v1', './journal.js?v=20261104-sureshot-only-v1', './risk-calculator.js?v=20261104-sureshot-only-v1', './backtest.js?v=20261104-sureshot-only-v1', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
