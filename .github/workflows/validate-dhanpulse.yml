@@ -41,11 +41,9 @@ jobs:
           test -s site/index.html
           test -s site/style.css
           test -s site/app.js
-          test -s site/journal.js
-          test -s site/risk-calculator.js
-          test -s site/backtest.js
-          grep -q 'risk-calculator.js' site/index.html
-          grep -q 'backtest.js' site/index.html
+          ! grep -q 'journal.js' site/index.html
+          ! grep -q 'risk-calculator.js' site/index.html
+          ! grep -q 'backtest.js' site/index.html
           test -s site/sw.js
           test -s site/dhanpulse-icon.svg
           node scripts/check-tabs.mjs
