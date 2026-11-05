@@ -3079,6 +3079,8 @@ async function exchangeAuthCode() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok !== true || !data.dashboardSessionToken) throw new Error(data.error || data.detail || 'Authentication failed or session was not issued.');
     localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken);
+    // A renewed backend session must be eligible for today's automatic Top 5 scan.
+    try { localStorage.removeItem(SURESHOT_AUTO_SCAN_DAY_KEY); } catch {}
     authExchangeInProgress = false;
     setFyersStatus('CONNECTED');
     setBackendStatus('ONLINE');
