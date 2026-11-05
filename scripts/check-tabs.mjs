@@ -58,10 +58,10 @@ console.log('PASS: legacy watchlist/alert browser data cleared; shared FYERS ses
 
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
 if (!app.includes('SURESHOT_AUTO_SCAN_ATTEMPT_KEY') ||
-    !html.includes('app.js?v=20261105-exchange-live-switches-v1') ||
-    !html.includes('sw.js?v=20261105-exchange-live-switches-v1') ||
-    !sw.includes('dhanpulse-shell-v129-bold-workstation-theme-v1') ||
-    !sw.includes('app.js?v=20261105-exchange-live-switches-v1') ||
+    !html.includes('app.js?v=20261105-mcx-sureshot-v1') ||
+    !html.includes('sw.js?v=20261105-mcx-sureshot-v1') ||
+    !sw.includes('dhanpulse-shell-v130-mcx-sureshot-v1') ||
+    !sw.includes('app.js?v=20261105-mcx-sureshot-v1') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('PWA cache and bounded Sureshot automatic-attempt guard must be present in the published shell.');
 }
