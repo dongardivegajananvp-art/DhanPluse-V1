@@ -2113,7 +2113,9 @@ app.get('/api/market/mcx-fno-universe', async (_req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     const universe = await getMcxFnoUniverse();
-    return res.json({ ok: true, ...universe, signalsAllowed: false, rankingIsSignal: false });
+    const clientData = universe.data.map(({ symbol, underlying, expiryDate, lotSize, tickSize }) =>
+      ({ symbol, underlying, expiryDate, lotSize, tickSize }));
+    return res.json({ ok: true, ...universe, data: clientData, signalsAllowed: false, rankingIsSignal: false });
   } catch (error) {
     return res.status(503).json({ ok: false, error: 'Official MCX F&O universe unavailable; MCX scan blocked.', detail: String(error.message || error).slice(0, 200), signalsAllowed: false });
   }
