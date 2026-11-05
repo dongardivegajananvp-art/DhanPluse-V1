@@ -120,6 +120,30 @@ test('identical history reads are coalesced and briefly cached', async () => {
   assert.equal(sent, 2, 'expired history cache must refresh from FYERS');
 });
 
+test('default history cache reuses OHLC for five minutes, then requires a fresh FYERS read', async () => {
+  let clock = 540_000;
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    now: () => clock,
+    minIntervalMs: 0,
+    fetchImpl: async () => {
+      sent += 1;
+      return new Response(JSON.stringify({ s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] }), {
+        status: 200, headers: { 'content-type': 'application/json' }
+      });
+    }
+  });
+  const url = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX&resolution=5';
+  await request(url);
+  clock += 4 * 60_000;
+  const cached = await request(url);
+  assert.equal(cached.headers.get('x-dhanpulse-cache'), 'HIT');
+  assert.equal(sent, 1, 'history should be reused inside the five-minute cache window');
+  clock += 60_001;
+  await request(url);
+  assert.equal(sent, 2, 'expired history must refresh from FYERS');
+});
+
 test('verified history cache remains readable during a shared Cloudflare cooldown', async () => {
   let clock = 550_000;
   let sent = 0;

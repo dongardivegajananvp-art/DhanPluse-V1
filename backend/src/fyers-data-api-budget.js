@@ -14,9 +14,10 @@ export function createFyersDataApiBudget({
   cloudflareCooldownMs = 15 * 60_000,
   maxCloudflareCooldownMs = 60 * 60_000,
   rateLimitCooldownMs = 60_000,
-  // Reuse identical verified OHLC reads for three minutes. Sureshot's candle
-  // validators independently reject stale completed bars before any signal.
-  historyCacheMs = 3 * 60_000,
+  // Reuse identical verified OHLC reads for five minutes to reduce repeated
+  // history calls during short provider throttles. Sureshot and chart consumers
+  // independently reject stale/incomplete bars; this cache never makes a signal valid.
+  historyCacheMs = 5 * 60_000,
   // Contract descriptors contain identity/expiry only (never premium/OI/volume).
   optionChainCacheMs = 60_000,
   maxCacheEntries = 100
