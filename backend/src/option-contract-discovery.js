@@ -1,4 +1,4 @@
-const CONTRACT_SYMBOL = /^(?:NSE|BSE):[A-Z0-9&-]{3,48}(CE|PE)$/;
+const CONTRACT_SYMBOL = /^(?:NSE|BSE|MCX):[A-Z0-9&.-]{3,48}(CE|PE)$/;
 
 export function normalizeOptionContractDiscovery(payload) {
   if (!payload || typeof payload !== "object" ||
