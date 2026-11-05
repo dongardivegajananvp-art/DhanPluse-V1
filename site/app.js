@@ -1769,6 +1769,7 @@ async function performSureshotSetup() {
   if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
   let selectedContract=null;
   const symbol=symbolEl.value,resolution=resolutionEl.value;
+  const selectedMarketOpen=symbol.startsWith('MCX:')?isMcxMarketSessionOpen():selectedMarketOpen;
   // Allow the backend to serve an identical, recently verified candle-cache hit
   // during a shared FYERS cooldown. Cache misses remain blocked upstream; the
   // directional and option-risk validators still require fresh exchange data.
@@ -1804,17 +1805,17 @@ async function performSureshotSetup() {
     if(weekdayTradingDay&&exchangeDate!==todayExchangeDate){
       throw new Error('STALE FYERS CHART · latest candle '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' is from an earlier session; no candle from today ('+todayExchangeDate+') was returned. Old-session chart and zones are blocked.');
     }
-    if(isRegularMarketSession()&&candleAgeMinutes>maxOpenAgeMinutes){
+    if(selectedMarketOpen&&candleAgeMinutes>maxOpenAgeMinutes){
       throw new Error('STALE FYERS CHART · latest candle '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' is too old for the open session. Chart and signals are blocked.');
     }
     const zones=deriveSureshotZones(candles);
     if(!zones)throw new Error('At least 12 verified candles are needed before zones can be calculated.');
     const close=Number(lastCandle[4]),previous=Number(candles[candles.length-2][4]);
     chart.innerHTML=sureshotZoneChart(candles,zones.supply,zones.demand);
-    const candleFreshnessLabel=isRegularMarketSession()?'CURRENT SESSION · '+candleAgeMinutes.toFixed(1)+' min old':'MARKET CLOSED · LAST AVAILABLE SESSION';
+    const candleFreshnessLabel=selectedMarketOpen?'CURRENT SESSION · '+candleAgeMinutes.toFixed(1)+' min old':'MARKET CLOSED · LAST AVAILABLE SESSION';
     summary.textContent='Latest FYERS candle: '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' · '+candleFreshnessLabel+' · '+candles.length+' verified candles · Supply '+formatPrice(zones.supply.low)+'–'+formatPrice(zones.supply.high)+' · Buyer/demand '+formatPrice(zones.demand.low)+'–'+formatPrice(zones.demand.high)+'. Zones are heuristic; the chart is not a live-moving feed.';
     let bias='NO TRADE',reason='Price is inside the mapped zones or has not confirmed a breakout.';
-    if(!isRegularMarketSession()){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
+    if(!selectedMarketOpen){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
     else if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
     else if(close<zones.demand.low&&close<previous){bias='PE WATCH';reason='Latest candle closed below the calculated buyer/demand-zone low.';}
     // Do not spend another FYERS REST request discovering option contracts
@@ -2245,8 +2246,14 @@ function settingsMarkup() {
   return '<div class="settings-grid"><article class="console-section"><h4>Secure connection</h4><p>FYERS credentials stay on the Render backend. Do not paste app secrets or access tokens into this page.</p><div class="data-row"><span>Backend URL</span><b>Render</b></div><code class="backend-url">' + BACKEND_URL + '</code><div class="button-row"><button class="primary" id="testBackendBtn">Test backend</button><button class="primary" id="connectFyersBtn">Connect FYERS</button><button class="secondary" id="testQuotesBtn">Refresh live quotes</button><button class="secondary" id="installPwaBtn">Install DhanPulse app</button></div><p class="hint">Install on desktop/laptop from the browser install icon, or on mobile use the browser menu → Install app / Add to Home Screen.</p></article><article class="console-section"><h4>Exchange live switches</h4><div class="data-row"><span>NSE market session</span><b id="settingsNseSession">CHECKING</b></div><div class="data-row"><span>NSE index feed</span><b id="settingsNseLiveFeed">WAITING</b></div><div class="data-row"><span>MCX market session</span><b id="settingsMcxSession">CHECKING</b></div><div class="data-row"><span>MCX futures feed</span><b id="settingsMcxLiveFeed">WAITING</b></div><p class="hint" id="settingsExchangeStatusNote">Session clock is indicative only; a fresh exchange-timestamped FYERS tick is required to show LIVE. Exchange holidays and special sessions are not checked.</p></article><article class="console-section"><h4>Connection diagnostics</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend health</span><b id="settingsBackend">CHECKING</b></div><div class="data-row"><span>Latest NSE index quotes</span><b id="settingsFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div><p class="hint">Backend health alone does not prove that FYERS authentication or live market data is connected.</p></article><article class="console-section"><h4>MCX live socket diagnostic</h4><div class="data-row"><span>MCX feed</span><b id="settingsMcxFeed">WAITING</b></div><div class="data-row"><span>Official contract</span><b id="settingsMcxSymbol">Loading FYERS master…</b></div><div class="data-row"><span>Verified LTP</span><b id="settingsMcxLtp">—</b></div><div class="data-row"><span>Exchange timestamp</span><b id="settingsMcxTime">—</b></div><p class="hint" id="settingsMcxDetail">One active MCX futures contract is subscribed on the existing FYERS socket. MCX data is diagnostic only and never enters NSE Sureshot.</p></article></div>';
 }
 
+let latestExchangeLiveStatus = {};
+function isMcxMarketSessionOpen() {
+  const mcx = latestExchangeLiveStatus.MCX || {};
+  return mcx.session === 'SCHEDULED_OPEN' && mcx.feed === 'LIVE';
+}
 function updateExchangeLiveSwitches(status) {
   const exchanges = status && status.exchangeLiveStatus ? status.exchangeLiveStatus : {};
+  latestExchangeLiveStatus = exchanges;
   const nse = exchanges.NSE || {};
   const mcx = exchanges.MCX || {};
   const set = (selector, value) => {
