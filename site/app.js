@@ -1809,7 +1809,7 @@ async function loadSureshotUniverseShortlist() {
         const lotText = Number.isInteger(Number(lotSize)) && Number(lotSize) > 0 ? Number(lotSize).toLocaleString('en-IN') + ' units' : 'Contract verify';
         return '<tr><td><b>#' + Number(row.rank) + '</b></td><td><b>' +
           escapeHtml(String(row.underlyingSymbol || '').replace(/^NSE:/, '').replace(/^BSE:/, '').replace(/-EQ$/, '').replace(/-INDEX$/, '')) +
-          '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td>₹' + formatPrice(row.ltp) + '</td><td>' + moveText + '</td><td>' + lotText + '</td><td>'
+          '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td>₹' + formatPrice(row.ltp) + '</td><td>' + moveText + '</td><td>' + lotText + '</td><td>' +
           (plan ? '<span class="signal-tone positive">VERIFIED</span>' : '<span class="signal-tone neutral">NO TRADE</span>') +
           '</td><td>' + (plan ? escapeHtml(plan.direction) : '—') + '</td><td>' +
           (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '—') +
