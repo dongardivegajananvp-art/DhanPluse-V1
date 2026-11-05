@@ -971,7 +971,6 @@ let fnoUniverseCache = { fetchedAt: 0, data: null };
 let fnoUniversePromise = null;
 let stockQuoteCache = { fetchedAt: 0, data: null };
 let stockQuotePromise = null;
-let stockQuoteCooldown = { until: 0, backoffMs: 30000 };
 const STOCK_QUOTE_CACHE_MS = 30000;
 const STOCK_QUOTE_BATCH_SIZE = 50;
 
@@ -1032,7 +1031,6 @@ function syncFnoQuoteCacheFromMoversPayload(payload, symbols = moversSymbols) {
   stockQuoteCache = { fetchedAt: Date.parse(snapshot.fetchedAt), data: snapshot };
   return true;
 }
-const STOCK_QUOTE_BATCH_PAUSE_MS = 1200;
 async function getNseFnoEquityUniverse() {
   if (fnoUniverseCache.data && Date.now() - fnoUniverseCache.fetchedAt < 24 * 60 * 60 * 1000) return fnoUniverseCache.data;
   if (fnoUniversePromise) return fnoUniversePromise;
@@ -1077,14 +1075,18 @@ app.get("/api/market/fno-universe", async (_req, res) => {
     res.status(503).json({ ok: false, error: "Verified NSE F&O universe unavailable; symbol selection blocked.", detail: String(error?.message || error).slice(0, 160) });
   }
 });
-function stockQuoteRateLimitError() {
-  const now = Date.now();
-  const until = now + stockQuoteCooldown.backoffMs;
-  stockQuoteCooldown = { until, backoffMs: Math.min(stockQuoteCooldown.backoffMs * 2, 15 * 60 * 1000) };
-  const error = new Error("FYERS quote rate limit reached; retry after cooldown.");
-  error.statusCode = 429;
-  error.retryAfterSeconds = Math.ceil((until - now) / 1000);
-  return error;
+function sendFyersDataApiCooldown(res, extra = {}) {
+  const status = fetchWithFyersBudget.getStatus();
+  const retryAfterSeconds = Number(status.retryAfterSeconds) || 0;
+  if (!status.cooldownActive || retryAfterSeconds <= 0) return false;
+  res.set("Retry-After", String(retryAfterSeconds));
+  res.status(429).json({
+    ok: false,
+    error: "FYERS Data API cooldown active; no upstream request was sent.",
+    retryAfterSeconds,
+    ...extra
+  });
+  return true;
 }
 async function loadVerifiedFnoStockQuotes({ priority = 'normal' } = {}) {
   const master = await getNseFnoEquityUniverse();
@@ -1094,7 +1096,6 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal' } = {}) {
   const missingSymbols = [];
   // Sequential batches with a small pause avoid a burst of parallel quote requests.
   for (let offset = 0; offset < symbols.length; offset += STOCK_QUOTE_BATCH_SIZE) {
-    if (offset > 0) await new Promise(resolve => setTimeout(resolve, STOCK_QUOTE_BATCH_PAUSE_MS));
     const batch = symbols.slice(offset, offset + STOCK_QUOTE_BATCH_SIZE);
     const url = new URL("https://api-t1.fyers.in/data/quotes");
     url.searchParams.set("symbols", batch.join(","));
@@ -1159,7 +1160,6 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal' } = {}) {
   };
   stockQuoteCache = { fetchedAt: Date.now(), data: result };
   syncMoversCacheFromFnoQuoteSnapshot(result, master.data.map(item => item.symbol));
-  stockQuoteCooldown = { until: 0, backoffMs: 30000 };
   return result;
 }
 app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) => {
@@ -1184,14 +1184,7 @@ app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) =
   // subset when even one F&O symbol has a stale or missing exchange timestamp.
   if (stockQuoteCache.data) stockQuoteCache = { fetchedAt: 0, data: null };
 
-  const remaining = stockQuoteCooldown.until - Date.now();
-  if (remaining > 0) {
-    res.set("Retry-After", String(Math.ceil(remaining / 1000)));
-    return res.status(429).json({
-      ok: false, error: "FYERS stock-quote cooldown active; no upstream request was sent.",
-      retryAfterSeconds: Math.ceil(remaining / 1000), partialQuotesDiscarded: true
-    });
-  }
+  if (sendFyersDataApiCooldown(res, { partialQuotesDiscarded: true })) return;
 
   // Collapse simultaneous browser refreshes into one upstream request sequence.
   const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes());
@@ -1201,16 +1194,10 @@ app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) =
   } catch (error) {
     const status = Number(error.statusCode) || 502;
     if (status === 429) {
-      const retry = Math.max(1, Number(error.retryAfterSeconds) || Math.ceil((stockQuoteCooldown.until - Date.now()) / 1000));
-      // Mirror the shared /data/quotes cooldown locally so browser polling does
-      // not repeatedly enter the quote loader while FYERS is still blocking it.
-      stockQuoteCooldown = {
-        until: Math.max(stockQuoteCooldown.until, Date.now() + retry * 1000),
-        backoffMs: Math.min(Math.max(stockQuoteCooldown.backoffMs * 2, retry * 1000), 15 * 60 * 1000)
-      };
+      const retry = Math.max(1, Number(error.retryAfterSeconds) || fetchWithFyersBudget.getStatus().retryAfterSeconds || 1);
       res.set("Retry-After", String(retry));
       return res.status(429).json({
-        ok: false, error: "FYERS quote rate limit reached while loading the F&O universe. Partial results were discarded.",
+        ok: false, error: "FYERS Data API rate limit reached while loading the F&O universe. Partial results were discarded.",
         retryAfterSeconds: retry, partialQuotesDiscarded: true
       });
     }
@@ -1249,15 +1236,7 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
       Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS
       ? stockQuoteCache.data : null;
     if (!snapshot) {
-      const remaining = stockQuoteCooldown.until - Date.now();
-      if (remaining > 0) {
-        res.set("Retry-After", String(Math.ceil(remaining / 1000)));
-        return res.status(429).json({
-          ok: false, signalsAllowed: false,
-          error: "FYERS F&O quote cooldown active; no upstream request sent.",
-          retryAfterSeconds: Math.ceil(remaining / 1000)
-        });
-      }
+      if (sendFyersDataApiCooldown(res, { signalsAllowed: false })) return;
       const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes());
       try { snapshot = await request; }
       finally { if (stockQuotePromise === request) stockQuotePromise = null; }
@@ -1334,12 +1313,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         isCompleteFreshFnoQuoteSnapshot(stockQuoteCache.data, expectedQuoteSymbols, Date.now())
         ? stockQuoteCache.data : null;
       if (!snapshot) {
-        const remaining = stockQuoteCooldown.until - Date.now();
-        if (remaining > 0) {
-          res.set("Retry-After", String(Math.ceil(remaining / 1000)));
-          return res.status(429).json({ ok: false, scanComplete: false, signalsAllowed: false,
-            error: "FYERS F&O quote cooldown active; no upstream request sent.", stage: scanStage, retryAfterSeconds: Math.ceil(remaining / 1000) });
-        }
+        if (sendFyersDataApiCooldown(res, { scanComplete: false, signalsAllowed: false, stage: scanStage })) return;
         const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes({ priority: "sureshot" }));
         try { snapshot = await request; } finally { if (stockQuotePromise === request) stockQuotePromise = null; }
       }
@@ -1532,8 +1506,7 @@ app.get("/api/market/last-known-stock-quotes", requireDashboardSession, async (_
     const missing = [];
     let stoppedReason = null;
     for (let offset = 0; offset < symbols.length; offset += STOCK_QUOTE_BATCH_SIZE) {
-      if (offset > 0) await new Promise(resolve => setTimeout(resolve, STOCK_QUOTE_BATCH_PAUSE_MS));
-      const batch = symbols.slice(offset, offset + STOCK_QUOTE_BATCH_SIZE);
+        const batch = symbols.slice(offset, offset + STOCK_QUOTE_BATCH_SIZE);
       try {
         const url = new URL("https://api-t1.fyers.in/data/quotes");
         url.searchParams.set("symbols", batch.join(","));
@@ -1636,6 +1609,45 @@ app.get('/api/market/movers', async (_req, res) => {
     res.set('Cache-Control', 'no-store');
     return res.json({ ...cachedPayload, data, cached: true });
   }
+  // During market hours, route Movers through the same complete F&O snapshot
+  // promise/cache as Stock Quotes and Sureshot. This prevents independent
+  // full-universe quote loaders from spending the same FYERS request budget.
+  if (nseRegularSessionNow()) {
+    try {
+      const universe = await getNseFnoEquityUniverse();
+      const symbols = universe.data.map(item => item.symbol);
+      const sameUniverse = symbols.length === moversSymbols.length &&
+        symbols.every((symbol, index) => symbol === moversSymbols[index]);
+      if (sameUniverse) {
+        let snapshot = stockQuoteCache.data &&
+          Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS &&
+          isCompleteFreshFnoQuoteSnapshot(stockQuoteCache.data, symbols, Date.now())
+          ? stockQuoteCache.data : null;
+        if (!snapshot) {
+          if (sendFyersDataApiCooldown(res, { partialQuotesDiscarded: true })) return;
+          const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes());
+          try { snapshot = await request; }
+          finally { if (stockQuotePromise === request) stockQuotePromise = null; }
+        }
+        const payload = fnoQuoteSnapshotToMoversPayload(snapshot, symbols, Date.now());
+        if (!payload) {
+          return res.status(503).json({ ok: false, error: "Complete fresh FYERS F&O snapshot could not be shared with Movers; no partial ranking returned." });
+        }
+        moversSnapshotCache = { cachedAt: Date.parse(payload.fetchedAt), payload };
+        res.set('Cache-Control', 'no-store');
+        return res.json(payload);
+      }
+    } catch (error) {
+      const status = Number(error.statusCode) || 503;
+      if (status === 429) res.set("Retry-After", String(Number(error.retryAfterSeconds) || fetchWithFyersBudget.getStatus().retryAfterSeconds || 1));
+      return res.status(status).json({
+        ok: false,
+        error: status === 429 ? "FYERS Data API cooldown active; shared F&O snapshot withheld." : "Shared FYERS F&O snapshot unavailable; Movers ranking withheld.",
+        detail: String(error.message || "Snapshot verification failed.").slice(0, 160),
+        partialQuotesDiscarded: true
+      });
+    }
+  }
   try {
     if (!moversSnapshotInFlight) {
       moversSnapshotInFlight = (async () => {
@@ -1656,10 +1668,6 @@ app.get('/api/market/movers', async (_req, res) => {
             quoteItems.push(...quotes);
             const returned = new Set(quotes.map(item => item && (item.n || item.symbol || item.v?.symbol)).filter(Boolean));
             failedBatches.push(...batch.filter(symbol => !returned.has(symbol)));
-            if (offset + MOVERS_BATCH_SIZE < moversSymbols.length) {
-              // Space provider quote batches conservatively to reduce HTTP 429 / Cloudflare throttling.
-              await new Promise(resolve => setTimeout(resolve, 1250));
-            }
           } catch (error) {
             failedBatches.push(...batch);
             // A 429 means this endpoint is in cooldown; stop immediately rather
