@@ -6,6 +6,15 @@ const BACKEND_URL = IS_ISOLATED_TEST_PREVIEW
   : 'https://dhanpluse-v1.onrender.com';
 // The FYERS access token stays on the backend. This opaque session token only
 // authorizes this browser session to read protected dashboard APIs.
+// Share the opaque dashboard bearer across same-origin tabs/PWA windows.
+// sessionStorage is tab-scoped and caused false 401s when another tab logged in.
+try {
+  if (!localStorage.getItem('dhanpulse-dashboard-session-v1')) {
+    const legacy = sessionStorage.getItem('dhanpulse-dashboard-session-v1');
+    if (legacy) localStorage.setItem('dhanpulse-dashboard-session-v1', legacy);
+  }
+  sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
+} catch {}
 const nativeFetch = window.fetch.bind(window);
 
 // FYERS 429/cooldown state is shared across tabs through localStorage.
@@ -152,14 +161,14 @@ window.fetch = function(input, init = {}) {
     return Promise.reject(new Error('OAuth is disabled in this isolated test preview until the test redirect URI is verified.'));
   }
   if (isBackend && !publicPaths.includes(pathname)) {
-    const session = sessionStorage.getItem('dhanpulse-dashboard-session-v1');
+    const session = localStorage.getItem('dhanpulse-dashboard-session-v1');
     if (session) headers.set('Authorization', 'Bearer ' + session);
   }
   return nativeFetch(input, { ...init, headers }).then(response => {
     if (isBackend && response.status === 401 && !publicPaths.includes(pathname)) {
-      const hadSession = !!sessionStorage.getItem('dhanpulse-dashboard-session-v1');
+      const hadSession = !!localStorage.getItem('dhanpulse-dashboard-session-v1');
       if (hadSession) {
-        sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
+        localStorage.removeItem('dhanpulse-dashboard-session-v1');
         setFyersStatus('RECONNECT REQUIRED');
         setConnection('FYERS session expired · reconnect required', true);
         const setupStatus = document.querySelector('#setupStatus');
@@ -631,7 +640,7 @@ async function loadDashboardCandles() {
   const count=document.querySelector('#chartSampleCount');
   const button=document.querySelector('#dashboardCandlesBtn');
   if(!symbol||!resolution||!chart||!status||dashboardCandleRequestRunning)return;
-  if (!sessionStorage.getItem('dhanpulse-dashboard-session-v1')) {
+  if (!localStorage.getItem('dhanpulse-dashboard-session-v1')) {
     status.textContent='Connect FYERS to load verified historical candles.';
     chart.innerHTML='<div class="chart-empty"><strong>FYERS connection required.</strong><p>Connect FYERS to load verified historical candles. No candle values are fabricated.</p><button type="button" class="primary dashboardReconnectBtn">Connect FYERS</button></div>';
     chart.querySelector('.dashboardReconnectBtn')?.addEventListener('click',startFyersLogin);
@@ -665,7 +674,7 @@ async function loadDashboardCandles() {
     const mainChart=document.querySelector('#mainTabChart');
     const mainNote=document.querySelector('#mainViewNote');
     if(sessionExpired) {
-      sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
+      localStorage.removeItem('dhanpulse-dashboard-session-v1');
       const recovery='<div class="chart-empty"><strong>FYERS dashboard session expired.</strong><p>Reconnect FYERS to securely renew the session before loading historical candles.</p><button type="button" class="primary dashboardReconnectBtn">Reconnect FYERS</button></div>';
       chart.innerHTML=recovery;
       if(mainChart)mainChart.innerHTML=recovery;
@@ -3077,7 +3086,7 @@ async function fetchLiveQuotes(force = false) {
         // A Render restart clears the backend's in-memory FYERS access token and
         // dashboard-session map. Discard the now-invalid browser session instead
         // of repeatedly polling protected routes and leaving the UI in "Waiting".
-        sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
+        localStorage.removeItem('dhanpulse-dashboard-session-v1');
         latestQuotes = {};
         quotePollDelay = 30000;
         setStatus('FYERS RECONNECT REQUIRED');
@@ -3166,7 +3175,7 @@ async function exchangeAuthCode() {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok !== true || !data.dashboardSessionToken) throw new Error(data.error || data.detail || 'Authentication failed or session was not issued.');
-    sessionStorage.setItem('dhanpulse-dashboard-session-v1', data.dashboardSessionToken);
+    localStorage.setItem('dhanpulse-dashboard-session-v1', data.dashboardSessionToken);
     setFyersStatus('CONNECTED');
     setBackendStatus('ONLINE');
     logEvent('FYERS authentication succeeded; checking live quotes.', 'info');
