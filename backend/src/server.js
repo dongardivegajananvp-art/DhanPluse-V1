@@ -450,11 +450,12 @@ app.get('/api/status', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
   const exchangeSessions = getExchangeSessionWindows();
-  const nseFreshTickCount = allowedSymbols.filter(symbol => {
+  const nseSymbols = allowedSymbols.filter(symbol => symbol.startsWith('NSE:'));
+  const nseFreshTickCount = nseSymbols.filter(symbol => {
     const tick = latestTicks.get(symbol);
     return Boolean(tick && quoteTimestampStatus(Date.parse(tick.updatedAt) / 1000, Date.now(), 30) === 'FRESH');
   }).length;
-  const nseHasAnyTick = allowedSymbols.some(symbol => latestTicks.has(symbol));
+  const nseHasAnyTick = nseSymbols.some(symbol => latestTicks.has(symbol));
   const nseFeed = !accessToken ? 'NOT_CONNECTED'
     : !streamConnected ? 'DISCONNECTED'
     : nseFreshTickCount === allowedSymbols.length ? 'LIVE'
@@ -475,7 +476,7 @@ app.get('/api/status', (_req, res) => {
     exchangeLiveStatus: {
       NSE: {
         ...exchangeSessions.NSE, feed: nseFeed,
-        freshTickCount: nseFreshTickCount, requiredTickCount: allowedSymbols.length,
+        freshTickCount: nseFreshTickCount, requiredTickCount: nseSymbols.length,
         live: nseFeed === 'LIVE'
       },
       MCX: {
