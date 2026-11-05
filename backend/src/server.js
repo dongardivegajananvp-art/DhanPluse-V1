@@ -2114,10 +2114,15 @@ app.get('/api/fyers/options-chain', async (req, res) => {
       const universe = await getMcxFnoUniverse();
       const future = universe.data.find(row => row.symbol === symbol);
       if (!future) return res.status(400).json({ ok: false, error: 'Underlying is not an active FYERS MCX future in the official master.' });
+      const expiryToMillis = value => {
+        const number = Number(value);
+        return Number.isFinite(number) && number > 0
+          ? (number > 1e12 ? number : number * 1000)
+          : Date.parse(String(value || ""));
+      };
       const byExpiry = new Map();
       for (const option of future.optionContracts) {
-        const expiryNumber = Number(option.expiryDate);
-        const expiryMs = Number.isFinite(expiryNumber) && expiryNumber > 0 ? (expiryNumber > 1e12 ? expiryNumber : expiryNumber * 1000) : Date.parse(option.expiryDate);
+        const expiryMs = expiryToMillis(option.expiryDate);
         if (!Number.isFinite(expiryMs) || expiryMs <= Date.now()) continue;
         const expiry = String(Math.floor(expiryMs / 1000));
         const date = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(expiryMs));
@@ -2125,11 +2130,9 @@ app.get('/api/fyers/options-chain', async (req, res) => {
       }
       const expiryData = [...byExpiry.values()].sort((a, b) => Number(a.expiry) - Number(b.expiry));
       const selectedExpiry = timestamp || expiryData[0]?.expiry;
-      const optionsChain = future.optionContracts.filter(option => {
-        const n = Number(option.expiryDate);
-        const ms = Number.isFinite(n) && n > 0 ? (n > 1e12 ? n : n * 1000) : Date.parse(option.expiryDate);
-        return Number.isFinite(ms) && String(Math.floor(ms / 1000)) === String(selectedExpiry);
-      }).map(option => ({ symbol: option.symbol, strike_price: option.strike, option_type: option.side, expiry: selectedExpiry }));
+      const optionsChain = future.optionContracts.filter(option =>
+        String(Math.floor(expiryToMillis(option.expiryDate) / 1000)) === String(selectedExpiry)
+      ).map(option => ({ symbol: option.symbol, strike_price: option.strike, option_type: option.side, expiry: selectedExpiry }));
       if (!optionsChain.length) return res.status(422).json({ ok: false, error: 'No active MCX options found for the selected expiry in the official master.' });
       const discovery = normalizeOptionContractDiscovery({ expiryData, optionsChain });
       res.set('Cache-Control', 'no-store');
