@@ -52,6 +52,26 @@ test("excludes contracts whose official trading session has closed", () => {
   assert.deepEqual(buildMcxFuturesUniverse(closed, now), []);
 });
 
+test("matches MCX option families to their exact underlying futures token", () => {
+  const secondExpiry = Math.floor(Date.parse("2026-12-17T00:00:00.000Z") / 1000);
+  const paired = {
+    "MCX:CRUDEOIL26NOVFUT": { tradeStatus: 1, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-nov", underSym: "CRUDEOIL", expiryDate: expiry, minLotSize: 100, tickSize: 1 },
+    "MCX:CRUDEOIL26DECFUT": { tradeStatus: 1, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-dec", underSym: "CRUDEOIL", expiryDate: secondExpiry, minLotSize: 100, tickSize: 1 },
+    "MCX:CRUDEOIL26NOV8400CE": { tradeStatus: 1, optType: "CE", tradingSession: "0900-2355", fyToken: "nov-ce", underFyTok: "fut-nov", underSym: "CRUDEOIL", strikePrice: 8400, expiryDate: expiry, minLotSize: 100, tickSize: 0.05 },
+    "MCX:CRUDEOIL26NOV8400PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-2355", fyToken: "nov-pe", underFyTok: "fut-nov", underSym: "CRUDEOIL", strikePrice: 8400, expiryDate: expiry, minLotSize: 100, tickSize: 0.05 },
+    "MCX:CRUDEOIL26DEC8500CE": { tradeStatus: 1, optType: "CE", tradingSession: "0900-2355", fyToken: "dec-ce", underFyTok: "fut-dec", underSym: "CRUDEOIL", strikePrice: 8500, expiryDate: secondExpiry, minLotSize: 100, tickSize: 0.05 },
+    "MCX:CRUDEOIL26DEC8500PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-2355", fyToken: "dec-pe", underFyTok: "fut-dec", underSym: "CRUDEOIL", strikePrice: 8500, expiryDate: secondExpiry, minLotSize: 100, tickSize: 0.05 }
+  };
+  const rows = buildMcxFuturesUniverse(paired, now);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.find(row => row.fyToken === "fut-nov").optionContracts.map(row => row.symbol), [
+    "MCX:CRUDEOIL26NOV8400CE", "MCX:CRUDEOIL26NOV8400PE"
+  ]);
+  assert.deepEqual(rows.find(row => row.fyToken === "fut-dec").optionContracts.map(row => row.symbol), [
+    "MCX:CRUDEOIL26DEC8500CE", "MCX:CRUDEOIL26DEC8500PE"
+  ]);
+});
+
 test("MCX shortlist requires complete fresh exchange-timestamped quote coverage", () => {
   const universe = buildMcxFuturesUniverse(master, now);
   const rows = buildVerifiedMcxShortlist({
