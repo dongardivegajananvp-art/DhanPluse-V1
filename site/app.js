@@ -1767,13 +1767,13 @@ async function loadSureshotUniverseShortlist() {
       host.innerHTML = '<div class="console-section-head"><div><h4>Live scan progress · NSE F&O universe</h4><p>' +
         offset + ' / ' + total + ' candidates checked · ' + (total ? Math.round(offset / total * 100) : 0) +
         '% · ranked by FYERS % move</p></div><span class="live-tag">SCANNING</span></div>' +
-        '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Symbol</th><th>Move</th><th>Direction</th><th>Check</th><th>Reason</th></tr></thead><tbody>' +
+        '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Symbol</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Direction</th><th>Check</th><th>Reason</th></tr></thead><tbody>' +
         progressRows.map(row => {
           const move = Number(row.changePct);
           return '<tr><td>#' + Number(row.rank) + '</td><td><b>' +
             escapeHtml(String(row.underlyingSymbol || '').replace(/^NSE:/, '').replace(/^BSE:/, '').replace(/-EQ$/, '').replace(/-INDEX$/, '')) +
-            '</b></td><td>' + (Number.isFinite(move) ? (move > 0 ? '+' : '') + move.toFixed(2) + '%' : '—') +
-            '</td><td>' + escapeHtml(row.direction || '—') + '</td><td>' +
+            '</b></td><td>₹' + formatPrice(row.ltp) + '</td><td>' + (Number.isFinite(move) ? (move > 0 ? '+' : '') + move.toFixed(2) + '%' : '—') +
+            '</td><td>' + (Number.isInteger(Number(row.lotSize)) && Number(row.lotSize) > 0 ? Number(row.lotSize).toLocaleString('en-IN') + ' units' : 'Contract verify') + '</td><td>' + escapeHtml(row.direction || '—') + '</td><td>' +
             (row.status === 'NO TRADE' ? '<span class="signal-tone neutral">CHECKED</span>' : escapeHtml(row.status || 'CHECKING')) +
             '</td><td>' + escapeHtml(row.reason || 'Direction / option contract / premium / RR verification passed to next stage.') + '</td></tr>';
         }).join('') + '</tbody></table></div><p class="hint">A setup appears only after fresh option quote and completed option candles pass the 1:2 risk check. No sample prices or partial trade signals.</p>';
@@ -1801,13 +1801,15 @@ async function loadSureshotUniverseShortlist() {
         Number(best.plan.quote.quoteAgeSeconds).toFixed(1) + ' sec / ' + Number(best.plan.quote.spreadPct).toFixed(2) +
         '%</b></div><div class="data-row"><span>Completed option candles</span><b>' +
         Number(best.plan.risk.candleCount) + ' · 5 min</b></div></article>' : '') +
-      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>Move</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>Target</th><th>RR</th></tr></thead><tbody>' +
+      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>Target</th><th>RR</th></tr></thead><tbody>' +
       result.results.map(row => {
         const plan = row.plan, move = Number(row.changePct);
         const moveText = (move > 0 ? '+' : '') + move.toFixed(2) + '%';
+        const lotSize = plan?.contract?.lotSize ?? row.lotSize;
+        const lotText = Number.isInteger(Number(lotSize)) && Number(lotSize) > 0 ? Number(lotSize).toLocaleString('en-IN') + ' units' : 'Contract verify';
         return '<tr><td><b>#' + Number(row.rank) + '</b></td><td><b>' +
           escapeHtml(String(row.underlyingSymbol || '').replace(/^NSE:/, '').replace(/^BSE:/, '').replace(/-EQ$/, '').replace(/-INDEX$/, '')) +
-          '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td>' + moveText + '</td><td>' +
+          '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td>₹' + formatPrice(row.ltp) + '</td><td>' + moveText + '</td><td>' + lotText + '</td><td>'
           (plan ? '<span class="signal-tone positive">VERIFIED</span>' : '<span class="signal-tone neutral">NO TRADE</span>') +
           '</td><td>' + (plan ? escapeHtml(plan.direction) : '—') + '</td><td>' +
           (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '—') +
@@ -1815,7 +1817,7 @@ async function loadSureshotUniverseShortlist() {
           (plan ? '₹' + formatPrice(plan.risk.stopLoss) : '—') + '</td><td>' +
           (plan ? '₹' + formatPrice(plan.risk.target) : '—') + '</td><td>' +
           (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
-          (plan ? '' : '<tr><td colspan="10" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
+          (plan ? '' : '<tr><td colspan="12" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
       }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS option quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. One-lot rupee risk uses official FYERS contract sizing; brokerage, taxes and slippage are excluded. No orders are placed.</p>';
     sureshotRetryAtNextSession = false;
     if (status) status.textContent = verified.length
