@@ -1769,6 +1769,13 @@ async function performSureshotSetup() {
   if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
   let selectedContract=null;
   const symbol=symbolEl.value,resolution=resolutionEl.value;
+  if (symbol.startsWith('MCX:')) {
+    try {
+      const exchangeStatusResponse = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const exchangeStatus = await exchangeStatusResponse.json().catch(() => ({}));
+      if (exchangeStatusResponse.ok) updateExchangeLiveSwitches(exchangeStatus);
+    } catch {}
+  }
   const selectedMarketOpen=symbol.startsWith('MCX:')?isMcxMarketSessionOpen():isRegularMarketSession();
   // Allow the backend to serve an identical, recently verified candle-cache hit
   // during a shared FYERS cooldown. Cache misses remain blocked upstream; the
@@ -2578,17 +2585,30 @@ function render(tab) {
       if (completedToday === today || attemptedToday === today) return;
       void loadSureshotUniverseShortlist({ automatic: true });
     };
-    const startAutomaticMcxTopFiveScan = () => {
+    let mcxAutoScanStatusCheckInFlight = false;
+    const startAutomaticMcxTopFiveScan = async () => {
       // MCX is the evening alternative: do not compete with the NSE daytime scan.
-      // It starts once per India date only after the independent MCX switch is LIVE.
+      // Refresh the independent switch from the backend before deciding to scan.
       if (currentTab !== 'Sureshot CE/PE' || isRegularMarketSession() ||
-          !isMcxMarketSessionOpen() || sureshotUniverseScanRunning) return;
-      const today = indiaTradingDateKey();
-      let attempted = '';
-      try { attempted = localStorage.getItem('dhanpulse_mcx_sureshot_scan_attempt_day') || ''; } catch {}
-      if (attempted === today) return;
-      try { localStorage.setItem('dhanpulse_mcx_sureshot_scan_attempt_day', today); } catch {}
-      void loadMcxSureshotUniverseShortlist();
+          sureshotUniverseScanRunning || mcxAutoScanStatusCheckInFlight) return;
+      mcxAutoScanStatusCheckInFlight = true;
+      try {
+        const response = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+        const status = await response.json().catch(() => ({}));
+        if (!response.ok) return;
+        updateExchangeLiveSwitches(status);
+        if (!isMcxMarketSessionOpen()) return;
+        const today = indiaTradingDateKey();
+        let attempted = '';
+        try { attempted = localStorage.getItem('dhanpulse_mcx_sureshot_scan_attempt_day') || ''; } catch {}
+        if (attempted === today) return;
+        try { localStorage.setItem('dhanpulse_mcx_sureshot_scan_attempt_day', today); } catch {}
+        void loadMcxSureshotUniverseShortlist();
+      } catch {
+        // Missing status is never treated as a live MCX feed.
+      } finally {
+        mcxAutoScanStatusCheckInFlight = false;
+      }
     };
     // Check only local session/time state; no provider polling is done by this timer.
     startAutomaticTopFiveScan();
