@@ -38,7 +38,8 @@ test("Sureshot publishes only after all selected candidates finish and discards 
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   const route = server.slice(start, end);
-  assert.match(route, /const selectedCandidatesComplete = state\.nextOffset >= state\.candidates\.length/);\n  assert.match(route, /selectedCandidatesComplete,/);
+  assert.match(route, /const selectedCandidatesComplete = state\.nextOffset >= state\.candidates\.length/);
+  assert.match(route, /selectedCandidatesComplete,/);
   assert.match(route, /stopReason: "TOP_FIVE_CANDIDATES_CHECKED"/);
   assert.match(route, /bestSetup: verified\[0\] \|\| null/);
   assert.match(route, /sureshotScanState = null;[\s\S]*partialPlansDiscarded: true/);
