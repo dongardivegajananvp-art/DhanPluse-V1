@@ -1204,8 +1204,14 @@ app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) =
   if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
 
   // Reuse the last successful snapshot while its exchange timestamps remain fresh.
-  const quoteUniverse = await getNseFnoEquityUniverse();
-  const expectedQuoteSymbols = quoteUniverse.data.map(item => item.symbol);
+  let expectedQuoteSymbols;
+  try {
+    const quoteUniverse = await getNseFnoEquityUniverse();
+    expectedQuoteSymbols = quoteUniverse.data.map(item => item.symbol);
+  } catch (error) {
+    return res.status(503).json({ ok: false, error: "Complete FYERS F&O universe could not be verified; quote cache reuse is blocked.",
+      detail: String(error.message || "F&O universe unavailable.").slice(0, 160), partialQuotesDiscarded: true });
+  }
   if (stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS &&
       isCompleteFreshFnoQuoteSnapshot(stockQuoteCache.data, expectedQuoteSymbols, Date.now())) {
     return res.json({ ...stockQuoteCache.data, marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED",
