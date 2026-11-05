@@ -99,3 +99,30 @@ export function fnoQuoteSnapshotToMoversPayload(snapshot, symbols, now = Date.no
     data
   };
 }
+
+
+/**
+ * A shared live snapshot is reusable only when every expected F&O symbol is
+ * present exactly once and every exchange timestamp is still fresh. Never
+ * turn an aging complete snapshot into a partial ranking.
+ */
+export function isCompleteFreshFnoQuoteSnapshot(snapshot, symbols, now = Date.now(), maxAgeMs = 30000) {
+  if (!snapshot || snapshot.ok !== true || snapshot.verified !== true ||
+      !Array.isArray(symbols) || !symbols.length ||
+      Number(snapshot.universeCount) !== symbols.length ||
+      Number(snapshot.quotedCount) !== symbols.length ||
+      !Array.isArray(snapshot.data) || snapshot.data.length !== symbols.length) return false;
+  const expected = new Set(symbols);
+  const seen = new Set();
+  for (const item of snapshot.data) {
+    const symbol = item?.n;
+    const value = item?.v;
+    const stamp = Number(value?.tt) * 1000;
+    if (!expected.has(symbol) || seen.has(symbol) || item.verified !== true ||
+        !isFinitePositive(value?.lp) || !Number.isFinite(Number(value?.chp)) ||
+        !Number.isFinite(stamp) || stamp <= 0 || stamp > now + 5000 ||
+        now - stamp > maxAgeMs) return false;
+    seen.add(symbol);
+  }
+  return seen.size === expected.size;
+}
