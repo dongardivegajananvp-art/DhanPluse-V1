@@ -8,7 +8,7 @@ import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './ga
 import { assertCompleteMoverSnapshot, assertFreshMoverSnapshot } from './movers-validation.js';
 import { quoteTimestampStatus } from './fresh-data-validation.js';
 import { getNseSessionWindow } from './market-data.js';
-import { isNseRegularSession } from './nse-market-session.js';
+
 import { buildFnoEquityUniverse } from './fno-universe.js';
 import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
@@ -325,7 +325,7 @@ const marketSocketWatchdog = setInterval(() => {
 marketSocketWatchdog.unref?.();
 
 function nseRegularSessionNow() {
-  return isNseRegularSession();
+  return getNseSessionWindow().isRegularHours;
 }
 
 function epochSeconds(value) {
