@@ -10,17 +10,16 @@ function normalizedUnderlying(value) {
 }
 
 function isWithinMasterTradingSession(value, now) {
-  const sessions = String(value || "").match(/(\d{4})-(\d{4})/g) || [];
+  const sessions = [...String(value || "").matchAll(/(\d{2}):?(\d{2})-(\d{2}):?(\d{2})/g)];
   if (!sessions.length) return false;
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
   }).formatToParts(new Date(now));
   const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
   const minute = Number(fields.hour) * 60 + Number(fields.minute);
-  return sessions.some(session => {
-    const [start, end] = session.split("-").map(Number);
-    const startMinute = Math.floor(start / 100) * 60 + start % 100;
-    const endMinute = Math.floor(end / 100) * 60 + end % 100;
+  return sessions.some((match) => {
+    const startMinute = Number(match[1]) * 60 + Number(match[2]);
+    const endMinute = Number(match[3]) * 60 + Number(match[4]);
     return startMinute <= endMinute
       ? minute >= startMinute && minute < endMinute
       : minute >= startMinute || minute < endMinute;
