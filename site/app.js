@@ -1769,7 +1769,7 @@ async function performSureshotSetup() {
   if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
   let selectedContract=null;
   const symbol=symbolEl.value,resolution=resolutionEl.value;
-  const selectedMarketOpen=symbol.startsWith('MCX:')?isMcxMarketSessionOpen():selectedMarketOpen;
+  const selectedMarketOpen=symbol.startsWith('MCX:')?isMcxMarketSessionOpen():isRegularMarketSession();
   // Allow the backend to serve an identical, recently verified candle-cache hit
   // during a shared FYERS cooldown. Cache misses remain blocked upstream; the
   // directional and option-risk validators still require fresh exchange data.
