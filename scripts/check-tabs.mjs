@@ -30,8 +30,10 @@ if (!app.includes("localStorage.removeItem('dhanpulse-watchlist-v1')") ||
   throw new Error('Legacy watchlist and alert data must be cleared from browser storage.');
 }
 if (!app.includes("localStorage.getItem('dhanpulse-dashboard-session-v1')") ||
-    !app.includes("const FYERS_COOLDOWN_KEY")) {
-  throw new Error('FYERS session and cooldown protections must remain intact.');
+    app.includes('FYERS_COOLDOWN_KEY') ||
+    app.includes('getFyersCooldownRemaining') ||
+    app.includes('FYERS Data API cooldown active; request suppressed locally.')) {
+  throw new Error('FYERS shared session must remain intact and obsolete browser-local cooldown blocking must be absent.');
 }
 const dashboardCandleStart = app.indexOf('async function loadDashboardCandles()');
 const dashboardCandleEnd = app.indexOf('\nfunction quoteCardsMarkup()', dashboardCandleStart);
@@ -48,7 +50,7 @@ if (dashboardCandleHandler.includes("localStorage.removeItem('dhanpulse-dashboar
   throw new Error('Unconditional dashboard-session deletion remains in the candle handler.');
 }
 console.log('PASS: exactly two visible tabs (Sureshot CE/PE, FYERS Connection); connection controls are separated from Sureshot.');
-console.log('PASS: legacy watchlist/alert browser data cleared; FYERS session and rate-limit guard preserved.');
+console.log('PASS: legacy watchlist/alert browser data cleared; shared FYERS session preserved; frontend cooldown guard removed.');
 
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
 if (!html.includes('app.js?v=20261105-session-race-v4') ||
