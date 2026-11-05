@@ -1779,15 +1779,16 @@ async function loadSureshotUniverseShortlist() {
         }).join('') + '</tbody></table></div><p class="hint">A setup appears only after fresh option quote and completed option candles pass the 1:2 risk check. No sample prices or partial trade signals.</p>';
     }
     if (!Array.isArray(result.results) || result.scannedCandidateCount !== result.results.length ||
-        (!result.candidateUniverseComplete && result.stopReason !== 'FIRST_VERIFIED_SETUP_FOUND')) {
-      throw new Error('The full-universe search did not finish or find a fully verified setup; partial results are withheld.');
+        (!result.selectedCandidatesComplete && result.stopReason !== 'THREE_VERIFIED_SETUPS_FOUND')) {
+      throw new Error('The ranked Sureshot scan did not finish or verify three complete setups; partial results are withheld.');
     }
     const verified = result.results.filter(row => row.status === 'VERIFIED SETUP');
     const best = result.bestSetup;
     host.innerHTML = '<div class="console-section-head"><div><h4>' +
-      (result.candidateUniverseComplete ? 'Full NSE F&O universe · FYERS verified scan' : 'Sureshot · first verified setup found') +
-      '</h4><p>' + Number(result.scannedCandidateCount) + ' / ' + Number(result.rankedCandidateCount) +
-      ' ranked candidates checked · ' + Number(result.verifiedSetupCount) + ' verified plan(s) · read-only</p></div><span class="' +
+      (result.selectedCandidatesComplete ? 'Sureshot · selected candidates fully checked' : 'Sureshot · Top 3 verified setups found') +
+      '</h4><p>' + Number(result.scannedCandidateCount) + ' / ' + Number(result.selectedCandidateCount) +
+      ' selected candidates checked · ' + Number(result.rankedCandidateCount) + ' ranked from the FYERS F&O universe · ' +
+      Number(result.verifiedSetupCount) + ' verified plan(s) · read-only</p></div><span class="'
       (verified.length ? 'live-tag' : 'signal-tone neutral') + '">' + (verified.length ? 'RISK VERIFIED' : 'NO TRADE') + '</span></div>' +
       (best ? '<article class="console-section"><div class="console-section-head"><h4>#1 BEST VERIFIED SETUP</h4><span class="signal-tone positive">' +
         escapeHtml(best.plan.direction) + '</span></div><strong class="console-price">₹' + formatPrice(best.plan.risk.entryPrice) +
@@ -1821,10 +1822,10 @@ async function loadSureshotUniverseShortlist() {
       }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS option quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. One-lot rupee risk uses official FYERS contract sizing; brokerage, taxes and slippage are excluded. No orders are placed.</p>';
     sureshotRetryAtNextSession = false;
     if (status) status.textContent = verified.length
-      ? (result.candidateUniverseComplete
-        ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s). Best valid setup is ranked first.'
-        : 'First verified setup found after checking ' + result.scannedCandidateCount + ' / ' + result.rankedCandidateCount + ' ranked candidates. Lower-ranked candidates were not scanned.')
-      : 'Full-universe scan complete · NO TRADE. No candidate passed every direction, contract, fresh quote, candle and ≥1:2 risk check.';
+      ? (result.stopReason === 'THREE_VERIFIED_SETUPS_FOUND'
+        ? 'Top 3 verified setups found after checking ' + result.scannedCandidateCount + ' / ' + result.selectedCandidateCount + ' selected candidates; ' + result.rankedCandidateCount + ' FYERS candidates were ranked. Best valid setup is ranked first.'
+        : 'Selected candidates fully checked · ' + verified.length + ' verified setup(s) from ' + result.scannedCandidateCount + ' / ' + result.selectedCandidateCount + ' selected candidates. Best valid setup is ranked first.')
+      : 'Selected ranked candidates fully checked · NO TRADE. No candidate passed every direction, contract, fresh quote, candle and ≥1:2 risk check.';
 
   } catch (error) {
     if (/Market session is closed/i.test(String(error.message || ''))) {
