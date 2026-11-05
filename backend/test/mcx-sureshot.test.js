@@ -43,7 +43,16 @@ test("MCX universe rejects malformed masters and missing option sides", () => {
   assert.deepEqual(buildMcxFuturesUniverse(incomplete, now), []);
 });
 
-test("excludes contracts whose official trading session has closed", () => {\n  const closed = {\n    "MCX:SILVER26NOVFUT": { tradeStatus: 1, optType: "XX", tradingSession: "0900-1700", fyToken: "fut-silver", underSym: "SILVER", expiryDate: expiry, minLotSize: 30, tickSize: 1 },\n    "MCX:SILVER26NOV100000CE": { tradeStatus: 1, optType: "CE", tradingSession: "0900-1700", fyToken: "silver-ce", underSym: "SILVER", strikePrice: 100000, expiryDate: expiry, minLotSize: 30, tickSize: 0.05 },\n    "MCX:SILVER26NOV100000PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-1700", fyToken: "silver-pe", underSym: "SILVER", strikePrice: 100000, expiryDate: expiry, minLotSize: 30, tickSize: 0.05 }\n  };\n  assert.deepEqual(buildMcxFuturesUniverse(closed, now), []);\n});\n\ntest("MCX shortlist requires complete fresh exchange-timestamped quote coverage", () => {
+test("excludes contracts whose official trading session has closed", () => {
+  const closed = {
+    "MCX:SILVER26NOVFUT": { tradeStatus: 1, optType: "XX", tradingSession: "0900-1700", fyToken: "fut-silver", underSym: "SILVER", expiryDate: expiry, minLotSize: 30, tickSize: 1 },
+    "MCX:SILVER26NOV100000CE": { tradeStatus: 1, optType: "CE", tradingSession: "0900-1700", fyToken: "silver-ce", underSym: "SILVER", strikePrice: 100000, expiryDate: expiry, minLotSize: 30, tickSize: 0.05 },
+    "MCX:SILVER26NOV100000PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-1700", fyToken: "silver-pe", underSym: "SILVER", strikePrice: 100000, expiryDate: expiry, minLotSize: 30, tickSize: 0.05 }
+  };
+  assert.deepEqual(buildMcxFuturesUniverse(closed, now), []);
+});
+
+test("MCX shortlist requires complete fresh exchange-timestamped quote coverage", () => {
   const universe = buildMcxFuturesUniverse(master, now);
   const rows = buildVerifiedMcxShortlist({
     universe, now, quoteRows: [{
