@@ -35,3 +35,12 @@ if (!app.includes("localStorage.getItem('dhanpulse-dashboard-session-v1')") ||
 }
 console.log('PASS: exactly two visible tabs (Sureshot CE/PE, FYERS Connection); connection controls are separated from Sureshot.');
 console.log('PASS: legacy watchlist/alert browser data cleared; FYERS session and rate-limit guard preserved.');
+
+const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
+if (!html.includes('app.js?v=20261105-session-cache-v2') ||
+    !html.includes('sw.js?v=20261105-session-cache-v2') ||
+    !sw.includes('dhanpulse-shell-v121-session-cache-v2') ||
+    !sw.includes("fetch(request, { cache: 'no-store' })")) {
+  throw new Error('PWA session-cache fix must force a new shell cache and bypass stale browser HTTP cache for app assets.');
+}
+console.log('PASS: PWA shell cache is version-bumped and app assets revalidate against the network before cache fallback.');
