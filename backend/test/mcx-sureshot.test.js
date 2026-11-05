@@ -6,25 +6,25 @@ const now = Date.parse("2026-11-05T14:00:00.000Z");
 const expiry = Math.floor(Date.parse("2026-11-19T00:00:00.000Z") / 1000);
 const master = {
   "MCX:CRUDEOIL26NOVFUT": {
-    tradeStatus: 1, optType: "XX", fyToken: "fut-1", underSym: "CRUDEOIL",
+    tradeStatus: 1, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-1", underSym: "CRUDEOIL",
     expiryDate: expiry, minLotSize: 100, tickSize: 1
   },
   "MCX:CRUDEOIL26NOV8400CE": {
-    tradeStatus: 1, optType: "CE", fyToken: "opt-1", underFyTok: "fut-1",
+    tradeStatus: 1, optType: "CE", tradingSession: "0900-2355", fyToken: "opt-1", underFyTok: "fut-1",
     underSym: "CRUDEOIL", strikePrice: 8400, expiryDate: expiry,
     minLotSize: 100, tickSize: 0.05
   },
   "MCX:CRUDEOIL26NOV8400PE": {
-    tradeStatus: 1, optType: "PE", fyToken: "opt-2", underFyTok: "fut-1",
+    tradeStatus: 1, optType: "PE", tradingSession: "0900-2355", fyToken: "opt-2", underFyTok: "fut-1",
     underSym: "CRUDEOIL", strikePrice: 8400, expiryDate: expiry,
     minLotSize: 100, tickSize: 0.05
   },
   "MCX:GOLD26NOVFUT": {
-    tradeStatus: 0, optType: "XX", fyToken: "fut-2", underSym: "GOLD",
+    tradeStatus: 0, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-2", underSym: "GOLD",
     expiryDate: expiry, minLotSize: 100, tickSize: 1
   },
   "MCX:NATURALGAS26NOVFUT": {
-    tradeStatus: 1, optType: "XX", fyToken: "fut-3", underSym: "NATURALGAS",
+    tradeStatus: 1, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-3", underSym: "NATURALGAS",
     expiryDate: expiry, minLotSize: 1250, tickSize: 0.1
   }
 };
