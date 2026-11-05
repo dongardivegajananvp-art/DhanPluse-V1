@@ -36,6 +36,13 @@ test("MCX universe accepts only active unexpired futures with active CE and PE m
   assert.equal(rows[0].optionContracts[0].tickSize, 0.05);
 });
 
+test("accepts colon-form tradingSession values in IST", () => {
+  const colonMaster = Object.fromEntries(Object.entries(master).map(([symbol, item]) => [
+    symbol, { ...item, tradingSession: "09:00-23:55" }
+  ]));
+  assert.deepEqual(buildMcxFuturesUniverse(colonMaster, now).map(row => row.symbol), ["MCX:CRUDEOIL26NOVFUT"]);
+});
+
 test("MCX universe rejects malformed masters and missing option sides", () => {
   assert.throws(() => buildMcxFuturesUniverse(null, now), /invalid_fyers_mcx_symbol_master/);
   const incomplete = { ...master };
