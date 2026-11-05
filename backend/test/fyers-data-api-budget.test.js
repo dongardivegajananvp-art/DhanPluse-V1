@@ -230,12 +230,45 @@ test('default FYERS pacing stays below the documented Standard plan limits', asy
     }
   });
 
-  for (let index = 0; index < 41; index += 1) {
+  for (let index = 0; index < 31; index += 1) {
     await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATEST' + index + '-EQ');
   }
 
-  assert.equal(sentAt.length, 41);
-  assert.ok(sentAt[1] - sentAt[0] >= 1250, 'requests must be spaced by at least 1.25 seconds');
-  assert.ok(sentAt[39] - sentAt[0] < 60_000, '40 requests should fit within the conservative rolling-minute budget');
-  assert.ok(sentAt[40] - sentAt[0] >= 60_000, 'the 41st request must wait for the rolling-minute window');
+  assert.equal(sentAt.length, 31);
+  assert.ok(sentAt[1] - sentAt[0] >= 2000, 'requests must be spaced by at least 2 seconds');
+  assert.ok(sentAt[29] - sentAt[0] < 60_000, '30 requests should fit within the conservative rolling-minute budget');
+  assert.ok(sentAt[30] - sentAt[0] >= 60_000, 'the 31st request must wait for the rolling window');
+});
+
+test('Cloudflare 1015 cooldown escalates after repeated blocks and resets only after success', async () => {
+  let clock = 800_000;
+  const outcomes = [
+    new Response('Cloudflare Error 1015', { status: 429 }),
+    new Response('', { status: 429, headers: { server: 'cloudflare', 'cf-ray': 'abc123' } }),
+    new Response(JSON.stringify({ s: 'ok' }), { status: 200 }),
+    new Response('Cloudflare Error 1015', { status: 429 })
+  ];
+  const request = createFyersDataApiBudget({
+    now: () => clock,
+    sleep: async ms => { clock += ms; },
+    minIntervalMs: 0,
+    cloudflareCooldownMs: 1000,
+    maxCloudflareCooldownMs: 4000,
+    fetchImpl: async () => outcomes.shift()
+  });
+  const url = 'https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATEST-EQ';
+
+  await request(url);
+  assert.equal(request.getStatus().retryAfterSeconds, 1);
+  assert.equal(request.getStatus().cooldownReason, 'CLOUDFLARE_1015');
+  clock += 1000;
+  await request(url);
+  assert.equal(request.getStatus().retryAfterSeconds, 2, 'second Cloudflare block doubles the cooldown');
+  assert.equal(request.getStatus().consecutiveCloudflareBlocks, 2);
+  clock += 2000;
+  const success = await request(url);
+  assert.equal(success.status, 200);
+  assert.equal(request.getStatus().consecutiveCloudflareBlocks, 0, 'successful provider response resets escalation');
+  await request(url);
+  assert.equal(request.getStatus().retryAfterSeconds, 1, 'a later 1015 starts again at the initial cooldown');
 });
