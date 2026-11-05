@@ -12,9 +12,14 @@ test("accepts BSE SENSEX option contract symbols", () => {
   assert.equal(isSupportedOptionContractSymbol("BSE:SENSEX26NOV82000PE"), true);
 });
 
+test("accepts MCX commodity option contract symbols", () => {
+  assert.equal(isSupportedOptionContractSymbol("MCX:CRUDEOIL26NOV8400CE"), true);
+  assert.equal(isSupportedOptionContractSymbol("MCX:NATURALGAS26NOV350PE"), true);
+  assert.equal(isSupportedOptionContractSymbol("MCX:GOLD26NOV100000.5CE"), true);
+});
+
 test("rejects unsupported exchanges and malformed option symbols", () => {
   for (const symbol of [
-    "MCX:GOLD26NOV100000CE",
     "NSE:RELIANCE-EQ",
     "BSE:SENSEX-INDEX",
     "NSE:CE",

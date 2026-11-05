@@ -46,3 +46,13 @@ test("uses each underlying contract's own lot size, never a shared/default lot",
   assert.equal(getVerifiedOptionContractMetadata(nifty, perContractMaster).lotSize, 25);
   assert.equal(getVerifiedOptionContractMetadata(banknifty, perContractMaster).lotSize, 15);
 });
+
+test("reads exact MCX option lot size and tick size from MCX_COM master", () => {
+  const mcxSymbol = "MCX:CRUDEOIL26NOV8400CE";
+  const mcxMaster = {
+    [mcxSymbol]: { tradeStatus: 1, optType: "CE", strikePrice: 8400, expiryDate: "1795046400", minLotSize: 100, tickSize: 0.05 }
+  };
+  assert.deepEqual(getVerifiedOptionContractMetadata(mcxSymbol, mcxMaster), {
+    symbol: mcxSymbol, side: "CE", strike: 8400, expiryDate: "1795046400", lotSize: 100, tickSize: 0.05
+  });
+});

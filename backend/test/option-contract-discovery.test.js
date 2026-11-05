@@ -48,11 +48,19 @@ test("normalizes BSE SENSEX option contract descriptors alongside NSE contracts"
   assert.equal(result.optionsChain[1].option_type, "PE");
 });
 
+test("normalizes MCX commodity option contract descriptors including decimal strikes", () => {
+  const result = normalizeOptionContractDiscovery({
+    expiryData: [{ expiry: "1795046400", date: "19-11-2026" }],
+    optionsChain: [{ symbol: "MCX:GOLD26NOV100000.5CE", option_type: "CE", strike_price: 100000.5 }]
+  });
+  assert.equal(result.optionsChain[0].symbol, "MCX:GOLD26NOV100000.5CE");
+  assert.equal(result.optionsChain[0].strike_price, 100000.5);
+});
+
 test("continues rejecting unsupported exchanges and malformed symbols", () => {
   assert.throws(() => normalizeOptionContractDiscovery({
     expiry: "1795651200",
     optionsChain: [
-      { symbol: "MCX:GOLD26NOV100000CE", option_type: "CE", strike_price: 100000 },
       { symbol: "BSE:SENSEX-INDEX", option_type: "CE", strike_price: 82000 }
     ]
   }), /no_valid_option_contract_descriptors/);

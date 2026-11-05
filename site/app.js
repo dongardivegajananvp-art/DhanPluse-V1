@@ -383,7 +383,7 @@ function signalDataBlockReason(symbol) {
   return '';
 }
 
-function validateOhlcCandles(candles, resolution) {
+function validateOhlcCandles(candles, resolution, marketOpen = isRegularMarketSession()) {
   if (!Array.isArray(candles) || candles.length < 12) return 'At least 12 OHLC candles are required.';
   let previousTime = -Infinity;
   for (const row of candles) {
@@ -395,7 +395,7 @@ function validateOhlcCandles(candles, resolution) {
     if (time <= previousTime) return 'Candle timestamps are duplicated or out of order.';
     previousTime = time;
   }
-  if (isRegularMarketSession()) {
+  if (marketOpen) {
     const lastTimeMs = Number(candles[candles.length - 1][0]) * 1000;
     // Daily candles can legitimately be older than 36 hours after weekends or exchange holidays.
     const maxAgeMs = resolution === 'D' ? 5 * 24 * 60 * 60 * 1000 : (Number(resolution) || 5) * 60 * 1000 * 3;
@@ -414,7 +414,7 @@ function validateOptionChainPayload(payload, verifiedUnderlyingSpot) {
   if (!Number.isFinite(spot) || spot <= 0) return 'Verified underlying candle close is missing; no option signal.';
   const chainExpiry = payload.expiryData?.[0]?.expiry ?? payload.expiry;
   const normalized = payload.optionsChain.map(row => {
-    if (!row || !/^(?:NSE|BSE):[A-Z0-9&-]{3,48}(CE|PE)$/.test(String(row.symbol || ''))) return null;
+    if (!row || !/^(?:(?:NSE|BSE):[A-Z0-9&-]{3,48}|MCX:[A-Z0-9&.-]{3,48})(CE|PE)$/.test(String(row.symbol || ''))) return null;
     const type = String(row.option_type || '').toUpperCase();
     const strike = Number(row.strike_price);
     const expiry = row.expiry ?? row.expiry_date ?? row.expiryDate ?? chainExpiry;
@@ -1340,7 +1340,7 @@ function advancedScannerMarkup(tab) {
       '<p><a href="https://www.nseindia.com/all-reports" target="_blank" rel="noopener noreferrer">NSE All Reports ↗</a></p></div>';
   }
   if (tab === 'Sureshot CE/PE') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY/SENSEX CE/PE · OHLC zones + contract discovery; fresh premium checked separately</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX" selected>NIFTY 50 · Index options (default)</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="BSE:SENSEX-INDEX">SENSEX · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse selected setup</button><button class="secondary" id="refreshSureshotStockBoardBtn">Refresh Stock % & Lot Size</button><button class="secondary" id="scanSureshotUniverseBtn">Scan Again · Full F&O Top 5</button></div><div id="sureshotStockBoard" class="console-section"><div class="chart-empty">Stock-wise FYERS LTP, daily % move and official lot size will appear here after refresh.</div></div><div id="sureshotUniverseResults" class="console-section"><div class="chart-empty">Automatic full eligible NSE F&O Top 5 scan starts once per trading day when the live NSE session is open and FYERS is authenticated. You can rescan manually; all five ranked candidates must pass verification.</div></div><div id="setupStatus" class="hint">A setup is shown only after verified underlying OHLC candles, contract descriptors, a fresh timestamped option quote and completed option candles. Chain OI/volume are not used. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>NSE + MCX F&O CE/PE · OHLC zones + contract discovery; fresh premium checked separately</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX" selected>NIFTY 50 · Index options (default)</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="BSE:SENSEX-INDEX">SENSEX · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse selected setup</button><button class="secondary" id="refreshSureshotStockBoardBtn">Refresh Stock % & Lot Size</button><button class="secondary" id="scanSureshotUniverseBtn">Scan Again · NSE F&O Top 5</button><button class="secondary" id="scanMcxSureshotUniverseBtn">Scan MCX F&O Top 5</button></div><div id="sureshotStockBoard" class="console-section"><div class="chart-empty">Stock-wise FYERS LTP, daily % move and official lot size will appear here after refresh.</div></div><div id="sureshotUniverseResults" class="console-section"><div class="chart-empty">Automatic full eligible NSE F&O Top 5 scan starts once per trading day when the live NSE session is open and FYERS is authenticated. You can rescan manually; all five ranked candidates must pass verification.</div></div><div id="mcxSureshotUniverseResults" class="console-section"><div class="chart-empty">MCX Sureshot uses the official MCX_COM master and the independent MCX live session. Run the MCX Top 5 scan while MCX is open.</div></div><div id="setupStatus" class="hint">A setup is shown only after verified underlying OHLC candles, contract descriptors, a fresh timestamped option quote and completed option candles. Chain OI/volume are not used. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
   }
   if (tab === 'FII/DII Flow') {
     return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
@@ -1769,6 +1769,15 @@ async function performSureshotSetup() {
   if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
   let selectedContract=null;
   const symbol=symbolEl.value,resolution=resolutionEl.value;
+  if (symbol.startsWith('MCX:')) {
+    try {
+      const exchangeStatusResponse = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const exchangeStatus = await exchangeStatusResponse.json().catch(() => ({}));
+      if (exchangeStatusResponse.ok) updateExchangeLiveSwitches(exchangeStatus);
+      else latestExchangeLiveStatus = {};
+    } catch { latestExchangeLiveStatus = {}; }
+  }
+  const selectedMarketOpen=symbol.startsWith('MCX:')?isMcxMarketSessionOpen():isRegularMarketSession();
   // Allow the backend to serve an identical, recently verified candle-cache hit
   // during a shared FYERS cooldown. Cache misses remain blocked upstream; the
   // directional and option-risk validators still require fresh exchange data.
@@ -1780,7 +1789,7 @@ async function performSureshotSetup() {
     const candleResult=await candleResponse.json().catch(()=>({}));
     if(!candleResponse.ok||candleResult.ok!==true||!Array.isArray(candleResult.data))throw new Error([candleResult.error,candleResult.detail].filter(Boolean).join(' · ')||'Verified historical candles unavailable.');
     const candles=candleResult.data;
-    const candleError=validateOhlcCandles(candles,resolution);
+    const candleError=validateOhlcCandles(candles,resolution,selectedMarketOpen);
     if(candleError)throw new Error(candleError);
     const lastCandle=candles[candles.length-1];
     const candleEpoch=Number(lastCandle[0]);
@@ -1804,17 +1813,17 @@ async function performSureshotSetup() {
     if(weekdayTradingDay&&exchangeDate!==todayExchangeDate){
       throw new Error('STALE FYERS CHART · latest candle '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' is from an earlier session; no candle from today ('+todayExchangeDate+') was returned. Old-session chart and zones are blocked.');
     }
-    if(isRegularMarketSession()&&candleAgeMinutes>maxOpenAgeMinutes){
+    if(selectedMarketOpen&&candleAgeMinutes>maxOpenAgeMinutes){
       throw new Error('STALE FYERS CHART · latest candle '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' is too old for the open session. Chart and signals are blocked.');
     }
     const zones=deriveSureshotZones(candles);
     if(!zones)throw new Error('At least 12 verified candles are needed before zones can be calculated.');
     const close=Number(lastCandle[4]),previous=Number(candles[candles.length-2][4]);
     chart.innerHTML=sureshotZoneChart(candles,zones.supply,zones.demand);
-    const candleFreshnessLabel=isRegularMarketSession()?'CURRENT SESSION · '+candleAgeMinutes.toFixed(1)+' min old':'MARKET CLOSED · LAST AVAILABLE SESSION';
+    const candleFreshnessLabel=selectedMarketOpen?'CURRENT SESSION · '+candleAgeMinutes.toFixed(1)+' min old':'MARKET CLOSED · LAST AVAILABLE SESSION';
     summary.textContent='Latest FYERS candle: '+candleDate.toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})+' · '+candleFreshnessLabel+' · '+candles.length+' verified candles · Supply '+formatPrice(zones.supply.low)+'–'+formatPrice(zones.supply.high)+' · Buyer/demand '+formatPrice(zones.demand.low)+'–'+formatPrice(zones.demand.high)+'. Zones are heuristic; the chart is not a live-moving feed.';
     let bias='NO TRADE',reason='Price is inside the mapped zones or has not confirmed a breakout.';
-    if(!isRegularMarketSession()){reason='Market session is closed or outside NSE regular hours. Historical zones may be reviewed, but no actionable setup is shown.';}
+    if(!selectedMarketOpen){reason='Selected exchange session is closed or its live feed is not fresh. Historical zones may be reviewed, but no actionable setup is shown.';}
     else if(close>zones.supply.high&&close>previous){bias='CE WATCH';reason='Latest candle closed above the calculated supply-zone high.';}
     else if(close<zones.demand.low&&close<previous){bias='PE WATCH';reason='Latest candle closed below the calculated buyer/demand-zone low.';}
     // Do not spend another FYERS REST request discovering option contracts
@@ -1926,6 +1935,90 @@ async function loadSureshotSetup() {
       sureshotRefreshPending = false;
       if (currentTab === 'Sureshot CE/PE') void loadSureshotSetup();
     }
+  }
+}
+
+async function loadMcxFuturesIntoSureshotSelect() {
+  const select = document.querySelector('#setupSymbol');
+  if (!select || select.dataset.mcxUniverseLoaded === 'true' || select.dataset.mcxUniverseLoaded === 'loading') return;
+  select.dataset.mcxUniverseLoaded = 'loading';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/mcx-fno-universe', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || !Array.isArray(result.data)) {
+      throw new Error(result.error || result.detail || 'Official MCX F&O universe unavailable.');
+    }
+    const existing = new Set(Array.from(select.options).map(option => option.value));
+    const group = document.createElement('optgroup');
+    group.label = 'MCX Commodity Futures · Sureshot';
+    for (const row of result.data) {
+      if (!row || typeof row.symbol !== 'string' || existing.has(row.symbol)) continue;
+      const option = document.createElement('option');
+      option.value = row.symbol;
+      const expiryNumber = Number(row.expiryDate);
+      const expiryMs = Number.isFinite(expiryNumber) && expiryNumber > 0
+        ? (expiryNumber > 1e12 ? expiryNumber : expiryNumber * 1000) : Date.parse(String(row.expiryDate || ''));
+      const expiryLabel = Number.isFinite(expiryMs)
+        ? new Date(expiryMs).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'expiry unverified';
+      option.textContent = String(row.underlying || row.symbol) + ' · ' + expiryLabel + ' · Lot ' + Number(row.lotSize);
+      group.append(option);
+    }
+    if (group.children.length) select.append(group);
+    select.dataset.mcxUniverseLoaded = 'true';
+    const status = document.querySelector('#setupStatus');
+    if (status) status.textContent += ' Official MCX futures loaded: ' + result.count + '. MCX option contracts are resolved from the MCX master; live prices and candles are verified separately.';
+  } catch (error) {
+    select.dataset.mcxUniverseLoaded = 'false';
+    logEvent('MCX symbol master unavailable: ' + (error.message || 'unknown error'), 'warn');
+  }
+}
+
+async function loadMcxSureshotUniverseShortlist() {
+  if (currentTab !== 'Sureshot CE/PE' || sureshotUniverseScanRunning) return;
+  const button = document.querySelector('#scanMcxSureshotUniverseBtn');
+  const host = document.querySelector('#mcxSureshotUniverseResults');
+  const status = document.querySelector('#setupStatus');
+  if (!host || (button && button.disabled)) return;
+  if (!localStorage.getItem(DASHBOARD_SESSION_KEY)) {
+    if (status) status.textContent = 'Connect FYERS first. MCX scan requires a valid broker session and fresh MCX exchange ticks.';
+    return;
+  }
+  sureshotUniverseScanRunning = true;
+  if (button) button.disabled = true;
+  host.innerHTML = '<div class="chart-empty">Scanning official MCX F&O universe. Every candidate requires fresh futures quotes, completed underlying candles, verified option contract, premium and option candles…</div>';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/mcx-sureshot-auto-plans', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok !== true || result.scanComplete !== true || result.orderPlacement !== 'disabled' || !Array.isArray(result.results)) {
+      throw new Error([result.stage, result.error, result.detail].filter(Boolean).join(' · ') || 'MCX full-universe scan was blocked.');
+    }
+    const rows = result.results.map(item => {
+      const plan = item.plan || {};
+      const contract = plan.contract || item.contract || {};
+      const risk = plan.risk || {};
+      return '<article class="candidate-card"><div class="candidate-top"><b>#' + Number(item.rank) + ' · ' + escapeHtml(item.underlying || item.underlyingSymbol || 'MCX') + '</b><span class="tag">' + escapeHtml(item.status || 'NO TRADE') + '</span></div><p>' + escapeHtml(item.underlyingSymbol || '') + ' · Move ' + (Number.isFinite(Number(item.changePct)) ? Number(item.changePct).toFixed(2) + '%' : 'unverified') + '</p>' +
+        (item.status === 'VERIFIED SETUP' ? '<p><b>' + escapeHtml(contract.side || plan.direction || '') + ' · ' + escapeHtml(contract.symbol || '') + '</b></p>' +
+        '<p>Expiry ' + escapeHtml(contract.expiryDate || contract.expiry || '—') + ' · Strike ' + displayNumber(contract.strike, 2) + ' · Lot ' + displayNumber(contract.lotSize, 0) + '</p>' +
+        '<p>Underlying LTP ₹' + Number(item.ltp).toFixed(2) + ' · quote age ' + Number(item.quoteAgeSeconds).toFixed(1) + 's · completed underlying candles ' + Number(plan.underlying.completedCandleCount) + '</p>' +
+        '<p>Fresh option premium ₹' + Number(plan.quote.ltp).toFixed(2) + ' · ' + escapeHtml(plan.quote.quoteTime || '—') + ' · age ' + Number(plan.quote.quoteAgeSeconds).toFixed(1) + 's · completed option candles ' + Number(risk.candleCount) + '</p>' +
+        '<p>Entry ₹' + Number(risk.entryPrice).toFixed(2) + ' · SL ₹' + Number(risk.stopLoss).toFixed(2) + ' · Target ₹' + Number(risk.target).toFixed(2) + ' · RR 1:' + Number(risk.rr).toFixed(2) + '</p>' +
+        '<p class="hint">Underlying completed candle: ' + escapeHtml(plan.underlying.latestCandleAt || '—') + '</p>' :
+        '<p class="hint">' + escapeHtml(item.reason || 'Required live data or setup condition was not verified.') + '</p>') + '</article>';
+    }).join('');
+    host.innerHTML = '<div class="console-section-head"><div><h4>MCX Top 5 · ' + Number(result.scannedCandidateCount) + ' checked / ' + Number(result.universeCount) + ' active futures</h4><p>Verified setups: ' + Number(result.verifiedSetupCount) + ' · Best setup: ' + (result.bestSetup ? escapeHtml(result.bestSetup.underlying || result.bestSetup.underlyingSymbol) : 'NO TRADE') + '</p></div><span class="live-tag">FYERS · READ ONLY</span></div>' + (rows || '<div class="chart-empty">NO TRADE — no candidate passed every verification gate.</div>');
+    if (status) status.textContent = 'MCX scan complete. ' + Number(result.verifiedSetupCount) + ' verified setup(s); all other candidates are NO TRADE. Orders remain disabled.';
+    logEvent('MCX full-universe Top 5 Sureshot scan completed: ' + Number(result.verifiedSetupCount) + ' verified setup(s).', 'info');
+  } catch (error) {
+    host.innerHTML = '<div class="chart-empty"><b>MCX NO TRADE — scan blocked.</b><p>' + escapeHtml(error.message || 'Verified MCX data unavailable.') + '</p><p>Partial results are discarded; reconnect or retry only after the issue is resolved.</p></div>';
+    if (status) status.textContent = 'MCX scan blocked · no partial plans were displayed.';
+    logEvent('MCX Sureshot scan blocked: ' + (error.message || 'unknown error'), 'warn');
+  } finally {
+    sureshotUniverseScanRunning = false;
+    if (button) button.disabled = false;
   }
 }
 
@@ -2171,8 +2264,14 @@ function settingsMarkup() {
   return '<div class="settings-grid"><article class="console-section"><h4>Secure connection</h4><p>FYERS credentials stay on the Render backend. Do not paste app secrets or access tokens into this page.</p><div class="data-row"><span>Backend URL</span><b>Render</b></div><code class="backend-url">' + BACKEND_URL + '</code><div class="button-row"><button class="primary" id="testBackendBtn">Test backend</button><button class="primary" id="connectFyersBtn">Connect FYERS</button><button class="secondary" id="testQuotesBtn">Refresh live quotes</button><button class="secondary" id="installPwaBtn">Install DhanPulse app</button></div><p class="hint">Install on desktop/laptop from the browser install icon, or on mobile use the browser menu → Install app / Add to Home Screen.</p></article><article class="console-section"><h4>Exchange live switches</h4><div class="data-row"><span>NSE market session</span><b id="settingsNseSession">CHECKING</b></div><div class="data-row"><span>NSE index feed</span><b id="settingsNseLiveFeed">WAITING</b></div><div class="data-row"><span>MCX market session</span><b id="settingsMcxSession">CHECKING</b></div><div class="data-row"><span>MCX futures feed</span><b id="settingsMcxLiveFeed">WAITING</b></div><p class="hint" id="settingsExchangeStatusNote">Session clock is indicative only; a fresh exchange-timestamped FYERS tick is required to show LIVE. Exchange holidays and special sessions are not checked.</p></article><article class="console-section"><h4>Connection diagnostics</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend health</span><b id="settingsBackend">CHECKING</b></div><div class="data-row"><span>Latest NSE index quotes</span><b id="settingsFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div><p class="hint">Backend health alone does not prove that FYERS authentication or live market data is connected.</p></article><article class="console-section"><h4>MCX live socket diagnostic</h4><div class="data-row"><span>MCX feed</span><b id="settingsMcxFeed">WAITING</b></div><div class="data-row"><span>Official contract</span><b id="settingsMcxSymbol">Loading FYERS master…</b></div><div class="data-row"><span>Verified LTP</span><b id="settingsMcxLtp">—</b></div><div class="data-row"><span>Exchange timestamp</span><b id="settingsMcxTime">—</b></div><p class="hint" id="settingsMcxDetail">One active MCX futures contract is subscribed on the existing FYERS socket. MCX data is diagnostic only and never enters NSE Sureshot.</p></article></div>';
 }
 
+let latestExchangeLiveStatus = {};
+function isMcxMarketSessionOpen() {
+  const mcx = latestExchangeLiveStatus.MCX || {};
+  return mcx.session === 'SCHEDULED_OPEN' && mcx.feed === 'LIVE';
+}
 function updateExchangeLiveSwitches(status) {
   const exchanges = status && status.exchangeLiveStatus ? status.exchangeLiveStatus : {};
+  latestExchangeLiveStatus = exchanges;
   const nse = exchanges.NSE || {};
   const mcx = exchanges.MCX || {};
   const set = (selector, value) => {
@@ -2497,9 +2596,38 @@ function render(tab) {
       if (completedToday === today || attemptedToday === today) return;
       void loadSureshotUniverseShortlist({ automatic: true });
     };
+    let mcxAutoScanStatusCheckInFlight = false;
+    const startAutomaticMcxTopFiveScan = async () => {
+      // MCX is the evening alternative: do not compete with the NSE daytime scan.
+      // Refresh the independent switch from the backend before deciding to scan.
+      if (currentTab !== 'Sureshot CE/PE' || isRegularMarketSession() ||
+          sureshotUniverseScanRunning || mcxAutoScanStatusCheckInFlight) return;
+      mcxAutoScanStatusCheckInFlight = true;
+      try {
+        const response = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+        const status = await response.json().catch(() => ({}));
+        if (!response.ok) return;
+        updateExchangeLiveSwitches(status);
+        if (currentTab !== 'Sureshot CE/PE' || sureshotUniverseScanRunning || !isMcxMarketSessionOpen()) return;
+        const today = indiaTradingDateKey();
+        let attempted = '';
+        try { attempted = localStorage.getItem('dhanpulse_mcx_sureshot_scan_attempt_day') || ''; } catch {}
+        if (attempted === today) return;
+        try { localStorage.setItem('dhanpulse_mcx_sureshot_scan_attempt_day', today); } catch {}
+        void loadMcxSureshotUniverseShortlist();
+      } catch {
+        // Missing status is never treated as a live MCX feed.
+      } finally {
+        mcxAutoScanStatusCheckInFlight = false;
+      }
+    };
     // Check only local session/time state; no provider polling is done by this timer.
     startAutomaticTopFiveScan();
-    sureshotAutoScanTimer = window.setInterval(startAutomaticTopFiveScan, 30000);
+    startAutomaticMcxTopFiveScan();
+    sureshotAutoScanTimer = window.setInterval(() => {
+      startAutomaticTopFiveScan();
+      startAutomaticMcxTopFiveScan();
+    }, 30000);
   }
   if (tab === 'Gap-Up/Down') {
     const gapButton = document.querySelector('#loadGapAnalysisBtn');
@@ -2585,12 +2713,14 @@ function bindTabActions() {
     showMessage('If installation was accepted, DhanPulse is available from your device app launcher.');
   });
   const setupRefresh=document.querySelector('#refreshSetupBtn');
-  if(currentTab==='Sureshot CE/PE') loadSureshotStockUniverse();
+  if(currentTab==='Sureshot CE/PE') { void loadSureshotStockUniverse().then(loadMcxFuturesIntoSureshotSelect); }
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
   const refreshSureshotStockBoardBtn=document.querySelector('#refreshSureshotStockBoardBtn');
   if(refreshSureshotStockBoardBtn) refreshSureshotStockBoardBtn.addEventListener('click',loadSureshotStockBoard);
   const scanSureshotUniverseBtn=document.querySelector('#scanSureshotUniverseBtn');
   if(scanSureshotUniverseBtn) scanSureshotUniverseBtn.addEventListener('click',loadSureshotUniverseShortlist);
+  const scanMcxSureshotUniverseBtn=document.querySelector('#scanMcxSureshotUniverseBtn');
+  if(scanMcxSureshotUniverseBtn) scanMcxSureshotUniverseBtn.addEventListener('click',loadMcxSureshotUniverseShortlist);
   const setupSymbol=document.querySelector('#setupSymbol');
   if(setupSymbol) setupSymbol.addEventListener('change',loadSureshotSetup);
   const advancedRefresh=document.querySelector('#refreshAdvancedBtn');

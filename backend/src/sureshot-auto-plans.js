@@ -128,13 +128,13 @@ export function buildVerifiedSureshotTradePlan({
   const contractSymbol = String(contract.symbol);
   const contractSide = String(contract.side || "").toUpperCase();
   const contractStrike = Number(contract.strike);
-  const symbolStrikeMatch = contractSymbol.match(/(\d+)(?:CE|PE)$/);
+  const symbolStrikeMatch = contractSymbol.match(/(\d+(?:\.\d+)?)(?:CE|PE)$/);
   const symbolStrike = symbolStrikeMatch ? Number(symbolStrikeMatch[1]) : NaN;
   const contractExpiryMs = expiryTime(contract.expiry);
   const contractExpiryDate = Number.isFinite(contractExpiryMs) ? indiaDateKey(contractExpiryMs) : "";
-  if (!["NSE", "BSE"].includes(underlyingExchange) ||
+  if (!["NSE", "BSE", "MCX"].includes(underlyingExchange) ||
       !contractSymbol.startsWith(underlyingExchange + ":") ||
-      !/^(?:NSE|BSE):[A-Z0-9&-]{3,48}(CE|PE)$/.test(contractSymbol) ||
+      !/^(?:(?:NSE|BSE):[A-Z0-9&-]{3,48}|MCX:[A-Z0-9&.-]{3,48})(CE|PE)$/.test(contractSymbol) ||
       contractSide !== direction.side || !contractSymbol.endsWith(direction.side) ||
       !Number.isFinite(contractStrike) || contractStrike <= 0 ||
       !Number.isFinite(symbolStrike) || Math.abs(symbolStrike - contractStrike) > 0.0001 ||
