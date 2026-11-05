@@ -657,6 +657,7 @@ async function loadDashboardCandles() {
     return;
   }
   dashboardCandleRequestRunning=true;
+  const requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
   if(button)button.disabled=true;
   status.textContent='Requesting verified FYERS historical candles…';
   chart.innerHTML='<div class="chart-empty">Loading verified OHLC candles…</div>';
@@ -683,7 +684,16 @@ async function loadDashboardCandles() {
     const mainChart=document.querySelector('#mainTabChart');
     const mainNote=document.querySelector('#mainViewNote');
     if(sessionExpired) {
-      localStorage.removeItem('dhanpulse-dashboard-session-v1');
+      const currentSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
+      // Ignore an old chart request's 401 after a newer OAuth login completed.
+      // The request wrapper may already have removed the exact expired bearer;
+      // never clear a different, newer session here.
+      if (currentSession && currentSession !== requestSession) {
+        chart.innerHTML='<div class="chart-empty">A newer FYERS session is active. Ignoring the stale chart response.</div>';
+        status.textContent='New FYERS session active · stale chart response ignored';
+        return;
+      }
+      if (requestSession && currentSession === requestSession) localStorage.removeItem(DASHBOARD_SESSION_KEY);
       const recovery='<div class="chart-empty"><strong>FYERS dashboard session expired.</strong><p>Reconnect FYERS to securely renew the session before loading historical candles.</p><button type="button" class="primary dashboardReconnectBtn">Reconnect FYERS</button></div>';
       chart.innerHTML=recovery;
       if(mainChart)mainChart.innerHTML=recovery;
