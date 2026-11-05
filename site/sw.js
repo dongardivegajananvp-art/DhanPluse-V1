@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dhanpulse-shell-v123-session-race-v4';
+const CACHE_NAME = 'dhanpulse-shell-v124-no-frontend-cooldown-v1';
 const SHELL = ['./', './index.html', './style.css?v=20261104-sureshot-only-v1', './app.js?v=20261105-session-race-v4', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
