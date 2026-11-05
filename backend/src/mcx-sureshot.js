@@ -9,6 +9,24 @@ function normalizedUnderlying(value) {
   return String(value || "").trim().toUpperCase().replace(/^MCX:/, "").replace(/[^A-Z0-9]/g, "");
 }
 
+function isWithinMasterTradingSession(value, now) {
+  const sessions = String(value || "").match(/(\\d{4})-(\\d{4})/g) || [];
+  if (!sessions.length) return false;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(new Date(now));
+  const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  const minute = Number(fields.hour) * 60 + Number(fields.minute);
+  return sessions.some(session => {
+    const [start, end] = session.split("-").map(Number);
+    const startMinute = Math.floor(start / 100) * 60 + start % 100;
+    const endMinute = Math.floor(end / 100) * 60 + end % 100;
+    return startMinute <= endMinute
+      ? minute >= startMinute && minute < endMinute
+      : minute >= startMinute || minute < endMinute;
+  });
+}
+
 /**
  * Build MCX futures from FYERS' official MCX_COM master. The master ticker and
  * its fields are authoritative; no contract symbol or lot size is synthesized.
@@ -26,7 +44,7 @@ export function buildMcxFuturesUniverse(master, now = Date.now()) {
     const expiry = expiryMillis(item?.expiryDate);
     const strike = Number(item?.strikePrice);
     const underlying = normalizedUnderlying(item?.underSym);
-    if (!symbol.startsWith("MCX:") || Number(item?.tradeStatus) !== 1 ||
+    if (!symbol.startsWith("MCX:") || Number(item?.tradeStatus) !== 1 || !isWithinMasterTradingSession(item?.tradingSession, now) ||
         !["CE", "PE"].includes(side) || !Number.isFinite(strike) || strike <= 0 ||
         !Number.isFinite(expiry) || expiry <= now || !underlying ||
         !item?.fyToken || !Number.isFinite(Number(item?.minLotSize)) ||
@@ -46,7 +64,7 @@ export function buildMcxFuturesUniverse(master, now = Date.now()) {
   for (const [symbol, item] of rows) {
     const expiry = expiryMillis(item?.expiryDate);
     const underlying = normalizedUnderlying(item?.underSym || item?.exSymbol);
-    if (!/^MCX:.+FUT$/.test(symbol) || Number(item?.tradeStatus) !== 1 ||
+    if (!/^MCX:.+FUT$/.test(symbol) || Number(item?.tradeStatus) !== 1 || !isWithinMasterTradingSession(item?.tradingSession, now) ||
         String(item?.optType || "").toUpperCase() !== "XX" ||
         !Number.isFinite(expiry) || expiry <= now || !underlying ||
         !item?.fyToken) continue;
