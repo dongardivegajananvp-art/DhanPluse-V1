@@ -114,7 +114,7 @@ export function createFyersDataApiBudget({
           const retryAfter = Number(response.headers?.get?.('retry-after'));
           const server = String(response.headers?.get?.('server') || '');
           const cfRay = String(response.headers?.get?.('cf-ray') || '');
-          const cloudflare1015 = /error\\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body) ||
+          const cloudflare1015 = /error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body) ||
             (/cloudflare/i.test(server) && Boolean(cfRay));
           const cooldown = cloudflare1015
             ? Math.min(cloudflareCooldownMs * (2 ** consecutiveCloudflareBlocks), maxCloudflareCooldownMs)
