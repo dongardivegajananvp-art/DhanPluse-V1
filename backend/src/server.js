@@ -79,10 +79,6 @@ const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const dashboardSessions = new Map();
 const DASHBOARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 let marketSocket = null;
-let marketReconnectTimer = null;
-let marketReconnectAttempt = 0;
-const MARKET_SOCKET_RECONNECT_FALLBACK_MS = 20_000;
-const MARKET_SOCKET_RECONNECT_MAX_MS = 120_000;
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
@@ -136,53 +132,12 @@ function parseTick(raw) {
       receivedAt: new Date().toISOString()
     });
     lastAnyMarketTickAt = Date.now();
-    // Reset retry backoff only after a real accepted market tick, not merely
-    // a WebSocket handshake that may immediately drop again.
-    marketReconnectAttempt = 0;
     acceptedCount += 1;
   }
   return acceptedCount;
 }
 
-function scheduleMarketSocketFallback(socket, reason = 'socket interruption') {
-  if (!canScheduleMarketSocketFallback({
-    sessionOpen: nseRegularSessionNow(),
-    hasToken: Boolean(accessToken),
-    hasSocket: Boolean(socket),
-    connected: streamConnected,
-    timerPending: Boolean(marketReconnectTimer)
-  })) return;
-  const delay = getMarketSocketReconnectDelay(
-    marketReconnectAttempt,
-    MARKET_SOCKET_RECONNECT_FALLBACK_MS,
-    MARKET_SOCKET_RECONNECT_MAX_MS
-  );
-  marketReconnectTimer = setTimeout(() => {
-    marketReconnectTimer = null;
-    if (marketSocket !== socket || streamConnected || !nseRegularSessionNow()) return;
-    marketReconnectAttempt += 1;
-    console.warn('FYERS market socket controlled reconnect attempt.', JSON.stringify({
-      reason,
-      delayMs: delay,
-      retry: marketReconnectAttempt
-    }));
-    try {
-      // One reconnect controller owns retries. The FYERS SDK auto-reconnect is
-      // deliberately not enabled, avoiding competing SDK and app retry loops.
-      // Reuse the same Data Socket instance and restore subscriptions on connect.
-      socket.connect();
-    } catch (error) {
-      console.error('FYERS market socket reconnect failed:', String(error?.message || error).slice(0, 240));
-      scheduleMarketSocketFallback(socket, 'manual reconnect threw');
-    }
-  }, delay);
-  marketReconnectTimer.unref?.();
-}
-
 function startMarketDataStream(token) {
-  if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
-  marketReconnectTimer = null;
-  marketReconnectAttempt = 0;
   streamError = '';
   streamConnected = false;
   latestTicks.clear();
@@ -191,8 +146,17 @@ function startMarketDataStream(token) {
       try { marketSocket.close(); } catch {}
       marketSocket = null;
     }
+    // The third SDK argument controls SDK logging, not reconnect behavior.
+    // Keep logging disabled and explicitly enable the SDK's single reconnect
+    // owner. FYERS documents that it restores prior subscriptions on reconnect.
     const socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
     marketSocket = socket;
+    const SDK_RECONNECT_RETRIES = 50;
+    if (typeof socket.autoReconnect !== 'function') {
+      throw new Error('Installed FYERS SDK does not expose autoReconnect(); refusing to start an unmanaged live socket.');
+    }
+    socket.autoReconnect(SDK_RECONNECT_RETRIES);
+    console.log('FYERS SDK auto-reconnect enabled.', JSON.stringify({ retries: SDK_RECONNECT_RETRIES }));
     let socketConnectCount = 0;
     socket.on('connect', () => {
       if (marketSocket !== socket) return;
@@ -200,8 +164,6 @@ function startMarketDataStream(token) {
       streamError = '';
       marketSocketConnectedAt = Date.now();
       lastAnyMarketTickAt = 0;
-      if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
-      marketReconnectTimer = null;
       socketConnectCount += 1;
       console.log('FYERS market socket connected; restoring baseline subscription.', JSON.stringify({
         connectionNumber: socketConnectCount,
@@ -211,20 +173,24 @@ function startMarketDataStream(token) {
         // Re-apply mode and subscriptions on every connect event. A TCP/WebSocket
         // reconnect does not guarantee that the provider retained subscriptions.
         socket.mode(socket.FullMode);
-        const subscriptionSymbols = buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStreamSymbol);
-        socket.subscribe(subscriptionSymbols);
-        console.log('FYERS baseline market socket subscription request sent.', JSON.stringify({
-          connectionNumber: socketConnectCount,
-          symbols: subscriptionSymbols
-        }));
+        if (socketConnectCount === 1) {
+          const subscriptionSymbols = buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStreamSymbol);
+          socket.subscribe(subscriptionSymbols);
+          console.log('FYERS baseline market socket subscription request sent.', JSON.stringify({
+            connectionNumber: socketConnectCount,
+            symbols: subscriptionSymbols
+          }));
+        } else {
+          // FYERS SDK autoReconnect restores the previous subscription set.
+          console.log('FYERS SDK reconnect established; retained subscriptions are restored by the SDK.', JSON.stringify({
+            connectionNumber: socketConnectCount
+          }));
+        }
       } catch (error) {
         streamConnected = false;
         streamError = 'Could not subscribe to FYERS index symbols; controlled recovery is pending.';
         console.error('FYERS market socket subscription failed:', String(error?.message || error).slice(0, 240));
-        // A successful WebSocket handshake is not enough: if restoring the
-        // baseline/chart subscriptions fails, retry through the same single
-        // market-hours controller instead of remaining connected-but-empty.
-        scheduleMarketSocketFallback(socket, 'subscription restoration failed');
+
       }
     });
     socket.on('message', message => {
@@ -283,7 +249,7 @@ function startMarketDataStream(token) {
       streamConnected = false;
       streamError = 'FYERS market data socket reported an error; controlled recovery is pending.';
       console.error('FYERS market socket error:', String(error?.message || error).slice(0, 240));
-      scheduleMarketSocketFallback(socket, 'socket error');
+
     });
     socket.on('close', (code, reason) => {
       if (marketSocket !== socket) return;
@@ -293,51 +259,43 @@ function startMarketDataStream(token) {
       console.warn('FYERS market socket closed:', JSON.stringify({
         code: code ?? null,
         reason: safeReason || null,
-        sdkAutoReconnect: false,
-        retryPolicy: 'single-controller-exponential-backoff',
-        fallbackAfterMs: MARKET_SOCKET_RECONNECT_FALLBACK_MS
+        sdkAutoReconnect: true,
+        retryPolicy: 'fyers-sdk-autoReconnect',
+        retryLimit: SDK_RECONNECT_RETRIES
       }));
-      scheduleMarketSocketFallback(socket, 'socket close');
     });
-    // Do not enable SDK auto-reconnect here: the backend owns one bounded,
-    // market-hours-only reconnect controller to prevent competing retry loops.
+    // Exactly one reconnect owner: FYERS SDK autoReconnect. Do not run a
+    // second application-level connect timer alongside it.
     socket.connect();
   } catch (error) {
     streamConnected = false;
     streamError = 'Could not start the FYERS market data socket; controlled recovery is pending.';
     console.error('FYERS market socket startup failed:', String(error?.message || error).slice(0, 240));
-    // Cover synchronous SDK startup/connect failures as well as emitted close
-    // and error events; the retry helper prevents duplicate timers.
-    if (marketSocket) scheduleMarketSocketFallback(marketSocket, 'socket startup failed');
+
   }
 }
 
-// Detect a half-open market socket that never emits a close/error event.
-// This check is limited to regular NSE market hours and never calls REST.
+// Detect a half-open market socket during regular NSE hours. Trigger a close
+// only after total feed silence; the FYERS SDK autoReconnect controller owns
+// the resulting reconnect and subscription restoration.
 const marketSocketWatchdog = setInterval(() => {
-  if (!accessToken || !marketSocket || !nseRegularSessionNow()) return;
-  // If the socket remains disconnected after the close, wait for regular NSE
-  // hours and then use the single controlled reconnect policy.
-  if (!streamConnected) {
-    scheduleMarketSocketFallback(marketSocket, 'market session recovery');
-    return;
-  }
+  if (!accessToken || !marketSocket || !streamConnected || !nseRegularSessionNow()) return;
   const now = Date.now();
-  // Do not reconnect because one quiet index has not changed. Keep per-index
-  // exchange-timestamp freshness checks in liveSnapshot()/signal validation;
-  // reconnect only when the entire subscribed feed has gone silent.
   const lastActivityAt = lastAnyMarketTickAt || marketSocketConnectedAt;
   const feedSilentForMs = lastActivityAt ? now - lastActivityAt : Infinity;
   const SOCKET_SILENCE_THRESHOLD_MS = 120_000;
   if (feedSilentForMs <= SOCKET_SILENCE_THRESHOLD_MS) return;
   streamConnected = false;
-  streamError = 'FYERS market socket stopped delivering all index ticks; reconnecting.';
+  streamError = 'FYERS market socket stopped delivering index ticks; SDK reconnect is being triggered.';
   console.warn('FYERS market socket watchdog detected total feed silence:', JSON.stringify({
     feedSilentForMs,
     thresholdMs: SOCKET_SILENCE_THRESHOLD_MS,
-    lastAnyMarketTickAt: lastAnyMarketTickAt ? new Date(lastAnyMarketTickAt).toISOString() : null
+    lastAnyMarketTickAt: lastAnyMarketTickAt ? new Date(lastAnyMarketTickAt).toISOString() : null,
+    reconnectOwner: 'fyers-sdk-autoReconnect'
   }));
-  scheduleMarketSocketFallback(marketSocket, 'total market feed silence');
+  try { marketSocket.close(); } catch (error) {
+    console.error('FYERS watchdog socket close failed:', String(error?.message || error).slice(0, 200));
+  }
 }, 15_000);
 marketSocketWatchdog.unref?.();
 
@@ -595,8 +553,6 @@ function invalidateFyersSession(reason) {
   streamError = 'FYERS access token was rejected or expired. Reconnect FYERS.';
   latestTicks.clear();
   dashboardSessions.clear();
-  if (marketReconnectTimer) clearTimeout(marketReconnectTimer);
-  marketReconnectTimer = null;
   const expiredSocket = marketSocket;
   marketSocket = null;
   if (expiredSocket) {
