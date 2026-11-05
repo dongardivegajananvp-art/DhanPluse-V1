@@ -118,8 +118,10 @@ jobs:
             const names = await tabs.evaluateAll(items => items.map(item => item.getAttribute('data-tab')));
             if (names.length !== 2 || names[0] !== 'Sureshot CE/PE' || names[1] !== 'FYERS Connection') throw new Error('Expected exactly Sureshot and FYERS Connection tabs; found ' + names.length + ': ' + names.join(', '));
             let scanRequests = 0;
+            await page.evaluate(() => { window.__scanRequests = 0; });
             await page.route('**/api/market/sureshot-auto-plans**', async route => {
               scanRequests += 1;
+              await page.evaluate(count => { window.__scanRequests = count; }, scanRequests);
               await route.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'Test-only controlled rate-limit response', stage: 'VERIFY_FNO_QUOTES', retryAfterSeconds: 60 }) });
             });
             await page.locator('#nav button[data-tab="Sureshot CE/PE"]').click();
@@ -139,7 +141,7 @@ jobs:
             await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent?.toLowerCase()?.includes('verify fno quotes'), { timeout: 5000 });
             if (scanRequests !== 1) throw new Error('Authenticated live-session Sureshot tab did not auto-start exactly one full-universe scan.');
             await page.locator('#scanSureshotUniverseBtn').click();
-            await page.waitForFunction(() => scanRequests === 2, { timeout: 5000 });
+            await page.waitForFunction(() => window.__scanRequests === 2, { timeout: 5000 });
             if (scanRequests !== 2) throw new Error('Manual Sureshot rescan did not issue exactly one additional controlled API request.');
             if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join(' | '));
             console.log('PASS: exactly two tabs; unauthenticated Sureshot does not scan; authenticated 09:30 IST session auto-starts full-universe scan; manual rescan works; rate-limit is handled safely.');
