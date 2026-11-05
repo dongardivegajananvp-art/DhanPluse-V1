@@ -1380,7 +1380,11 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     const today = indiaNow.toISOString().slice(0, 10);
     const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 6)).toISOString().slice(0, 10);
     const batch = state.candidates.slice(offset, offset + SURESHOT_BATCH_SIZE);
-    const batchResults = [];
+    const resultBySymbol = new Map();
+    const prepared = [];
+
+    // Stage 1: verify each selected underlying and discover its exact option
+    // contract. Do not request premiums until all eligible contracts are known.
     for (const candidate of batch) {
       if (!nseRegularSessionNow()) { const error = new Error("Market session closed during scan; partial plans discarded."); error.statusCode = 409; throw error; }
       const base = { rank: candidate.rank, underlyingSymbol: candidate.symbol, underlyingType: candidate.underlyingType,
@@ -1393,28 +1397,78 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         scanStage = "VERIFY_UNDERLYING_CANDLES";
         const underlyingHistory = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot" });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [], "5", Date.now());
-        if (!direction.ok || !direction.side) { batchResults.push({ ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." }); continue; }
+        if (!direction.ok || !direction.side) {
+          resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
+          continue;
+        }
+
         scanStage = "DISCOVER_OPTION_CONTRACT";
         const chainUrl = new URL("https://api-t1.fyers.in/data/options-chain-v3");
         chainUrl.searchParams.set("symbol", candidate.symbol); chainUrl.searchParams.set("strikecount", "10"); chainUrl.searchParams.set("greeks", "1");
         const chainResult = await fyersReadOnlyGet(chainUrl, { priority: "sureshot" });
         const discovery = normalizeOptionContractDiscovery(chainResult?.data);
         const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now() });
-        if (!selected.ok) { batchResults.push({ ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason }); continue; }
+        if (!selected.ok) {
+          resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
+          continue;
+        }
+
         const contractSizing = await getFyersOptionContractMetadata(selected.contract.symbol);
         if (!contractSizing) {
-          batchResults.push({ ...base, status: "NO TRADE", direction: direction.side, contract: selected.contract,
+          resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, contract: selected.contract,
             reason: "Official FYERS lot size or tick size is unavailable for the selected option contract." });
           continue;
         }
-        const contract = { ...selected.contract, lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize };
+        prepared.push({
+          candidate, base, direction,
+          contract: { ...selected.contract, lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize },
+          contractSizing
+        });
+      } catch (error) {
+        const status = Number(error.statusCode) || 0;
+        if (status === 429 || status === 401) throw error;
+        resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", reason: String(error.message || "Candidate verification failed.").slice(0, 180) });
+      }
+    }
+
+    // Stage 2: fetch all selected option premiums in one live FYERS quote call.
+    // This preserves per-contract exchange timestamps while replacing five
+    // serial quote requests with one bounded batch (Top 5 is below FYERS' 50 limit).
+    const quoteBySymbol = new Map();
+    if (prepared.length) {
+      try {
         scanStage = "VERIFY_OPTION_QUOTE";
-        const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes"); quoteUrl.searchParams.set("symbols", contract.symbol);
+        const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes");
+        quoteUrl.searchParams.set("symbols", prepared.map(item => item.contract.symbol).join(","));
         const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: "sureshot" });
         const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
-        const quoteRow = quoteRows.find(item => (item?.n || item?.symbol || item?.v?.symbol) === contract.symbol);
-        const quote = quoteRow?.v || quoteRow;
-        if (!quote) { batchResults.push({ ...base, status: "NO TRADE", direction: direction.side, contract, reason: "FYERS returned no quote for selected option contract." }); continue; }
+        for (const row of quoteRows) {
+          const symbol = row?.n || row?.symbol || row?.v?.symbol;
+          if (symbol && prepared.some(item => item.contract.symbol === symbol)) quoteBySymbol.set(symbol, row?.v || row);
+        }
+      } catch (error) {
+        const status = Number(error.statusCode) || 0;
+        if (status === 429 || status === 401) throw error;
+        for (const item of prepared) {
+          resultBySymbol.set(item.candidate.symbol, { ...item.base, status: "NO TRADE", direction: item.direction.side,
+            contract: item.contract, reason: String(error.message || "FYERS option quote batch could not be verified.").slice(0, 180) });
+        }
+      }
+    }
+
+    // Stage 3: independently validate each premium, completed option candles and
+    // risk plan. A missing quote blocks only that candidate; no candidate is skipped.
+    for (const item of prepared) {
+      if (resultBySymbol.has(item.candidate.symbol)) continue;
+      if (!nseRegularSessionNow()) { const error = new Error("Market session closed during scan; partial plans discarded."); error.statusCode = 409; throw error; }
+      const { candidate, base, direction, contract, contractSizing } = item;
+      const quote = quoteBySymbol.get(contract.symbol);
+      if (!quote) {
+        resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, contract,
+          reason: "FYERS returned no quote for selected option contract." });
+        continue;
+      }
+      try {
         const optionHistoryUrl = new URL("https://api-t1.fyers.in/data/history");
         optionHistoryUrl.searchParams.set("symbol", contract.symbol); optionHistoryUrl.searchParams.set("resolution", "5");
         optionHistoryUrl.searchParams.set("date_format", "1"); optionHistoryUrl.searchParams.set("range_from", from);
@@ -1423,17 +1477,20 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot" });
         scanStage = "BUILD_RISK_PLAN";
         const plan = buildVerifiedSureshotTradePlan({ underlyingSymbol: candidate.symbol, direction, contract, quote,
-          optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5", lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, now: Date.now() });
-        batchResults.push(plan.ok ? { ...base, status: "VERIFIED SETUP", plan } :
+          optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5",
+          lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, now: Date.now() });
+        resultBySymbol.set(candidate.symbol, plan.ok ? { ...base, status: "VERIFIED SETUP", plan } :
           { ...base, status: "NO TRADE", direction: direction.side, contract, reason: plan.reason });
       } catch (error) {
         const status = Number(error.statusCode) || 0;
         if (status === 429 || status === 401) throw error;
-        batchResults.push({ ...base, status: "NO TRADE", reason: String(error.message || "Candidate verification failed.").slice(0, 180) });
+        resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, contract,
+          reason: String(error.message || "Candidate verification failed.").slice(0, 180) });
       }
-      // Verify every one of the top five ranked candidates; do not stop at
-      // the first setup. Each row must independently pass fresh FYERS checks.
     }
+
+    const batchResults = batch.map(candidate => resultBySymbol.get(candidate.symbol) ||
+      { rank: candidate.rank, underlyingSymbol: candidate.symbol, status: "NO TRADE", reason: "Candidate verification did not produce a complete result." });
     state.results.push(...batchResults);
     state.nextOffset += batchResults.length;
     const selectedCandidatesComplete = state.nextOffset >= state.candidates.length;
