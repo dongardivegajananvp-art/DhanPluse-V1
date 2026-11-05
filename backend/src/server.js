@@ -1384,7 +1384,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     for (const candidate of batch) {
       if (!nseRegularSessionNow()) { const error = new Error("Market session closed during scan; partial plans discarded."); error.statusCode = 409; throw error; }
       const base = { rank: candidate.rank, underlyingSymbol: candidate.symbol, underlyingType: candidate.underlyingType,
-        changePct: candidate.changePct, ltp: candidate.price, quoteAgeSeconds: candidate.quoteAgeSeconds };
+        changePct: candidate.changePct, ltp: candidate.price, lotSize: candidate.lotSize ?? null, quoteAgeSeconds: candidate.quoteAgeSeconds };
       try {
         const underlyingUrl = new URL("https://api-t1.fyers.in/data/history");
         underlyingUrl.searchParams.set("symbol", candidate.symbol); underlyingUrl.searchParams.set("resolution", "5");
@@ -1446,7 +1446,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       totalCandidateCount: state.candidates.length, batchSize: batchResults.length,
       scannedCandidates: state.results.map(item => ({
         rank: item.rank, underlyingSymbol: item.underlyingSymbol, underlyingType: item.underlyingType,
-        changePct: item.changePct, status: item.status, direction: item.direction || null,
+        changePct: item.changePct, ltp: item.ltp, lotSize: item.lotSize ?? null, status: item.status, direction: item.direction || null,
         reason: item.reason || null
       })) });
     const results = state.results;

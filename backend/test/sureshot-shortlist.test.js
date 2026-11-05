@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { buildVerifiedSureshotShortlist } from "../src/sureshot-shortlist.js";
 
 const now = Date.parse("2026-11-02T07:00:00.000Z");
-const universe = { data: Array.from({ length: 218 }, (_, i) => ({ symbol: `NSE:STOCK${i}-EQ` })) };
+const universe = { data: Array.from({ length: 218 }, (_, i) => ({ symbol: `NSE:STOCK${i}-EQ`, lotSize: 25 })) };
 const quoteSnapshot = {
   ok: true, verified: true, universeCount: 218, quotedCount: 218,
   data: universe.data.map((row, i) => ({
@@ -25,6 +25,7 @@ test("ranks the complete fresh F&O universe and includes individually fresh indi
   assert.equal(result.data[0].symbol, "NSE:NIFTY50-INDEX");
   assert.equal(result.data[0].rank, 1);
   assert.equal(result.signalsAllowed, false);
+  assert.equal(result.data.find(row => row.symbol === "NSE:STOCK217-EQ").lotSize, 25, "official stock lot size is preserved in the ranked rows");
   assert.deepEqual(result.data.slice(0, 5).map(row => row.symbol), ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX", "NSE:STOCK217-EQ", "NSE:STOCK216-EQ"]);
   assert.equal(result.data.at(-1).rank, 221);
 });

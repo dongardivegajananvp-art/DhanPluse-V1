@@ -28,6 +28,7 @@ export function buildFnoEquityUniverse(foMaster, cmMaster) {
   }
 
   const underlyingByTicker = new Map();
+  const lotSizesByUnderlying = new Map();
   for (const [ticker, item] of Object.entries(foMaster)) {
     if (!ticker.startsWith("NSE:") || Number(item?.tradeStatus) === 0) continue;
     const type = Number(item?.exInstType);
@@ -45,9 +46,22 @@ export function buildFnoEquityUniverse(foMaster, cmMaster) {
         }
       }
     }
-    if (cashTicker) underlyingByTicker.set(cashTicker, cashTicker.replace(/^NSE:/, "").replace(/-EQ$/, ""));
+    if (cashTicker) {
+      underlyingByTicker.set(cashTicker, cashTicker.replace(/^NSE:/, "").replace(/-EQ$/, ""));
+      const lotSize = Number(item?.minLotSize);
+      if (Number.isInteger(lotSize) && lotSize > 0) {
+        if (!lotSizesByUnderlying.has(cashTicker)) lotSizesByUnderlying.set(cashTicker, new Set());
+        lotSizesByUnderlying.get(cashTicker).add(lotSize);
+      }
+    }
   }
   return [...underlyingByTicker.entries()]
-    .map(([symbol, underlying]) => ({ symbol, underlying }))
+    .map(([symbol, underlying]) => {
+      const lotSizes = [...(lotSizesByUnderlying.get(symbol) || [])];
+      // A stock-level reference lot is shown only when every active derivative
+      // row in the official master agrees. The selected option contract is
+      // still re-checked against its exact symbol before a plan is built.
+      return { symbol, underlying, lotSize: lotSizes.length === 1 ? lotSizes[0] : null };
+    })
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
 }

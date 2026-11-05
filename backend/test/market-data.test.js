@@ -47,11 +47,11 @@ test("resolves stock F&O underlyings by FY token and excludes index contracts", 
     "NSE:NIFTY50-INDEX": { fyToken: "999", exSymbol: "NIFTY50", tradeStatus: 1 }
   };
   const fo = {
-    "NSE:RELIANCE26OCTFUT": { underFyTok: "101", underSym: "Reliance Industries", exInstType: 13, tradeStatus: 1 },
-    "NSE:RELIANCE26OCT1500CE": { underFyTok: "101", optType: "CE", exInstType: 15, tradeStatus: 1 },
+    "NSE:RELIANCE26OCTFUT": { underFyTok: "101", underSym: "Reliance Industries", exInstType: 13, minLotSize: 250, tradeStatus: 1 },
+    "NSE:RELIANCE26OCT1500CE": { underFyTok: "101", optType: "CE", exInstType: 15, minLotSize: 250, tradeStatus: 1 },
     "NSE:NIFTY26OCT25000CE": { underFyTok: "999", optType: "CE", exInstType: 14, tradeStatus: 1 }
   };
-  assert.deepEqual(buildFnoEquityUniverse(fo, cm), [{ symbol: "NSE:RELIANCE-EQ", underlying: "RELIANCE" }]);
+  assert.deepEqual(buildFnoEquityUniverse(fo, cm), [{ symbol: "NSE:RELIANCE-EQ", underlying: "RELIANCE", lotSize: 250 }]);
 });
 
 test("normalizes underlying aliases and excludes inactive cash symbols", () => {
@@ -63,7 +63,7 @@ test("normalizes underlying aliases and excludes inactive cash symbols", () => {
     "NSE:MM26OCTFUT": { underSym: "Mahindra & Mahindra", exInstType: 13, tradeStatus: 1 },
     "NSE:OLD26OCTFUT": { underSym: "OLD", exInstType: 13, tradeStatus: 1 }
   };
-  assert.deepEqual(buildFnoEquityUniverse(fo, cm), [{ symbol: "NSE:M&M-EQ", underlying: "M&M" }]);
+  assert.deepEqual(buildFnoEquityUniverse(fo, cm), [{ symbol: "NSE:M&M-EQ", underlying: "M&M", lotSize: null }]);
 });
 
 test("excludes inactive derivative rows when FYERS tradeStatus is a string", () => {
@@ -75,9 +75,21 @@ test("excludes inactive derivative rows when FYERS tradeStatus is a string", () 
     "NSE:LIVE26OCTFUT": { underSym: "LIVE", exInstType: 13, tradeStatus: 1 },
     "NSE:OLD26OCTFUT": { underSym: "OLD", exInstType: 13, tradeStatus: "0" }
   };
-  assert.deepEqual(buildFnoEquityUniverse(fo, cm), [{ symbol: "NSE:LIVE-EQ", underlying: "LIVE" }]);
+  assert.deepEqual(buildFnoEquityUniverse(fo, cm), [{ symbol: "NSE:LIVE-EQ", underlying: "LIVE", lotSize: null }]);
 });
 
 test("invalid FYERS symbol masters fail closed", () => {
   assert.throws(() => buildFnoEquityUniverse(null, {}), /invalid_fyers_symbol_master/);
+});
+
+
+test("stock-level lot size is withheld when active derivative master rows disagree", () => {
+  const cm = { "NSE:RELIANCE-EQ": { fyToken: "101", tradeStatus: 1 } };
+  const fo = {
+    "NSE:RELIANCE26OCTFUT": { underFyTok: "101", exInstType: 13, minLotSize: 250, tradeStatus: 1 },
+    "NSE:RELIANCE26OCT2500CE": { underFyTok: "101", optType: "CE", exInstType: 15, minLotSize: 500, tradeStatus: 1 }
+  };
+  assert.deepEqual(buildFnoEquityUniverse(fo, cm), [
+    { symbol: "NSE:RELIANCE-EQ", underlying: "RELIANCE", lotSize: null }
+  ]);
 });
