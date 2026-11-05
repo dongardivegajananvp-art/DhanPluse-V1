@@ -22,6 +22,13 @@ test("NSE and MCX scheduled sessions close independently after their respective 
   assert.equal(status.MCX.session, "SCHEDULED_OPEN");
 });
 
+test("MCX non-agri close adjusts with US daylight saving", () => {
+  const summer = getExchangeSessionWindows(new Date("2026-07-01T12:00:00.000Z"));
+  const winter = getExchangeSessionWindows(new Date("2026-11-05T12:00:00.000Z"));
+  assert.equal(summer.MCX.sessionHours, "09:00–23:30 IST (non-agri)");
+  assert.equal(winter.MCX.sessionHours, "09:00–23:55 IST (non-agri)");
+});
+
 test("weekends are scheduled closed for both exchanges", () => {
   const status = getExchangeSessionWindows(new Date("2026-11-07T05:00:00.000Z"));
   assert.equal(status.NSE.session, "SCHEDULED_CLOSED");
