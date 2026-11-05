@@ -1646,7 +1646,6 @@ async function loadSureshotUniverseShortlist(options = {}) {
   const status = document.querySelector('#setupStatus');
   if (!host || (button && button.disabled)) return;
   sureshotUniverseScanRunning = true;
-  try { localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY, indiaTradingDateKey()); } catch {}
   if (button) button.disabled = true;
   host.innerHTML = '<div class="chart-empty">Starting full eligible NSE F&O Top 5 scan in small sequential FYERS batches…</div>';
   if (status) status.textContent = 'Full-universe scan starting. The backend retains scan progress if this app is backgrounded or reopened.';
@@ -1733,6 +1732,9 @@ async function loadSureshotUniverseShortlist(options = {}) {
         ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s). Best valid setup is ranked first.'
         : 'First verified setup found after checking ' + result.scannedCandidateCount + ' / ' + result.rankedCandidateCount + ' ranked candidates. Lower-ranked candidates were not scanned.')
       : 'Full-universe scan complete · NO TRADE. No candidate passed every direction, contract, fresh quote, candle and ≥1:2 risk check.';
+    // Mark the trading date only after every selected Top 5 candidate was checked.
+    // Failed/incomplete scans remain eligible for the automatic session retry.
+    try { localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY, indiaTradingDateKey()); } catch {}
 
   } catch (error) {
     if (/Market session is closed/i.test(String(error.message || ''))) {
