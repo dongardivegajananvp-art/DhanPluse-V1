@@ -93,3 +93,19 @@ test("stock-level lot size is withheld when active derivative master rows disagr
     { symbol: "NSE:RELIANCE-EQ", underlying: "RELIANCE", lotSize: null }
   ]);
 });
+
+test("NSE session window enforces exact 09:15 open and 15:30 close boundaries", async () => {
+  const { getNseSessionWindow } = await import("../src/market-data.js");
+  assert.equal(getNseSessionWindow(new Date("2026-11-02T03:44:00.000Z")).isRegularHours, false); // 09:14 IST
+  assert.equal(getNseSessionWindow(new Date("2026-11-02T03:45:00.000Z")).isRegularHours, true); // 09:15 IST
+  assert.equal(getNseSessionWindow(new Date("2026-11-02T09:59:00.000Z")).isRegularHours, true); // 15:29 IST
+  assert.equal(getNseSessionWindow(new Date("2026-11-02T10:00:00.000Z")).isRegularHours, false); // 15:30 IST
+});
+
+test("NSE session window is timezone-independent for UTC instants", async () => {
+  const { getNseSessionWindow } = await import("../src/market-data.js");
+  const session = getNseSessionWindow(new Date("2026-11-06T04:00:00.000Z"));
+  assert.equal(session.localTime, "09:30");
+  assert.equal(session.isRegularHours, true);
+  assert.equal(session.timezone, "Asia/Kolkata");
+});
