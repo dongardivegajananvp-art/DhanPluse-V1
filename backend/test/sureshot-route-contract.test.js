@@ -63,12 +63,13 @@ test("frontend automatic scan requires active Sureshot tab, open session and sha
   assert.match(trigger, /currentTab !== 'Sureshot CE\/PE'/);
   assert.match(trigger, /!isRegularMarketSession\(\)/);
   assert.match(trigger, /SURESHOT_AUTO_SCAN_DAY_KEY/);
+  assert.match(trigger, /SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
   const loader = app.slice(app.indexOf("async function loadSureshotUniverseShortlist"), app.indexOf("async function performSureshotSetup"));
   assert.match(loader, /DASHBOARD_SESSION_KEY/);
   assert.match(trigger, /loadSureshotUniverseShortlist\(\{ automatic: true \}\)/);
 });
 
-test("frontend marks the trading date only after complete Top 5 scan; failure keeps retry eligible", () => {
+test("frontend records one automatic attempt per session day and still marks completion only after all five pass", () => {
   const start = app.indexOf("async function loadSureshotUniverseShortlist");
   const end = app.indexOf("async function performSureshotSetup", start);
   assert.ok(start >= 0 && end > start);
@@ -76,7 +77,14 @@ test("frontend marks the trading date only after complete Top 5 scan; failure ke
   const marker = loader.indexOf("localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY");
   const complete = loader.indexOf("result.selectedCandidatesComplete !== true");
   const catchAt = loader.indexOf("} catch (error)");
-  assert.ok(marker > complete && marker < catchAt, "daily marker must be written after completion checks and before catch");
+  assert.ok(marker > complete && marker < catchAt, "success marker must be written after completion checks and before catch");
+  const attempt = loader.indexOf("localStorage.setItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY");
+  const firstFetch = loader.indexOf("fetch(BACKEND_URL + '/api/market/sureshot-auto-plans'");
+  assert.ok(attempt >= 0 && attempt < firstFetch, "attempt marker must be written before any FYERS scan request");
   assert.match(loader.slice(0, catchAt), /TOP_FIVE_CANDIDATES_CHECKED/);
   assert.match(loader.slice(catchAt), /All partial plans are discarded/);
+  assert.doesNotMatch(loader.slice(catchAt), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
+  const authStart = app.indexOf("localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken)");
+  const authEnd = app.indexOf("authExchangeInProgress = false", authStart);
+  assert.match(app.slice(authStart, authEnd), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY\)/);
 });
