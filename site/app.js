@@ -1774,7 +1774,8 @@ async function performSureshotSetup() {
       const exchangeStatusResponse = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const exchangeStatus = await exchangeStatusResponse.json().catch(() => ({}));
       if (exchangeStatusResponse.ok) updateExchangeLiveSwitches(exchangeStatus);
-    } catch {}
+      else latestExchangeLiveStatus = {};
+    } catch { latestExchangeLiveStatus = {}; }
   }
   const selectedMarketOpen=symbol.startsWith('MCX:')?isMcxMarketSessionOpen():isRegularMarketSession();
   // Allow the backend to serve an identical, recently verified candle-cache hit
@@ -2597,7 +2598,7 @@ function render(tab) {
         const status = await response.json().catch(() => ({}));
         if (!response.ok) return;
         updateExchangeLiveSwitches(status);
-        if (!isMcxMarketSessionOpen()) return;
+        if (currentTab !== 'Sureshot CE/PE' || sureshotUniverseScanRunning || !isMcxMarketSessionOpen()) return;
         const today = indiaTradingDateKey();
         let attempted = '';
         try { attempted = localStorage.getItem('dhanpulse_mcx_sureshot_scan_attempt_day') || ''; } catch {}
