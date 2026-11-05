@@ -2242,6 +2242,13 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
   if (!exchangeSessionOpen) {
     return res.status(409).json({ ok: false, error: optionExchange + ' market session is closed; no actionable option risk plan is generated.' });
   }
+  if (optionExchange === 'MCX') {
+    const mcxTickAgeSeconds = mcxDiagnosticTick ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
+    if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(mcxTickAgeSeconds) ||
+        mcxTickAgeSeconds < 0 || mcxTickAgeSeconds > 30) {
+      return res.status(409).json({ ok: false, error: 'MCX WebSocket feed is not fresh; no MCX option risk plan is generated.' });
+    }
+  }
   try {
     const contractMetadata = await getFyersOptionContractMetadata(symbol);
     if (!contractMetadata) {
