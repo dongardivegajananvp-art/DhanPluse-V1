@@ -10,7 +10,7 @@ function normalizedUnderlying(value) {
 }
 
 function isWithinMasterTradingSession(value, now) {
-  const sessions = String(value || "").match(/(\\d{4})-(\\d{4})/g) || [];
+  const sessions = String(value || "").match(/(\d{4})-(\d{4})/g) || [];
   if (!sessions.length) return false;
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
