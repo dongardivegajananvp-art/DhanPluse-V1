@@ -22,6 +22,7 @@ import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
 import { buildMarketSocketSubscriptionSymbols } from './market-socket-recovery.js';
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
+import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist } from './mcx-sureshot.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 
@@ -808,6 +809,14 @@ app.get('/api/market/chart-quote', (req, res) => {
 app.get('/api/market/candles', async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
   const allowed = new Set(allowedSymbols);
+  if (symbol.startsWith('MCX:') && accessToken) {
+    try {
+      const mcxUniverse = await getMcxFnoUniverse();
+      if (mcxUniverse.data.some(item => item.symbol === symbol)) allowed.add(symbol);
+    } catch (error) {
+      return res.status(503).json({ ok: false, error: 'Official MCX symbol master unavailable; MCX candles blocked.', detail: String(error.message || error).slice(0, 160) });
+    }
+  }
   if (!allowed.has(symbol) && accessToken) {
     try {
       const verifiedUniverse = await getNseFnoEquityUniverse();
@@ -1121,6 +1130,31 @@ app.get("/api/market/institutional-flow", async (_req, res) => {
 
 let fnoUniverseCache = { fetchedAt: 0, data: null };
 let fnoUniversePromise = null;
+let mcxFnoUniverseCache = { fetchedAt: 0, data: null, master: null };
+let mcxFnoUniversePromise = null;
+async function getMcxFnoUniverse() {
+  if (mcxFnoUniverseCache.data && Date.now() - mcxFnoUniverseCache.fetchedAt < 24 * 60 * 60 * 1000) return mcxFnoUniverseCache.data;
+  if (mcxFnoUniversePromise) return mcxFnoUniversePromise;
+  mcxFnoUniversePromise = (async () => {
+    const response = await fetch('https://public.fyers.in/sym_details/MCX_COM_sym_master.json', { signal: AbortSignal.timeout(15000), headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error('FYERS official MCX_COM symbol master unavailable.');
+    const master = await response.json();
+    const data = buildMcxFuturesUniverse(master, Date.now());
+    if (!data.length) throw new Error('Official MCX master returned no active futures with matching active CE and PE option contracts.');
+    const result = { source: 'FYERS MCX_COM symbol master', fetchedAt: new Date().toISOString(), count: data.length, data };
+    mcxFnoUniverseCache = { fetchedAt: Date.now(), data: result, master };
+    console.log('FYERS MCX F&O universe loaded:', JSON.stringify({ count: data.length, source: result.source }));
+    return result;
+  })();
+  try { return await mcxFnoUniversePromise; } finally { mcxFnoUniversePromise = null; }
+}
+async function getMcxOptionContractMetadata(symbol) {
+  const universe = await getMcxFnoUniverse();
+  const master = mcxFnoUniverseCache.master;
+  const metadata = resolveOptionContractMetadata(symbol, master);
+  if (!metadata || !universe.data.some(row => row.optionContracts.some(option => option.symbol === symbol))) return null;
+  return metadata;
+}
 let stockQuoteCache = { fetchedAt: 0, data: null };
 let stockQuotePromise = null;
 const STOCK_QUOTE_CACHE_MS = 30000;
@@ -1131,6 +1165,7 @@ const STOCK_QUOTE_BATCH_SIZE = 50;
 let optionContractMasterCache = { fetchedAt: 0, data: null };
 let optionContractMasterPromise = null;
 async function getFyersOptionContractMetadata(symbol) {
+  if (String(symbol).startsWith('MCX:')) return getMcxOptionContractMetadata(symbol);
   if (optionContractMasterCache.data && Date.now() - optionContractMasterCache.fetchedAt < 24 * 60 * 60 * 1000) {
     return resolveOptionContractMetadata(symbol, optionContractMasterCache.data);
   }
@@ -1908,8 +1943,47 @@ app.get('/api/market/movers', async (_req, res) => {
     moversSnapshotInFlight = null;
   }
 });
+app.get('/api/market/mcx-fno-universe', async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const universe = await getMcxFnoUniverse();
+    return res.json({ ok: true, ...universe, signalsAllowed: false, rankingIsSignal: false });
+  } catch (error) {
+    return res.status(503).json({ ok: false, error: 'Official MCX F&O universe unavailable; MCX scan blocked.', detail: String(error.message || error).slice(0, 200), signalsAllowed: false });
+  }
+});
+
 app.get('/api/fyers/options-chain', async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
+  if (symbol.startsWith('MCX:')) {
+    try {
+      const universe = await getMcxFnoUniverse();
+      const future = universe.data.find(row => row.symbol === symbol);
+      if (!future) return res.status(400).json({ ok: false, error: 'Underlying is not an active FYERS MCX future in the official master.' });
+      const byExpiry = new Map();
+      for (const option of future.optionContracts) {
+        const expiryNumber = Number(option.expiryDate);
+        const expiryMs = Number.isFinite(expiryNumber) && expiryNumber > 0 ? (expiryNumber > 1e12 ? expiryNumber : expiryNumber * 1000) : Date.parse(option.expiryDate);
+        if (!Number.isFinite(expiryMs) || expiryMs <= Date.now()) continue;
+        const expiry = String(Math.floor(expiryMs / 1000));
+        const date = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(expiryMs));
+        if (!byExpiry.has(expiry)) byExpiry.set(expiry, { expiry, date });
+      }
+      const expiryData = [...byExpiry.values()].sort((a, b) => Number(a.expiry) - Number(b.expiry));
+      const selectedExpiry = timestamp || expiryData[0]?.expiry;
+      const optionsChain = future.optionContracts.filter(option => {
+        const n = Number(option.expiryDate);
+        const ms = Number.isFinite(n) && n > 0 ? (n > 1e12 ? n : n * 1000) : Date.parse(option.expiryDate);
+        return Number.isFinite(ms) && String(Math.floor(ms / 1000)) === String(selectedExpiry);
+      }).map(option => ({ symbol: option.symbol, strike_price: option.strike, option_type: option.side, expiry: selectedExpiry }));
+      if (!optionsChain.length) return res.status(422).json({ ok: false, error: 'No active MCX options found for the selected expiry in the official master.' });
+      const discovery = normalizeOptionContractDiscovery({ expiryData, optionsChain });
+      res.set('Cache-Control', 'no-store');
+      return res.json({ ok: true, contractDiscoveryOnly: true, source: 'FYERS MCX_COM symbol master', chainFreshness: 'NOT_APPLICABLE', notice: 'MCX contract identity, strike and expiry come from the official symbol master. Premium, bid/ask and candles are verified separately; OI/volume are not used.', data: discovery });
+    } catch (error) {
+      return res.status(503).json({ ok: false, error: 'FYERS MCX option contract discovery failed.', detail: String(error.message || error).slice(0, 200) });
+    }
+  }
   const allowed = [...allowedSymbols, ...moversSymbols];
   const strikeCount = Number.parseInt(String(req.query.strikecount || '10'), 10);
   const timestamp = req.query.timestamp == null ? '' : String(req.query.timestamp);
@@ -1991,8 +2065,13 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
   if (!['5', '15', '30', '60'].includes(resolution)) {
     return res.status(400).json({ ok: false, error: 'Option risk candles must use a 5, 15, 30 or 60 minute interval.' });
   }
-  if (!nseRegularSessionNow()) {
-    return res.status(409).json({ ok: false, error: 'Market is closed; no actionable option risk plan is generated.' });
+  const optionExchange = symbol.split(':')[0];
+  const exchangeSession = getExchangeSessionWindows()[optionExchange];
+  const exchangeSessionOpen = optionExchange === 'MCX'
+    ? exchangeSession?.session === 'SCHEDULED_OPEN'
+    : optionExchange === 'NSE' || optionExchange === 'BSE' ? nseRegularSessionNow() : false;
+  if (!exchangeSessionOpen) {
+    return res.status(409).json({ ok: false, error: optionExchange + ' market session is closed; no actionable option risk plan is generated.' });
   }
   try {
     const contractMetadata = await getFyersOptionContractMetadata(symbol);
