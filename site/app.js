@@ -22,115 +22,6 @@ const nativeFetch = window.fetch.bind(window);
 let authExchangeInProgress = new URLSearchParams(window.location.search).has('auth_code');
 const DASHBOARD_SESSION_KEY = 'dhanpulse-dashboard-session-v1';
 
-// FYERS 429/cooldown state is shared across tabs through localStorage.
-// This is a UI backoff only; the backend remains the authority for API limits.
-const FYERS_COOLDOWN_KEY = 'dhanpulse_fyers_cooldown_until_v1';
-function getFyersCooldownRemaining() {
-  let storedUntil = 0;
-  try { storedUntil = Number(localStorage.getItem(FYERS_COOLDOWN_KEY) || 0); } catch {}
-  return Math.max(0, Math.ceil((Math.max(storedUntil, window.__dhanPulseCooldownUntil || 0) - Date.now()) / 1000));
-}
-function renderFyersCooldown() {
-  const remaining = getFyersCooldownRemaining();
-  let notice = document.querySelector('#fyersCooldownNotice');
-  if (remaining > 0) {
-    if (!notice) {
-      notice = document.createElement('span');
-      notice.id = 'fyersCooldownNotice';
-      notice.className = 'market-pill';
-      notice.style.cssText = 'display:inline-flex;align-items:center;margin-right:10px;color:#ffd38a;border:1px solid #8a6633;background:#332714;font-size:11px;white-space:nowrap;';
-      const header = document.querySelector('.header-right');
-      if (header) header.insertBefore(notice, header.firstChild);
-    }
-    const hours = Math.floor(remaining / 3600);
-    const minutes = Math.floor((remaining % 3600) / 60);
-    const seconds = remaining % 60;
-    const duration = hours > 0
-      ? hours + 'h ' + String(minutes).padStart(2, '0') + 'm ' + String(seconds).padStart(2, '0') + 's'
-      : minutes + 'm ' + String(seconds).padStart(2, '0') + 's';
-    notice.textContent = 'FYERS cooling down · Retry in ' + duration;
-    notice.hidden = false;
-  } else if (notice) {
-    notice.remove();
-  }
-
-  document.querySelectorAll('main button').forEach(button => {
-    const description = ((button.id || '') + ' ' + (button.textContent || '')).toLowerCase();
-    const isDataRefresh = /refresh|load (equity|stock|market|quote|candle)|run scanner|scan (now|market|stocks)/.test(description);
-    if (!isDataRefresh) return;
-    if (remaining > 0 && !button.disabled) {
-      button.dataset.fyersCooldownDisabled = 'true';
-      button.disabled = true;
-      button.title = 'FYERS rate-limit cooldown is active.';
-    } else if (remaining === 0 && button.dataset.fyersCooldownDisabled === 'true') {
-      button.disabled = false;
-      delete button.dataset.fyersCooldownDisabled;
-      button.removeAttribute('title');
-    }
-  });
-}
-async function syncFyersCooldownFromBackend() {
-  // A 429 can be endpoint-specific (for example /data/history) while other
-  // FYERS endpoints remain usable. Only the shared backend budget status may
-  // activate the app-wide refresh guard.
-  try {
-    const response = await nativeFetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
-    if (!response.ok) return;
-    const status = await response.json();
-    const budget = status && status.fyersDataApi;
-    const seconds = Number(budget && budget.retryAfterSeconds);
-    const backendUntil = budget && budget.cooldownActive === true && Number.isFinite(seconds) && seconds > 0
-      ? Date.now() + Math.min(86400, seconds) * 1000
-      : 0;
-    // Preserve a single Sureshot retry for the end of the backend-confirmed
-    // provider cooldown. The scan interval below waits for regular market hours
-    // and for the visible cooldown guard to clear before making one request.
-    if (backendUntil > Date.now()) {
-      window.__dhanPulseSureshotRetryAt = backendUntil + 2000;
-    } else {
-      // A restarted backend has cleared its in-memory budget; discard any
-      // obsolete browser retry deadline and allow one controlled fresh probe.
-      window.__dhanPulseSureshotRetryAt = 0;
-    }
-    // The backend is the source of truth after a deploy/restart. Do not let an
-    // obsolete browser-persisted 60-minute timer outlive the current backend
-    // budget; a fresh 429 will establish a new bounded cooldown if 1015 remains.
-    const until = backendUntil;
-    if (until > Date.now()) {
-      window.__dhanPulseCooldownUntil = until;
-      try { localStorage.setItem(FYERS_COOLDOWN_KEY, String(until)); } catch {}
-    } else {
-      window.__dhanPulseCooldownUntil = 0;
-      try { localStorage.removeItem(FYERS_COOLDOWN_KEY); } catch {}
-    }
-    renderFyersCooldown();
-  } catch {
-    // If status cannot be read, retain the existing guard rather than guessing.
-  }
-}
-function activateFyersCooldown() {
-  void syncFyersCooldownFromBackend();
-}
-window.addEventListener('storage', event => {
-  if (event.key === FYERS_COOLDOWN_KEY) renderFyersCooldown();
-});
-window.setInterval(renderFyersCooldown, 1000);
-// Reconcile any legacy browser-stored timer with the backend's authoritative budget on app startup.
-void syncFyersCooldownFromBackend();
-
-// Suppress only FYERS Data-API-backed REST routes while a confirmed provider
-// cooldown is active. WebSocket ticks, cached last-known data, symbol masters,
-// auth/status, and NSE institutional-flow reads remain available.
-const FYERS_DATA_API_PATHS = new Set([
-  '/api/market/stock-quotes',
-  '/api/market/last-known-stock-quotes',
-  // Candle reads are allowed through during cooldown so the backend can serve
-  // an identical verified history-cache hit. Cache misses remain blocked by
-  // the shared FYERS Data API budget; no stale candle is treated as fresh.
-  '/api/market/movers',
-  '/api/market/sureshot-shortlist',
-  '/api/market/sureshot-auto-plans'
-]);
 window.fetch = function(input, init = {}) {
   let url = '';
   try { url = new URL(typeof input === 'string' ? input : input.url, window.location.href).href; } catch {}
@@ -138,27 +29,6 @@ window.fetch = function(input, init = {}) {
   const isBackend = url.startsWith(BACKEND_URL + '/');
   const publicPaths = ['/health', '/api/status', '/api/fyers/auth/start', '/api/fyers/auth/exchange'];
   const pathname = isBackend ? new URL(url).pathname : '';
-  if (isBackend && FYERS_DATA_API_PATHS.has(pathname)) {
-    const retryAfterSeconds = getFyersCooldownRemaining();
-    if (retryAfterSeconds > 0) {
-      return Promise.resolve(new Response(JSON.stringify({
-        ok: false,
-        signalsAllowed: false,
-        scanComplete: false,
-        error: 'FYERS Data API cooldown active; request suppressed locally.',
-        stage: pathname === '/api/market/sureshot-auto-plans' ? 'VERIFY_FNO_QUOTES' : 'QUOTE_SNAPSHOT',
-        retryAfterSeconds,
-        partialQuotesDiscarded: true
-      }), {
-        status: 429,
-        headers: {
-          'Content-Type': 'application/json',
-          'Retry-After': String(retryAfterSeconds),
-          'X-DhanPulse-Cooldown-Guard': 'local'
-        }
-      }));
-    }
-  }
   // Never initiate OAuth from an isolated preview until its redirect URI is
   // independently verified. This prevents a test page from sending auth flow
   // to a production-configured callback by mistake.
@@ -191,11 +61,6 @@ window.fetch = function(input, init = {}) {
           featureContent.prepend(notice);
         }
       }
-    }
-    if (isBackend && response.status === 429 &&
-        response.headers.get('X-DhanPulse-Cooldown-Guard') !== 'local') {
-      response.clone().json().then(payload => activateFyersCooldown(payload, response))
-        .catch(() => activateFyersCooldown({}, response));
     }
     return response;
   });
