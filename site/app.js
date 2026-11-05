@@ -95,6 +95,7 @@ let optionRequestRunning = false;
 let sureshotRequestRunning = false;
 let sureshotRefreshPending = false;
 let sureshotAutoScanTimer = null;
+let connectionDiagnosticsTimer = null;
 let sureshotUniverseScanRunning = false;
 const SURESHOT_AUTO_SCAN_DAY_KEY = 'dhanpulse-sureshot-auto-scan-day-v1';
 const SURESHOT_AUTO_SCAN_ATTEMPT_KEY = 'dhanpulse-sureshot-auto-scan-attempt-v1';
@@ -2167,7 +2168,51 @@ function alertListMarkup() {
 }
 
 function settingsMarkup() {
-  return '<div class="settings-grid"><article class="console-section"><h4>Secure connection</h4><p>FYERS credentials stay on the Render backend. Do not paste app secrets or access tokens into this page.</p><div class="data-row"><span>Backend URL</span><b>Render</b></div><code class="backend-url">' + BACKEND_URL + '</code><div class="button-row"><button class="primary" id="testBackendBtn">Test backend</button><button class="primary" id="connectFyersBtn">Connect FYERS</button><button class="secondary" id="testQuotesBtn">Refresh live quotes</button><button class="secondary" id="installPwaBtn">Install DhanPulse app</button></div><p class="hint">Install on desktop/laptop from the browser install icon, or on mobile use the browser menu → Install app / Add to Home Screen.</p></article><article class="console-section"><h4>Connection diagnostics</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend health</span><b id="settingsBackend">CHECKING</b></div><div class="data-row"><span>Latest quotes</span><b id="settingsFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div><p class="hint">Backend health alone does not prove that FYERS authentication or live market data is connected.</p></article></div>';
+  return '<div class="settings-grid"><article class="console-section"><h4>Secure connection</h4><p>FYERS credentials stay on the Render backend. Do not paste app secrets or access tokens into this page.</p><div class="data-row"><span>Backend URL</span><b>Render</b></div><code class="backend-url">' + BACKEND_URL + '</code><div class="button-row"><button class="primary" id="testBackendBtn">Test backend</button><button class="primary" id="connectFyersBtn">Connect FYERS</button><button class="secondary" id="testQuotesBtn">Refresh live quotes</button><button class="secondary" id="installPwaBtn">Install DhanPulse app</button></div><p class="hint">Install on desktop/laptop from the browser install icon, or on mobile use the browser menu → Install app / Add to Home Screen.</p></article><article class="console-section"><h4>Connection diagnostics</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend health</span><b id="settingsBackend">CHECKING</b></div><div class="data-row"><span>Latest NSE index quotes</span><b id="settingsFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div><p class="hint">Backend health alone does not prove that FYERS authentication or live market data is connected.</p></article><article class="console-section"><h4>MCX live socket diagnostic</h4><div class="data-row"><span>MCX feed</span><b id="settingsMcxFeed">WAITING</b></div><div class="data-row"><span>Official contract</span><b id="settingsMcxSymbol">Loading FYERS master…</b></div><div class="data-row"><span>Verified LTP</span><b id="settingsMcxLtp">—</b></div><div class="data-row"><span>Exchange timestamp</span><b id="settingsMcxTime">—</b></div><p class="hint" id="settingsMcxDetail">One active MCX futures contract is subscribed on the existing FYERS socket. MCX data is diagnostic only and never enters NSE Sureshot.</p></article></div>';
+}
+
+function updateMcxConnectionDiagnostics(status) {
+  const diagnostic = status && status.mcxDiagnostic ? status.mcxDiagnostic : {};
+  const feed = document.querySelector('#settingsMcxFeed');
+  const symbol = document.querySelector('#settingsMcxSymbol');
+  const ltp = document.querySelector('#settingsMcxLtp');
+  const time = document.querySelector('#settingsMcxTime');
+  const detail = document.querySelector('#settingsMcxDetail');
+  if (!feed || !symbol || !ltp || !time || !detail) return;
+  const state = String(diagnostic.status || 'STATUS_UNAVAILABLE');
+  feed.textContent = state === 'FRESH' ? 'LIVE · FRESH TICK' : state.replace(/_/g, ' ');
+  symbol.textContent = diagnostic.symbol || (state === 'MASTER_UNAVAILABLE'
+    ? 'FYERS MCX master unavailable'
+    : state === 'NO_ACTIVE_FUTURE' ? 'No active diagnostic future' : 'Resolving official MCX contract…');
+  ltp.textContent = Number.isFinite(Number(diagnostic.ltp)) && Number(diagnostic.ltp) > 0
+    ? '₹' + formatPrice(Number(diagnostic.ltp)) + (diagnostic.freshness === 'FRESH' ? '' : ' · STALE')
+    : '—';
+  time.textContent = diagnostic.exchangeTimestamp
+    ? new Date(diagnostic.exchangeTimestamp).toLocaleString('en-IN')
+    : 'Waiting for exchange tick';
+  const age = Number.isFinite(Number(diagnostic.ageSeconds)) ? ' · age ' + diagnostic.ageSeconds + 's' : '';
+  detail.textContent = (diagnostic.note || 'MCX is diagnostic only; no signal or order is generated.') +
+    (diagnostic.expiryDate ? ' Contract expiry: ' + diagnostic.expiryDate + '.' : '') +
+    (diagnostic.subscribedOnCurrentSocket ? ' Subscribed on the existing socket.' : '') + age;
+}
+
+async function refreshConnectionDiagnostics() {
+  if (currentTab !== 'FYERS Connection') return;
+  try {
+    const response = await fetch(BACKEND_URL + '/api/status', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const status = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error('Status endpoint unavailable.');
+    updateMcxConnectionDiagnostics(status);
+  } catch {
+    updateMcxConnectionDiagnostics({
+      mcxDiagnostic: {
+        status: 'STATUS_UNAVAILABLE',
+        note: 'Backend diagnostics are temporarily unavailable. No live status is assumed.'
+      }
+    });
+  }
 }
 
 function escapeHtml(value) {
@@ -2347,6 +2392,7 @@ function renderLogs() {
 }
 
 function render(tab) {
+  if (connectionDiagnosticsTimer) { window.clearInterval(connectionDiagnosticsTimer); connectionDiagnosticsTimer = null; }
   if (!descriptions[tab]) return;
   if (['Trade Journal','Capital Protection','Backtesting'].includes(tab)) {
     currentTab = tab;
@@ -2486,6 +2532,17 @@ function bindTabActions() {
   if (connect) connect.addEventListener('click', startFyersLogin);
   const quotes = document.querySelector('#testQuotesBtn');
   if (quotes) quotes.addEventListener('click', fetchLiveQuotes);
+  if (currentTab === 'FYERS Connection') {
+    void refreshConnectionDiagnostics();
+    connectionDiagnosticsTimer = window.setInterval(() => {
+      if (currentTab !== 'FYERS Connection') {
+        window.clearInterval(connectionDiagnosticsTimer);
+        connectionDiagnosticsTimer = null;
+        return;
+      }
+      void refreshConnectionDiagnostics();
+    }, 5000);
+  }
   const installButton = document.querySelector('#installPwaBtn');
   if (installButton) installButton.addEventListener('click', async () => {
     if (!deferredInstallPrompt) {
