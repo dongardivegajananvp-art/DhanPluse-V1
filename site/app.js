@@ -16,6 +16,11 @@ try {
   sessionStorage.removeItem('dhanpulse-dashboard-session-v1');
 } catch {}
 const nativeFetch = window.fetch.bind(window);
+// A fresh OAuth redirect must finish before any protected quote request runs.
+// Otherwise an initial request carrying the pre-restart bearer can return 401
+// after the new token is stored and incorrectly clear the new session.
+let authExchangeInProgress = new URLSearchParams(window.location.search).has('auth_code');
+const DASHBOARD_SESSION_KEY = 'dhanpulse-dashboard-session-v1';
 
 // FYERS 429/cooldown state is shared across tabs through localStorage.
 // This is a UI backoff only; the backend remains the authority for API limits.
@@ -160,15 +165,19 @@ window.fetch = function(input, init = {}) {
   if (IS_ISOLATED_TEST_PREVIEW && isBackend && pathname === '/api/fyers/auth/start') {
     return Promise.reject(new Error('OAuth is disabled in this isolated test preview until the test redirect URI is verified.'));
   }
+  let requestSession = '';
   if (isBackend && !publicPaths.includes(pathname)) {
-    const session = localStorage.getItem('dhanpulse-dashboard-session-v1');
-    if (session) headers.set('Authorization', 'Bearer ' + session);
+    requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
+    if (requestSession) headers.set('Authorization', 'Bearer ' + requestSession);
   }
   return nativeFetch(input, { ...init, headers }).then(response => {
     if (isBackend && response.status === 401 && !publicPaths.includes(pathname)) {
-      const hadSession = !!localStorage.getItem('dhanpulse-dashboard-session-v1');
-      if (hadSession) {
-        localStorage.removeItem('dhanpulse-dashboard-session-v1');
+      const currentSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
+      // Ignore a late 401 from an older request if a newer OAuth session has
+      // already replaced its bearer. Never let stale responses erase new login.
+      const responseStillOwnsSession = Boolean(requestSession) && currentSession === requestSession;
+      if (responseStillOwnsSession) {
+        localStorage.removeItem(DASHBOARD_SESSION_KEY);
         setFyersStatus('RECONNECT REQUIRED');
         setConnection('FYERS session expired · reconnect required', true);
         const setupStatus = document.querySelector('#setupStatus');
@@ -3050,7 +3059,9 @@ async function fetchLiveQuotes(force = false) {
     quoteTimer = null;
   }
   if (quotePollingPausedForRateLimit || quoteRequestRunning) return;
+  if (authExchangeInProgress) return;
   quoteRequestRunning = true;
+  const requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
   try {
     const response = await fetch(BACKEND_URL + '/api/market/quotes', { headers: { Accept: 'application/json' }, cache: 'no-store' });
     const data = await response.json().catch(() => ({}));
@@ -3083,10 +3094,16 @@ async function fetchLiveQuotes(force = false) {
         } catch {}
       }
       if (response.status === 401) {
+        const currentSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
+        // A response sent with no/older bearer must not clear a newer login
+        // established while that request was in flight.
+        if (currentSession && currentSession !== requestSession) {
+          quotePollDelay = 1000;
+          return;
+        }
         // A Render restart clears the backend's in-memory FYERS access token and
-        // dashboard-session map. Discard the now-invalid browser session instead
-        // of repeatedly polling protected routes and leaving the UI in "Waiting".
-        localStorage.removeItem('dhanpulse-dashboard-session-v1');
+        // dashboard-session map. Clear only the exact bearer used by this request.
+        if (requestSession && currentSession === requestSession) localStorage.removeItem(DASHBOARD_SESSION_KEY);
         latestQuotes = {};
         quotePollDelay = 30000;
         setStatus('FYERS RECONNECT REQUIRED');
@@ -3175,13 +3192,15 @@ async function exchangeAuthCode() {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok !== true || !data.dashboardSessionToken) throw new Error(data.error || data.detail || 'Authentication failed or session was not issued.');
-    localStorage.setItem('dhanpulse-dashboard-session-v1', data.dashboardSessionToken);
+    localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken);
+    authExchangeInProgress = false;
     setFyersStatus('CONNECTED');
     setBackendStatus('ONLINE');
     logEvent('FYERS authentication succeeded; checking live quotes.', 'info');
     showMessage('FYERS authentication succeeded. Verifying live quotes…');
     await fetchLiveQuotes(true);
   } catch (error) {
+    authExchangeInProgress = false;
     setStatus('FYERS AUTH FAILED');
     setFyersStatus('AUTH FAILED');
     showMessage(error.message || 'Authentication failed. Try a fresh FYERS login.', true);
@@ -3228,4 +3247,5 @@ restoreLastKnownIndexQuotes();
 testBackend();
 exchangeAuthCode();
 logEvent('DhanPulse console initialised.', 'info');
-fetchLiveQuotes();
+// The OAuth callback performs its own quote check after the new bearer is stored.
+if (!authExchangeInProgress) fetchLiveQuotes();
