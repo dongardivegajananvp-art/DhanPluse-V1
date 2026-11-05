@@ -79,6 +79,10 @@ const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const dashboardSessions = new Map();
 const DASHBOARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 let marketSocket = null;
+// Track which FYERS access token owns the one active SDK socket. A repeated
+// OAuth exchange with the same token must never close/recreate a healthy or
+// SDK-reconnecting socket; doing so resets SDK reconnect state and subscriptions.
+let marketSocketToken = '';
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
@@ -138,6 +142,10 @@ function parseTick(raw) {
 }
 
 function startMarketDataStream(token) {
+  if (marketSocket && marketSocketToken === token) {
+    console.log('FYERS market socket start skipped: same access token already owns the socket; preserving SDK lifecycle.');
+    return;
+  }
   streamError = '';
   streamConnected = false;
   latestTicks.clear();
@@ -151,6 +159,7 @@ function startMarketDataStream(token) {
     // owner. FYERS documents that it restores prior subscriptions on reconnect.
     const socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
     marketSocket = socket;
+    marketSocketToken = token;
     const SDK_RECONNECT_RETRIES = 50;
     // FYERS Node docs use `autoreconnect`; support the camelCase spelling
     // present in some published SDK examples without creating two controllers.
@@ -562,6 +571,7 @@ function invalidateFyersSession(reason) {
   dashboardSessions.clear();
   const expiredSocket = marketSocket;
   marketSocket = null;
+  marketSocketToken = '';
   if (expiredSocket) {
     try { expiredSocket.close(); } catch {}
   }
