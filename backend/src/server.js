@@ -18,7 +18,7 @@ import { isFyersAuthRejected } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
-import { canScheduleMarketSocketFallback, getMarketSocketReconnectDelay, buildMarketSocketSubscriptionSymbols } from './market-socket-recovery.js';
+import { buildMarketSocketSubscriptionSymbols } from './market-socket-recovery.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 
@@ -285,27 +285,24 @@ function startMarketDataStream(token) {
   }
 }
 
-// Detect a half-open market socket during regular NSE hours. Trigger a close
-// only after total feed silence; the FYERS SDK autoReconnect controller owns
-// the resulting reconnect and subscription restoration.
+// Observe prolonged feed silence without manually closing the socket.
+// A programmatic close can be interpreted as an intentional shutdown by the
+// SDK and may suppress its auto-reconnect controller. Tick freshness gates
+// independently block signals while the feed is silent or stale.
 const marketSocketWatchdog = setInterval(() => {
-  if (!accessToken || !marketSocket || !streamConnected || !nseRegularSessionNow()) return;
+  if (!accessToken || !marketSocket || !nseRegularSessionNow()) return;
   const now = Date.now();
   const lastActivityAt = lastAnyMarketTickAt || marketSocketConnectedAt;
   const feedSilentForMs = lastActivityAt ? now - lastActivityAt : Infinity;
   const SOCKET_SILENCE_THRESHOLD_MS = 120_000;
   if (feedSilentForMs <= SOCKET_SILENCE_THRESHOLD_MS) return;
-  streamConnected = false;
-  streamError = 'FYERS market socket stopped delivering index ticks; SDK reconnect is being triggered.';
-  console.warn('FYERS market socket watchdog detected total feed silence:', JSON.stringify({
+  console.warn('FYERS market socket feed silence detected; preserving SDK-managed socket lifecycle:', JSON.stringify({
     feedSilentForMs,
     thresholdMs: SOCKET_SILENCE_THRESHOLD_MS,
     lastAnyMarketTickAt: lastAnyMarketTickAt ? new Date(lastAnyMarketTickAt).toISOString() : null,
-    reconnectOwner: 'fyers-sdk-autoReconnect'
+    reconnectOwner: 'fyers-sdk-autoReconnect',
+    forcedClose: false
   }));
-  try { marketSocket.close(); } catch (error) {
-    console.error('FYERS watchdog socket close failed:', String(error?.message || error).slice(0, 200));
-  }
 }, 15_000);
 marketSocketWatchdog.unref?.();
 
