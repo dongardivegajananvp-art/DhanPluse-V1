@@ -58,12 +58,12 @@ console.log('PASS: legacy watchlist/alert browser data cleared; shared FYERS ses
 
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
 if (!app.includes('SURESHOT_AUTO_SCAN_ATTEMPT_KEY') ||
-    !html.includes('app.js?v=20261105-mcx-socket-diagnostics-v1') ||
-    !html.includes('sw.js?v=20261105-mcx-socket-diagnostics-v1') ||
-    !sw.includes('dhanpulse-shell-v127-mcx-socket-diagnostics-v1') ||
-    !sw.includes('app.js?v=20261105-mcx-socket-diagnostics-v1') ||
+    !html.includes('app.js?v=20261105-exchange-live-switches-v1') ||
+    !html.includes('sw.js?v=20261105-exchange-live-switches-v1') ||
+    !sw.includes('dhanpulse-shell-v128-exchange-live-switches-v1') ||
+    !sw.includes('app.js?v=20261105-exchange-live-switches-v1') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('PWA cache and bounded Sureshot automatic-attempt guard must be present in the published shell.');
 }
-if (!app.includes('settingsMcxFeed') || !app.includes('refreshConnectionDiagnostics') || !app.includes('updateMcxConnectionDiagnostics')) throw new Error('MCX diagnostics must be visible in the existing FYERS Connection tab.');
-console.log('PASS: PWA shell v127 loads the bounded Sureshot scan-attempt guard and visible MCX socket diagnostics in the existing FYERS Connection tab.');
+if (!app.includes('settingsMcxFeed') || !app.includes('refreshConnectionDiagnostics') || !app.includes('updateMcxConnectionDiagnostics') || !app.includes('settingsNseSession') || !app.includes('settingsNseLiveFeed') || !app.includes('settingsMcxSession') || !app.includes('settingsMcxLiveFeed') || !app.includes('updateExchangeLiveSwitches')) throw new Error('MCX diagnostics must be visible in the existing FYERS Connection tab.');
+console.log('PASS: PWA shell v128 loads the bounded Sureshot scan-attempt guard, MCX diagnostics, and independent NSE/MCX live switches in the existing FYERS Connection tab.');
