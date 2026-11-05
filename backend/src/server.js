@@ -18,7 +18,6 @@ import { isFyersAuthRejected } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
-import { shouldStopSureshotScan, getSureshotScanStopReason } from './sureshot-scan-policy.js';
 import { canScheduleMarketSocketFallback, getMarketSocketReconnectDelay, buildMarketSocketSubscriptionSymbols } from './market-socket-recovery.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
@@ -1311,10 +1310,10 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
   }
 });
 
-// Rank the complete FYERS F&O universe, then verify option plans for the top 5 ranked candidates.
+// Rank the complete FYERS F&O universe, but verify option plans only for the top 5 movers.
 // Each candidate can require four Data API reads (underlying candles, option chain,
-// live option quote, option candles). Keeping the candidate cap at five preserves
-// the existing request budget while allowing up to three independently verified plans.
+// live option quote, option candles). Five candidates bound the scan to ~20 reads
+// plus the shared F&O snapshot, leaving headroom under the rolling API budget.
 const SURESHOT_UNIVERSE_SCAN_LIMIT = 5;
 const SURESHOT_BATCH_SIZE = 5;
 const SURESHOT_SCAN_TTL_MS = 30 * 60 * 1000;
@@ -1432,21 +1431,13 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         if (status === 429 || status === 401) throw error;
         batchResults.push({ ...base, status: "NO TRADE", reason: String(error.message || "Candidate verification failed.").slice(0, 180) });
       }
-      // Keep checking ranked candidates until three complete plans are verified
-      // or the bounded candidate set is exhausted. No partial plan is promoted.
-      const verifiedSoFar = state.results.filter(item => item.status === "VERIFIED SETUP").length +
-        batchResults.filter(item => item.status === "VERIFIED SETUP").length;
-      if (verifiedSoFar >= 3) break;
+      // Verify every one of the top five ranked candidates; do not stop at
+      // the first setup. Each row must independently pass fresh FYERS checks.
     }
     state.results.push(...batchResults);
     state.nextOffset += batchResults.length;
     const selectedCandidatesComplete = state.nextOffset >= state.candidates.length;
-    const verifiedSetupCount = state.results.filter(item => item.status === "VERIFIED SETUP").length;
-    const scanComplete = shouldStopSureshotScan({
-      verifiedSetupCount,
-      scannedCandidateCount: state.nextOffset,
-      candidateCount: state.candidates.length
-    });
+    const scanComplete = selectedCandidatesComplete;
     if (!scanComplete) return res.json({ ok: true, scanComplete: false, batchComplete: true,
       orderPlacement: "disabled", scanId: state.id, nextOffset: state.nextOffset,
       scannedCandidateCount: state.results.length, rankedCandidateCount: state.rankedCandidateCount,
@@ -1458,22 +1449,15 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       })) });
     const results = state.results;
     const verified = results.filter(item => item.status === "VERIFIED SETUP");
-    const stopReason = getSureshotScanStopReason({
-      verifiedSetupCount: verified.length,
-      scannedCandidateCount: state.nextOffset,
-      candidateCount: state.candidates.length
-    });
-    console.info("Sureshot scan completed:", JSON.stringify({ scannedCandidateCount: results.length, rankedCandidateCount: state.rankedCandidateCount, verifiedSetupCount: verified.length, stopReason }));
+    console.info("Sureshot scan completed:", JSON.stringify({ scannedCandidateCount: results.length, rankedCandidateCount: state.rankedCandidateCount, verifiedSetupCount: verified.length, stopReason: "TOP_FIVE_CANDIDATES_CHECKED" }));
     const payload = { ok: true, scanComplete: true, selectedCandidatesComplete,
-      stopReason,
+      stopReason: "TOP_FIVE_CANDIDATES_CHECKED",
       signalsAllowed: verified.length > 0,
       orderPlacement: "disabled", readOnly: true, source: "FYERS only",
       rankedCandidateCount: state.rankedCandidateCount, selectedCandidateCount: state.candidates.length,
       scannedCandidateCount: results.length, verifiedSetupCount: verified.length,
       bestSetup: verified[0] || null, results,
-      notice: selectedCandidatesComplete
-        ? "The complete FYERS NSE F&O quote universe was ranked and all selected top-5 candidates were checked; up to three plans passed fresh option quote, completed OHLC candle and >=1:2 risk checks. No orders are placed."
-        : "Three fully verified setups were found in ranked order; remaining lower-ranked candidates were not checked to preserve the FYERS API request budget. Fresh option quotes and completed OHLC candles only; no orders are placed." };
+      notice: "The complete eligible FYERS NSE F&O universe was ranked from a verified quote snapshot; all selected top-five candidates were checked independently for fresh underlying candles, contract identity, live option premium, completed option candles and >=1:2 risk/reward. No orders are placed." };
     sureshotScanState = null;
     return res.json(payload);
   } catch (error) {
