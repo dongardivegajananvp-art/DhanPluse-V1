@@ -34,7 +34,8 @@ export function buildVerifiedSureshotShortlist({
       quoteSnapshot.quotedCount !== universe.data.length || quoteSnapshot.data.length !== universe.data.length) {
     throw new Error("complete_verified_fno_quote_snapshot_required");
   }
-  const requested = new Set(universe.data.map(row => row?.symbol).filter(Boolean));
+  const universeBySymbol = new Map(universe.data.map(row => [row?.symbol, row]));
+  const requested = new Set(universeBySymbol.keys());
   if (requested.size !== universe.data.length) throw new Error("fno_universe_contains_duplicate_symbols");
   const seen = new Set();
   const candidates = [];
@@ -56,6 +57,8 @@ export function buildVerifiedSureshotShortlist({
       underlyingType: "FNO_EQUITY",
       price,
       changePct,
+      lotSize: Number.isInteger(Number(universeBySymbol.get(symbol)?.lotSize)) && Number(universeBySymbol.get(symbol)?.lotSize) > 0
+        ? Number(universeBySymbol.get(symbol).lotSize) : null,
       exchangeTime: new Date(timestampMs).toISOString(),
       quoteAgeSeconds: Math.max(0, Number((ageMs / 1000).toFixed(1)))
     });
