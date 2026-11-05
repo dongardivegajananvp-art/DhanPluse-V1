@@ -152,11 +152,21 @@ function startMarketDataStream(token) {
     const socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
     marketSocket = socket;
     const SDK_RECONNECT_RETRIES = 50;
-    if (typeof socket.autoReconnect !== 'function') {
-      throw new Error('Installed FYERS SDK does not expose autoReconnect(); refusing to start an unmanaged live socket.');
+    // FYERS Node docs use `autoreconnect`; support the camelCase spelling
+    // present in some published SDK examples without creating two controllers.
+    const sdkReconnect = typeof socket.autoreconnect === 'function'
+      ? socket.autoreconnect.bind(socket)
+      : typeof socket.autoReconnect === 'function'
+        ? socket.autoReconnect.bind(socket)
+        : null;
+    if (!sdkReconnect) {
+      throw new Error('Installed FYERS SDK does not expose its documented auto-reconnect method; refusing to start an unmanaged live socket.');
     }
-    socket.autoReconnect(SDK_RECONNECT_RETRIES);
-    console.log('FYERS SDK auto-reconnect enabled.', JSON.stringify({ retries: SDK_RECONNECT_RETRIES }));
+    sdkReconnect(SDK_RECONNECT_RETRIES);
+    console.log('FYERS SDK auto-reconnect enabled.', JSON.stringify({
+      retries: SDK_RECONNECT_RETRIES,
+      method: typeof socket.autoreconnect === 'function' ? 'autoreconnect' : 'autoReconnect'
+    }));
     let socketConnectCount = 0;
     socket.on('connect', () => {
       if (marketSocket !== socket) return;
