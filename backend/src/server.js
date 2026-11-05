@@ -1669,6 +1669,155 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
   } finally { sureshotAutoPlansInFlight = false; }
 });
 
+// MCX Sureshot uses its own official MCX_COM master and MCX session gate.
+// It shares the existing authenticated FYERS Data API budget and never touches NSE state.
+app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  const mcxSessionOpen = () => getExchangeSessionWindows().MCX?.session === "SCHEDULED_OPEN";
+  if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
+  if (!mcxSessionOpen()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "MCX session is closed; actionable option plans are withheld." });
+  if (sureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Another Sureshot scan is already running." });
+  sureshotAutoPlansInFlight = true;
+  let stage = "LOAD_MCX_MASTER";
+  try {
+    const universe = await getMcxFnoUniverse();
+    stage = "VERIFY_MCX_FUTURES_QUOTES";
+    const quoteRows = [];
+    for (let offset = 0; offset < universe.data.length; offset += 50) {
+      if (!mcxSessionOpen()) { const error = new Error("MCX session closed during quote scan; partial results discarded."); error.statusCode = 409; throw error; }
+      const batch = universe.data.slice(offset, offset + 50).map(item => item.symbol);
+      const url = new URL("https://api-t1.fyers.in/data/quotes");
+      url.searchParams.set("symbols", batch.join(","));
+      const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
+      const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
+      quoteRows.push(...rows);
+    }
+    const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: 5 });
+    const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
+    const today = indiaNow.toISOString().slice(0, 10);
+    const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 6)).toISOString().slice(0, 10);
+    const results = [];
+    const prepared = [];
+    for (const candidate of ranked.data) {
+      if (!mcxSessionOpen()) { const error = new Error("MCX session closed during scan; partial plans discarded."); error.statusCode = 409; throw error; }
+      const base = { rank: candidate.rank, underlyingSymbol: candidate.symbol, underlying: candidate.underlying,
+        changePct: candidate.changePct, ltp: candidate.price, quoteAgeSeconds: candidate.quoteAgeSeconds };
+      try {
+        stage = "VERIFY_MCX_UNDERLYING_CANDLES";
+        const historyUrl = new URL("https://api-t1.fyers.in/data/history");
+        historyUrl.searchParams.set("symbol", candidate.symbol); historyUrl.searchParams.set("resolution", "5");
+        historyUrl.searchParams.set("date_format", "1"); historyUrl.searchParams.set("range_from", from);
+        historyUrl.searchParams.set("range_to", today); historyUrl.searchParams.set("cont_flag", "1");
+        const history = await fyersReadOnlyGet(historyUrl, { priority: "sureshot" });
+        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now());
+        if (!direction.ok || !direction.side) {
+          results.push({ ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
+          continue;
+        }
+        const expiryMap = new Map();
+        for (const option of candidate.optionContracts) {
+          const n = Number(option.expiryDate);
+          const ms = Number.isFinite(n) && n > 0 ? (n > 1e12 ? n : n * 1000) : Date.parse(option.expiryDate);
+          if (!Number.isFinite(ms) || ms <= Date.now()) continue;
+          const expiry = String(Math.floor(ms / 1000));
+          const date = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(ms));
+          if (!expiryMap.has(expiry)) expiryMap.set(expiry, { expiry, date });
+        }
+        const discovery = {
+          expiryData: [...expiryMap.values()].sort((a, b) => Number(a.expiry) - Number(b.expiry)),
+          optionsChain: candidate.optionContracts.map(option => ({
+            symbol: option.symbol, strike_price: option.strike, option_type: option.side,
+            expiry: String(Math.floor((Number(option.expiryDate) > 1e12 ? Number(option.expiryDate) : Number(option.expiryDate) * 1000) / 1000))
+          }))
+        };
+        stage = "SELECT_MCX_OPTION_CONTRACT";
+        const selected = selectNearestVerifiedOptionContract({
+          discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now()
+        });
+        if (!selected.ok) {
+          results.push({ ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
+          continue;
+        }
+        const sizing = await getFyersOptionContractMetadata(selected.contract.symbol);
+        if (!sizing) {
+          results.push({ ...base, status: "NO TRADE", direction: direction.side, contract: selected.contract,
+            reason: "Official MCX contract lot size or tick size is unavailable." });
+          continue;
+        }
+        prepared.push({ candidate, base, direction,
+          contract: { ...selected.contract, lotSize: sizing.lotSize, tickSize: sizing.tickSize }, sizing });
+      } catch (error) {
+        if ([401, 429].includes(Number(error.statusCode))) throw error;
+        results.push({ ...base, status: "NO TRADE", reason: String(error.message || "MCX candidate verification failed.").slice(0, 180) });
+      }
+    }
+
+    const quoteBySymbol = new Map();
+    if (prepared.length) {
+      stage = "VERIFY_MCX_OPTION_QUOTES";
+      const url = new URL("https://api-t1.fyers.in/data/quotes");
+      url.searchParams.set("symbols", prepared.map(item => item.contract.symbol).join(","));
+      const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
+      const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
+      for (const row of rows) {
+        const symbol = row?.n || row?.symbol || row?.v?.symbol;
+        if (symbol && prepared.some(item => item.contract.symbol === symbol)) quoteBySymbol.set(symbol, row?.v || row);
+      }
+    }
+    for (const item of prepared) {
+      if (!mcxSessionOpen()) { const error = new Error("MCX session closed during option verification; partial plans discarded."); error.statusCode = 409; throw error; }
+      const quote = quoteBySymbol.get(item.contract.symbol);
+      if (!quote) {
+        results.push({ ...item.base, status: "NO TRADE", direction: item.direction.side, contract: item.contract,
+          reason: "FYERS returned no quote for the selected MCX option contract." });
+        continue;
+      }
+      try {
+        stage = "VERIFY_MCX_OPTION_CANDLES";
+        const historyUrl = new URL("https://api-t1.fyers.in/data/history");
+        historyUrl.searchParams.set("symbol", item.contract.symbol); historyUrl.searchParams.set("resolution", "5");
+        historyUrl.searchParams.set("date_format", "1"); historyUrl.searchParams.set("range_from", from);
+        historyUrl.searchParams.set("range_to", today); historyUrl.searchParams.set("cont_flag", "1");
+        const optionHistory = await fyersReadOnlyGet(historyUrl, { priority: "sureshot" });
+        stage = "BUILD_MCX_RISK_PLAN";
+        const plan = buildVerifiedSureshotTradePlan({
+          underlyingSymbol: item.candidate.symbol, direction: item.direction, contract: item.contract,
+          quote, optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
+          resolution: "5", lotSize: item.sizing.lotSize, tickSize: item.sizing.tickSize, now: Date.now()
+        });
+        results.push(plan.ok
+          ? { ...item.base, status: "VERIFIED SETUP", plan }
+          : { ...item.base, status: "NO TRADE", direction: item.direction.side, contract: item.contract, reason: plan.reason });
+      } catch (error) {
+        if ([401, 429].includes(Number(error.statusCode))) throw error;
+        results.push({ ...item.base, status: "NO TRADE", direction: item.direction.side, contract: item.contract,
+          reason: String(error.message || "MCX option verification failed.").slice(0, 180) });
+      }
+    }
+    const verified = results.filter(item => item.status === "VERIFIED SETUP").sort((a, b) => a.rank - b.rank);
+    return res.json({
+      ok: true, scanComplete: true, signalsAllowed: verified.length > 0,
+      orderPlacement: "disabled", readOnly: true, source: "FYERS MCX_COM master + FYERS market data",
+      universeCount: universe.count, rankedCandidateCount: ranked.candidateCount,
+      selectedCandidateCount: ranked.data.length, scannedCandidateCount: results.length,
+      verifiedSetupCount: verified.length, bestSetup: verified[0] || null, results,
+      notice: "MCX universe was ranked from a complete fresh timestamped FYERS futures quote snapshot. Selected candidates were checked for completed underlying candles, official MCX option identity, fresh option premium, completed option candles and >=1:2 risk/reward. No OI/volume is used and no orders are placed."
+    });
+  } catch (error) {
+    const status = Number(error.statusCode) || 503;
+    if (status === 429 && error.retryAfterSeconds) res.set("Retry-After", String(error.retryAfterSeconds));
+    return res.status(status).json({
+      ok: false, scanComplete: false, signalsAllowed: false, orderPlacement: "disabled", stage,
+      error: status === 401 ? "FYERS session expired; reconnect and rerun the MCX scan."
+        : status === 409 ? String(error.message || "MCX session closed; scan blocked.")
+        : "MCX full-universe scan could not verify all required data.",
+      detail: String(error.message || "MCX scan failed.").slice(0, 180), partialPlansDiscarded: true
+    });
+  } finally {
+    sureshotAutoPlansInFlight = false;
+  }
+});
+
 // Last-known F&O equity quotes are display-only. Unlike the live movers endpoint,
 // this route may return older exchange-stamped LTPs while the market is closed.
 let lastKnownStockCache = { fetchedAt: 0, data: null };
