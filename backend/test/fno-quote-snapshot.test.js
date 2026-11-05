@@ -58,3 +58,19 @@ test("stale or incomplete F&O quote snapshots cannot seed movers cache", () => {
   stale.data[0].v.tt = Math.floor((now - 31000) / 1000);
   assert.equal(fnoQuoteSnapshotToMoversPayload(stale, symbols, now), null);
 });
+
+
+test("a cached F&O snapshot is reusable only while every expected symbol remains fresh", async () => {
+  const { isCompleteFreshFnoQuoteSnapshot } = await import("../src/fno-quote-snapshot.js");
+  assert.equal(isCompleteFreshFnoQuoteSnapshot(snapshot, symbols, now), true);
+  const partial = structuredClone(snapshot);
+  partial.data.pop();
+  partial.quotedCount = 1;
+  assert.equal(isCompleteFreshFnoQuoteSnapshot(partial, symbols, now), false);
+  const staleOne = structuredClone(snapshot);
+  staleOne.data[1].v.tt = Math.floor((now - 31000) / 1000);
+  assert.equal(isCompleteFreshFnoQuoteSnapshot(staleOne, symbols, now), false);
+  const duplicate = structuredClone(snapshot);
+  duplicate.data[1].n = duplicate.data[0].n;
+  assert.equal(isCompleteFreshFnoQuoteSnapshot(duplicate, symbols, now), false);
+});
