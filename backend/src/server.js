@@ -8,6 +8,7 @@ import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './ga
 import { assertCompleteMoverSnapshot, assertFreshMoverSnapshot } from './movers-validation.js';
 import { quoteTimestampStatus } from './fresh-data-validation.js';
 import { getNseSessionWindow } from './market-data.js';
+import { isNseRegularSession } from './nse-market-session.js';
 import { buildFnoEquityUniverse } from './fno-universe.js';
 import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
@@ -324,10 +325,7 @@ const marketSocketWatchdog = setInterval(() => {
 marketSocketWatchdog.unref?.();
 
 function nseRegularSessionNow() {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
-  const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
-  const minute = Number(fields.hour) * 60 + Number(fields.minute);
-  return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(fields.weekday) && minute >= 555 && minute < 930;
+  return isNseRegularSession();
 }
 
 function epochSeconds(value) {
