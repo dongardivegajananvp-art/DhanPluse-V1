@@ -132,7 +132,7 @@ export function buildVerifiedSureshotTradePlan({
   const symbolStrike = symbolStrikeMatch ? Number(symbolStrikeMatch[1]) : NaN;
   const contractExpiryMs = expiryTime(contract.expiry);
   const contractExpiryDate = Number.isFinite(contractExpiryMs) ? indiaDateKey(contractExpiryMs) : "";
-  if (!["NSE", "BSE"].includes(underlyingExchange) ||
+  if (!["NSE", "BSE", "MCX"].includes(underlyingExchange) ||
       !contractSymbol.startsWith(underlyingExchange + ":") ||
       !/^(?:NSE|BSE):[A-Z0-9&-]{3,48}(CE|PE)$/.test(contractSymbol) ||
       contractSide !== direction.side || !contractSymbol.endsWith(direction.side) ||
