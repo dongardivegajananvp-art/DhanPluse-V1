@@ -625,9 +625,17 @@ async function fyersReadOnlyGet(url, { priority = 'normal' } = {}) {
     const upstreamStatus = String(data.s || 'missing');
     const upstreamCode = data.code == null ? 'n/a' : String(data.code);
     const message = upstreamMessage
-      ? String(upstreamMessage).slice(0, 150)
-      : (responseText ? responseText.replace(/\s+/g, ' ').slice(0, 150) : 'FYERS API returned no error message.');
-    const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}${retryAfterHeader ? `, Retry-After ${retryAfterHeader}` : ''}): ${message}`.slice(0, 220));
+      ? String(upstreamMessage).slice(0, 110)
+      : (responseText ? responseText.replace(/\\s+/g, ' ').slice(0, 110) : 'FYERS API returned no error message.');
+    const cloudflareRayId = response.headers.get('cf-ray') || null;
+    const upstreamServer = response.headers.get('server') || null;
+    const cloudflareMitigation = response.headers.get('cf-mitigated') || null;
+    const diagnosticTags = [
+      cloudflareRayId ? `CF-Ray ${cloudflareRayId}` : '',
+      upstreamServer ? `server ${upstreamServer}` : '',
+      cloudflareMitigation ? `cf-mitigated ${cloudflareMitigation}` : ''
+    ].filter(Boolean).join(', ');
+    const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}${retryAfterHeader ? `, Retry-After ${retryAfterHeader}` : ''}${diagnosticTags ? `, ${diagnosticTags}` : ''}): ${message}`.slice(0, 280));
     error.statusCode = response.status === 429 ? 429 : (response.status === 401 || data.code === -16 ? 401 : 502);
     if (isFyersAuthRejected(response.status, data.code) && accessToken === requestAccessToken) {
       invalidateFyersSession(message);
@@ -641,6 +649,9 @@ async function fyersReadOnlyGet(url, { priority = 'normal' } = {}) {
       apiStatus: upstreamStatus,
       apiCode: upstreamCode,
       retryAfter: retryAfterHeader || null,
+      cloudflareRayId,
+      upstreamServer,
+      cloudflareMitigation,
       message
     }));
     throw error;
