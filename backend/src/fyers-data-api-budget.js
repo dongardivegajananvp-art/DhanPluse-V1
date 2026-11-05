@@ -6,12 +6,13 @@ export function createFyersDataApiBudget({
   fetchImpl = fetch,
   now = () => Date.now(),
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  maxRequestsPerMinute = 40,
-  minIntervalMs = 1250,
+  maxRequestsPerMinute = 30,
+  minIntervalMs = 2000,
   windowMs = 60_000,
-  // Use a short, single-probe backoff instead of freezing the workstation for an hour.
-  // A 1015 still blocks signals; the next request is only attempted after this pause.
-  cloudflareCooldownMs = 5 * 60_000,
+  // Cloudflare 1015 is an IP/WAF throttle, not a normal per-endpoint 429.
+  // Start with a conservative pause and exponentially back off repeated blocks.
+  cloudflareCooldownMs = 15 * 60_000,
+  maxCloudflareCooldownMs = 60 * 60_000,
   rateLimitCooldownMs = 60_000,
   // Reuse identical verified OHLC reads for three minutes. Sureshot's candle
   // validators independently reject stale completed bars before any signal.
@@ -24,6 +25,8 @@ export function createFyersDataApiBudget({
   let requestTimes = [];
   let lastRequestAt = 0;
   let blockedUntil = 0;
+  let consecutiveCloudflareBlocks = 0;
+  let blockedReason = null;
   const responseCache = new Map();
   const inFlight = new Map();
 
@@ -109,11 +112,21 @@ export function createFyersDataApiBudget({
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
           const retryAfter = Number(response.headers?.get?.('retry-after'));
-          const cloudflare1015 = /error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body);
+          const server = String(response.headers?.get?.('server') || '');
+          const cfRay = String(response.headers?.get?.('cf-ray') || '');
+          const cloudflare1015 = /error\\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body) ||
+            (/cloudflare/i.test(server) && Boolean(cfRay));
           const cooldown = cloudflare1015
-            ? cloudflareCooldownMs
+            ? Math.min(cloudflareCooldownMs * (2 ** consecutiveCloudflareBlocks), maxCloudflareCooldownMs)
             : Math.max(rateLimitCooldownMs, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0);
+          if (cloudflare1015) consecutiveCloudflareBlocks += 1;
+          blockedReason = cloudflare1015 ? 'CLOUDFLARE_1015' : 'HTTP_429';
           blockedUntil = Math.max(blockedUntil, now() + cooldown);
+        } else if (response.ok) {
+          // A successful provider response is the only evidence that the WAF
+          // throttle has cleared; do not reset the escalation merely on timer expiry.
+          consecutiveCloudflareBlocks = 0;
+          blockedReason = null;
         }
 
         if ((cacheKey && response.ok) || quoteFlightKey) {
@@ -157,6 +170,8 @@ export function createFyersDataApiBudget({
       cooldownActive: retryAfterSeconds > 0,
       retryAfterSeconds,
       blockedUntil: blockedUntil > currentTime ? new Date(blockedUntil).toISOString() : null,
+      cooldownReason: retryAfterSeconds > 0 ? blockedReason : null,
+      consecutiveCloudflareBlocks,
       queuedRequests: 0
     };
   };
