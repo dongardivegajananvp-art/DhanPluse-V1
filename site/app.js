@@ -383,7 +383,7 @@ function signalDataBlockReason(symbol) {
   return '';
 }
 
-function validateOhlcCandles(candles, resolution) {
+function validateOhlcCandles(candles, resolution, marketOpen = isRegularMarketSession()) {
   if (!Array.isArray(candles) || candles.length < 12) return 'At least 12 OHLC candles are required.';
   let previousTime = -Infinity;
   for (const row of candles) {
@@ -395,7 +395,7 @@ function validateOhlcCandles(candles, resolution) {
     if (time <= previousTime) return 'Candle timestamps are duplicated or out of order.';
     previousTime = time;
   }
-  if (isRegularMarketSession()) {
+  if (marketOpen) {
     const lastTimeMs = Number(candles[candles.length - 1][0]) * 1000;
     // Daily candles can legitimately be older than 36 hours after weekends or exchange holidays.
     const maxAgeMs = resolution === 'D' ? 5 * 24 * 60 * 60 * 1000 : (Number(resolution) || 5) * 60 * 1000 * 3;
@@ -414,7 +414,7 @@ function validateOptionChainPayload(payload, verifiedUnderlyingSpot) {
   if (!Number.isFinite(spot) || spot <= 0) return 'Verified underlying candle close is missing; no option signal.';
   const chainExpiry = payload.expiryData?.[0]?.expiry ?? payload.expiry;
   const normalized = payload.optionsChain.map(row => {
-    if (!row || !/^(?:NSE|BSE):[A-Z0-9&-]{3,48}(CE|PE)$/.test(String(row.symbol || ''))) return null;
+    if (!row || !/^(?:(?:NSE|BSE):[A-Z0-9&-]{3,48}|MCX:[A-Z0-9&.-]{3,48})(CE|PE)$/.test(String(row.symbol || ''))) return null;
     const type = String(row.option_type || '').toUpperCase();
     const strike = Number(row.strike_price);
     const expiry = row.expiry ?? row.expiry_date ?? row.expiryDate ?? chainExpiry;
@@ -1788,7 +1788,7 @@ async function performSureshotSetup() {
     const candleResult=await candleResponse.json().catch(()=>({}));
     if(!candleResponse.ok||candleResult.ok!==true||!Array.isArray(candleResult.data))throw new Error([candleResult.error,candleResult.detail].filter(Boolean).join(' · ')||'Verified historical candles unavailable.');
     const candles=candleResult.data;
-    const candleError=validateOhlcCandles(candles,resolution);
+    const candleError=validateOhlcCandles(candles,resolution,selectedMarketOpen);
     if(candleError)throw new Error(candleError);
     const lastCandle=candles[candles.length-1];
     const candleEpoch=Number(lastCandle[0]);
