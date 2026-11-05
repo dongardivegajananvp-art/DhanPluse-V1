@@ -8,6 +8,7 @@ import { analyzeOpeningGap, isValidIsoDate, summarizeHistoricalGaps } from './ga
 import { assertCompleteMoverSnapshot, assertFreshMoverSnapshot } from './movers-validation.js';
 import { quoteTimestampStatus } from './fresh-data-validation.js';
 import { getNseSessionWindow } from './market-data.js';
+import { getExchangeSessionWindows } from './exchange-session-status.js';
 
 import { buildFnoEquityUniverse } from './fno-universe.js';
 import { isAllowedChartSymbol } from './chart-symbol-validation.js';
@@ -448,11 +449,41 @@ app.get('/health', (_req, res) => {
 app.get('/api/status', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
+  const exchangeSessions = getExchangeSessionWindows();
+  const nseFreshTickCount = allowedSymbols.filter(symbol => {
+    const tick = latestTicks.get(symbol);
+    return Boolean(tick && quoteTimestampStatus(Date.parse(tick.updatedAt) / 1000, Date.now(), 30) === 'FRESH');
+  }).length;
+  const nseHasAnyTick = allowedSymbols.some(symbol => latestTicks.has(symbol));
+  const nseFeed = !accessToken ? 'NOT_CONNECTED'
+    : !streamConnected ? 'DISCONNECTED'
+    : nseFreshTickCount === allowedSymbols.length ? 'LIVE'
+    : nseFreshTickCount > 0 ? 'PARTIAL'
+    : nseHasAnyTick ? 'STALE' : 'WAITING';
+  const mcxTickAgeSeconds = mcxDiagnosticTick
+    ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : null;
+  const mcxFeed = !accessToken ? 'NOT_CONNECTED'
+    : !streamConnected ? 'DISCONNECTED'
+    : mcxSubscribedSocket !== marketSocket ? 'SUBSCRIPTION_PENDING'
+    : mcxTickAgeSeconds === null ? 'WAITING'
+    : mcxTickAgeSeconds >= 0 && mcxTickAgeSeconds <= 30 ? 'LIVE' : 'STALE';
   res.json({
     backend: 'online', fyers: accessToken ? 'connected' : 'not-connected',
     liveData: streamConnected && snapshot ? 'streaming' : 'waiting-for-live-ticks',
     marketSocketConnected: streamConnected, authenticatedAt,
     lastTickAt: snapshot?.fetchedAt || null,
+    exchangeLiveStatus: {
+      NSE: {
+        ...exchangeSessions.NSE, feed: nseFeed,
+        freshTickCount: nseFreshTickCount, requiredTickCount: allowedSymbols.length,
+        live: nseFeed === 'LIVE'
+      },
+      MCX: {
+        ...exchangeSessions.MCX, feed: mcxFeed,
+        freshTickCount: mcxFeed === 'LIVE' ? 1 : 0, requiredTickCount: 1,
+        live: mcxFeed === 'LIVE'
+      }
+    },
     mcxDiagnostic: (() => {
       const tick = mcxDiagnosticTick;
       const exchangeTime = tick ? Date.parse(tick.updatedAt) / 1000 : null;
