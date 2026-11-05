@@ -58,3 +58,10 @@ test("rejects duplicate F&O symbols", () => {
   assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot, universe: { data: duplicate }, indexTicks, now }),
     /fno_universe_contains_duplicate_symbols/);
 });
+
+test("default shortlist is exactly five from the complete 218-equity universe", () => {
+  const result = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now });
+  assert.equal(result.data.length, 5);
+  assert.equal(result.candidateCount, 221);
+  assert.deepEqual(result.data.map(row => row.rank), [1, 2, 3, 4, 5]);
+});
