@@ -2578,9 +2578,25 @@ function render(tab) {
       if (completedToday === today || attemptedToday === today) return;
       void loadSureshotUniverseShortlist({ automatic: true });
     };
+    const startAutomaticMcxTopFiveScan = () => {
+      // MCX is the evening alternative: do not compete with the NSE daytime scan.
+      // It starts once per India date only after the independent MCX switch is LIVE.
+      if (currentTab !== 'Sureshot CE/PE' || isRegularMarketSession() ||
+          !isMcxMarketSessionOpen() || sureshotUniverseScanRunning) return;
+      const today = indiaTradingDateKey();
+      let attempted = '';
+      try { attempted = localStorage.getItem('dhanpulse_mcx_sureshot_scan_attempt_day') || ''; } catch {}
+      if (attempted === today) return;
+      try { localStorage.setItem('dhanpulse_mcx_sureshot_scan_attempt_day', today); } catch {}
+      void loadMcxSureshotUniverseShortlist();
+    };
     // Check only local session/time state; no provider polling is done by this timer.
     startAutomaticTopFiveScan();
-    sureshotAutoScanTimer = window.setInterval(startAutomaticTopFiveScan, 30000);
+    startAutomaticMcxTopFiveScan();
+    sureshotAutoScanTimer = window.setInterval(() => {
+      startAutomaticTopFiveScan();
+      startAutomaticMcxTopFiveScan();
+    }, 30000);
   }
   if (tab === 'Gap-Up/Down') {
     const gapButton = document.querySelector('#loadGapAnalysisBtn');
