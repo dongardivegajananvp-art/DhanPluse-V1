@@ -1704,6 +1704,24 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
       url.searchParams.set("symbols", batch.join(","));
       const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
       const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
+      const sample = rows[0] || null;
+      const sampleQuote = sample?.v || sample || {};
+      console.info("FYERS MCX futures quote batch received:", JSON.stringify({
+        batchIndex: Math.floor(offset / 50) + 1,
+        requestedCount: batch.length,
+        receivedCount: rows.length,
+        apiStatus: result?.s || "missing",
+        apiCode: result?.code ?? null,
+        sampleSymbol: sample?.n || sample?.symbol || null,
+        sampleRowStatus: sample?.s || null,
+        sampleQuoteKeys: Object.keys(sampleQuote).slice(0, 24),
+        sampleTimestampFields: {
+          tt: sampleQuote?.tt ?? null,
+          ltt: sampleQuote?.ltt ?? null,
+          exch_feed_time: sampleQuote?.exch_feed_time ?? null,
+          timestamp: sampleQuote?.timestamp ?? null
+        }
+      }));
       quoteRows.push(...rows);
     }
     const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: 5 });
@@ -1825,6 +1843,10 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
     });
   } catch (error) {
     const status = Number(error.statusCode) || 503;
+    console.warn("FYERS MCX Sureshot scan failed:", JSON.stringify({
+      stage, status, message: String(error.message || error).slice(0, 280),
+      quoteRowsReceived: typeof quoteRows !== "undefined" ? quoteRows.length : null
+    }));
     if (status === 429 && error.retryAfterSeconds) res.set("Retry-After", String(error.retryAfterSeconds));
     return res.status(status).json({
       ok: false, scanComplete: false, signalsAllowed: false, orderPlacement: "disabled", stage,
