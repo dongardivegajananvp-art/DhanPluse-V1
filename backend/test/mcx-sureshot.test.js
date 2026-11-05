@@ -7,25 +7,25 @@ const expiry = Math.floor(Date.parse("2026-11-19T00:00:00.000Z") / 1000);
 const master = {
   "MCX:CRUDEOIL26NOVFUT": {
     tradeStatus: 1, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-1", underSym: "CRUDEOIL",
-    expiryDate: expiry, minLotSize: 100, tickSize: 1
+    expiryDate: expiry, minLotSize: 1, qtyMultiplier: 100, tickSize: 1
   },
   "MCX:CRUDEOIL26NOV8400CE": {
     tradeStatus: 1, optType: "CE", tradingSession: "0900-2355", fyToken: "opt-1", underFyTok: "fut-1",
     underSym: "CRUDEOIL", strikePrice: 8400, expiryDate: expiry,
-    minLotSize: 100, tickSize: 0.05
+    minLotSize: 1, qtyMultiplier: 100, tickSize: 0.05
   },
   "MCX:CRUDEOIL26NOV8400PE": {
     tradeStatus: 1, optType: "PE", tradingSession: "0900-2355", fyToken: "opt-2", underFyTok: "fut-1",
     underSym: "CRUDEOIL", strikePrice: 8400, expiryDate: expiry,
-    minLotSize: 100, tickSize: 0.05
+    minLotSize: 1, qtyMultiplier: 100, tickSize: 0.05
   },
   "MCX:GOLD26NOVFUT": {
     tradeStatus: 0, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-2", underSym: "GOLD",
-    expiryDate: expiry, minLotSize: 100, tickSize: 1
+    expiryDate: expiry, minLotSize: 1, qtyMultiplier: 100, tickSize: 1
   },
   "MCX:NATURALGAS26NOVFUT": {
     tradeStatus: 1, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-3", underSym: "NATURALGAS",
-    expiryDate: expiry, minLotSize: 1250, tickSize: 0.1
+    expiryDate: expiry, minLotSize: 1, qtyMultiplier: 1250, tickSize: 0.1
   }
 };
 
@@ -52,9 +52,9 @@ test("MCX universe rejects malformed masters and missing option sides", () => {
 
 test("excludes contracts whose official trading session has closed", () => {
   const closed = {
-    "MCX:SILVER26NOVFUT": { tradeStatus: 1, optType: "XX", tradingSession: "0900-1700", fyToken: "fut-silver", underSym: "SILVER", expiryDate: expiry, minLotSize: 30, tickSize: 1 },
-    "MCX:SILVER26NOV100000CE": { tradeStatus: 1, optType: "CE", tradingSession: "0900-1700", fyToken: "silver-ce", underSym: "SILVER", strikePrice: 100000, expiryDate: expiry, minLotSize: 30, tickSize: 0.05 },
-    "MCX:SILVER26NOV100000PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-1700", fyToken: "silver-pe", underSym: "SILVER", strikePrice: 100000, expiryDate: expiry, minLotSize: 30, tickSize: 0.05 }
+    "MCX:SILVER26NOVFUT": { tradeStatus: 1, optType: "XX", tradingSession: "0900-1700", fyToken: "fut-silver", underSym: "SILVER", expiryDate: expiry, minLotSize: 1, qtyMultiplier: 30, tickSize: 1 },
+    "MCX:SILVER26NOV100000CE": { tradeStatus: 1, optType: "CE", tradingSession: "0900-1700", fyToken: "silver-ce", underSym: "SILVER", strikePrice: 100000, expiryDate: expiry, minLotSize: 1, qtyMultiplier: 30, tickSize: 0.05 },
+    "MCX:SILVER26NOV100000PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-1700", fyToken: "silver-pe", underSym: "SILVER", strikePrice: 100000, expiryDate: expiry, minLotSize: 1, qtyMultiplier: 30, tickSize: 0.05 }
   };
   assert.deepEqual(buildMcxFuturesUniverse(closed, now), []);
 });
@@ -62,12 +62,12 @@ test("excludes contracts whose official trading session has closed", () => {
 test("matches MCX option families to their exact underlying futures token", () => {
   const secondExpiry = Math.floor(Date.parse("2026-12-17T00:00:00.000Z") / 1000);
   const paired = {
-    "MCX:CRUDEOIL26NOVFUT": { tradeStatus: 1, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-nov", underSym: "CRUDEOIL", expiryDate: expiry, minLotSize: 100, tickSize: 1 },
-    "MCX:CRUDEOIL26DECFUT": { tradeStatus: 1, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-dec", underSym: "CRUDEOIL", expiryDate: secondExpiry, minLotSize: 100, tickSize: 1 },
-    "MCX:CRUDEOIL26NOV8400CE": { tradeStatus: 1, optType: "CE", tradingSession: "0900-2355", fyToken: "nov-ce", underFyTok: "fut-nov", underSym: "CRUDEOIL", strikePrice: 8400, expiryDate: expiry, minLotSize: 100, tickSize: 0.05 },
-    "MCX:CRUDEOIL26NOV8400PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-2355", fyToken: "nov-pe", underFyTok: "fut-nov", underSym: "CRUDEOIL", strikePrice: 8400, expiryDate: expiry, minLotSize: 100, tickSize: 0.05 },
-    "MCX:CRUDEOIL26DEC8500CE": { tradeStatus: 1, optType: "CE", tradingSession: "0900-2355", fyToken: "dec-ce", underFyTok: "fut-dec", underSym: "CRUDEOIL", strikePrice: 8500, expiryDate: secondExpiry, minLotSize: 100, tickSize: 0.05 },
-    "MCX:CRUDEOIL26DEC8500PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-2355", fyToken: "dec-pe", underFyTok: "fut-dec", underSym: "CRUDEOIL", strikePrice: 8500, expiryDate: secondExpiry, minLotSize: 100, tickSize: 0.05 }
+    "MCX:CRUDEOIL26NOVFUT": { tradeStatus: 1, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-nov", underSym: "CRUDEOIL", expiryDate: expiry, minLotSize: 1, qtyMultiplier: 100, tickSize: 1 },
+    "MCX:CRUDEOIL26DECFUT": { tradeStatus: 1, optType: "XX", tradingSession: "0900-2355", fyToken: "fut-dec", underSym: "CRUDEOIL", expiryDate: secondExpiry, minLotSize: 1, qtyMultiplier: 100, tickSize: 1 },
+    "MCX:CRUDEOIL26NOV8400CE": { tradeStatus: 1, optType: "CE", tradingSession: "0900-2355", fyToken: "nov-ce", underFyTok: "fut-nov", underSym: "CRUDEOIL", strikePrice: 8400, expiryDate: expiry, minLotSize: 1, qtyMultiplier: 100, tickSize: 0.05 },
+    "MCX:CRUDEOIL26NOV8400PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-2355", fyToken: "nov-pe", underFyTok: "fut-nov", underSym: "CRUDEOIL", strikePrice: 8400, expiryDate: expiry, minLotSize: 1, qtyMultiplier: 100, tickSize: 0.05 },
+    "MCX:CRUDEOIL26DEC8500CE": { tradeStatus: 1, optType: "CE", tradingSession: "0900-2355", fyToken: "dec-ce", underFyTok: "fut-dec", underSym: "CRUDEOIL", strikePrice: 8500, expiryDate: secondExpiry, minLotSize: 1, qtyMultiplier: 100, tickSize: 0.05 },
+    "MCX:CRUDEOIL26DEC8500PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-2355", fyToken: "dec-pe", underFyTok: "fut-dec", underSym: "CRUDEOIL", strikePrice: 8500, expiryDate: secondExpiry, minLotSize: 1, qtyMultiplier: 100, tickSize: 0.05 }
   };
   const rows = buildMcxFuturesUniverse(paired, now);
   assert.equal(rows.length, 2);
@@ -79,7 +79,7 @@ test("matches MCX option families to their exact underlying futures token", () =
   ]);
 });
 
-test("MCX shortlist requires complete fresh exchange-timestamped quote coverage", () => {
+test("MCX shortlist ranks only fresh exchange-timestamped quote rows", () => {
   const universe = buildMcxFuturesUniverse(master, now);
   const rows = buildVerifiedMcxShortlist({
     universe, now, quoteRows: [{
@@ -90,14 +90,32 @@ test("MCX shortlist requires complete fresh exchange-timestamped quote coverage"
   assert.equal(rows.data[0].symbol, "MCX:CRUDEOIL26NOVFUT");
   assert.equal(rows.data[0].price, 8440);
   assert.equal(rows.rankingIsSignal, false);
+  assert.deepEqual(rows.coverage, { requested: 1, received: 1, fresh: 1, excluded: 0, missing: 0 });
 });
 
-test("MCX shortlist fails closed for missing, duplicate, unknown or stale quotes", () => {
+test("MCX shortlist excludes stale or missing contracts when fresh peers exist", () => {
+  const universe = [
+    ...buildMcxFuturesUniverse(master, now),
+    { symbol: "MCX:NATURALGAS26NOVFUT", underlying: "NATURALGAS" }
+  ];
+  const quoteRows = [
+    { n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, tt: Math.floor(now / 1000) } },
+    { n: "MCX:NATURALGAS26NOVFUT", v: { lp: 320, chp: 0.5, tt: Math.floor((now - 60000) / 1000) } }
+  ];
+  const result = buildVerifiedMcxShortlist({ universe, quoteRows, now });
+  assert.equal(result.freshQuoteCount, 1);
+  assert.equal(result.excludedQuoteCount, 1);
+  assert.equal(result.missingQuoteCount, 0);
+  assert.deepEqual(result.coverage, { requested: 2, received: 2, fresh: 1, excluded: 1, missing: 0 });
+  assert.equal(result.data[0].symbol, "MCX:CRUDEOIL26NOVFUT");
+});
+
+test("MCX shortlist fails closed when no fresh quotes are available and rejects duplicate or unknown symbols", () => {
   const universe = buildMcxFuturesUniverse(master, now);
-  assert.throws(() => buildVerifiedMcxShortlist({ universe, quoteRows: [], now }), /incomplete_mcx_quote_coverage/);
+  assert.throws(() => buildVerifiedMcxShortlist({ universe, quoteRows: [], now }), /no_fresh_mcx_future_quotes/);
   assert.throws(() => buildVerifiedMcxShortlist({
     universe, now, quoteRows: [{ n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, tt: Math.floor((now - 60000) / 1000) } }]
-  }), /stale_or_invalid_mcx_future_quote/);
+  }), /no_fresh_mcx_future_quotes/);
   assert.throws(() => buildVerifiedMcxShortlist({
     universe, now, quoteRows: [
       { n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, tt: Math.floor(now / 1000) } },
