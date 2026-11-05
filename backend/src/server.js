@@ -93,9 +93,9 @@ let mcxSubscribedSocket = null;
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
-// Track overall market-data activity separately from per-symbol freshness.
-// An unchanged index may legitimately emit no new tick; that must not reset
-// a healthy socket while the other subscribed indices are still updating.
+// Track NSE baseline market-data activity separately from MCX diagnostics and per-symbol freshness.
+// An unchanged index may legitimately emit no new tick; MCX ticks must not mask
+// silence in the NSE baseline feed.
 let lastAnyMarketTickAt = 0;
 let marketSocketConnectedAt = 0;
 const lastTickDiagnosticAt = new Map();
@@ -162,7 +162,7 @@ function parseTick(raw) {
     );
     if (!exchangeTime) {
       if (shouldLogSocketDiagnostic(lastRejectedDiagnosticAt, symbol)) {
-        console.warn('FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
+        console.warn(isMcxDiagnostic ? 'FYERS MCX update ignored: missing exchange timestamp.' : 'FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
       }
       continue;
     }
