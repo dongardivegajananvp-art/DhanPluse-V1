@@ -1707,6 +1707,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
       quoteRows.push(...rows);
     }
     const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: 5 });
+    console.info("FYERS MCX Sureshot futures quote coverage:", JSON.stringify(ranked.coverage));
     const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
     const today = indiaNow.toISOString().slice(0, 10);
     const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 6)).toISOString().slice(0, 10);
@@ -1816,9 +1817,11 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
       ok: true, scanComplete: true, signalsAllowed: verified.length > 0,
       orderPlacement: "disabled", readOnly: true, source: "FYERS MCX_COM master + FYERS market data",
       universeCount: universe.count, rankedCandidateCount: ranked.candidateCount,
+      quoteCoverage: ranked.coverage, freshFutureQuoteCount: ranked.freshQuoteCount,
+      excludedFutureQuoteCount: ranked.excludedQuoteCount, missingFutureQuoteCount: ranked.missingQuoteCount,
       selectedCandidateCount: ranked.data.length, scannedCandidateCount: results.length,
       verifiedSetupCount: verified.length, bestSetup: verified[0] || null, results,
-      notice: "MCX universe was ranked from a complete fresh timestamped FYERS futures quote snapshot. Selected candidates were checked for completed underlying candles, official MCX option identity, fresh option premium, completed option candles and >=1:2 risk/reward. No OI/volume is used and no orders are placed."
+      notice: "All active MCX futures were requested from the official master. Only contracts with fresh exchange-timestamped futures quotes were ranked; stale, invalid or missing quotes were excluded and never used. Selected candidates were checked for completed underlying candles, official MCX option identity, fresh option premium, completed option candles and >=1:2 risk/reward. No OI/volume is used and no orders are placed."
     });
   } catch (error) {
     const status = Number(error.statusCode) || 503;
