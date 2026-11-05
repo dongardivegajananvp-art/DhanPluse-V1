@@ -5,5 +5,5 @@
  */
 export function isSupportedOptionContractSymbol(value) {
   return typeof value === "string" &&
-    /^(?:NSE|BSE):[A-Z0-9&-]{3,48}(?:CE|PE)$/.test(value);
+    /^(?:(?:NSE|BSE):[A-Z0-9&-]{3,48}|MCX:[A-Z0-9&.-]{3,48})(?:CE|PE)$/.test(value);
 }
