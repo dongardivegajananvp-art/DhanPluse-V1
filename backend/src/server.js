@@ -92,6 +92,38 @@ let mcxDiagnosticTick = null;
 let mcxDiagnosticMasterStatus = 'NOT_LOADED';
 let mcxDiagnosticMasterPromise = null;
 let mcxSubscribedSocket = null;
+// Both the connection diagnostic and Sureshot must share one authoritative
+// official master download. Separate fetches caused duplicate slow requests
+// and could leave the diagnostic and scanner with conflicting availability.
+let mcxOfficialMaster = null;
+let mcxOfficialMasterFetchedAt = 0;
+let mcxOfficialMasterPromise = null;
+const MCX_OFFICIAL_MASTER_CACHE_MS = 24 * 60 * 60 * 1000;
+
+async function loadOfficialMcxSymbolMaster() {
+  if (mcxOfficialMaster && Date.now() - mcxOfficialMasterFetchedAt < MCX_OFFICIAL_MASTER_CACHE_MS) {
+    return mcxOfficialMaster;
+  }
+  if (mcxOfficialMasterPromise) return mcxOfficialMasterPromise;
+  mcxOfficialMasterPromise = (async () => {
+    const response = await fetch('https://public.fyers.in/sym_details/MCX_COM_sym_master.json', {
+      signal: AbortSignal.timeout(30000), headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) throw new Error(`FYERS official MCX_COM symbol master unavailable (HTTP ${response.status}).`);
+    const master = await response.json();
+    if (!master || typeof master !== 'object' || Array.isArray(master)) {
+      throw new Error('FYERS MCX_COM symbol master format is invalid.');
+    }
+    mcxOfficialMaster = master;
+    mcxOfficialMasterFetchedAt = Date.now();
+    console.log('FYERS official MCX_COM symbol master cached for connection diagnostics and Sureshot.', JSON.stringify({
+      entries: Object.keys(master).length,
+      fetchedAt: new Date(mcxOfficialMasterFetchedAt).toISOString()
+    }));
+    return master;
+  })().finally(() => { mcxOfficialMasterPromise = null; });
+  return mcxOfficialMasterPromise;
+}
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
@@ -121,11 +153,7 @@ async function loadMcxDiagnosticInstrument() {
   if (mcxDiagnosticMasterPromise) return mcxDiagnosticMasterPromise;
   mcxDiagnosticMasterStatus = 'LOADING_OFFICIAL_SYMBOL_MASTER';
   mcxDiagnosticMasterPromise = (async () => {
-    const response = await fetch('https://public.fyers.in/sym_details/MCX_COM_sym_master.json', {
-      signal: AbortSignal.timeout(12000), headers: { Accept: 'application/json' }
-    });
-    if (!response.ok) throw new Error('FYERS MCX symbol master download failed.');
-    const master = await response.json();
+    const master = await loadOfficialMcxSymbolMaster();
     const selected = selectMcxDiagnosticInstrument(master, Date.now());
     if (!selected) {
       mcxDiagnosticMasterStatus = 'NO_ACTIVE_FUTURE';
@@ -1145,11 +1173,10 @@ async function getMcxFnoUniverse() {
   }
   if (mcxFnoUniversePromise) return mcxFnoUniversePromise;
   mcxFnoUniversePromise = (async () => {
-    const response = await fetch('https://public.fyers.in/sym_details/MCX_COM_sym_master.json', { signal: AbortSignal.timeout(15000), headers: { Accept: 'application/json' } });
-    if (!response.ok) throw new Error('FYERS official MCX_COM symbol master unavailable.');
-    const master = await response.json();
-    if (!master || typeof master !== 'object' || Array.isArray(master)) throw new Error('FYERS MCX_COM symbol master format is invalid.');
-    const fetchedAt = Date.now();
+    // Reuse the same official master request/cache as the connection diagnostic;
+    // never download the large MCX master twice in parallel.
+    const master = await loadOfficialMcxSymbolMaster();
+    const fetchedAt = mcxOfficialMasterFetchedAt;
     mcxFnoUniverseCache = { fetchedAt, data: null, master };
     const result = buildCurrentMcxFnoUniverse(master, fetchedAt);
     console.log('FYERS MCX F&O universe loaded:', JSON.stringify({ count: result.count, source: result.source }));
