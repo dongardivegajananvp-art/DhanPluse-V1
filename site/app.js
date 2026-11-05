@@ -1641,12 +1641,12 @@ async function loadSureshotUniverseShortlist(options = {}) {
     if (status) status.textContent = 'Connect FYERS first. Automatic full-universe Top 5 scan will start during the live NSE session after authentication.';
     return;
   }
-  sureshotUniverseScanRunning = true;
-  try { localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY, indiaTradingDateKey()); } catch {}
   const button = document.querySelector('#scanSureshotUniverseBtn');
   const host = document.querySelector('#sureshotUniverseResults');
   const status = document.querySelector('#setupStatus');
   if (!host || (button && button.disabled)) return;
+  sureshotUniverseScanRunning = true;
+  try { localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY, indiaTradingDateKey()); } catch {}
   if (button) button.disabled = true;
   host.innerHTML = '<div class="chart-empty">Starting full eligible NSE F&O Top 5 scan in small sequential FYERS batches…</div>';
   if (status) status.textContent = 'Full-universe scan starting. The backend retains scan progress if this app is backgrounded or reopened.';
