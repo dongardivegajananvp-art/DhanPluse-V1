@@ -1694,6 +1694,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
   let stage = "LOAD_MCX_MASTER";
   try {
     const universe = await getMcxFnoUniverse();
+    if (!universe.count) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "No MCX futures with active CE/PE contracts are currently inside their official trading sessions." });
     stage = "VERIFY_MCX_FUTURES_QUOTES";
     const quoteRows = [];
     for (let offset = 0; offset < universe.data.length; offset += 50) {
