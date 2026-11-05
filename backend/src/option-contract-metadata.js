@@ -8,7 +8,7 @@ export function getVerifiedOptionContractMetadata(symbol, foMaster) {
       !foMaster || typeof foMaster !== "object" || Array.isArray(foMaster)) return null;
   const item = foMaster[symbol];
   if (!item || Number(item.tradeStatus) !== 1 || !["CE", "PE"].includes(String(item.optType || "").toUpperCase())) return null;
-  const lotSize = Number(item.minLotSize);
+  const lotSize = Number(symbol.startsWith("MCX:") ? item.qtyMultiplier : item.minLotSize);
   const tickSize = Number(item.tickSize);
   const strike = Number(item.strikePrice);
   const expiryDate = String(item.expiryDate ?? "").trim();
