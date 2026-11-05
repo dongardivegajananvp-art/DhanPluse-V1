@@ -28,7 +28,7 @@ if (!app.includes('async function loadSureshotUniverseShortlist(options = {})'))
 if (!app.includes('startAutomaticTopFiveScan();') || !app.includes('SURESHOT_AUTO_SCAN_DAY_KEY') || !app.includes("localStorage.getItem(DASHBOARD_SESSION_KEY)")) {
   throw new Error('Authenticated automatic full-universe Top 5 scan trigger is missing.');
 }
-if (!app.includes("window.setInterval(startAutomaticTopFiveScan, 30000)")) throw new Error('Sureshot must detect the start of the regular NSE session while its tab is active.');
+if (!app.includes("startAutomaticTopFiveScan();") || !app.includes("startAutomaticMcxTopFiveScan();") || !app.includes("}, 30000);")) throw new Error('Sureshot must detect NSE and MCX session starts while its tab is active.');
 if (!app.includes("localStorage.removeItem('dhanpulse-watchlist-v1')") ||
     !app.includes("localStorage.removeItem('dhanpulse-price-alerts')")) {
   throw new Error('Legacy watchlist and alert data must be cleared from browser storage.');
