@@ -80,6 +80,8 @@ jobs:
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
           grep -q "dhanpulse-shell-v125-auto-top-five-v1" <<< "$sw"
+          app_js="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}app.js?v=20261105-auto-top-five-v1&deploy_smoke=$(date +%s)")"
+          grep -q "startAutomaticTopFiveScan();" <<< "$app_js"
           grep -q "FYERS Connection" <<< "$html"
           echo "PASS: ${app_url} serves the two-tab DhanPulse UI and service-worker cache build."
           backtest="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}backtest.js?v=20261027-fno-gap-selector2&deploy_smoke=$(date +%s)")"
@@ -123,7 +125,7 @@ jobs:
             await page.locator('#nav button[data-tab="Sureshot CE/PE"]').click();
             await page.waitForFunction(() => document.querySelector('#pageTitle')?.textContent?.trim() === 'Sureshot CE/PE', { timeout: 5000 });
             await page.waitForTimeout(1500);
-            if (scanRequests !== 0) throw new Error('Sureshot must not launch a full-universe scan automatically on tab open.');
+            if (scanRequests !== 0) throw new Error('Unauthenticated Sureshot must not launch a full-universe scan.');
             await page.waitForSelector('#scanSureshotUniverseBtn', { timeout: 5000 });
             if (await page.locator('#sureshotFyersConnectBtn').count()) throw new Error('Connect control must not appear on Sureshot tab.');
             await page.locator('#nav button[data-tab="FYERS Connection"]').click();
