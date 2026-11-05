@@ -37,3 +37,19 @@ test("reconnect subscription restoration includes baseline indices and selected 
   assert.deepEqual(buildMarketSocketSubscriptionSymbols(baseline, "NSE:NIFTY50-INDEX"), baseline);
   assert.deepEqual(buildMarketSocketSubscriptionSymbols(["NSE:NIFTY50-INDEX", "NSE:NIFTY50-INDEX"], null), ["NSE:NIFTY50-INDEX"]);
 });
+
+import { readFile } from "node:fs/promises";
+
+test("failed socket startup releases only its own socket so the same token can retry", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  assert.match(source, /let socket = null;\s*try \{/);
+  assert.match(source, /if \(socket && marketSocket === socket\) \{\s*marketSocket = null;\s*marketSocketToken = '';/);
+  assert.match(source, /if \(marketSocket && marketSocketToken === token\)/);
+});
+
+test("ordinary SDK close keeps the socket owner intact for SDK-managed reconnect", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  const closeHandler = source.match(/socket\.on\('close',[\s\S]*?\n    \}\);/);
+  assert.ok(closeHandler, "socket close handler must exist");
+  assert.doesNotMatch(closeHandler[0], /marketSocket\s*=\s*null|marketSocketToken\s*=/);
+});
