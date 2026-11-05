@@ -84,7 +84,7 @@ jobs:
           app_js="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}app.js?v=20261105-mcx-sureshot-v1&deploy_smoke=$(date +%s)")"
           grep -q "SURESHOT_AUTO_SCAN_ATTEMPT_KEY" <<< "$app_js"
           grep -q "settingsMcxFeed" <<< "$app_js"
-          grep -q 'style.css?v=20261105-bold-workstation-theme-v1' <<< "$index_html"
+          grep -q 'style.css?v=20261105-bold-workstation-theme-v1' <<< "$html"
           grep -q "settingsNseSession" <<< "$app_js"
           grep -q "settingsNseLiveFeed" <<< "$app_js"
           grep -q "settingsMcxSession" <<< "$app_js"
