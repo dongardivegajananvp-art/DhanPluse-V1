@@ -1,5 +1,5 @@
-const CACHE_NAME = 'dhanpulse-shell-v120-sureshot-live-auto-v1';
-const SHELL = ['./', './index.html', './style.css?v=20261104-sureshot-only-v1', './app.js?v=20261104-sureshot-live-auto-v1', './manifest.webmanifest', './dhanpulse-icon.svg'];
+const CACHE_NAME = 'dhanpulse-shell-v121-session-cache-v2';
+const SHELL = ['./', './index.html', './style.css?v=20261104-sureshot-only-v1', './app.js?v=20261105-session-cache-v2', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -14,7 +14,7 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
 
-  event.respondWith(fetch(request).then(response => {
+  event.respondWith(fetch(request, { cache: 'no-store' }).then(response => {
     if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request, response.clone()));
     return response;
   }).catch(async () => {
