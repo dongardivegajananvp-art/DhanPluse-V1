@@ -1739,10 +1739,13 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
         }
         const discovery = {
           expiryData: [...expiryMap.values()].sort((a, b) => Number(a.expiry) - Number(b.expiry)),
-          optionsChain: candidate.optionContracts.map(option => ({
-            symbol: option.symbol, strike_price: option.strike, option_type: option.side,
-            expiry: String(Math.floor((Number(option.expiryDate) > 1e12 ? Number(option.expiryDate) : Number(option.expiryDate) * 1000) / 1000))
-          }))
+          optionsChain: candidate.optionContracts.map(option => {
+            const value = Number(option.expiryDate);
+            const expiryMs = Number.isFinite(value) && value > 0
+              ? (value > 1e12 ? value : value * 1000) : Date.parse(String(option.expiryDate || ""));
+            return { symbol: option.symbol, strike_price: option.strike, option_type: option.side,
+              expiry: Number.isFinite(expiryMs) ? String(Math.floor(expiryMs / 1000)) : "" };
+          }).filter(option => option.expiry)
         };
         stage = "SELECT_MCX_OPTION_CONTRACT";
         const selected = selectNearestVerifiedOptionContract({
