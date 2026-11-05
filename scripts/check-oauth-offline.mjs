@@ -11,7 +11,7 @@ const checks = [
   ['exchange validates code server-side without exposing app secret to browser', /createHash\('sha256'\)[\s\S]{0,120}\.update\(\`\$\{appId\}:\$\{appSecret\}\`\)/.test(server) && !/appSecret/.test(app)],
   ['callback reads FYERS auth_code and state parameters', /params\.get\('auth_code'\)/.test(app) && /params\.get\('state'\)/.test(app)],
   ['callback removes authorization query from address bar before exchange', /window\.history\.replaceState\(\{\}, document\.title, window\.location\.pathname\)[\s\S]{0,450}\/api\/fyers\/auth\/exchange/.test(app)],
-  ['dashboard session token is kept in sessionStorage, not localStorage', /sessionStorage\.setItem\('dhanpulse-dashboard-session-v1'/.test(app) && !/localStorage\.setItem\('dhanpulse-dashboard-session-v1'/.test(app)],
+  ['opaque dashboard session is shared across same-origin tabs via localStorage; FYERS access token remains backend-only', /localStorage\.setItem\('dhanpulse-dashboard-session-v1'/.test(app) && /localStorage\.getItem\('dhanpulse-dashboard-session-v1'/.test(app) && /sessionStorage\.removeItem\('dhanpulse-dashboard-session-v1'/.test(app) && !/sessionStorage\.setItem\('dhanpulse-dashboard-session-v1'/.test(app)],
   ['isolated preview refuses to start OAuth before redirect verification', /IS_ISOLATED_TEST_PREVIEW && isBackend && pathname === '\/api\/fyers\/auth\/start'/.test(app) && /OAuth is disabled in this isolated test preview/.test(app)]
 ];
 const failed = checks.filter(([, ok]) => !ok);

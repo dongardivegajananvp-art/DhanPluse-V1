@@ -29,7 +29,7 @@ if (!app.includes("localStorage.removeItem('dhanpulse-watchlist-v1')") ||
     !app.includes("localStorage.removeItem('dhanpulse-price-alerts')")) {
   throw new Error('Legacy watchlist and alert data must be cleared from browser storage.');
 }
-if (!app.includes("sessionStorage.getItem('dhanpulse-dashboard-session-v1')") ||
+if (!app.includes("localStorage.getItem('dhanpulse-dashboard-session-v1')") ||
     !app.includes("const FYERS_COOLDOWN_KEY")) {
   throw new Error('FYERS session and cooldown protections must remain intact.');
 }
