@@ -109,6 +109,7 @@ void syncFyersCooldownFromBackend();
 // auth/status, and NSE institutional-flow reads remain available.
 const FYERS_DATA_API_PATHS = new Set([
   '/api/market/stock-quotes',
+  '/api/market/last-known-stock-quotes',
   // Candle reads are allowed through during cooldown so the backend can serve
   // an identical verified history-cache hit. Cache misses remain blocked by
   // the shared FYERS Data API budget; no stale candle is treated as fresh.
@@ -1437,7 +1438,7 @@ function advancedScannerMarkup(tab) {
       '<p><a href="https://www.nseindia.com/all-reports" target="_blank" rel="noopener noreferrer">NSE All Reports ↗</a></p></div>';
   }
   if (tab === 'Sureshot CE/PE') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY/SENSEX CE/PE · OHLC zones + contract discovery; fresh premium checked separately</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX" selected>NIFTY 50 · Index options (default)</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="BSE:SENSEX-INDEX">SENSEX · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse selected setup</button><button class="secondary" id="scanSureshotUniverseBtn">Scan Full F&O Universe</button></div><div id="sureshotUniverseResults" class="console-section"><div class="chart-empty">Sureshot checks the selected underlying automatically during NSE market hours. Full F&O universe scan remains manual and runs in controlled batches.</div></div><div id="setupStatus" class="hint">A setup is shown only after verified underlying OHLC candles, contract descriptors, a fresh timestamped option quote and completed option candles. Chain OI/volume are not used. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY/SENSEX CE/PE · OHLC zones + contract discovery; fresh premium checked separately</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX" selected>NIFTY 50 · Index options (default)</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="BSE:SENSEX-INDEX">SENSEX · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse selected setup</button><button class="secondary" id="refreshSureshotStockBoardBtn">Refresh Stock % & Lot Size</button><button class="secondary" id="scanSureshotUniverseBtn">Scan Full F&O Universe</button></div><div id="sureshotStockBoard" class="console-section"><div class="chart-empty">Stock-wise FYERS LTP, daily % move and official lot size will appear here after refresh.</div></div><div id="sureshotUniverseResults" class="console-section"><div class="chart-empty">Sureshot checks the selected underlying automatically during NSE market hours. Full F&O universe scan remains manual and runs in controlled batches.</div></div><div id="setupStatus" class="hint">A setup is shown only after verified underlying OHLC candles, contract descriptors, a fresh timestamped option quote and completed option candles. Chain OI/volume are not used. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
   }
   if (tab === 'FII/DII Flow') {
     return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
@@ -1617,7 +1618,8 @@ async function loadSureshotStockUniverse() {
     const stockOptions = stockRows.map(row => {
       const option = document.createElement('option');
       option.value = row.symbol;
-      option.textContent = row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '') + ' · Stock options';
+      const lotLabel = Number.isInteger(Number(row.lotSize)) && Number(row.lotSize) > 0 ? ' · Lot ' + Number(row.lotSize) : ' · Lot verify';
+      option.textContent = row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '') + lotLabel + ' · Stock options';
       return option;
     });
     select.replaceChildren(...indexOptions, ...stockOptions);
@@ -1633,6 +1635,104 @@ async function loadSureshotStockUniverse() {
       (error.message || 'verified symbol master unavailable') + '. No stock prices or strikes were fabricated.';
   }
 }
+async function loadSureshotStockBoard() {
+  if (currentTab !== 'Sureshot CE/PE') return;
+  const button = document.querySelector('#refreshSureshotStockBoardBtn');
+  const host = document.querySelector('#sureshotStockBoard');
+  if (!host || (button && button.disabled)) return;
+  if (button) button.disabled = true;
+  host.innerHTML = '<div class="chart-empty">Loading official FYERS stock universe and quote snapshot…</div>';
+  try {
+    const universeResponse = await fetch(BACKEND_URL + '/api/market/fno-universe', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const universe = await universeResponse.json().catch(() => ({}));
+    if (!universeResponse.ok || universe.ok !== true || !Array.isArray(universe.data) ||
+        universe.count !== universe.data.length || universe.data.length < 180) {
+      throw new Error(universe.error || universe.detail || 'Complete official FYERS F&O stock universe is unavailable.');
+    }
+
+    const liveSession = isRegularMarketSession();
+    const quotePath = liveSession ? '/api/market/stock-quotes' : '/api/market/last-known-stock-quotes';
+    const quoteResponse = await fetch(BACKEND_URL + quotePath, {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const quotes = await quoteResponse.json().catch(() => ({}));
+    if (!quoteResponse.ok || quotes.ok !== true || !Array.isArray(quotes.data)) {
+      throw new Error(quotes.error || quotes.detail || 'FYERS stock quotes are unavailable; no prices were guessed.');
+    }
+    const expectedCount = universe.data.length;
+    if (quotes.universeCount !== expectedCount || quotes.quotedCount !== expectedCount ||
+        quotes.data.length !== expectedCount || quotes.partial === true || quotes.complete === false) {
+      throw new Error('Incomplete F&O quote coverage (' + Number(quotes.quotedCount || quotes.data.length) +
+        '/' + expectedCount + '). Partial stock rankings are withheld.');
+    }
+
+    const lotBySymbol = new Map(universe.data.map(row => [row.symbol, row.lotSize]));
+    const seen = new Set();
+    const rows = quotes.data.map(item => {
+      const symbol = item?.n || item?.symbol;
+      if (!lotBySymbol.has(symbol) || seen.has(symbol)) throw new Error('FYERS stock quote symbols do not match the official F&O universe.');
+      seen.add(symbol);
+      const live = Boolean(item?.v);
+      const price = Number(live ? item.v.lp : item.price);
+      const changePctValue = live ? item.v.chp : item.changePct;
+      const changePct = changePctValue == null ? null : Number(changePctValue);
+      const rawTime = live ? item.v.tt : item.priceAsOf;
+      const numericTime = Number(rawTime);
+      const stamp = Number.isFinite(numericTime) && numericTime > 0
+        ? (numericTime > 1e12 ? numericTime : numericTime * 1000)
+        : Date.parse(String(rawTime || ''));
+      const ageSeconds = (Date.now() - stamp) / 1000;
+      if (item.verified !== true || !Number.isFinite(price) || price <= 0 ||
+          (changePct !== null && !Number.isFinite(changePct)) ||
+          !Number.isFinite(stamp) || ageSeconds < -5 ||
+          (live && ageSeconds > 30)) {
+        throw new Error('A stock quote failed FYERS price, percentage or exchange-timestamp validation. Complete table withheld.');
+      }
+      return {
+        symbol, price, changePct, lotSize: lotBySymbol.get(symbol),
+        ageSeconds: Math.max(0, ageSeconds), lastKnown: !live || quotes.signalsAllowed === false
+      };
+    });
+    if (seen.size !== expectedCount) throw new Error('F&O quote coverage does not match the complete symbol master.');
+
+    rows.sort((a, b) => {
+      const av = a.changePct == null ? -1 : Math.abs(a.changePct);
+      const bv = b.changePct == null ? -1 : Math.abs(b.changePct);
+      return bv - av || a.symbol.localeCompare(b.symbol);
+    });
+    const lastKnown = !liveSession || rows.some(row => row.lastKnown);
+    host.innerHTML = '<div class="console-section-head"><div><h4>FYERS NSE F&O stock board</h4><p>' +
+      rows.length + ' / ' + expectedCount + ' stocks · ranked by absolute daily % change · ' +
+      (lastKnown ? 'LAST KNOWN · DISPLAY ONLY' : 'FRESH LIVE QUOTES') +
+      '</p></div><span class="' + (lastKnown ? 'signal-tone neutral' : 'live-tag') + '">' +
+      (lastKnown ? 'NON-ACTIONABLE' : 'FYERS VERIFIED') + '</span></div>' +
+      '<div class="table-wrap"><table class="console-table"><thead><tr><th>#</th><th>Stock</th><th>LTP</th><th>Change %</th><th>F&O Lot Size</th><th>Quote Age</th></tr></thead><tbody>' +
+      rows.map((row, index) => {
+        const pct = row.changePct == null ? '—' : (row.changePct > 0 ? '+' : '') + row.changePct.toFixed(2) + '%';
+        const lot = Number.isInteger(Number(row.lotSize)) && Number(row.lotSize) > 0
+          ? Number(row.lotSize).toLocaleString('en-IN') + ' units'
+          : 'Contract-specific verify';
+        return '<tr><td>' + (index + 1) + '</td><td><b>' +
+          escapeHtml(row.symbol.replace(/^NSE:/, '').replace(/-EQ$/, '')) +
+          '</b></td><td>₹' + formatPrice(row.price) + '</td><td>' + pct + '</td><td>' +
+          lot + '</td><td>' + row.ageSeconds.toFixed(1) + ' sec</td></tr>';
+      }).join('') +
+      '</tbody></table></div><p class="hint">' +
+      (lastKnown
+        ? 'Exchange-stamped last-known FYERS prices only. This board is display-only; no stale quote can create a trade signal.'
+        : 'Complete FYERS exchange-timestamped quote coverage verified. Lot size is shown only when all active derivative-master rows agree; selected option contracts are re-verified individually before risk calculation.') +
+      '</p>';
+  } catch (error) {
+    host.innerHTML = '<div class="chart-empty">Stock board blocked · ' +
+      escapeHtml(error.message || 'FYERS stock data could not be verified.') +
+      ' No partial prices, percentage ranking or guessed lot sizes are shown.</div>';
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 async function loadSureshotUniverseShortlist() {
   if (currentTab !== 'Sureshot CE/PE') return;
   const button = document.querySelector('#scanSureshotUniverseBtn');
@@ -2478,6 +2578,8 @@ function bindTabActions() {
   const setupRefresh=document.querySelector('#refreshSetupBtn');
   if(currentTab==='Sureshot CE/PE') loadSureshotStockUniverse();
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
+  const refreshSureshotStockBoardBtn=document.querySelector('#refreshSureshotStockBoardBtn');
+  if(refreshSureshotStockBoardBtn) refreshSureshotStockBoardBtn.addEventListener('click',loadSureshotStockBoard);
   const scanSureshotUniverseBtn=document.querySelector('#scanSureshotUniverseBtn');
   if(scanSureshotUniverseBtn) scanSureshotUniverseBtn.addEventListener('click',loadSureshotUniverseShortlist);
   const setupSymbol=document.querySelector('#setupSymbol');
