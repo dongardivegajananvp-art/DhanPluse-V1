@@ -149,6 +149,7 @@ function startMarketDataStream(token) {
   streamError = '';
   streamConnected = false;
   latestTicks.clear();
+  let socket = null;
   try {
     if (marketSocket) {
       try { marketSocket.close(); } catch {}
@@ -157,7 +158,7 @@ function startMarketDataStream(token) {
     // The third SDK argument controls SDK logging, not reconnect behavior.
     // Keep logging disabled and explicitly enable the SDK's single reconnect
     // owner. FYERS documents that it restores prior subscriptions on reconnect.
-    const socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
+    socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
     marketSocket = socket;
     marketSocketToken = token;
     const SDK_RECONNECT_RETRIES = 50;
@@ -290,7 +291,14 @@ function startMarketDataStream(token) {
     streamConnected = false;
     streamError = 'Could not start the FYERS market data socket; controlled recovery is pending.';
     console.error('FYERS market socket startup failed:', String(error?.message || error).slice(0, 240));
-
+    // A startup exception is different from an ordinary SDK close/reconnect.
+    // Release only this failed socket so a later auth/start attempt can retry;
+    // never clear a newer socket that may have replaced it in the meantime.
+    if (socket && marketSocket === socket) {
+      marketSocket = null;
+      marketSocketToken = '';
+      try { socket.close(); } catch {}
+    }
   }
 }
 
