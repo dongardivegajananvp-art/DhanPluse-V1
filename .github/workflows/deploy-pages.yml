@@ -145,6 +145,10 @@ jobs:
             await page.locator('#scanSureshotUniverseBtn').click();
             await page.waitForFunction(() => window.__scanRequests === 2, { timeout: 5000 });
             if (scanRequests !== 2) throw new Error('Manual Sureshot rescan did not issue exactly one additional controlled API request.');
+            await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent?.toLowerCase()?.includes('full-universe scan withheld'), { timeout: 5000 });
+            await page.clock.fastForward(31_000);
+            await page.waitForTimeout(100);
+            if (scanRequests !== 2) throw new Error('A failed Sureshot scan was automatically retried by the 30-second timer; the daily attempt guard did not hold.');
             if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join(' | '));
             console.log('PASS: exactly two tabs; unauthenticated Sureshot does not scan; authenticated 09:30 IST session auto-starts full-universe scan; manual rescan works; rate-limit is handled safely.');
             await page.close();
