@@ -9,14 +9,9 @@ export function createFyersDataApiBudget({
   maxRequestsPerMinute = 30,
   minIntervalMs = 2000,
   windowMs = 60_000,
-  // Cloudflare 1015 is an IP/WAF throttle, not a normal per-endpoint 429.
-  // Start with a conservative pause and exponentially back off repeated blocks.
-  cloudflareCooldownMs = 15 * 60_000,
-  maxCloudflareCooldownMs = 60 * 60_000,
-  rateLimitCooldownMs = 60_000,
-  // Reuse identical verified OHLC reads for five minutes to reduce repeated
-  // history calls during short provider throttles. Sureshot and chart consumers
-  // independently reject stale/incomplete bars; this cache never makes a signal valid.
+  // FYERS 429/Cloudflare 1015 is reported but never converted into an
+  // application-side cooldown. Continue serialized, paced requests so a
+  // provider block cannot freeze the workstation for 15-60 minutes.
   historyCacheMs = 5 * 60_000,
   // Contract descriptors contain identity/expiry only (never premium/OI/volume).
   optionChainCacheMs = 60_000,
@@ -25,9 +20,7 @@ export function createFyersDataApiBudget({
   let queue = Promise.resolve();
   let requestTimes = [];
   let lastRequestAt = 0;
-  let blockedUntil = 0;
   let consecutiveCloudflareBlocks = 0;
-  let blockedReason = null;
   const responseCache = new Map();
   const inFlight = new Map();
 
@@ -79,14 +72,6 @@ export function createFyersDataApiBudget({
     const requestPromise = (async () => {
       const current = queue.then(async () => {
         let time = now();
-        if (time < blockedUntil) {
-          const retryAfterSeconds = Math.max(1, Math.ceil((blockedUntil - time) / 1000));
-          const error = new Error(`FYERS Data API cooldown active. Retry in about ${retryAfterSeconds} seconds.`);
-          error.statusCode = 429;
-          error.retryAfterSeconds = retryAfterSeconds;
-          throw error;
-        }
-
         while (true) {
           time = now();
           requestTimes = requestTimes.filter(stamp => time - stamp < windowMs);
@@ -97,13 +82,6 @@ export function createFyersDataApiBudget({
           const waitMs = Math.max(intervalWait, windowWait);
           if (waitMs <= 0) break;
           await sleep(waitMs);
-          if (now() < blockedUntil) {
-            const retryAfterSeconds = Math.max(1, Math.ceil((blockedUntil - now()) / 1000));
-            const error = new Error(`FYERS Data API cooldown active. Retry in about ${retryAfterSeconds} seconds.`);
-            error.statusCode = 429;
-            error.retryAfterSeconds = retryAfterSeconds;
-            throw error;
-          }
         }
 
         time = now();
@@ -117,17 +95,13 @@ export function createFyersDataApiBudget({
           const cfRay = String(response.headers?.get?.('cf-ray') || '');
           const cloudflare1015 = /error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body) ||
             (/cloudflare/i.test(server) && Boolean(cfRay));
-          const cooldown = cloudflare1015
-            ? Math.min(cloudflareCooldownMs * (2 ** consecutiveCloudflareBlocks), maxCloudflareCooldownMs)
-            : Math.max(rateLimitCooldownMs, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0);
           if (cloudflare1015) consecutiveCloudflareBlocks += 1;
-          blockedReason = cloudflare1015 ? 'CLOUDFLARE_1015' : 'HTTP_429';
-          blockedUntil = Math.max(blockedUntil, now() + cooldown);
+          // Record repeated upstream blocks for diagnostics only. Never impose
+          // a local 429/1015 cooldown that suppresses subsequent requests.
         } else if (response.ok) {
           // A successful provider response is the only evidence that the WAF
           // throttle has cleared; do not reset the escalation merely on timer expiry.
           consecutiveCloudflareBlocks = 0;
-          blockedReason = null;
         }
 
         if ((cacheKey && response.ok) || quoteFlightKey) {
@@ -164,18 +138,14 @@ export function createFyersDataApiBudget({
     }
   }
 
-  run.getStatus = () => {
-    const currentTime = now();
-    const retryAfterSeconds = Math.max(0, Math.ceil((blockedUntil - currentTime) / 1000));
-    return {
-      cooldownActive: retryAfterSeconds > 0,
-      retryAfterSeconds,
-      blockedUntil: blockedUntil > currentTime ? new Date(blockedUntil).toISOString() : null,
-      cooldownReason: retryAfterSeconds > 0 ? blockedReason : null,
-      consecutiveCloudflareBlocks,
-      queuedRequests: 0
-    };
-  };
+  run.getStatus = () => ({
+    cooldownActive: false,
+    retryAfterSeconds: 0,
+    blockedUntil: null,
+    cooldownReason: null,
+    consecutiveCloudflareBlocks,
+    queuedRequests: 0
+  });
 
   return run;
 }

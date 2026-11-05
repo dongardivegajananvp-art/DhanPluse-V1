@@ -37,50 +37,29 @@ test('FYERS Data API requests share a rolling-minute budget', async () => {
   assert.ok(sentAt[2] - sentAt[0] >= 60_000, 'third request must wait for the first request to leave the rolling window');
 });
 
-test('Cloudflare 1015 blocks all FYERS Data API paths, not just one endpoint', async () => {
-  let clock = 200_000;
+test('Cloudflare 1015 is reported but does not activate an application cooldown', async () => {
   let sent = 0;
   const request = createFyersDataApiBudget({
-    now: () => clock,
-    sleep: async ms => { clock += ms; },
     minIntervalMs: 0,
-    fetchImpl: async () => {
-      sent += 1;
-      return fakeResponse(429, 'Cloudflare Error 1015');
-    }
+    fetchImpl: async () => { sent += 1; return fakeResponse(429, 'Cloudflare Error 1015'); }
   });
-
   await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
-  await assert.rejects(
-    request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ'),
-    error => error.statusCode === 429 && /Data API cooldown active/.test(error.message)
-  );
-  assert.equal(sent, 1, 'second endpoint must not reach upstream during the shared cooldown');
+  await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ');
+  assert.equal(sent, 2, 'a provider 1015 must not suppress the next app request');
+  assert.equal(request.getStatus().cooldownActive, false);
+  assert.equal(request.getStatus().retryAfterSeconds, 0);
 });
-
-test('Cloudflare 1015 is detected when the code appears before Cloudflare', async () => {
-  for (const body of ['Error 1015: You are being rate limited', '1015 - Cloudflare rate limit']) {
-    let clock = 300_000;
-    let sent = 0;
-    const request = createFyersDataApiBudget({
-      now: () => clock,
-      sleep: async ms => { clock += ms; },
-      minIntervalMs: 0,
-      fetchImpl: async () => {
-        sent += 1;
-        return fakeResponse(429, body);
-      }
-    });
-
-    await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX');
-    await assert.rejects(
-      request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ'),
-      error => error.statusCode === 429 && /Data API cooldown active/.test(error.message)
-    );
-    assert.equal(sent, 1, '1015 response must activate the shared cooldown');
-  }
+test('HTTP 429 Retry-After is not turned into a local application cooldown', async () => {
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    minIntervalMs: 0,
+    fetchImpl: async () => { sent += 1; return fakeResponse(429, 'rate limited', '3600'); }
+  });
+  await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX');
+  await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
+  assert.equal(sent, 2);
+  assert.equal(request.getStatus().cooldownActive, false);
 });
-
 test('non-Data API endpoints are not counted against the Data API budget', async () => {
   let sent = 0;
   const request = createFyersDataApiBudget({
@@ -144,7 +123,7 @@ test('default history cache reuses OHLC for five minutes, then requires a fresh 
   assert.equal(sent, 2, 'expired history must refresh from FYERS');
 });
 
-test('verified history cache remains readable during a shared Cloudflare cooldown', async () => {
+test('verified history cache remains readable and expired history is allowed to refresh after 1015', async () => {
   let clock = 550_000;
   let sent = 0;
   const request = createFyersDataApiBudget({
@@ -153,32 +132,24 @@ test('verified history cache remains readable during a shared Cloudflare cooldow
     historyCacheMs: 180_000,
     fetchImpl: async url => {
       sent += 1;
-      if (String(url).includes('/data/quotes')) {
-        return new Response('Cloudflare Error 1015', { status: 429 });
-      }
+      if (String(url).includes('/data/quotes')) return new Response('Cloudflare Error 1015', { status: 429 });
+      if (sent > 2) return new Response('Cloudflare Error 1015', { status: 429 });
       return new Response(JSON.stringify({ s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] }), {
         status: 200, headers: { 'content-type': 'application/json' }
       });
     }
   });
-
   const historyUrl = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX&resolution=5';
   await request(historyUrl);
   await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
-
   const cached = await request(historyUrl);
-  assert.equal(sent, 2, 'a cache hit must not send another upstream request during cooldown');
+  assert.equal(sent, 2);
   assert.equal(cached.headers.get('x-dhanpulse-cache'), 'HIT');
-  assert.deepEqual(await cached.json(), { s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] });
-
   clock += 180_001;
-  await assert.rejects(
-    request(historyUrl),
-    error => error.statusCode === 429 && /Data API cooldown active/.test(error.message)
-  );
-  assert.equal(sent, 2, 'an expired cache must remain blocked rather than probing Cloudflare early');
+  const refreshed = await request(historyUrl);
+  assert.equal(refreshed.status, 429, 'expired history must reach FYERS instead of a local cooldown gate');
+  assert.equal(sent, 3);
 });
-
 test('option quote requests are never cached', async () => {
   let sent = 0;
   const request = createFyersDataApiBudget({
@@ -217,31 +188,17 @@ test('identical concurrent quote reads share one upstream request but are not ca
   assert.equal(sent, 2, 'a later quote read must reach FYERS again; quote/premium data is never cached');
 });
 
-test('cooldown status reports the real shared FYERS Data API backoff without exposing request data', async () => {
-  let clock = 600_000;
+test('FYERS 429 status never reports an application-side cooldown', async () => {
   const request = createFyersDataApiBudget({
-    now: () => clock,
-    sleep: async ms => { clock += ms; },
     minIntervalMs: 0,
-    cloudflareCooldownMs: 120_000,
     fetchImpl: async () => fakeResponse(429, 'Cloudflare Error 1015')
   });
-
-  const before = request.getStatus();
-  assert.equal(before.cooldownActive, false);
-  assert.equal(before.retryAfterSeconds, 0);
   await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX');
-  const active = request.getStatus();
-  assert.equal(active.cooldownActive, true);
-  assert.equal(active.retryAfterSeconds, 120);
-  assert.equal(active.blockedUntil, new Date(clock + 120_000).toISOString());
-  clock += 30_000;
-  assert.equal(request.getStatus().retryAfterSeconds, 90);
-  clock += 90_000;
-  assert.equal(request.getStatus().cooldownActive, false);
-  assert.equal(request.getStatus().blockedUntil, null);
+  assert.deepEqual(request.getStatus(), {
+    cooldownActive: false, retryAfterSeconds: 0, blockedUntil: null,
+    cooldownReason: null, consecutiveCloudflareBlocks: 1, queuedRequests: 0
+  });
 });
-
 test('default FYERS pacing stays below the documented Standard plan limits', async () => {
   let clock = 700_000;
   const sentAt = [];
@@ -264,8 +221,7 @@ test('default FYERS pacing stays below the documented Standard plan limits', asy
   assert.ok(sentAt[30] - sentAt[0] >= 60_000, 'the 31st request must wait for the rolling window');
 });
 
-test('Cloudflare 1015 cooldown escalates after repeated blocks and resets only after success', async () => {
-  let clock = 800_000;
+test('repeated Cloudflare 1015 responses are diagnostic only and do not escalate a cooldown', async () => {
   const outcomes = [
     new Response('Cloudflare Error 1015', { status: 429 }),
     new Response('', { status: 429, headers: { server: 'cloudflare', 'cf-ray': 'abc123' } }),
@@ -273,26 +229,16 @@ test('Cloudflare 1015 cooldown escalates after repeated blocks and resets only a
     new Response('Cloudflare Error 1015', { status: 429 })
   ];
   const request = createFyersDataApiBudget({
-    now: () => clock,
-    sleep: async ms => { clock += ms; },
     minIntervalMs: 0,
-    cloudflareCooldownMs: 1000,
-    maxCloudflareCooldownMs: 4000,
     fetchImpl: async () => outcomes.shift()
   });
   const url = 'https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATEST-EQ';
-
   await request(url);
-  assert.equal(request.getStatus().retryAfterSeconds, 1);
-  assert.equal(request.getStatus().cooldownReason, 'CLOUDFLARE_1015');
-  clock += 1000;
   await request(url);
-  assert.equal(request.getStatus().retryAfterSeconds, 2, 'second Cloudflare block doubles the cooldown');
+  assert.equal(request.getStatus().cooldownActive, false);
   assert.equal(request.getStatus().consecutiveCloudflareBlocks, 2);
-  clock += 2000;
-  const success = await request(url);
-  assert.equal(success.status, 200);
-  assert.equal(request.getStatus().consecutiveCloudflareBlocks, 0, 'successful provider response resets escalation');
   await request(url);
-  assert.equal(request.getStatus().retryAfterSeconds, 1, 'a later 1015 starts again at the initial cooldown');
+  assert.equal(request.getStatus().consecutiveCloudflareBlocks, 0);
+  await request(url);
+  assert.equal(request.getStatus().cooldownActive, false);
 });
