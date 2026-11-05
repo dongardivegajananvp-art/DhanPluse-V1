@@ -48,7 +48,7 @@ test("normalizes BSE SENSEX option contract descriptors alongside NSE contracts"
   assert.equal(result.optionsChain[1].option_type, "PE");
 });
 
-test("continues rejecting unsupported exchanges and malformed symbols", () => {
+test("accepts MCX option contracts while rejecting unsupported exchanges and malformed symbols", () => {
   assert.throws(() => normalizeOptionContractDiscovery({
     expiry: "1795651200",
     optionsChain: [
