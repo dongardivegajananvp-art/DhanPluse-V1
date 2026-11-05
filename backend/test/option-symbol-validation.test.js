@@ -20,7 +20,6 @@ test("accepts MCX commodity option contract symbols", () => {
 
 test("rejects unsupported exchanges and malformed option symbols", () => {
   for (const symbol of [
-    "MCX:GOLD26NOV100000CE",
     "NSE:RELIANCE-EQ",
     "BSE:SENSEX-INDEX",
     "NSE:CE",
