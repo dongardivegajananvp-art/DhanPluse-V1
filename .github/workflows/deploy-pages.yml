@@ -41,8 +41,8 @@ jobs:
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
           grep -q "Sureshot CE/PE" dist/site/index.html
-          grep -q "dhanpulse-shell-v126-auto-scan-attempt-v1" dist/site/sw.js
-          grep -q "app.js?v=20261105-auto-scan-attempt-v1" dist/site/index.html
+          grep -q "dhanpulse-shell-v127-mcx-socket-diagnostics-v1" dist/site/sw.js
+          grep -q "app.js?v=20261105-mcx-socket-diagnostics-v1" dist/site/index.html
           grep -q "SURESHOT_AUTO_SCAN_ATTEMPT_KEY" dist/site/app.js
       - name: Package static site for Pages
         run: |
@@ -69,7 +69,7 @@ jobs:
           html=""
           for attempt in $(seq 1 12); do
             html="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}?deploy_smoke=$(date +%s)" 2>/dev/null || true)"
-            if [[ -n "$html" ]] && grep -q "Sureshot CE/PE" <<< "$html" && grep -q "style.css?v=20261104-sureshot-only-v1" <<< "$html" && grep -q "app.js?v=20261105-auto-scan-attempt-v1" <<< "$html"; then
+            if [[ -n "$html" ]] && grep -q "Sureshot CE/PE" <<< "$html" && grep -q "style.css?v=20261104-sureshot-only-v1" <<< "$html" && grep -q "app.js?v=20261105-mcx-socket-diagnostics-v1" <<< "$html"; then
               break
             fi
             echo "Waiting for the deployed Pages asset to become visible (attempt $attempt/12)."
@@ -80,9 +80,10 @@ jobs:
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "dhanpulse-shell-v126-auto-scan-attempt-v1" <<< "$sw"
-          app_js="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}app.js?v=20261105-auto-scan-attempt-v1&deploy_smoke=$(date +%s)")"
+          grep -q "dhanpulse-shell-v127-mcx-socket-diagnostics-v1" <<< "$sw"
+          app_js="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}app.js?v=20261105-mcx-socket-diagnostics-v1&deploy_smoke=$(date +%s)")"
           grep -q "SURESHOT_AUTO_SCAN_ATTEMPT_KEY" <<< "$app_js"
+          grep -q "settingsMcxFeed" <<< "$app_js"
           grep -q "startAutomaticTopFiveScan();" <<< "$app_js"
           grep -q "FYERS Connection" <<< "$html"
           echo "PASS: ${app_url} serves the two-tab DhanPulse UI and service-worker cache build."
@@ -111,7 +112,7 @@ jobs:
             await page.route('**/api/status', async route => route.fulfill({
               status: 200, contentType: 'application/json',
               body: JSON.stringify({ backend: 'online', fyers: 'not-connected', liveData: 'waiting-for-live-ticks',
-                marketSocketConnected: false, fyersDataApi: { cooldownActive: false, retryAfterSeconds: 0 }, orderPlacement: 'disabled' })
+                marketSocketConnected: false, mcxDiagnostic: { exchange: 'MCX', status: 'WAITING_FOR_EXCHANGE_TICK', symbol: 'MCX:CRUDEOIL26NOVFUT', ltp: null, exchangeTimestamp: null, signalsAllowed: false }, fyersDataApi: { cooldownActive: false, retryAfterSeconds: 0 }, orderPlacement: 'disabled' })
             }));
             const appUrl = process.env.APP_URL.replace(/\/$/, '') + '/site/';
             const response = await page.goto(appUrl + '?browser_smoke=' + Date.now(), { waitUntil: 'networkidle', timeout: 60000 });
@@ -136,6 +137,7 @@ jobs:
             await page.waitForFunction(() => document.querySelector('#pageTitle')?.textContent?.trim() === 'FYERS Connection', { timeout: 5000 });
             await page.waitForSelector('#connectFyersBtn', { state: 'visible', timeout: 5000 });
             await page.waitForSelector('#testBackendBtn', { state: 'visible', timeout: 5000 });
+            await page.waitForSelector('#settingsMcxFeed', { state: 'visible', timeout: 5000 });
             await page.evaluate(() => localStorage.setItem('dhanpulse-dashboard-session-v1', 'smoke-session'));
             await page.locator('#nav button[data-tab="Sureshot CE/PE"]').click();
             await page.waitForSelector('#scanSureshotUniverseBtn', { timeout: 5000 });
@@ -161,7 +163,7 @@ jobs:
             await mobilePage.route('**/api/status', async route => route.fulfill({
               status: 200, contentType: 'application/json',
               body: JSON.stringify({ backend: 'online', fyers: 'not-connected', liveData: 'waiting-for-live-ticks',
-                marketSocketConnected: false, fyersDataApi: { cooldownActive: false, retryAfterSeconds: 0 }, orderPlacement: 'disabled' })
+                marketSocketConnected: false, mcxDiagnostic: { exchange: 'MCX', status: 'WAITING_FOR_EXCHANGE_TICK', symbol: 'MCX:CRUDEOIL26NOVFUT', ltp: null, exchangeTimestamp: null, signalsAllowed: false }, fyersDataApi: { cooldownActive: false, retryAfterSeconds: 0 }, orderPlacement: 'disabled' })
             }));
             const mobileResponse = await mobilePage.goto(appUrl + '?android_smoke=' + Date.now(), { waitUntil: 'networkidle', timeout: 60000 });
             if (!mobileResponse || !mobileResponse.ok()) throw new Error('Android-sized PWA page did not return HTTP success');
@@ -170,6 +172,7 @@ jobs:
             if (await mobilePage.locator('link[rel="manifest"]').count() !== 1) throw new Error('PWA manifest link is missing on Android viewport');
             await mobilePage.locator('#nav button[data-tab="FYERS Connection"]').tap();
             await mobilePage.waitForSelector('#connectFyersBtn', { state: 'visible', timeout: 5000 });
+            await mobilePage.waitForSelector('#settingsMcxFeed', { state: 'visible', timeout: 5000 });
             await mobilePage.locator('#nav button[data-tab="Sureshot CE/PE"]').tap();
             await mobilePage.waitForSelector('#scanSureshotUniverseBtn', { timeout: 5000 });
             if (mobileErrors.length) throw new Error('Android viewport page errors: ' + mobileErrors.join(' | '));

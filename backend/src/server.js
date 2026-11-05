@@ -20,6 +20,7 @@ import { normalizeOptionContractDiscovery } from './option-contract-discovery.js
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
 import { buildMarketSocketSubscriptionSymbols } from './market-socket-recovery.js';
+import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 
@@ -84,12 +85,17 @@ let marketSocket = null;
 // OAuth exchange with the same token must never close/recreate a healthy or
 // SDK-reconnecting socket; doing so resets SDK reconnect state and subscriptions.
 let marketSocketToken = '';
+let mcxDiagnosticInstrument = null;
+let mcxDiagnosticTick = null;
+let mcxDiagnosticMasterStatus = 'NOT_LOADED';
+let mcxDiagnosticMasterPromise = null;
+let mcxSubscribedSocket = null;
 let streamConnected = false;
 let streamError = '';
 const latestTicks = new Map();
-// Track overall market-data activity separately from per-symbol freshness.
-// An unchanged index may legitimately emit no new tick; that must not reset
-// a healthy socket while the other subscribed indices are still updating.
+// Track NSE baseline market-data activity separately from MCX diagnostics and per-symbol freshness.
+// An unchanged index may legitimately emit no new tick; MCX ticks must not mask
+// silence in the NSE baseline feed.
 let lastAnyMarketTickAt = 0;
 let marketSocketConnectedAt = 0;
 const lastTickDiagnosticAt = new Map();
@@ -108,6 +114,36 @@ function shouldLogSocketDiagnostic(store, symbol) {
   return true;
 }
 
+async function loadMcxDiagnosticInstrument() {
+  if (mcxDiagnosticInstrument) return mcxDiagnosticInstrument;
+  if (mcxDiagnosticMasterPromise) return mcxDiagnosticMasterPromise;
+  mcxDiagnosticMasterStatus = 'LOADING_OFFICIAL_SYMBOL_MASTER';
+  mcxDiagnosticMasterPromise = (async () => {
+    const response = await fetch('https://public.fyers.in/sym_details/MCX_COM_sym_master.json', {
+      signal: AbortSignal.timeout(12000), headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) throw new Error('FYERS MCX symbol master download failed.');
+    const master = await response.json();
+    const selected = selectMcxDiagnosticInstrument(master, Date.now());
+    if (!selected) {
+      mcxDiagnosticMasterStatus = 'NO_ACTIVE_FUTURE';
+      console.warn('FYERS MCX diagnostics: no active unexpired CRUDEOIL or GOLD future found in the official symbol master.');
+      return null;
+    }
+    mcxDiagnosticInstrument = selected;
+    mcxDiagnosticMasterStatus = 'READY';
+    console.log('FYERS MCX diagnostic contract resolved from official symbol master.', JSON.stringify({
+      symbol: selected.symbol, expiryDate: selected.expiryDate, source: 'MCX_COM_sym_master.json'
+    }));
+    return selected;
+  })().catch(error => {
+    mcxDiagnosticMasterStatus = 'MASTER_UNAVAILABLE';
+    console.warn('FYERS MCX diagnostic symbol master unavailable:', String(error?.message || error).slice(0, 180));
+    return null;
+  }).finally(() => { mcxDiagnosticMasterPromise = null; });
+  return mcxDiagnosticMasterPromise;
+}
+
 function parseTick(raw) {
   let parsed = raw;
   if (typeof raw === 'string') {
@@ -119,24 +155,37 @@ function parseTick(raw) {
     if (!item || typeof item !== 'object') continue;
     const symbol = item.symbol || item.n;
     const ltp = Number(item.ltp ?? item.lp ?? item.v?.lp);
-    if (!(allowedSymbols.includes(symbol) || symbol === chartStreamSymbol) || !Number.isFinite(ltp) || ltp <= 0) continue;
+    const isMcxDiagnostic = Boolean(mcxDiagnosticInstrument && symbol === mcxDiagnosticInstrument.symbol);
+    if (!(allowedSymbols.includes(symbol) || symbol === chartStreamSymbol || isMcxDiagnostic) || !Number.isFinite(ltp) || ltp <= 0) continue;
     const exchangeTime = epochSeconds(
       item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt ?? item.v?.exch_feed_time ?? item.v?.last_traded_time ?? item.v?.ltt ?? item.v?.tt
     );
     if (!exchangeTime) {
       if (shouldLogSocketDiagnostic(lastRejectedDiagnosticAt, symbol)) {
-        console.warn('FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
+        console.warn(isMcxDiagnostic ? 'FYERS MCX update ignored: missing exchange timestamp.' : 'FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
       }
       continue;
     }
-    latestTicks.set(symbol, {
+    const tick = {
       symbol, ltp,
       ch: item.ch == null || !Number.isFinite(Number(item.ch)) ? null : Number(item.ch),
       chp: item.chp == null || !Number.isFinite(Number(item.chp)) ? null : Number(item.chp),
       updatedAt: new Date(exchangeTime * 1000).toISOString(),
       receivedAt: new Date().toISOString()
-    });
-    lastAnyMarketTickAt = Date.now();
+    };
+    latestTicks.set(symbol, tick);
+    if (isMcxDiagnostic) {
+      mcxDiagnosticTick = tick;
+      if (shouldLogSocketDiagnostic(lastTickDiagnosticAt, symbol)) {
+        const ageSeconds = Number(((Date.now() / 1000) - exchangeTime).toFixed(1));
+        console.log('FYERS MCX diagnostic tick accepted.', JSON.stringify({
+          symbol, exchangeTimestamp: tick.updatedAt, exchangeAgeSeconds: ageSeconds,
+          freshness: ageSeconds >= 0 && ageSeconds <= 30 ? 'FRESH' : 'STALE'
+        }));
+      }
+    }
+    // MCX is an auxiliary diagnostics tick; it must not mask silence in the NSE baseline feed.
+    if (!isMcxDiagnostic) lastAnyMarketTickAt = Date.now();
     acceptedCount += 1;
   }
   return acceptedCount;
@@ -150,6 +199,8 @@ function startMarketDataStream(token) {
   streamError = '';
   streamConnected = false;
   latestTicks.clear();
+  mcxDiagnosticTick = null;
+  mcxSubscribedSocket = null;
   let socket = null;
   try {
     if (marketSocket) {
@@ -196,7 +247,9 @@ function startMarketDataStream(token) {
         socket.mode(socket.FullMode);
         if (socketConnectCount === 1) {
           const subscriptionSymbols = buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStreamSymbol);
+          if (mcxDiagnosticInstrument) subscriptionSymbols.push(mcxDiagnosticInstrument.symbol);
           socket.subscribe(subscriptionSymbols);
+          if (mcxDiagnosticInstrument) mcxSubscribedSocket = socket;
           console.log('FYERS baseline market socket subscription request sent.', JSON.stringify({
             connectionNumber: socketConnectCount,
             symbols: subscriptionSymbols
@@ -284,6 +337,20 @@ function startMarketDataStream(token) {
         retryPolicy: 'fyers-sdk-autoReconnect',
         retryLimit: SDK_RECONNECT_RETRIES
       }));
+    });
+    // Add one official MCX diagnostic contract to this same SDK socket.
+    // MCX never enters NSE snapshots, Sureshot ranking, option logic, or orders.
+    void loadMcxDiagnosticInstrument().then(instrument => {
+      if (!instrument || marketSocket !== socket || !streamConnected || mcxSubscribedSocket === socket) return;
+      try {
+        socket.subscribe([instrument.symbol]);
+        mcxSubscribedSocket = socket;
+        console.log('FYERS MCX diagnostic subscription requested on existing socket.', JSON.stringify({
+          symbol: instrument.symbol, exchange: 'MCX', socketInstance: 'shared-existing'
+        }));
+      } catch (error) {
+        console.warn('FYERS MCX diagnostic subscription failed:', String(error?.message || error).slice(0, 180));
+      }
     });
     // Exactly one reconnect owner: FYERS SDK autoReconnect. Do not run a
     // second application-level connect timer alongside it.
@@ -386,6 +453,32 @@ app.get('/api/status', (_req, res) => {
     liveData: streamConnected && snapshot ? 'streaming' : 'waiting-for-live-ticks',
     marketSocketConnected: streamConnected, authenticatedAt,
     lastTickAt: snapshot?.fetchedAt || null,
+    mcxDiagnostic: (() => {
+      const tick = mcxDiagnosticTick;
+      const exchangeTime = tick ? Date.parse(tick.updatedAt) / 1000 : null;
+      const ageSeconds = Number.isFinite(exchangeTime) ? Number((Date.now() / 1000 - exchangeTime).toFixed(1)) : null;
+      const freshness = ageSeconds === null || ageSeconds < 0 ? 'TIME_UNVERIFIED' : ageSeconds <= 30 ? 'FRESH' : 'STALE';
+      let status = mcxDiagnosticMasterStatus;
+      if (status === 'READY') {
+        if (!accessToken) status = 'FYERS_NOT_CONNECTED';
+        else if (!streamConnected) status = 'SOCKET_DISCONNECTED';
+        else if (mcxSubscribedSocket !== marketSocket) status = 'SUBSCRIPTION_PENDING';
+        else if (!tick) status = 'WAITING_FOR_EXCHANGE_TICK';
+        else status = freshness;
+      }
+      return {
+        exchange: 'MCX', status, symbol: mcxDiagnosticInstrument?.symbol || null,
+        instrument: mcxDiagnosticInstrument?.label || null,
+        expiryDate: mcxDiagnosticInstrument?.expiryDate || null,
+        source: mcxDiagnosticInstrument ? 'FYERS official MCX_COM symbol master' : null,
+        socketConnected: streamConnected,
+        subscribedOnCurrentSocket: Boolean(marketSocket && mcxSubscribedSocket === marketSocket),
+        ltp: tick?.ltp ?? null, exchangeTimestamp: tick?.updatedAt || null,
+        receivedAt: tick?.receivedAt || null, ageSeconds, freshness,
+        signalsAllowed: false,
+        note: 'Connection diagnostics only; never used by NSE Sureshot or trading signals.'
+      };
+    })(),
     indexTickStatus: allowedSymbols.map(symbol => {
       const tick = latestTicks.get(symbol);
       const exchangeTime = tick ? Date.parse(tick.updatedAt) / 1000 : null;
