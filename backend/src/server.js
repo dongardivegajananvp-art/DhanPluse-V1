@@ -1440,7 +1440,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     }
     state.results.push(...batchResults);
     state.nextOffset += batchResults.length;
-    const candidateUniverseComplete = state.nextOffset >= state.candidates.length;
+    const selectedCandidatesComplete = state.nextOffset >= state.candidates.length;
     const verifiedSetupCount = state.results.filter(item => item.status === "VERIFIED SETUP").length;
     const scanComplete = shouldStopSureshotScan({
       verifiedSetupCount,
@@ -1464,13 +1464,14 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       candidateCount: state.candidates.length
     });
     console.info("Sureshot scan completed:", JSON.stringify({ scannedCandidateCount: results.length, rankedCandidateCount: state.rankedCandidateCount, verifiedSetupCount: verified.length, stopReason }));
-    const payload = { ok: true, scanComplete: true, candidateUniverseComplete,
+    const payload = { ok: true, scanComplete: true, selectedCandidatesComplete,
       stopReason,
       signalsAllowed: verified.length > 0,
       orderPlacement: "disabled", readOnly: true, source: "FYERS only",
-      rankedCandidateCount: state.rankedCandidateCount, scannedCandidateCount: results.length,
-      verifiedSetupCount: verified.length, bestSetup: verified[0] || null, results,
-      notice: candidateUniverseComplete
+      rankedCandidateCount: state.rankedCandidateCount, selectedCandidateCount: state.candidates.length,
+      scannedCandidateCount: results.length, verifiedSetupCount: verified.length,
+      bestSetup: verified[0] || null, results,
+      notice: selectedCandidatesComplete
         ? "The complete FYERS NSE F&O quote universe was ranked and all selected top-5 candidates were checked; up to three plans passed fresh option quote, completed OHLC candle and >=1:2 risk checks. No orders are placed."
         : "Three fully verified setups were found in ranked order; remaining lower-ranked candidates were not checked to preserve the FYERS API request budget. Fresh option quotes and completed OHLC candles only; no orders are placed." };
     sureshotScanState = null;
