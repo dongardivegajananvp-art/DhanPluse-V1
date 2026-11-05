@@ -1996,7 +1996,11 @@ async function loadMcxSureshotUniverseShortlist() {
       const contract = plan.contract || item.contract || {};
       const risk = plan.risk || {};
       return '<article class="candidate-card"><div class="candidate-top"><b>#' + Number(item.rank) + ' · ' + escapeHtml(item.underlying || item.underlyingSymbol || 'MCX') + '</b><span class="tag">' + escapeHtml(item.status || 'NO TRADE') + '</span></div><p>' + escapeHtml(item.underlyingSymbol || '') + ' · Move ' + (Number.isFinite(Number(item.changePct)) ? Number(item.changePct).toFixed(2) + '%' : 'unverified') + '</p>' +
-        (item.status === 'VERIFIED SETUP' ? '<p><b>' + escapeHtml(contract.side || plan.direction || '') + ' · ' + escapeHtml(contract.symbol || '') + '</b></p><p>Entry ₹' + Number(risk.entryPrice).toFixed(2) + ' · SL ₹' + Number(risk.stopLoss).toFixed(2) + ' · Target ₹' + Number(risk.target).toFixed(2) + ' · RR 1:' + Number(risk.rr).toFixed(2) + '</p>' :
+        (item.status === 'VERIFIED SETUP' ? '<p><b>' + escapeHtml(contract.side || plan.direction || '') + ' · ' + escapeHtml(contract.symbol || '') + '</b></p>' +
+        '<p>Expiry ' + escapeHtml(contract.expiryDate || contract.expiry || '—') + ' · Strike ' + displayNumber(contract.strike, 2) + ' · Lot ' + displayNumber(contract.lotSize, 0) + '</p>' +
+        '<p>Fresh option premium ₹' + Number(plan.quote.ltp).toFixed(2) + ' · quote age ' + Number(plan.quote.quoteAgeSeconds).toFixed(1) + 's · completed option candles ' + Number(risk.candleCount) + '</p>' +
+        '<p>Entry ₹' + Number(risk.entryPrice).toFixed(2) + ' · SL ₹' + Number(risk.stopLoss).toFixed(2) + ' · Target ₹' + Number(risk.target).toFixed(2) + ' · RR 1:' + Number(risk.rr).toFixed(2) + '</p>' +
+        '<p class="hint">Underlying completed candle: ' + escapeHtml(plan.underlying.latestCandleAt || '—') + '</p>' :
         '<p class="hint">' + escapeHtml(item.reason || 'Required live data or setup condition was not verified.') + '</p>') + '</article>';
     }).join('');
     host.innerHTML = '<div class="console-section-head"><div><h4>MCX Top 5 · ' + Number(result.scannedCandidateCount) + ' checked / ' + Number(result.universeCount) + ' active futures</h4><p>Verified setups: ' + Number(result.verifiedSetupCount) + ' · Best setup: ' + (result.bestSetup ? escapeHtml(result.bestSetup.underlying || result.bestSetup.underlyingSymbol) : 'NO TRADE') + '</p></div><span class="live-tag">FYERS · READ ONLY</span></div>' + (rows || '<div class="chart-empty">NO TRADE — no candidate passed every verification gate.</div>');
