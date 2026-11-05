@@ -53,3 +53,41 @@ test("ordinary SDK close keeps the socket owner intact for SDK-managed reconnect
   assert.ok(closeHandler, "socket close handler must exist");
   assert.doesNotMatch(closeHandler[0], /marketSocket\s*=\s*null|marketSocketToken\s*=/);
 });
+
+test("one SDK auto-reconnect owner is configured and the application does not start a second reconnect timer", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  const start = source.indexOf("function startMarketDataStream");
+  const end = source.indexOf("// Observe prolonged feed silence", start);
+  assert.ok(start >= 0 && end > start);
+  const lifecycle = source.slice(start, end);
+  assert.match(lifecycle, /socket\.autoreconnect|socket\.autoReconnect/);
+  assert.match(lifecycle, /sdkReconnect\(SDK_RECONNECT_RETRIES\)/);
+  assert.match(lifecycle, /socket\.connect\(\)/);
+  assert.doesNotMatch(lifecycle, /setTimeout\s*\([^)]*connect/i);
+});
+
+test("socket reconnect reapplies mode and relies on SDK subscription restoration after first connect", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  const start = source.indexOf("socket.on('connect'");
+  const end = source.indexOf("socket.on('message'", start);
+  assert.ok(start >= 0 && end > start);
+  const handler = source.slice(start, end);
+  assert.match(handler, /socket\.mode\(socket\.FullMode\)/);
+  assert.match(handler, /if \(socketConnectCount === 1\)/);
+  assert.match(handler, /socket\.subscribe\(subscriptionSymbols\)/);
+  assert.match(handler, /retained subscriptions are restored by the SDK/);
+});
+
+test("market ticks without exchange timestamps are rejected and live snapshots enforce timestamp freshness", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  const parseStart = source.indexOf("function parseTick");
+  const parseEnd = source.indexOf("function startMarketDataStream", parseStart);
+  assert.ok(parseStart >= 0 && parseEnd > parseStart);
+  const parser = source.slice(parseStart, parseEnd);
+  assert.match(parser, /if \(!exchangeTime\)/);
+  assert.match(parser, /latestTicks\.set\(symbol/);
+  const snapshotStart = source.indexOf("function liveSnapshot");
+  const snapshotEnd = source.indexOf("\n}", snapshotStart) + 2;
+  assert.ok(snapshotStart >= 0 && snapshotEnd > snapshotStart);
+  assert.match(source.slice(snapshotStart, snapshotEnd), /quoteTimestampStatus/);
+});
