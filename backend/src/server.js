@@ -2104,6 +2104,7 @@ app.get('/api/market/mcx-fno-universe', async (_req, res) => {
 
 app.get('/api/fyers/options-chain', async (req, res) => {
   const symbol = String(req.query.symbol || 'NSE:NIFTY50-INDEX');
+  const timestamp = req.query.timestamp == null ? '' : String(req.query.timestamp);
   if (symbol.startsWith('MCX:')) {
     try {
       const universe = await getMcxFnoUniverse();
@@ -2135,7 +2136,6 @@ app.get('/api/fyers/options-chain', async (req, res) => {
   }
   const allowed = [...allowedSymbols, ...moversSymbols];
   const strikeCount = Number.parseInt(String(req.query.strikecount || '10'), 10);
-  const timestamp = req.query.timestamp == null ? '' : String(req.query.timestamp);
   if (!allowed.includes(symbol)) return res.status(400).json({ ok: false, error: 'Unsupported underlying symbol.' });
   if (!Number.isInteger(strikeCount) || strikeCount < 1 || strikeCount > 50) {
     return res.status(400).json({ ok: false, error: 'strikecount must be between 1 and 50.' });
