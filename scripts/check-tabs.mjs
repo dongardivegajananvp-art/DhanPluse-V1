@@ -57,10 +57,12 @@ console.log('PASS: exactly two visible tabs (Sureshot CE/PE, FYERS Connection); 
 console.log('PASS: legacy watchlist/alert browser data cleared; shared FYERS session preserved; frontend cooldown guard removed.');
 
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
-if (!html.includes('app.js?v=20261105-auto-top-five-v1') ||
-    !html.includes('sw.js?v=20261105-auto-top-five-v1') ||
-    !sw.includes('dhanpulse-shell-v125-auto-top-five-v1') ||
+if (!app.includes('SURESHOT_AUTO_SCAN_ATTEMPT_KEY') ||
+    !html.includes('app.js?v=20261105-auto-scan-attempt-v1') ||
+    !html.includes('sw.js?v=20261105-auto-scan-attempt-v1') ||
+    !sw.includes('dhanpulse-shell-v126-auto-scan-attempt-v1') ||
+    !sw.includes('app.js?v=20261105-auto-scan-attempt-v1') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
-  throw new Error('PWA session-cache fix must force a new shell cache and bypass stale browser HTTP cache for app assets.');
+  throw new Error('PWA cache and bounded Sureshot automatic-attempt guard must be present in the published shell.');
 }
-console.log('PASS: PWA shell cache is version-bumped for the automatic Sureshot Top 5 build and app assets revalidate against the network before cache fallback.');
+console.log('PASS: PWA shell v126 loads the bounded automatic Sureshot scan-attempt guard and revalidates app assets against the network before cache fallback.');
