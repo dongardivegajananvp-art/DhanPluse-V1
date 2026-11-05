@@ -1962,7 +1962,7 @@ async function loadMcxFuturesIntoSureshotSelect() {
         ? (expiryNumber > 1e12 ? expiryNumber : expiryNumber * 1000) : Date.parse(String(row.expiryDate || ''));
       const expiryLabel = Number.isFinite(expiryMs)
         ? new Date(expiryMs).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'expiry unverified';
-      option.textContent = String(row.underlying || row.symbol) + ' · ' + expiryLabel + ' · Lot ' + Number(row.lotSize);
+      option.textContent = String(row.underlying || row.symbol) + ' · ' + expiryLabel + ' · Lot quantity ' + Number(row.lotSize).toLocaleString('en-IN');
       group.append(option);
     }
     if (group.children.length) select.append(group);
@@ -1987,7 +1987,7 @@ async function loadMcxSureshotUniverseShortlist() {
   }
   sureshotUniverseScanRunning = true;
   if (button) button.disabled = true;
-  host.innerHTML = '<div class="chart-empty">Scanning official MCX F&O universe. Every candidate requires fresh futures quotes, completed underlying candles, verified option contract, premium and option candles…</div>';
+  host.innerHTML = '<div class="chart-empty">Scanning official MCX F&O universe. Stale or missing futures quotes will be excluded; every ranked candidate still requires fresh underlying candles, verified option contract, premium and option candles…</div>';
   try {
     const response = await fetch(BACKEND_URL + '/api/market/mcx-sureshot-auto-plans', {
       headers: { Accept: 'application/json' }, cache: 'no-store'
@@ -2009,7 +2009,7 @@ async function loadMcxSureshotUniverseShortlist() {
         '<p class="hint">Underlying completed candle: ' + escapeHtml(plan.underlying.latestCandleAt || '—') + '</p>' :
         '<p class="hint">' + escapeHtml(item.reason || 'Required live data or setup condition was not verified.') + '</p>') + '</article>';
     }).join('');
-    host.innerHTML = '<div class="console-section-head"><div><h4>MCX Top 5 · ' + Number(result.scannedCandidateCount) + ' checked / ' + Number(result.universeCount) + ' active futures</h4><p>Verified setups: ' + Number(result.verifiedSetupCount) + ' · Best setup: ' + (result.bestSetup ? escapeHtml(result.bestSetup.underlying || result.bestSetup.underlyingSymbol) : 'NO TRADE') + '</p></div><span class="live-tag">FYERS · READ ONLY</span></div>' + (rows || '<div class="chart-empty">NO TRADE — no candidate passed every verification gate.</div>');
+    host.innerHTML = '<div class="console-section-head"><div><h4>MCX Top 5 · ' + Number(result.scannedCandidateCount) + ' checked / ' + Number(result.universeCount) + ' active futures</h4><p>Fresh futures quotes: ' + Number(result.quoteCoverage?.fresh) + ' · excluded stale/invalid: ' + Number(result.quoteCoverage?.excluded) + ' · missing: ' + Number(result.quoteCoverage?.missing) + '</p><p>Verified setups: ' + Number(result.verifiedSetupCount) + ' · Best setup: ' + (result.bestSetup ? escapeHtml(result.bestSetup.underlying || result.bestSetup.underlyingSymbol) : 'NO TRADE') + '</p></div><span class="live-tag">FYERS · READ ONLY</span></div>' + (rows || '<div class="chart-empty">NO TRADE — no candidate passed every verification gate.</div>');
     if (status) status.textContent = 'MCX scan complete. ' + Number(result.verifiedSetupCount) + ' verified setup(s); all other candidates are NO TRADE. Orders remain disabled.';
     logEvent('MCX full-universe Top 5 Sureshot scan completed: ' + Number(result.verifiedSetupCount) + ' verified setup(s).', 'info');
   } catch (error) {
