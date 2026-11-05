@@ -1957,7 +1957,12 @@ async function loadMcxFuturesIntoSureshotSelect() {
       if (!row || typeof row.symbol !== 'string' || existing.has(row.symbol)) continue;
       const option = document.createElement('option');
       option.value = row.symbol;
-      option.textContent = String(row.underlying || row.symbol) + ' · MCX Future · Lot ' + Number(row.lotSize);
+      const expiryNumber = Number(row.expiryDate);
+      const expiryMs = Number.isFinite(expiryNumber) && expiryNumber > 0
+        ? (expiryNumber > 1e12 ? expiryNumber : expiryNumber * 1000) : Date.parse(String(row.expiryDate || ''));
+      const expiryLabel = Number.isFinite(expiryMs)
+        ? new Date(expiryMs).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'expiry unverified';
+      option.textContent = String(row.underlying || row.symbol) + ' · ' + expiryLabel + ' · Lot ' + Number(row.lotSize);
       group.append(option);
     }
     if (group.children.length) select.append(group);
