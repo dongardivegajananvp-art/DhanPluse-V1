@@ -2168,7 +2168,35 @@ function alertListMarkup() {
 }
 
 function settingsMarkup() {
-  return '<div class="settings-grid"><article class="console-section"><h4>Secure connection</h4><p>FYERS credentials stay on the Render backend. Do not paste app secrets or access tokens into this page.</p><div class="data-row"><span>Backend URL</span><b>Render</b></div><code class="backend-url">' + BACKEND_URL + '</code><div class="button-row"><button class="primary" id="testBackendBtn">Test backend</button><button class="primary" id="connectFyersBtn">Connect FYERS</button><button class="secondary" id="testQuotesBtn">Refresh live quotes</button><button class="secondary" id="installPwaBtn">Install DhanPulse app</button></div><p class="hint">Install on desktop/laptop from the browser install icon, or on mobile use the browser menu → Install app / Add to Home Screen.</p></article><article class="console-section"><h4>Connection diagnostics</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend health</span><b id="settingsBackend">CHECKING</b></div><div class="data-row"><span>Latest NSE index quotes</span><b id="settingsFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div><p class="hint">Backend health alone does not prove that FYERS authentication or live market data is connected.</p></article><article class="console-section"><h4>MCX live socket diagnostic</h4><div class="data-row"><span>MCX feed</span><b id="settingsMcxFeed">WAITING</b></div><div class="data-row"><span>Official contract</span><b id="settingsMcxSymbol">Loading FYERS master…</b></div><div class="data-row"><span>Verified LTP</span><b id="settingsMcxLtp">—</b></div><div class="data-row"><span>Exchange timestamp</span><b id="settingsMcxTime">—</b></div><p class="hint" id="settingsMcxDetail">One active MCX futures contract is subscribed on the existing FYERS socket. MCX data is diagnostic only and never enters NSE Sureshot.</p></article></div>';
+  return '<div class="settings-grid"><article class="console-section"><h4>Secure connection</h4><p>FYERS credentials stay on the Render backend. Do not paste app secrets or access tokens into this page.</p><div class="data-row"><span>Backend URL</span><b>Render</b></div><code class="backend-url">' + BACKEND_URL + '</code><div class="button-row"><button class="primary" id="testBackendBtn">Test backend</button><button class="primary" id="connectFyersBtn">Connect FYERS</button><button class="secondary" id="testQuotesBtn">Refresh live quotes</button><button class="secondary" id="installPwaBtn">Install DhanPulse app</button></div><p class="hint">Install on desktop/laptop from the browser install icon, or on mobile use the browser menu → Install app / Add to Home Screen.</p></article><article class="console-section"><h4>Exchange live switches</h4><div class="data-row"><span>NSE market session</span><b id="settingsNseSession">CHECKING</b></div><div class="data-row"><span>NSE FYERS feed</span><b id="settingsNseLiveFeed">WAITING</b></div><div class="data-row"><span>MCX market session</span><b id="settingsMcxSession">CHECKING</b></div><div class="data-row"><span>MCX FYERS feed</span><b id="settingsMcxLiveFeed">WAITING</b></div><p class="hint" id="settingsExchangeStatusNote">Session clock is indicative only; a fresh exchange-timestamped FYERS tick is required to show LIVE. Exchange holidays and special sessions are not checked.</p></article><article class="console-section"><h4>Connection diagnostics</h4><div class="data-row"><span>Frontend</span><b class="positive-text">ONLINE</b></div><div class="data-row"><span>Backend health</span><b id="settingsBackend">CHECKING</b></div><div class="data-row"><span>Latest NSE index quotes</span><b id="settingsFeed">WAITING</b></div><div class="data-row"><span>Order placement</span><b class="warning-text">DISABLED</b></div><p class="hint">Backend health alone does not prove that FYERS authentication or live market data is connected.</p></article><article class="console-section"><h4>MCX live socket diagnostic</h4><div class="data-row"><span>MCX feed</span><b id="settingsMcxFeed">WAITING</b></div><div class="data-row"><span>Official contract</span><b id="settingsMcxSymbol">Loading FYERS master…</b></div><div class="data-row"><span>Verified LTP</span><b id="settingsMcxLtp">—</b></div><div class="data-row"><span>Exchange timestamp</span><b id="settingsMcxTime">—</b></div><p class="hint" id="settingsMcxDetail">One active MCX futures contract is subscribed on the existing FYERS socket. MCX data is diagnostic only and never enters NSE Sureshot.</p></article></div>';
+}
+
+function updateExchangeLiveSwitches(status) {
+  const exchanges = status && status.exchangeLiveStatus ? status.exchangeLiveStatus : {};
+  const nse = exchanges.NSE || {};
+  const mcx = exchanges.MCX || {};
+  const set = (selector, value) => {
+    const element = document.querySelector(selector);
+    if (element) element.textContent = value;
+  };
+  const sessionLabel = item => item.session === 'SCHEDULED_OPEN'
+    ? 'SCHEDULED OPEN' : item.session === 'SCHEDULED_CLOSED'
+      ? 'SCHEDULED CLOSED' : 'UNAVAILABLE';
+  const feedLabel = item => {
+    const feed = String(item.feed || 'UNAVAILABLE').replace(/_/g, ' ');
+    return feed === 'LIVE' ? 'LIVE · FRESH TICK' : feed;
+  };
+  set('#settingsNseSession', sessionLabel(nse));
+  set('#settingsNseLiveFeed', feedLabel(nse));
+  set('#settingsMcxSession', sessionLabel(mcx));
+  set('#settingsMcxLiveFeed', feedLabel(mcx));
+  const note = document.querySelector('#settingsExchangeStatusNote');
+  if (note) {
+    const nseHours = nse.sessionHours || 'session hours unavailable';
+    const mcxHours = mcx.sessionHours || 'session hours unavailable';
+    note.textContent = 'NSE ' + nseHours + ' · MCX ' + mcxHours +
+      '. Clock schedule only; exchange holidays/special sessions are not checked. LIVE requires a fresh exchange-timestamped FYERS tick from that exchange.';
+  }
 }
 
 function updateMcxConnectionDiagnostics(status) {
@@ -2204,8 +2232,10 @@ async function refreshConnectionDiagnostics() {
     });
     const status = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error('Status endpoint unavailable.');
+    updateExchangeLiveSwitches(status);
     updateMcxConnectionDiagnostics(status);
   } catch {
+    updateExchangeLiveSwitches(null);
     updateMcxConnectionDiagnostics({
       mcxDiagnostic: {
         status: 'STATUS_UNAVAILABLE',
