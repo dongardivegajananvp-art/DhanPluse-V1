@@ -134,7 +134,7 @@ export function buildVerifiedSureshotTradePlan({
   const contractExpiryDate = Number.isFinite(contractExpiryMs) ? indiaDateKey(contractExpiryMs) : "";
   if (!["NSE", "BSE", "MCX"].includes(underlyingExchange) ||
       !contractSymbol.startsWith(underlyingExchange + ":") ||
-      !/^(?:NSE|BSE):[A-Z0-9&-]{3,48}(CE|PE)$/.test(contractSymbol) ||
+      !/^(?:NSE|BSE|MCX):[A-Z0-9&.-]{3,48}(CE|PE)$/.test(contractSymbol) ||
       contractSide !== direction.side || !contractSymbol.endsWith(direction.side) ||
       !Number.isFinite(contractStrike) || contractStrike <= 0 ||
       !Number.isFinite(symbolStrike) || Math.abs(symbolStrike - contractStrike) > 0.0001 ||
