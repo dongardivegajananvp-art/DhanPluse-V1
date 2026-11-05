@@ -184,7 +184,8 @@ function parseTick(raw) {
         }));
       }
     }
-    lastAnyMarketTickAt = Date.now();
+    // MCX is an auxiliary diagnostics tick; it must not mask silence in the NSE baseline feed.
+    if (!isMcxDiagnostic) lastAnyMarketTickAt = Date.now();
     acceptedCount += 1;
   }
   return acceptedCount;
