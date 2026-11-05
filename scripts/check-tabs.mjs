@@ -37,9 +37,9 @@ console.log('PASS: exactly two visible tabs (Sureshot CE/PE, FYERS Connection); 
 console.log('PASS: legacy watchlist/alert browser data cleared; FYERS session and rate-limit guard preserved.');
 
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
-if (!html.includes('app.js?v=20261105-session-cache-v2') ||
-    !html.includes('sw.js?v=20261105-session-cache-v2') ||
-    !sw.includes('dhanpulse-shell-v121-session-cache-v2') ||
+if (!html.includes('app.js?v=20261105-session-race-v3') ||
+    !html.includes('sw.js?v=20261105-session-race-v3') ||
+    !sw.includes('dhanpulse-shell-v122-session-race-v3') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('PWA session-cache fix must force a new shell cache and bypass stale browser HTTP cache for app assets.');
 }
