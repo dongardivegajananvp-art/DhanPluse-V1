@@ -68,7 +68,11 @@ export function buildMcxFuturesUniverse(master, now = Date.now()) {
         String(item?.optType || "").toUpperCase() !== "XX" ||
         !Number.isFinite(expiry) || expiry <= now || !underlying ||
         !item?.fyToken) continue;
-    const family = optionsByUnderlying.get(underlying) || [];
+    const allUnderlyingOptions = optionsByUnderlying.get(underlying) || [];
+    const tokenMatchedOptions = allUnderlyingOptions.filter(option => option.underFyTok && option.underFyTok === String(item.fyToken));
+    const relatedOptions = tokenMatchedOptions.length ? tokenMatchedOptions : allUnderlyingOptions;
+    // An option must not outlive the futures contract used as its underlying.
+    const family = relatedOptions.filter(option => option.expiryMs <= expiry);
     const activeSides = new Set(family.map(option => option.side));
     if (!activeSides.has("CE") || !activeSides.has("PE")) continue;
     const lotSize = Number(item.minLotSize);
