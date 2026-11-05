@@ -626,7 +626,7 @@ async function fyersReadOnlyGet(url, { priority = 'normal' } = {}) {
     const upstreamCode = data.code == null ? 'n/a' : String(data.code);
     const message = upstreamMessage
       ? String(upstreamMessage).slice(0, 110)
-      : (responseText ? responseText.replace(/\\s+/g, ' ').slice(0, 110) : 'FYERS API returned no error message.');
+      : (responseText ? responseText.replace(/\s+/g, ' ').slice(0, 110) : 'FYERS API returned no error message.');
     const cloudflareRayId = response.headers.get('cf-ray') || null;
     const upstreamServer = response.headers.get('server') || null;
     const cloudflareMitigation = response.headers.get('cf-mitigated') || null;
