@@ -4,7 +4,7 @@
  * Never infer lot size or tick size from the underlying or another contract.
  */
 export function getVerifiedOptionContractMetadata(symbol, foMaster) {
-  if (typeof symbol !== "string" || !/^(?:NSE|BSE):[A-Z0-9&-]+(?:CE|PE)$/.test(symbol) ||
+  if (typeof symbol !== "string" || !/^(?:NSE|BSE|MCX):[A-Z0-9&.-]+(?:CE|PE)$/.test(symbol) ||
       !foMaster || typeof foMaster !== "object" || Array.isArray(foMaster)) return null;
   const item = foMaster[symbol];
   if (!item || Number(item.tradeStatus) !== 1 || !["CE", "PE"].includes(item.optType)) return null;
