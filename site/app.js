@@ -2190,7 +2190,7 @@ function updateMcxConnectionDiagnostics(status) {
   time.textContent = diagnostic.exchangeTimestamp
     ? new Date(diagnostic.exchangeTimestamp).toLocaleString('en-IN')
     : 'Waiting for exchange tick';
-  const age = Number.isFinite(Number(diagnostic.ageSeconds)) ? ' · age ' + diagnostic.ageSeconds + 's' : '';
+  const age = diagnostic.ageSeconds != null && Number.isFinite(Number(diagnostic.ageSeconds)) ? ' · age ' + diagnostic.ageSeconds + 's' : '';
   detail.textContent = (diagnostic.note || 'MCX is diagnostic only; no signal or order is generated.') +
     (diagnostic.expiryDate ? ' Contract expiry: ' + diagnostic.expiryDate + '.' : '') +
     (diagnostic.subscribedOnCurrentSocket ? ' Subscribed on the existing socket.' : '') + age;
