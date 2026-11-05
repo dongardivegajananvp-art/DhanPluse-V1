@@ -1132,18 +1132,27 @@ let fnoUniverseCache = { fetchedAt: 0, data: null };
 let fnoUniversePromise = null;
 let mcxFnoUniverseCache = { fetchedAt: 0, data: null, master: null };
 let mcxFnoUniversePromise = null;
+function buildCurrentMcxFnoUniverse(master, fetchedAt) {
+  const data = buildMcxFuturesUniverse(master, Date.now());
+  return { source: 'FYERS MCX_COM symbol master', fetchedAt: new Date(fetchedAt).toISOString(),
+    count: data.length, data, sessionFilteredAt: new Date().toISOString() };
+}
 async function getMcxFnoUniverse() {
-  if (mcxFnoUniverseCache.data && Date.now() - mcxFnoUniverseCache.fetchedAt < 24 * 60 * 60 * 1000) return mcxFnoUniverseCache.data;
+  if (mcxFnoUniverseCache.master && Date.now() - mcxFnoUniverseCache.fetchedAt < 24 * 60 * 60 * 1000) {
+    // Re-evaluate tradingSession fields on every request. Do not cache an
+    // evening-only universe into the next morning (or vice versa).
+    return buildCurrentMcxFnoUniverse(mcxFnoUniverseCache.master, mcxFnoUniverseCache.fetchedAt);
+  }
   if (mcxFnoUniversePromise) return mcxFnoUniversePromise;
   mcxFnoUniversePromise = (async () => {
     const response = await fetch('https://public.fyers.in/sym_details/MCX_COM_sym_master.json', { signal: AbortSignal.timeout(15000), headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error('FYERS official MCX_COM symbol master unavailable.');
     const master = await response.json();
-    const data = buildMcxFuturesUniverse(master, Date.now());
-    if (!data.length) throw new Error('Official MCX master returned no active futures with matching active CE and PE option contracts.');
-    const result = { source: 'FYERS MCX_COM symbol master', fetchedAt: new Date().toISOString(), count: data.length, data };
-    mcxFnoUniverseCache = { fetchedAt: Date.now(), data: result, master };
-    console.log('FYERS MCX F&O universe loaded:', JSON.stringify({ count: data.length, source: result.source }));
+    if (!master || typeof master !== 'object' || Array.isArray(master)) throw new Error('FYERS MCX_COM symbol master format is invalid.');
+    const fetchedAt = Date.now();
+    mcxFnoUniverseCache = { fetchedAt, data: null, master };
+    const result = buildCurrentMcxFnoUniverse(master, fetchedAt);
+    console.log('FYERS MCX F&O universe loaded:', JSON.stringify({ count: result.count, source: result.source }));
     return result;
   })();
   try { return await mcxFnoUniversePromise; } finally { mcxFnoUniversePromise = null; }
