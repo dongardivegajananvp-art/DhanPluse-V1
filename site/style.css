@@ -157,3 +157,127 @@ input:focus,select:focus,textarea:focus{outline:1px solid #61f2d2;box-shadow:0 0
 
 /* Trade journal safety controls */
 .journal-checks{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#0c1420}.journal-checks label{display:flex;align-items:center;gap:8px;font-size:11px;color:#c4d0e2}.journal-checks input{accent-color:#63e6d0;width:15px;height:15px}.alert-form label input[type=checkbox]{display:inline-block;width:auto;margin:0}@media(max-width:650px){.journal-checks{grid-template-columns:1fr}.alert-form{grid-template-columns:1fr}}
+
+
+/* DhanPulse workstation visual refresh — bold, readable, focused */
+:root{
+  --bg:#080d12;--panel:#111a20;--panel2:#17232a;--line:#2b3b40;
+  --text:#f5faf8;--muted:#a4b5af;--cyan:#65e6c1;--blue:#8ba9ff;
+  --green:#65e6a7;--red:#ff8797;--amber:#ffd27c;--violet:#c6a7ff;
+}
+html{font-size:16px;text-rendering:optimizeLegibility}
+body{
+  font-size:15px;line-height:1.58;letter-spacing:.005em;
+  background:
+    radial-gradient(ellipse at 86% -12%,rgba(16,163,127,.19),transparent 34%),
+    radial-gradient(ellipse at 10% 80%,rgba(91,126,255,.10),transparent 38%),
+    var(--bg);
+}
+.sidebar{
+  background:linear-gradient(180deg,#10191d 0%,#0a1115 100%);
+  border-right:1px solid #263b39;
+}
+.brand{padding-bottom:25px}
+.brandmark{
+  width:44px;height:44px;border-radius:14px;
+  background:linear-gradient(140deg,#10a37f 0%,#65e6c1 48%,#8ba9ff 100%);
+  box-shadow:0 8px 26px rgba(16,163,127,.22);
+}
+.brand b{font-size:19px;font-weight:850;letter-spacing:-.65px}
+.brand small{font-size:10px;letter-spacing:1.7px;font-weight:750}
+nav{gap:7px}
+nav button{
+  font-size:14px;font-weight:650;line-height:1.35;
+  padding:12px 13px;border-radius:11px;
+}
+nav button.active{
+  background:linear-gradient(100deg,rgba(16,163,127,.19),rgba(76,112,154,.16));
+  border-color:rgba(101,230,193,.34);
+  box-shadow:inset 3px 0 #65e6c1,0 5px 18px rgba(0,0,0,.12);
+}
+main{padding-top:30px}
+header{margin-bottom:26px}
+h1{font-size:clamp(29px,3vw,36px);font-weight:850;letter-spacing:-1.15px}
+h2{font-weight:800;letter-spacing:-.65px}
+h3{font-weight:760;letter-spacing:-.2px}
+.eyebrow{font-size:11px;letter-spacing:2px;font-weight:850;color:#8ccfbb}
+.market-pill{font-size:11px;font-weight:750;letter-spacing:.75px;padding:10px 14px}
+.avatar{width:38px;height:38px;font-size:13px;font-weight:850}
+.welcome{
+  border-radius:20px;padding:30px 32px;
+  background:linear-gradient(112deg,rgba(16,48,43,.96),rgba(20,34,43,.96) 56%,rgba(34,37,65,.94));
+  border-color:#31544c;box-shadow:0 18px 48px rgba(0,0,0,.2);
+}
+.welcome h2{font-size:clamp(28px,3vw,36px);font-weight:850;letter-spacing:-1.1px}
+.welcome p:not(.eyebrow){font-size:15px;line-height:1.65;color:#c0d1ca}
+.metrics{gap:15px;margin:19px 0}
+.metric,.panel{border-radius:17px}
+.metric{padding:19px 20px}
+.metric span{font-size:11px;letter-spacing:1.05px;font-weight:850}
+.metric strong{font-size:clamp(23px,2.2vw,29px);font-weight:850;letter-spacing:-.6px}
+.metric small{font-size:12px}
+.panel{padding:22px}
+.panel h3{font-size:17px;font-weight:800}
+.panel-head p{font-size:13px;line-height:1.5}
+.tag{font-size:11px;font-weight:850;letter-spacing:.8px;padding:6px 10px}
+.statusrow{font-size:14px;padding:16px 0;line-height:1.5}
+.statusrow b{font-size:12px;font-weight:850;letter-spacing:.55px}
+.hint{font-size:12px;line-height:1.55;padding:12px 13px;color:#b1c0ba}
+.primary,.secondary,.btn,button{
+  font-family:inherit;
+}
+.primary{
+  font-size:14px;font-weight:850;padding:12px 17px;border-radius:11px;
+  background:linear-gradient(135deg,#65e6c1,#36c99c);
+  box-shadow:0 7px 20px rgba(16,163,127,.17);
+}
+.secondary{font-size:13px;font-weight:750;padding:10px 13px}
+input,select,textarea{
+  font:inherit!important;font-size:14px!important;min-height:42px;
+  border-radius:10px!important;
+}
+label{font-size:13px!important;font-weight:650}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:2px solid #65e6c1!important;outline-offset:3px;
+}
+.panel,.metric,.welcome,.status-card,.feature-panel{
+  box-shadow:0 14px 38px rgba(0,0,0,.19);
+}
+.panel:hover,.metric:hover{border-color:#3b5c55}
+.data-row,.status-row{font-size:14px}
+.data-row b,.status-row b{font-size:13px;font-weight:800}
+.main-view-heading h2{font-size:clamp(27px,3vw,36px);font-weight:850;letter-spacing:-.9px}
+.main-view-heading p,.main-view-note{font-size:14px;line-height:1.6}
+.main-chart-title{font-size:12px;font-weight:800;letter-spacing:.7px}
+.explorer-card h4{font-size:16px;font-weight:800}
+.explorer-price{font-size:25px;font-weight:850}
+.explorer-card>small,.explorer-card p{font-size:12px;line-height:1.55}
+.option-controls label,.explorer-controls label{font-size:13px;font-weight:700}
+#settingsNseSession,#settingsNseLiveFeed,#settingsMcxSession,#settingsMcxLiveFeed{
+  font-size:13px;font-weight:850;letter-spacing:.35px;
+}
+#settingsExchangeStatusNote{font-size:12px;line-height:1.6}
+.dot{width:8px;height:8px}
+@media(max-width:900px){
+  main,.main,.workspace{padding:20px 16px!important}
+  #nav button{font-size:13px;font-weight:750;padding:11px 13px}
+}
+@media(max-width:650px){
+  body{font-size:15px}
+  .brand b{font-size:18px}
+  .welcome{padding:22px!important}
+  .welcome h2{font-size:clamp(25px,7vw,32px)}
+  .welcome p:not(.eyebrow){font-size:14px}
+  .panel{padding:17px}
+  .metric{padding:15px}
+  .metric span{font-size:10px}
+  .metric strong{font-size:22px}
+  .statusrow{font-size:13px}
+  .statusrow b{font-size:11px}
+  #nav button{font-size:13px!important;min-height:44px;padding:11px 10px!important}
+  .primary,.secondary{min-height:44px;font-size:14px}
+  input,select,textarea{min-height:44px;font-size:16px!important}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
