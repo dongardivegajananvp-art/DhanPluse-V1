@@ -93,10 +93,10 @@ let authInProgress = false;
 let deferredInstallPrompt = null;
 let optionRequestRunning = false;
 let sureshotRequestRunning = false;
-let sureshotRetryAtNextSession = false;
 let sureshotRefreshPending = false;
-let sureshotAutoRefreshTimer = null;
-let lastSureshotAutoRefreshAt = 0;
+let sureshotAutoScanTimer = null;
+let sureshotUniverseScanRunning = false;
+const SURESHOT_AUTO_SCAN_DAY_KEY = 'dhanpulse-sureshot-auto-scan-day-v1';
 let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
 let latestQuotes = {};
@@ -205,6 +205,12 @@ function logEvent(message, level) {
   appLogs.unshift({ time: new Date().toLocaleTimeString('en-IN'), message: message, level: level || 'info' });
   appLogs = appLogs.slice(0, 80);
   if (currentTab === 'Logs') renderLogs();
+}
+
+function indiaTradingDateKey() {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return values.year + '-' + values.month + '-' + values.day;
 }
 
 function isRegularMarketSession() {
@@ -1331,7 +1337,7 @@ function advancedScannerMarkup(tab) {
       '<p><a href="https://www.nseindia.com/all-reports" target="_blank" rel="noopener noreferrer">NSE All Reports ↗</a></p></div>';
   }
   if (tab === 'Sureshot CE/PE') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY/SENSEX CE/PE · OHLC zones + contract discovery; fresh premium checked separately</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX" selected>NIFTY 50 · Index options (default)</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="BSE:SENSEX-INDEX">SENSEX · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse selected setup</button><button class="secondary" id="refreshSureshotStockBoardBtn">Refresh Stock % & Lot Size</button><button class="secondary" id="scanSureshotUniverseBtn">Scan Full F&O Universe</button></div><div id="sureshotStockBoard" class="console-section"><div class="chart-empty">Stock-wise FYERS LTP, daily % move and official lot size will appear here after refresh.</div></div><div id="sureshotUniverseResults" class="console-section"><div class="chart-empty">Sureshot checks the selected underlying automatically during NSE market hours. Full F&O universe scan remains manual and runs in controlled batches.</div></div><div id="setupStatus" class="hint">A setup is shown only after verified underlying OHLC candles, contract descriptors, a fresh timestamped option quote and completed option candles. Chain OI/volume are not used. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>Stocks + NIFTY/BANKNIFTY/SENSEX CE/PE · OHLC zones + contract discovery; fresh premium checked separately</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX" selected>NIFTY 50 · Index options (default)</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="BSE:SENSEX-INDEX">SENSEX · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option><option value="15">15 min</option><option value="60">60 min</option><option value="D">Daily</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse selected setup</button><button class="secondary" id="refreshSureshotStockBoardBtn">Refresh Stock % & Lot Size</button><button class="secondary" id="scanSureshotUniverseBtn">Scan Again · Full F&O Top 5</button></div><div id="sureshotStockBoard" class="console-section"><div class="chart-empty">Stock-wise FYERS LTP, daily % move and official lot size will appear here after refresh.</div></div><div id="sureshotUniverseResults" class="console-section"><div class="chart-empty">Automatic full eligible NSE F&O Top 5 scan starts once per trading day when the live NSE session is open and FYERS is authenticated. You can rescan manually; all five ranked candidates must pass verification.</div></div><div id="setupStatus" class="hint">A setup is shown only after verified underlying OHLC candles, contract descriptors, a fresh timestamped option quote and completed option candles. Chain OI/volume are not used. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum planned RR: <b>1:2</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:2 planned reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
   }
   if (tab === 'FII/DII Flow') {
     return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
@@ -1626,14 +1632,23 @@ async function loadSureshotStockBoard() {
   }
 }
 
-async function loadSureshotUniverseShortlist() {
-  if (currentTab !== 'Sureshot CE/PE') return;
+async function loadSureshotUniverseShortlist(options = {}) {
+  if (currentTab !== 'Sureshot CE/PE' || sureshotUniverseScanRunning) return;
+  const automatic = options.automatic === true;
+  if (automatic && !isRegularMarketSession()) return;
+  if (!localStorage.getItem(DASHBOARD_SESSION_KEY)) {
+    const status = document.querySelector('#setupStatus');
+    if (status) status.textContent = 'Connect FYERS first. Automatic full-universe Top 5 scan will start during the live NSE session after authentication.';
+    return;
+  }
   const button = document.querySelector('#scanSureshotUniverseBtn');
   const host = document.querySelector('#sureshotUniverseResults');
   const status = document.querySelector('#setupStatus');
   if (!host || (button && button.disabled)) return;
+  sureshotUniverseScanRunning = true;
+  try { localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY, indiaTradingDateKey()); } catch {}
   if (button) button.disabled = true;
-  host.innerHTML = '<div class="chart-empty">Starting full eligible NSE F&O scan in small sequential FYERS batches…</div>';
+  host.innerHTML = '<div class="chart-empty">Starting full eligible NSE F&O Top 5 scan in small sequential FYERS batches…</div>';
   if (status) status.textContent = 'Full-universe scan starting. The backend retains scan progress if this app is backgrounded or reopened.';
   try {
     let result = null, scanId = '', offset = 0, total = 0, batchNumber = 0, progressRows = [];
@@ -1713,7 +1728,6 @@ async function loadSureshotUniverseShortlist() {
           (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
           (plan ? '' : '<tr><td colspan="12" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
       }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS option quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. One-lot rupee risk uses official FYERS contract sizing; brokerage, taxes and slippage are excluded. No orders are placed.</p>';
-    sureshotRetryAtNextSession = false;
     if (status) status.textContent = verified.length
       ? (result.selectedCandidatesComplete
         ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s). Best valid setup is ranked first.'
@@ -1725,16 +1739,18 @@ async function loadSureshotUniverseShortlist() {
       const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date());
       const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
       const minutes = Number(fields.hour) * 60 + Number(fields.minute);
-      sureshotRetryAtNextSession = ['Sat', 'Sun'].includes(fields.weekday) || minutes >= 930 || minutes < 555;
-      if (status && sureshotRetryAtNextSession) status.textContent = 'Market closed · Sureshot will automatically retry when the next regular session opens.';
+      if (status) status.textContent = 'Market closed · automatic Top 5 scan will start when the next regular NSE session is open.';
     }
     host.innerHTML = '<div class="console-section"><div class="console-section-head"><h4>NO TRADE · FULL-UNIVERSE SCAN BLOCKED</h4><span class="signal-tone neutral">FYERS VERIFICATION</span></div><p>' +
       escapeHtml(error.message || 'Complete verified full-universe scan unavailable.') +
       '</p><p class="hint">All partial plans are discarded. No stale fallback, sample price or partial ranking is shown as actionable.</p></div>';
     if (status) status.textContent = 'Full-universe scan withheld · ' + (error.message || 'FYERS verification failed.');
-  } finally { if (button) button.disabled = false; }
+  } finally {
+    sureshotUniverseScanRunning = false;
+    if (button) button.disabled = false;
+  }
 }
-// Sureshot scans are user-triggered only; no automatic retries or background provider polling.
+// Auto-start one full-universe scan per India trading date when this tab is active and FYERS is authenticated.
 async function performSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
@@ -2333,7 +2349,7 @@ function render(tab) {
     return;
   }
   currentTab = tab;
-  if (sureshotAutoRefreshTimer) { window.clearInterval(sureshotAutoRefreshTimer); sureshotAutoRefreshTimer = null; }
+  if (sureshotAutoScanTimer) { window.clearInterval(sureshotAutoScanTimer); sureshotAutoScanTimer = null; }
   const dashboardMode = tab === 'Dashboard';
   ['.welcome', '.metrics', '.grid'].forEach(selector => {
     const section = document.querySelector(selector);
@@ -2383,21 +2399,16 @@ function render(tab) {
   else featureContent.innerHTML = '<div class="chart-empty">This workspace has no renderer configured. No market data or signals are shown.</div>';
   bindTabActions();
   if (tab === 'Sureshot CE/PE') {
-    // Analyse the default/selected underlying immediately during the live session.
-    if (isRegularMarketSession()) {
-      lastSureshotAutoRefreshAt = Date.now();
-      window.setTimeout(() => {
-        if (currentTab === 'Sureshot CE/PE' && isRegularMarketSession()) void loadSureshotSetup();
-      }, 0);
-    }
-    // Refresh every five minutes while this tab remains active. Do not launch
-    // a full-universe scan automatically; it is deliberately user-triggered.
-    sureshotAutoRefreshTimer = window.setInterval(() => {
-      if (currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession() || sureshotRequestRunning) return;
-      if (Date.now() - lastSureshotAutoRefreshAt < 300000) return;
-      lastSureshotAutoRefreshAt = Date.now();
-      void loadSureshotSetup();
-    }, 60000);
+    const startAutomaticTopFiveScan = () => {
+      if (currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession() || sureshotUniverseScanRunning) return;
+      let attemptedToday = '';
+      try { attemptedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_DAY_KEY) || ''; } catch {}
+      if (attemptedToday === indiaTradingDateKey()) return;
+      void loadSureshotUniverseShortlist({ automatic: true });
+    };
+    // Check only local session/time state; no provider polling is done by this timer.
+    startAutomaticTopFiveScan();
+    sureshotAutoScanTimer = window.setInterval(startAutomaticTopFiveScan, 30000);
   }
   if (tab === 'Gap-Up/Down') {
     const gapButton = document.querySelector('#loadGapAnalysisBtn');
@@ -3068,6 +3079,8 @@ async function exchangeAuthCode() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok !== true || !data.dashboardSessionToken) throw new Error(data.error || data.detail || 'Authentication failed or session was not issued.');
     localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken);
+    // A renewed backend session must be eligible for today's automatic Top 5 scan.
+    try { localStorage.removeItem(SURESHOT_AUTO_SCAN_DAY_KEY); } catch {}
     authExchangeInProgress = false;
     setFyersStatus('CONNECTED');
     setBackendStatus('ONLINE');

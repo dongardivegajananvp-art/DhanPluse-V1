@@ -24,7 +24,11 @@ const renderBlock = app.slice(renderStart, renderEnd);
 if (!renderBlock.includes("tab === 'Sureshot CE/PE') featureContent.innerHTML = advancedScannerMarkup(tab)")) {
   throw new Error('Sureshot CE/PE renderer is missing.');
 }
-if (!app.includes("loadSureshotUniverseShortlist()")) throw new Error('Sureshot shortlist loader is missing.');
+if (!app.includes('async function loadSureshotUniverseShortlist(options = {})')) throw new Error('Sureshot full-universe shortlist loader is missing.');
+if (!app.includes('startAutomaticTopFiveScan();') || !app.includes('SURESHOT_AUTO_SCAN_DAY_KEY') || !app.includes("localStorage.getItem(DASHBOARD_SESSION_KEY)")) {
+  throw new Error('Authenticated automatic full-universe Top 5 scan trigger is missing.');
+}
+if (!app.includes("window.setInterval(startAutomaticTopFiveScan, 30000)")) throw new Error('Sureshot must detect the start of the regular NSE session while its tab is active.');
 if (!app.includes("localStorage.removeItem('dhanpulse-watchlist-v1')") ||
     !app.includes("localStorage.removeItem('dhanpulse-price-alerts')")) {
   throw new Error('Legacy watchlist and alert data must be cleared from browser storage.');
@@ -53,10 +57,10 @@ console.log('PASS: exactly two visible tabs (Sureshot CE/PE, FYERS Connection); 
 console.log('PASS: legacy watchlist/alert browser data cleared; shared FYERS session preserved; frontend cooldown guard removed.');
 
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
-if (!html.includes('app.js?v=20261105-no-frontend-cooldown-v1') ||
-    !html.includes('sw.js?v=20261105-no-frontend-cooldown-v1') ||
-    !sw.includes('dhanpulse-shell-v124-no-frontend-cooldown-v1') ||
+if (!html.includes('app.js?v=20261105-auto-top-five-v1') ||
+    !html.includes('sw.js?v=20261105-auto-top-five-v1') ||
+    !sw.includes('dhanpulse-shell-v125-auto-top-five-v1') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('PWA session-cache fix must force a new shell cache and bypass stale browser HTTP cache for app assets.');
 }
-console.log('PASS: PWA shell cache is version-bumped and app assets revalidate against the network before cache fallback.');
+console.log('PASS: PWA shell cache is version-bumped for the automatic Sureshot Top 5 build and app assets revalidate against the network before cache fallback.');
