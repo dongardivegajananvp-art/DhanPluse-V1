@@ -33,6 +33,20 @@ if (!app.includes("localStorage.getItem('dhanpulse-dashboard-session-v1')") ||
     !app.includes("const FYERS_COOLDOWN_KEY")) {
   throw new Error('FYERS session and cooldown protections must remain intact.');
 }
+const dashboardCandleStart = app.indexOf('async function loadDashboardCandles()');
+const dashboardCandleEnd = app.indexOf('\nfunction quoteCardsMarkup()', dashboardCandleStart);
+if (dashboardCandleStart < 0 || dashboardCandleEnd < 0) {
+  throw new Error('Dashboard candle request handler could not be located.');
+}
+const dashboardCandleHandler = app.slice(dashboardCandleStart, dashboardCandleEnd);
+if (!dashboardCandleHandler.includes("const requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';") ||
+    !dashboardCandleHandler.includes("currentSession && currentSession !== requestSession") ||
+    !dashboardCandleHandler.includes("if (requestSession && currentSession === requestSession) localStorage.removeItem(DASHBOARD_SESSION_KEY)")) {
+  throw new Error('Dashboard candle 401 handler must preserve a newer FYERS session.');
+}
+if (dashboardCandleHandler.includes("localStorage.removeItem('dhanpulse-dashboard-session-v1')")) {
+  throw new Error('Unconditional dashboard-session deletion remains in the candle handler.');
+}
 console.log('PASS: exactly two visible tabs (Sureshot CE/PE, FYERS Connection); connection controls are separated from Sureshot.');
 console.log('PASS: legacy watchlist/alert browser data cleared; FYERS session and rate-limit guard preserved.');
 
