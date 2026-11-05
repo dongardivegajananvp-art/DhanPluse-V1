@@ -65,7 +65,7 @@ test("frontend automatic scan requires active Sureshot tab, open session and sha
   assert.match(trigger, /SURESHOT_AUTO_SCAN_DAY_KEY/);
   const loader = app.slice(app.indexOf("async function loadSureshotUniverseShortlist"), app.indexOf("async function performSureshotSetup"));
   assert.match(loader, /DASHBOARD_SESSION_KEY/);
-  assert.match(loader, /automatic: true/);
+  assert.match(trigger, /loadSureshotUniverseShortlist\(\{ automatic: true \}\)/);
 });
 
 test("frontend marks the trading date only after complete Top 5 scan; failure keeps retry eligible", () => {
