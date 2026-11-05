@@ -19,7 +19,7 @@ import { normalizeOptionContractDiscovery } from './option-contract-discovery.js
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
 import { canScheduleMarketSocketFallback, getMarketSocketReconnectDelay, buildMarketSocketSubscriptionSymbols } from './market-socket-recovery.js';
-import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload } from './fno-quote-snapshot.js';
+import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 
 const require = createRequire(import.meta.url);
@@ -1204,11 +1204,16 @@ app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) =
   if (!accessToken) return res.status(401).json({ ok: false, error: "Connect FYERS first." });
 
   // Reuse the last successful snapshot while its exchange timestamps remain fresh.
-  if (stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS) {
-    const cache = stockQuoteCache.data;
-    const fresh = cache.data.filter(item => Math.abs(Date.now() - Number(item.v.tt) * 1000) <= 30000);
-    if (fresh.length) return res.json({ ...cache, marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED", data: fresh, quotedCount: fresh.length, cached: true, fetchedAt: new Date(stockQuoteCache.fetchedAt).toISOString() });
+  const quoteUniverse = await getNseFnoEquityUniverse();
+  const expectedQuoteSymbols = quoteUniverse.data.map(item => item.symbol);
+  if (stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS &&
+      isCompleteFreshFnoQuoteSnapshot(stockQuoteCache.data, expectedQuoteSymbols, Date.now())) {
+    return res.json({ ...stockQuoteCache.data, marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED",
+      cached: true, fetchedAt: new Date(stockQuoteCache.fetchedAt).toISOString() });
   }
+  // An aging snapshot is discarded as a whole. Do not return a fresh-looking
+  // subset when even one F&O symbol has a stale or missing exchange timestamp.
+  if (stockQuoteCache.data) stockQuoteCache = { fetchedAt: 0, data: null };
 
   const remaining = stockQuoteCooldown.until - Date.now();
   if (remaining > 0) {
@@ -1350,11 +1355,14 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       const universe = await getNseFnoEquityUniverse();
       const indexSymbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX"];
       const indexTicks = new Map(indexSymbols.map(symbol => [symbol, latestTicks.get(symbol)]));
-      if (!stockQuoteCache.data || Date.now() - stockQuoteCache.fetchedAt >= STOCK_QUOTE_CACHE_MS) {
-        syncFnoQuoteCacheFromMoversPayload(moversSnapshotCache?.payload, universe.data.map(item => item.symbol));
+      const expectedQuoteSymbols = universe.data.map(item => item.symbol);
+      if (!isCompleteFreshFnoQuoteSnapshot(stockQuoteCache.data, expectedQuoteSymbols, Date.now()) ||
+          Date.now() - stockQuoteCache.fetchedAt >= STOCK_QUOTE_CACHE_MS) {
+        syncFnoQuoteCacheFromMoversPayload(moversSnapshotCache?.payload, expectedQuoteSymbols);
       }
       scanStage = "VERIFY_FNO_QUOTES";
-      let snapshot = stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS
+      let snapshot = stockQuoteCache.data && Date.now() - stockQuoteCache.fetchedAt < STOCK_QUOTE_CACHE_MS &&
+        isCompleteFreshFnoQuoteSnapshot(stockQuoteCache.data, expectedQuoteSymbols, Date.now())
         ? stockQuoteCache.data : null;
       if (!snapshot) {
         const remaining = stockQuoteCooldown.until - Date.now();
