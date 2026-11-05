@@ -97,6 +97,8 @@ let sureshotRefreshPending = false;
 let sureshotAutoScanTimer = null;
 let sureshotUniverseScanRunning = false;
 const SURESHOT_AUTO_SCAN_DAY_KEY = 'dhanpulse-sureshot-auto-scan-day-v1';
+const SURESHOT_AUTO_SCAN_ATTEMPT_KEY = 'dhanpulse-sureshot-auto-scan-attempt-v1';
+let sureshotAutoScanAttemptedToday = '';
 let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
 let latestQuotes = {};
@@ -1645,6 +1647,13 @@ async function loadSureshotUniverseShortlist(options = {}) {
   const host = document.querySelector('#sureshotUniverseResults');
   const status = document.querySelector('#setupStatus');
   if (!host || (button && button.disabled)) return;
+  // Record one automatic attempt per India trading date before any FYERS request.
+  // A 429/network failure must not make the 30-second session timer hammer FYERS.
+  // Manual rescan remains available; a fresh OAuth session clears this attempt.
+  if (isRegularMarketSession()) {
+    sureshotAutoScanAttemptedToday = indiaTradingDateKey();
+    try { localStorage.setItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY, sureshotAutoScanAttemptedToday); } catch {}
+  }
   sureshotUniverseScanRunning = true;
   if (button) button.disabled = true;
   host.innerHTML = '<div class="chart-empty">Starting full eligible NSE F&O Top 5 scan in small sequential FYERS batches…</div>';
@@ -2403,9 +2412,13 @@ function render(tab) {
   if (tab === 'Sureshot CE/PE') {
     const startAutomaticTopFiveScan = () => {
       if (currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession() || sureshotUniverseScanRunning) return;
-      let attemptedToday = '';
-      try { attemptedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_DAY_KEY) || ''; } catch {}
-      if (attemptedToday === indiaTradingDateKey()) return;
+      const today = indiaTradingDateKey();
+      let completedToday = '', attemptedToday = sureshotAutoScanAttemptedToday;
+      try {
+        completedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_DAY_KEY) || '';
+        attemptedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY) || attemptedToday;
+      } catch {}
+      if (completedToday === today || attemptedToday === today) return;
       void loadSureshotUniverseShortlist({ automatic: true });
     };
     // Check only local session/time state; no provider polling is done by this timer.
@@ -3081,8 +3094,12 @@ async function exchangeAuthCode() {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok !== true || !data.dashboardSessionToken) throw new Error(data.error || data.detail || 'Authentication failed or session was not issued.');
     localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken);
-    // A renewed backend session must be eligible for today's automatic Top 5 scan.
-    try { localStorage.removeItem(SURESHOT_AUTO_SCAN_DAY_KEY); } catch {}
+    // A renewed backend session must be eligible for one fresh automatic Top 5 attempt.
+    sureshotAutoScanAttemptedToday = '';
+    try {
+      localStorage.removeItem(SURESHOT_AUTO_SCAN_DAY_KEY);
+      localStorage.removeItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY);
+    } catch {}
     authExchangeInProgress = false;
     setFyersStatus('CONNECTED');
     setBackendStatus('ONLINE');
