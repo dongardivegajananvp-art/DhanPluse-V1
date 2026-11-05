@@ -53,9 +53,9 @@ console.log('PASS: exactly two visible tabs (Sureshot CE/PE, FYERS Connection); 
 console.log('PASS: legacy watchlist/alert browser data cleared; shared FYERS session preserved; frontend cooldown guard removed.');
 
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
-if (!html.includes('app.js?v=20261105-session-race-v4') ||
-    !html.includes('sw.js?v=20261105-session-race-v4') ||
-    !sw.includes('dhanpulse-shell-v123-session-race-v4') ||
+if (!html.includes('app.js?v=20261105-no-frontend-cooldown-v1') ||
+    !html.includes('sw.js?v=20261105-no-frontend-cooldown-v1') ||
+    !sw.includes('dhanpulse-shell-v124-no-frontend-cooldown-v1') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('PWA session-cache fix must force a new shell cache and bypass stale browser HTTP cache for app assets.');
 }
