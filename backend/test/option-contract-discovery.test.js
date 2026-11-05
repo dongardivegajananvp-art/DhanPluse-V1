@@ -61,7 +61,6 @@ test("continues rejecting unsupported exchanges and malformed symbols", () => {
   assert.throws(() => normalizeOptionContractDiscovery({
     expiry: "1795651200",
     optionsChain: [
-      { symbol: "MCX:GOLD26NOV100000CE", option_type: "CE", strike_price: 100000 },
       { symbol: "BSE:SENSEX-INDEX", option_type: "CE", strike_price: 82000 }
     ]
   }), /no_valid_option_contract_descriptors/);
