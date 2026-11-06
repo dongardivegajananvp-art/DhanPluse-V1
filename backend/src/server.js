@@ -360,7 +360,7 @@ function startMarketDataStream(token) {
         : { message: String(error ?? 'Unknown socket error') };
       const code = detail.code ?? detail.statusCode ?? detail.status ?? detail.response?.status ?? null;
       const message = String(detail.message ?? detail.error ?? detail.reason ?? 'Unspecified FYERS SDK socket error')
-        .replace(/\\s+/g, ' ').slice(0, 240);
+        .replace(/\s+/g, ' ').slice(0, 240);
       recordDiagnostic('warn', 'market_socket_error', {
         code: code == null ? null : String(code).slice(0, 40),
         message,
