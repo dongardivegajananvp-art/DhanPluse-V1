@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dhanpulse-shell-v133-single-html-tabs-v1';
+const CACHE_NAME = 'dhanpulse-shell-v134-public-pages-v1';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
 self.addEventListener('install', event => {
