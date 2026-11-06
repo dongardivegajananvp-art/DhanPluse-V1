@@ -11,6 +11,7 @@ import { getNseSessionWindow } from './market-data.js';
 import { getExchangeSessionWindows } from './exchange-session-status.js';
 
 import { buildFnoEquityUniverse } from './fno-universe.js';
+import { getReferenceDataRetryDelay } from './reference-data-backoff.js';
 import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
@@ -1176,6 +1177,9 @@ app.get("/api/market/institutional-flow", async (_req, res) => {
 
 let fnoUniverseCache = { fetchedAt: 0, data: null };
 let fnoUniversePromise = null;
+let fnoUniverseFailureCount = 0;
+let fnoUniverseRetryAt = 0;
+let fnoUniverseLastError = '';
 let mcxFnoUniverseCache = { fetchedAt: 0, data: null, master: null };
 let mcxFnoUniversePromise = null;
 function buildCurrentMcxFnoUniverse(master, fetchedAt) {
@@ -1275,6 +1279,12 @@ function syncFnoQuoteCacheFromMoversPayload(payload, symbols = moversSymbols) {
 async function getNseFnoEquityUniverse() {
   if (fnoUniverseCache.data && Date.now() - fnoUniverseCache.fetchedAt < 24 * 60 * 60 * 1000) return fnoUniverseCache.data;
   if (fnoUniversePromise) return fnoUniversePromise;
+  if (Date.now() < fnoUniverseRetryAt) {
+    const error = new Error(fnoUniverseLastError || 'FYERS F&O symbol master retry is cooling down.');
+    error.statusCode = 503;
+    error.retryAfterSeconds = Math.max(1, Math.ceil((fnoUniverseRetryAt - Date.now()) / 1000));
+    throw error;
+  }
   fnoUniversePromise = (async () => {
     const [foResponse, cmResponse] = await Promise.all([
       fetchWithFyersBudget("https://public.fyers.in/sym_details/NSE_FO_sym_master.json", { signal: AbortSignal.timeout(45000) }),
@@ -1291,9 +1301,23 @@ async function getNseFnoEquityUniverse() {
     }
     const result = { source: "FYERS NSE_FO + NSE_CM symbol masters", fetchedAt: new Date().toISOString(), count: symbols.length, data: symbols };
     fnoUniverseCache = { fetchedAt: Date.now(), data: result };
+    fnoUniverseFailureCount = 0;
+    fnoUniverseRetryAt = 0;
+    fnoUniverseLastError = '';
     console.log("FYERS NSE F&O equity universe loaded:", JSON.stringify({ count: symbols.length, source: result.source }));
     return result;
-  })();
+  })().catch(error => {
+    fnoUniverseFailureCount += 1;
+    const retryDelayMs = getReferenceDataRetryDelay(fnoUniverseFailureCount);
+    fnoUniverseRetryAt = Date.now() + retryDelayMs;
+    fnoUniverseLastError = String(error?.message || 'FYERS F&O symbol master unavailable.').slice(0, 160);
+    console.warn("FYERS NSE F&O symbol master retry backoff activated:", JSON.stringify({
+      failureCount: fnoUniverseFailureCount,
+      retryAfterSeconds: Math.ceil(retryDelayMs / 1000),
+      reason: fnoUniverseLastError
+    }));
+    throw error;
+  });
   try { return await fnoUniversePromise; }
   finally { fnoUniversePromise = null; }
 }
@@ -1312,8 +1336,11 @@ app.get("/api/market/fno-universe", async (_req, res) => {
       data: universe.data
     });
   } catch (error) {
+    const retryAfterSeconds = Math.max(0, Number(error.retryAfterSeconds) || 0);
+    if (retryAfterSeconds) res.set("Retry-After", String(retryAfterSeconds));
     console.warn("Verified F&O universe unavailable:", String(error?.message || error).slice(0, 160));
-    res.status(503).json({ ok: false, error: "Verified NSE F&O universe unavailable; symbol selection blocked.", detail: String(error?.message || error).slice(0, 160) });
+    res.status(503).json({ ok: false, error: "Verified NSE F&O universe unavailable; symbol selection blocked.",
+      detail: String(error?.message || error).slice(0, 160), ...(retryAfterSeconds ? { retryAfterSeconds } : {}) });
   }
 });
 function sendFyersDataApiCooldown(res, extra = {}) {
