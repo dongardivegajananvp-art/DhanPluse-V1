@@ -93,3 +93,9 @@ test("market ticks without exchange timestamps are rejected and live snapshots e
   assert.ok(snapshotStart >= 0 && snapshotEnd > snapshotStart);
   assert.match(source.slice(snapshotStart, snapshotEnd), /quoteTimestampStatus/);
 });
+
+test("FYERS SDK reconnect attempts are bounded to avoid repeated provider 429 pressure", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  assert.match(source, /const SDK_RECONNECT_RETRIES = 6;/);
+  assert.doesNotMatch(source, /const SDK_RECONNECT_RETRIES = 50;/);
+});

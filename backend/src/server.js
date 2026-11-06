@@ -247,7 +247,7 @@ function startMarketDataStream(token) {
     socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
     marketSocket = socket;
     marketSocketToken = token;
-    const SDK_RECONNECT_RETRIES = 50;
+    const SDK_RECONNECT_RETRIES = 6;
     // FYERS Node docs use `autoreconnect`; support the camelCase spelling
     // present in some published SDK examples without creating two controllers.
     const sdkReconnect = typeof socket.autoreconnect === 'function'
