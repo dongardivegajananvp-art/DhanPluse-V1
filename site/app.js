@@ -3332,6 +3332,12 @@ async function exchangeAuthCode() {
     logEvent('FYERS authentication succeeded; checking live quotes.', 'info');
     showMessage('FYERS authentication succeeded. Verifying live quotes…');
     await fetchLiveQuotes(true);
+    // The pre-login chart request may have been rejected before this session existed.
+    // Re-run it with the newly issued dashboard session, then start today's NSE scan.
+    if (currentTab === 'Sureshot CE/PE') {
+      await loadSureshotSetup();
+      if (isRegularMarketSession()) void loadSureshotUniverseShortlist({ automatic: true });
+    }
   } catch (error) {
     authExchangeInProgress = false;
     setStatus('FYERS AUTH FAILED');
