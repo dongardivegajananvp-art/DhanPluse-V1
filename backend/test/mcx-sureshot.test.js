@@ -93,29 +93,29 @@ test("MCX shortlist ranks only fresh exchange-timestamped quote rows", () => {
   assert.deepEqual(rows.coverage, { requested: 1, received: 1, fresh: 1, excluded: 0, missing: 0 });
 });
 
-test("MCX shortlist excludes stale or missing contracts when fresh peers exist", () => {
+test("MCX shortlist rejects partial quote coverage instead of ranking fresh peers", () => {
   const universe = [
     ...buildMcxFuturesUniverse(master, now),
     { symbol: "MCX:NATURALGAS26NOVFUT", underlying: "NATURALGAS" }
   ];
-  const quoteRows = [
-    { n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, tt: Math.floor(now / 1000) } },
-    { n: "MCX:NATURALGAS26NOVFUT", v: { lp: 320, chp: 0.5, tt: Math.floor((now - 60000) / 1000) } }
-  ];
-  const result = buildVerifiedMcxShortlist({ universe, quoteRows, now });
-  assert.equal(result.freshQuoteCount, 1);
-  assert.equal(result.excludedQuoteCount, 1);
-  assert.equal(result.missingQuoteCount, 0);
-  assert.deepEqual(result.coverage, { requested: 2, received: 2, fresh: 1, excluded: 1, missing: 0 });
-  assert.equal(result.data[0].symbol, "MCX:CRUDEOIL26NOVFUT");
+  const freshCrude = { n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, tt: Math.floor(now / 1000) } };
+  assert.throws(() => buildVerifiedMcxShortlist({
+    universe, quoteRows: [freshCrude], now
+  }), /incomplete_mcx_quote_snapshot/);
+  assert.throws(() => buildVerifiedMcxShortlist({
+    universe, quoteRows: [
+      freshCrude,
+      { n: "MCX:NATURALGAS26NOVFUT", v: { lp: 320, chp: 0.5, tt: Math.floor((now - 60000) / 1000) } }
+    ], now
+  }), /stale_or_invalid_mcx_quote_snapshot/);
 });
 
 test("MCX shortlist fails closed when no fresh quotes are available and rejects duplicate or unknown symbols", () => {
   const universe = buildMcxFuturesUniverse(master, now);
-  assert.throws(() => buildVerifiedMcxShortlist({ universe, quoteRows: [], now }), /no_fresh_mcx_future_quotes/);
+  assert.throws(() => buildVerifiedMcxShortlist({ universe, quoteRows: [], now }), /incomplete_mcx_quote_snapshot/);
   assert.throws(() => buildVerifiedMcxShortlist({
     universe, now, quoteRows: [{ n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, tt: Math.floor((now - 60000) / 1000) } }]
-  }), /no_fresh_mcx_future_quotes/);
+  }), /stale_or_invalid_mcx_quote_snapshot/);
   assert.throws(() => buildVerifiedMcxShortlist({
     universe, now, quoteRows: [
       { n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, tt: Math.floor(now / 1000) } },
