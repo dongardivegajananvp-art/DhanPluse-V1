@@ -645,7 +645,7 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
     return res.status(400).json({ error: 'FYERS login state is invalid or expired. Start Connect FYERS again.' });
   }
   pendingAuthStates.delete(state);
-  if (!fyersTokenStoreReady) {
+  if (fyersTokenStore.configured && !fyersTokenStoreReady) {
     return res.status(503).json({ error: 'Secure FYERS token storage is not ready. Configure DATABASE_URL and FYERS_TOKEN_ENCRYPTION_KEY, then restart the backend.' });
   }
   try {
@@ -661,11 +661,13 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
       return res.status(401).json({ error: 'FYERS authentication failed.', detail: data.message || data.error || 'Please check FYERS settings.' });
     }
     const newAuthenticatedAt = new Date().toISOString();
-    try {
-      await fyersTokenStore.save(data.access_token, newAuthenticatedAt);
-    } catch (storageError) {
-      console.error('FYERS token was issued but secure persistence failed; login is not activated.', storageError?.message || 'database error');
-      return res.status(503).json({ error: 'FYERS token could not be securely saved. Connection was not activated; check backend database configuration.' });
+    if (fyersTokenStore.configured) {
+      try {
+        await fyersTokenStore.save(data.access_token, newAuthenticatedAt);
+      } catch (storageError) {
+        console.error('FYERS token was issued but secure persistence failed; login is not activated.', storageError?.message || 'database error');
+        return res.status(503).json({ error: 'FYERS token could not be securely saved. Connection was not activated; check backend database configuration.' });
+      }
     }
     accessToken = data.access_token;
     // Keep other valid browser/PWA dashboard sessions alive when this browser
@@ -2487,7 +2489,7 @@ async function startServer() {
       console.error('FYERS PostgreSQL token store initialization failed; FYERS login remains disabled until fixed:', error?.message || 'database error');
     }
   } else {
-    console.error('FYERS login disabled: configure DATABASE_URL and FYERS_TOKEN_ENCRYPTION_KEY for encrypted server-side token persistence.');
+    console.warn('FYERS PostgreSQL persistence is not configured yet; existing in-memory authentication remains enabled until DATABASE_URL and FYERS_TOKEN_ENCRYPTION_KEY are added. Tokens will not survive a backend restart yet.');
   }
   app.listen(port, () => {
     console.log(`DhanPulse backend listening on ${port}`);
