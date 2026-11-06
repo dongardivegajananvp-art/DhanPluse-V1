@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: DhanPluse-V1
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeployTrigger: commit
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dhanpulse-fyers-auth
+          property: connectionString
+
+databases:
+  - name: dhanpulse-fyers-auth
+    plan: free
+    region: singapore
+    postgresMajorVersion: "18"
+    databaseName: dhanpulse_fyers_auth
+    user: dhanpulse_fyers_auth_user
