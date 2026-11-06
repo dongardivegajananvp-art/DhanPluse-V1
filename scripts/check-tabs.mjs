@@ -9,7 +9,7 @@ const navTabs = [...navBlock[1].matchAll(/data-tab="([^"]+)"/g)]
 if (navTabs.length !== 2 || navTabs[0] !== 'Sureshot CE/PE' || navTabs[1] !== 'FYERS Connection') {
   throw new Error('Expected the two existing trading app tabs; found: ' + navTabs.join(', '));
 }
-const publicNav = html.match(/<nav id="publicNav">([\\s\\S]*?)<\\/nav>/);
+const publicNav = html.match(/<nav id="publicNav">([\s\S]*?)<\/nav>/);
 if (!publicNav) throw new Error('Public website navigation is missing.');
 const publicTabs = [...publicNav[1].matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]);
 const requiredPublicTabs = ['Home','About','Features','Contact','Login','Signup','App'];
