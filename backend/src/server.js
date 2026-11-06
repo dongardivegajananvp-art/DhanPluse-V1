@@ -637,6 +637,16 @@ app.get('/api/status', (_req, res) => {
   });
 });
 
+function createDashboardSessionToken() {
+  const keyHex = String(process.env.FYERS_TOKEN_ENCRYPTION_KEY || '').trim();
+  if (fyersTokenStore.configured && /^[a-f0-9]{64}$/i.test(keyHex) && accessToken && authenticatedAt) {
+    return crypto.createHmac('sha256', Buffer.from(keyHex, 'hex'))
+      .update(`DhanPulse/dashboard-session/v1:${accessToken}:${authenticatedAt}`)
+      .digest('hex');
+  }
+  return crypto.randomBytes(32).toString('hex');
+}
+
 function requireDashboardSession(req, res, next) {
   // The official FYERS NSE F&O instrument master is public reference data.
   // Exempt only this read-only GET endpoint; all quotes, candles, options,
@@ -646,11 +656,17 @@ function requireDashboardSession(req, res, next) {
   const match = /^Bearer ([a-f0-9]{64})$/.exec(header);
   const token = match ? match[1] : '';
   const session = token ? dashboardSessions.get(token) : null;
-  if (!session || Date.now() - session.createdAt > DASHBOARD_SESSION_TTL_MS || !accessToken) {
+  const persistedSessionValid = Boolean(token && accessToken && fyersTokenStore.configured &&
+    token === createDashboardSessionToken());
+  if ((!session || Date.now() - session.createdAt > DASHBOARD_SESSION_TTL_MS) && !persistedSessionValid) {
     if (token) dashboardSessions.delete(token);
     return res.status(401).json({ ok: false, error: 'Dashboard session missing or expired. Reconnect FYERS.' });
   }
-  session.lastSeenAt = Date.now();
+  if (!session && persistedSessionValid) {
+    dashboardSessions.set(token, { createdAt: Date.now(), lastSeenAt: Date.now() });
+  } else if (session) {
+    session.lastSeenAt = Date.now();
+  }
   return next();
 }
 
@@ -720,13 +736,11 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
       }
     }
     accessToken = data.access_token;
-    // Keep other valid browser/PWA dashboard sessions alive when this browser
-    // completes a fresh OAuth login. Clearing the whole map made one tab's
-    // reconnect invalidate every other tab's bearer token, producing a false
-    // connect/disconnect loop and 401s on protected F&O endpoints.
-    const dashboardSessionToken = crypto.randomBytes(32).toString('hex');
-    dashboardSessions.set(dashboardSessionToken, { createdAt: Date.now(), lastSeenAt: Date.now() });
     authenticatedAt = newAuthenticatedAt;
+    // With encrypted PostgreSQL persistence, this HMAC-derived browser session
+    // remains verifiable after a backend restart without exposing the FYERS token.
+    const dashboardSessionToken = createDashboardSessionToken();
+    dashboardSessions.set(dashboardSessionToken, { createdAt: Date.now(), lastSeenAt: Date.now() });
     restQuoteCache = null;
     restQuoteFetchedAt = 0;
     startMarketDataStream(accessToken);
@@ -1614,12 +1628,14 @@ const SURESHOT_UNIVERSE_SCAN_LIMIT = 5;
 const SURESHOT_BATCH_SIZE = 5;
 const SURESHOT_SCAN_TTL_MS = 30 * 60 * 1000;
 let sureshotAutoPlansInFlight = false;
+let nseSureshotAutoPlansInFlight = false;
+let mcxSureshotAutoPlansInFlight = false;
 let sureshotScanState = null;
 app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, res) => {
   res.set("Cache-Control", "no-store");
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
   if (!nseRegularSessionNow()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Market session is closed; actionable option plans are withheld." });
-  if (sureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "A Sureshot batch is already running." });
+  if (nseSureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "An NSE Sureshot batch is already running." });
   let scanId = String(req.query.scanId || "");
   let offset = Number(req.query.offset ?? 0);
   if (!Number.isInteger(offset) || offset < 0) return res.status(400).json({ ok: false, scanComplete: false, error: "Invalid scan offset." });
@@ -1637,6 +1653,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
   } else if (!scanId && sureshotScanState) {
     sureshotScanState = null;
   }
+  nseSureshotAutoPlansInFlight = true;
   sureshotAutoPlansInFlight = true;
   let scanStage = "LOAD_FNO_UNIVERSE";
   console.info("Sureshot scan started:", JSON.stringify({ resumed: Boolean(scanId), offset }));
@@ -1822,7 +1839,10 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         : status === 409 ? String(error.message || "Market session closed; full-universe scan blocked.")
         : "Automatic full-universe trade-plan scan could not verify required data.",
       detail: String(error.message || "Verification failed.").slice(0, 180), partialPlansDiscarded: true });
-  } finally { sureshotAutoPlansInFlight = false; }
+  } finally {
+    nseSureshotAutoPlansInFlight = false;
+    sureshotAutoPlansInFlight = mcxSureshotAutoPlansInFlight;
+  }
 });
 
 // MCX Sureshot uses its own official MCX_COM master and MCX session gate.
@@ -1836,7 +1856,8 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
   if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(mcxSocketAgeSeconds) || mcxSocketAgeSeconds < 0 || mcxSocketAgeSeconds > 30) {
     return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "MCX WebSocket feed is not fresh; reconnect or wait for a verified MCX exchange tick before scanning." });
   }
-  if (sureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Another Sureshot scan is already running." });
+  if (mcxSureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "An MCX Sureshot scan is already running." });
+  mcxSureshotAutoPlansInFlight = true;
   sureshotAutoPlansInFlight = true;
   let stage = "LOAD_MCX_MASTER";
   try {
@@ -2003,7 +2024,8 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
       detail: String(error.message || "MCX scan failed.").slice(0, 180), partialPlansDiscarded: true
     });
   } finally {
-    sureshotAutoPlansInFlight = false;
+    mcxSureshotAutoPlansInFlight = false;
+    sureshotAutoPlansInFlight = nseSureshotAutoPlansInFlight;
   }
 });
 
