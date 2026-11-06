@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
+import { createFyersTokenStore } from './fyers-token-store.js';
 import { createRequire } from 'node:module';
 import express from 'express';
 import helmet from 'helmet';
@@ -41,6 +42,11 @@ const appId = (process.env.FYERS_APP_ID || '').trim();
 const appSecret = (process.env.FYERS_APP_SECRET || '').trim();
 // FIX: Accept both URI and URL naming - Render UI truncation issue
 const redirectUri = (process.env.FYERS_REDIRECT_URI || process.env.FYERS_REDIRECT_URL || process.env.FYERS_REDIRECT || '').trim();
+const fyersTokenStore = createFyersTokenStore({
+  databaseUrl: process.env.DATABASE_URL,
+  encryptionKey: process.env.FYERS_TOKEN_ENCRYPTION_KEY
+});
+let fyersTokenStoreReady = false;
 const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
 let chartStreamSymbol = null;
 
@@ -639,6 +645,9 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
     return res.status(400).json({ error: 'FYERS login state is invalid or expired. Start Connect FYERS again.' });
   }
   pendingAuthStates.delete(state);
+  if (!fyersTokenStoreReady) {
+    return res.status(503).json({ error: 'Secure FYERS token storage is not ready. Configure DATABASE_URL and FYERS_TOKEN_ENCRYPTION_KEY, then restart the backend.' });
+  }
   try {
     const appIdHash = crypto.createHash('sha256').update(`${appId}:${appSecret}`).digest('hex');
     const response = await fetch('https://api-t1.fyers.in/api/v3/validate-authcode', {
@@ -651,6 +660,13 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
     if (!response.ok || data.s !== 'ok' || !data.access_token) {
       return res.status(401).json({ error: 'FYERS authentication failed.', detail: data.message || data.error || 'Please check FYERS settings.' });
     }
+    const newAuthenticatedAt = new Date().toISOString();
+    try {
+      await fyersTokenStore.save(data.access_token, newAuthenticatedAt);
+    } catch (storageError) {
+      console.error('FYERS token was issued but secure persistence failed; login is not activated.', storageError?.message || 'database error');
+      return res.status(503).json({ error: 'FYERS token could not be securely saved. Connection was not activated; check backend database configuration.' });
+    }
     accessToken = data.access_token;
     // Keep other valid browser/PWA dashboard sessions alive when this browser
     // completes a fresh OAuth login. Clearing the whole map made one tab's
@@ -658,7 +674,7 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
     // connect/disconnect loop and 401s on protected F&O endpoints.
     const dashboardSessionToken = crypto.randomBytes(32).toString('hex');
     dashboardSessions.set(dashboardSessionToken, { createdAt: Date.now(), lastSeenAt: Date.now() });
-    authenticatedAt = new Date().toISOString();
+    authenticatedAt = newAuthenticatedAt;
     restQuoteCache = null;
     restQuoteFetchedAt = 0;
     startMarketDataStream(accessToken);
@@ -751,6 +767,9 @@ function invalidateFyersSession(reason) {
   streamError = 'FYERS access token was rejected or expired. Reconnect FYERS.';
   latestTicks.clear();
   dashboardSessions.clear();
+  fyersTokenStore.clear().catch(error => {
+    console.error('Could not clear persisted FYERS token after auth rejection:', error?.message || 'database error');
+  });
   const expiredSocket = marketSocket;
   marketSocket = null;
   marketSocketToken = '';
@@ -2449,6 +2468,33 @@ app.use((err, _req, res, _next) => {
 });
 
 const port = Number(process.env.PORT || 8080);
-app.listen(port, () => {
-  console.log(`DhanPulse backend listening on ${port}`);
+
+async function startServer() {
+  if (fyersTokenStore.configured) {
+    try {
+      const savedAuth = await fyersTokenStore.initialize();
+      fyersTokenStoreReady = true;
+      if (savedAuth?.accessToken) {
+        accessToken = savedAuth.accessToken;
+        authenticatedAt = savedAuth.authenticatedAt;
+        console.log('Encrypted FYERS token restored from PostgreSQL; reconnecting the read-only market data socket.');
+        startMarketDataStream(accessToken);
+      } else {
+        console.log('FYERS PostgreSQL token store ready; no saved token exists. Connect FYERS to authenticate.');
+      }
+    } catch (error) {
+      fyersTokenStoreReady = false;
+      console.error('FYERS PostgreSQL token store initialization failed; FYERS login remains disabled until fixed:', error?.message || 'database error');
+    }
+  } else {
+    console.error('FYERS login disabled: configure DATABASE_URL and FYERS_TOKEN_ENCRYPTION_KEY for encrypted server-side token persistence.');
+  }
+  app.listen(port, () => {
+    console.log(`DhanPulse backend listening on ${port}`);
+  });
+}
+
+startServer().catch(error => {
+  console.error('DhanPulse backend startup failed:', error?.message || 'startup error');
+  process.exitCode = 1;
 });
