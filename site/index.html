@@ -314,8 +314,11 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 </style>
 </head>
 <body>
-<aside class="sidebar"><div class="brand"><span class="brandmark">DP</span><div><b>DhanPulse</b><small>ULTIMATE · FYERS</small></div></div><nav id="nav">
-<button class="active" data-tab="Home">⌂ Home</button><button data-tab="About">About</button><button data-tab="Features">Features</button><button data-tab="Contact">Contact</button><button data-tab="Login">Login</button><button data-tab="Signup">Sign up</button><button data-tab="App">🚀 Open App</button><button data-tab="Sureshot CE/PE">🎯 Sureshot</button><button data-tab="FYERS Connection">🔐 FYERS Connect</button>
+<aside class="sidebar"><div class="brand"><span class="brandmark">DP</span><div><b>DhanPulse</b><small>ULTIMATE · FYERS</small></div></div><nav id="publicNav">
+<button class="active" data-tab="Home">⌂ Home</button><button data-tab="About">About</button><button data-tab="Features">Features</button><button data-tab="Contact">Contact</button><button data-tab="Login">Login</button><button data-tab="Signup">Sign up</button><button data-tab="App">🚀 Open App</button>
+</nav>
+<nav id="nav">
+<button data-tab="Sureshot CE/PE">🎯 Sureshot</button><button data-tab="FYERS Connection">🔐 FYERS Connect</button>
 </nav><div class="sidefoot"><span class="dot gray" id="sideFeedDot"></span> <span id="sideFeedStatus">Waiting for verified live feed</span></div></aside>
 <main><header><div><p class="eyebrow">TRADING WORKSPACE / INDIA</p><h1 id="pageTitle">Sureshot CE/PE</h1></div><div class="header-right"><span class="market-pill"><i class="dot gray"></i><span id="marketStatus">LIVE DATA NOT CONNECTED</span></span><div class="avatar">DP</div></div></header>
 <section id="publicPage" aria-live="polite"></section>
@@ -2962,7 +2965,7 @@ function renderPublicPage(page) {
   root.style.display='block';
   title.textContent = page === 'Signup' ? 'Create account' : page;
   panelTitle.textContent = page; featureTitle.textContent = page; featureDesc.textContent = 'DhanPulse — verified market intelligence';
-  nav.querySelectorAll('button[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === page));
+  document.querySelectorAll('#publicNav button[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === page));
   const pages = {};
   pages.Home = '<div class="public-hero"><span class="public-kicker">DHANPULSE · INDIA MARKET WORKSPACE</span><h2>Make every market decision with clarity.</h2><p>A focused trading workstation built around verified FYERS market data, disciplined setups and risk-first analysis. Read-only by design: no order is placed from this website.</p><div class="public-actions"><button class="public-btn primary" data-public-action="app">Open DhanPulse App</button><button class="public-btn" data-public-action="features">Explore features</button></div></div><section class="public-section"><h3>One workspace. Verified information first.</h3><p>Market connectivity, live quotes, option setup research and system diagnostics stay together in one responsive app. If exchange data is missing or stale, actionable signals remain blocked.</p><div class="public-cards"><article class="public-card"><span class="ico">◉</span><h4>Verify the feed</h4><p>Separate backend health, broker authentication, socket state and fresh exchange ticks.</p></article><article class="public-card"><span class="ico">⌁</span><h4>Research setups</h4><p>Review CE/PE candidates only after the required underlying and option data are verified.</p></article><article class="public-card"><span class="ico">⛨</span><h4>Protect capital</h4><p>Read-only workflow with explicit risk levels. Order placement stays disabled.</p></article></div></section>';
   pages.About = '<section class="public-section"><span class="public-kicker">ABOUT DHANPULSE</span><h3>Built for disciplined, data-first market research.</h3><p>DhanPulse is a personal trading workstation that brings FYERS connectivity, market monitoring and rule-based setup research into a single interface. Its operating principle is simple: verify data first, analyse later.</p><div class="public-cards"><article class="public-card"><h4>Data integrity</h4><p>No fabricated, demo or fallback market prices are presented as live data.</p></article><article class="public-card"><h4>Transparency</h4><p>Fresh, stale, last-known and unavailable states are kept distinct.</p></article><article class="public-card"><h4>Read-only safety</h4><p>Trading decisions remain yours; the application does not place orders.</p></article></div></section>';
@@ -3840,6 +3843,12 @@ window.addEventListener('appinstalled', () => {
   showMessage('DhanPulse app installed successfully.');
 });
 
+document.querySelector('#publicNav')?.addEventListener('click', event => {
+  const target = event.target instanceof Element ? event.target : event.target && event.target.parentElement;
+  const button = target && target.closest('button[data-tab]');
+  if (!button) return;
+  try { render(button.dataset.tab); } catch (error) { logEvent('Public page render failed: ' + (error.message || 'unknown error'), 'error'); }
+});
 nav.addEventListener('click', event => {
   const target = event.target instanceof Element ? event.target : event.target && event.target.parentElement;
   const button = target && target.closest('button[data-tab]');
