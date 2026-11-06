@@ -74,6 +74,9 @@ test("frontend records one automatic attempt per session day and still marks com
   const end = app.indexOf("async function performSureshotSetup", start);
   assert.ok(start >= 0 && end > start);
   const loader = app.slice(start, end);
+  const triggerStart = app.indexOf("const startAutomaticTopFiveScan");
+  const triggerEnd = app.indexOf("sureshotAutoScanTimer = window.setInterval", triggerStart);
+  const trigger = app.slice(triggerStart, triggerEnd);
   const marker = loader.indexOf("localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY");
   const complete = loader.indexOf("result.selectedCandidatesComplete !== true");
   const catchAt = loader.indexOf("} catch (error)");
