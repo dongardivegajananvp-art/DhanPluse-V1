@@ -322,16 +322,32 @@ function startMarketDataStream(token) {
         // Re-apply the complete required subscription set after EVERY connect,
         // including SDK-managed reconnects. Do not assume the provider retained
         // subscriptions across a dropped WebSocket session.
-        const subscriptionSymbols = buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStreamSymbol);
-        if (mcxDiagnosticInstrument) subscriptionSymbols.push(mcxDiagnosticInstrument.symbol);
-        socket.subscribe(subscriptionSymbols);
-        if (mcxDiagnosticInstrument) mcxSubscribedSocket = socket;
-        console.log('FYERS market subscriptions applied after socket connect.', JSON.stringify({
-          connectionNumber: socketConnectCount,
-          reconnect: socketConnectCount > 1,
-          symbols: subscriptionSymbols,
-          mcxIncluded: Boolean(mcxDiagnosticInstrument)
-        }));
+        const nseSubscriptionSymbols = buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStreamSymbol);
+        try {
+          socket.subscribe(nseSubscriptionSymbols);
+          console.log('FYERS NSE subscriptions applied after socket connect.', JSON.stringify({
+            connectionNumber: socketConnectCount, reconnect: socketConnectCount > 1,
+            symbols: nseSubscriptionSymbols
+          }));
+        } catch (nseSubscriptionError) {
+          nseReconnectPending = true;
+          console.error('FYERS NSE subscription restore failed; MCX subscription restore will still be attempted:', String(nseSubscriptionError?.message || nseSubscriptionError).slice(0, 200));
+        }
+        // Keep MCX subscription restoration independent from NSE subscription
+        // restoration even though FYERS requires one Data Socket transport.
+        if (mcxDiagnosticInstrument) {
+          try {
+            socket.subscribe([mcxDiagnosticInstrument.symbol]);
+            mcxSubscribedSocket = socket;
+            console.log('FYERS MCX subscription restored independently after socket connect.', JSON.stringify({
+              connectionNumber: socketConnectCount, reconnect: socketConnectCount > 1,
+              symbol: mcxDiagnosticInstrument.symbol
+            }));
+          } catch (mcxSubscriptionError) {
+            mcxSubscribedSocket = null;
+            console.error('FYERS MCX subscription restore failed independently of NSE:', String(mcxSubscriptionError?.message || mcxSubscriptionError).slice(0, 200));
+          }
+        }
       } catch (error) {
         streamConnected = false;
         streamError = 'Could not subscribe to FYERS index symbols; controlled recovery is pending.';
