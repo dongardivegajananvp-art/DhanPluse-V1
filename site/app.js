@@ -2636,7 +2636,7 @@ function render(tab) {
   bindTabActions();
   if (tab === 'Sureshot CE/PE') {
     const startAutomaticTopFiveScan = () => {
-      if (currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession() || sureshotUniverseScanRunning || sureshotRequestRunning) return;
+      if (currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession() || sureshotUniverseScanRunning  ) return;
       const today = indiaTradingDateKey();
       let completedToday = '', attemptedToday = sureshotAutoScanAttemptedToday;
       try {
@@ -2651,7 +2651,7 @@ function render(tab) {
       // MCX is the evening alternative: do not compete with the NSE daytime scan.
       // Refresh the independent switch from the backend before deciding to scan.
       if (currentTab !== 'Sureshot CE/PE' || isRegularMarketSession() ||
-          sureshotUniverseScanRunning || sureshotRequestRunning || mcxAutoScanStatusCheckInFlight) return;
+          sureshotUniverseScanRunning || mcxAutoScanStatusCheckInFlight) return;
       mcxAutoScanStatusCheckInFlight = true;
       try {
         const response = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
