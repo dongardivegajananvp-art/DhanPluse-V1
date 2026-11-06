@@ -73,7 +73,10 @@ app.use(cors({
     console.warn('CORS blocked origin:', origin);
     return callback(new Error('Origin not allowed'));
   },
-  credentials: true
+  credentials: true,
+  // The frontend uses the server's exact FYERS cooldown deadline to schedule
+  // its next automatic scan without probing the provider during the block.
+  exposedHeaders: ['Retry-After']
 }));
 
 let accessToken = '';

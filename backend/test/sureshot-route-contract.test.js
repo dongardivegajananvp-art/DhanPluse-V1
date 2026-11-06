@@ -74,6 +74,9 @@ test("frontend records one automatic attempt per session day and still marks com
   const end = app.indexOf("async function performSureshotSetup", start);
   assert.ok(start >= 0 && end > start);
   const loader = app.slice(start, end);
+  const triggerStart = app.indexOf("const startAutomaticTopFiveScan");
+  const triggerEnd = app.indexOf("sureshotAutoScanTimer = window.setInterval", triggerStart);
+  const trigger = app.slice(triggerStart, triggerEnd);
   const marker = loader.indexOf("localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY");
   const complete = loader.indexOf("result.selectedCandidatesComplete !== true");
   const catchAt = loader.indexOf("} catch (error)");
@@ -83,7 +86,10 @@ test("frontend records one automatic attempt per session day and still marks com
   assert.ok(attempt >= 0 && attempt < firstFetch, "attempt marker must be written before any FYERS scan request");
   assert.match(loader.slice(0, catchAt), /TOP_FIVE_CANDIDATES_CHECKED/);
   assert.match(loader.slice(catchAt), /All partial plans are discarded/);
-  assert.doesNotMatch(loader.slice(catchAt), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
+  assert.match(loader.slice(catchAt), /SURESHOT_AUTO_SCAN_RETRY_KEY/);
+  assert.match(loader.slice(catchAt), /retryAfterSeconds/);
+  assert.match(loader.slice(catchAt), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
+  assert.match(trigger, /SURESHOT_AUTO_SCAN_RETRY_KEY/);
   const authStart = app.indexOf("localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken)");
   const authEnd = app.indexOf("authExchangeInProgress = false", authStart);
   assert.match(app.slice(authStart, authEnd), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY\)/);
