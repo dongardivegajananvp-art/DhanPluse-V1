@@ -113,6 +113,12 @@ export function buildVerifiedMcxShortlist({ universe, quoteRows, now = Date.now(
     candidates.push({ symbol, underlying: expected.get(symbol).underlying, price, changePct, exchangeTime: new Date(timestamp).toISOString(), quoteAgeSeconds: Math.max(0, Number((age / 1000).toFixed(1))) });
   }
   const missingQuoteCount = universe.length - seen.size;
+  // A shortlist is valid only when every expected future has one fresh,
+  // exchange-timestamped quote. Never rank the fresh subset of a partial scan.
+  if (missingQuoteCount > 0) throw new Error("incomplete_mcx_quote_snapshot");
+  if (excludedQuoteCount > 0 || candidates.length !== expected.size) {
+    throw new Error("stale_or_invalid_mcx_quote_snapshot");
+  }
   if (!candidates.length) throw new Error("no_fresh_mcx_future_quotes");
   candidates.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct) || a.symbol.localeCompare(b.symbol));
   return { ok: true, verified: true, source: "FYERS MCX_COM master + fresh exchange-timestamped futures quotes", universeCount: universe.length, receivedQuoteCount: seen.size, freshQuoteCount: candidates.length, excludedQuoteCount, missingQuoteCount, candidateCount: candidates.length, rankingIsSignal: false, coverage: { requested: universe.length, received: seen.size, fresh: candidates.length, excluded: excludedQuoteCount, missing: missingQuoteCount }, data: candidates.slice(0, limit).map((row, index) => ({ rank: index + 1, ...row })) };
