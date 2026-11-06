@@ -488,7 +488,7 @@ app.get('/api/status', (_req, res) => {
   const nseHasAnyTick = nseSymbols.some(symbol => latestTicks.has(symbol));
   const nseFeed = !accessToken ? 'NOT_CONNECTED'
     : !streamConnected ? 'DISCONNECTED'
-    : nseFreshTickCount === allowedSymbols.length ? 'LIVE'
+    : nseFreshTickCount === nseSymbols.length ? 'LIVE'
     : nseFreshTickCount > 0 ? 'PARTIAL'
     : nseHasAnyTick ? 'STALE' : 'WAITING';
   const mcxTickAgeSeconds = mcxDiagnosticTick
