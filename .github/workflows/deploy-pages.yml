@@ -41,8 +41,8 @@ jobs:
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
           grep -q "Sureshot CE/PE" dist/site/index.html
-          grep -q "dhanpulse-shell-v130-mcx-sureshot-v1" dist/site/sw.js
-          grep -q "app.js?v=20261105-mcx-sureshot-v1" dist/site/index.html
+          grep -q "dhanpulse-shell-v131-fyers-status-v1" dist/site/sw.js
+          grep -q "app.js?v=20261106-fyers-status-v1" dist/site/index.html
           grep -q "SURESHOT_AUTO_SCAN_ATTEMPT_KEY" dist/site/app.js
       - name: Package static site for Pages
         run: |
@@ -69,7 +69,7 @@ jobs:
           html=""
           for attempt in $(seq 1 12); do
             html="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}?deploy_smoke=$(date +%s)" 2>/dev/null || true)"
-            if [[ -n "$html" ]] && grep -q "Sureshot CE/PE" <<< "$html" && grep -q "style.css?v=20261105-bold-workstation-theme-v1" <<< "$html" && grep -q "app.js?v=20261105-mcx-sureshot-v1" <<< "$html"; then
+            if [[ -n "$html" ]] && grep -q "Sureshot CE/PE" <<< "$html" && grep -q "style.css?v=20261105-bold-workstation-theme-v1" <<< "$html" && grep -q "app.js?v=20261106-fyers-status-v1" <<< "$html"; then
               break
             fi
             echo "Waiting for the deployed Pages asset to become visible (attempt $attempt/12)."
@@ -80,8 +80,8 @@ jobs:
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "dhanpulse-shell-v130-mcx-sureshot-v1" <<< "$sw"
-          app_js="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}app.js?v=20261105-mcx-sureshot-v1&deploy_smoke=$(date +%s)")"
+          grep -q "dhanpulse-shell-v131-fyers-status-v1" <<< "$sw"
+          app_js="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}app.js?v=20261106-fyers-status-v1&deploy_smoke=$(date +%s)")"
           grep -q "SURESHOT_AUTO_SCAN_ATTEMPT_KEY" <<< "$app_js"
           grep -q "settingsMcxFeed" <<< "$app_js"
           grep -q 'style.css?v=20261105-bold-workstation-theme-v1' <<< "$html"
