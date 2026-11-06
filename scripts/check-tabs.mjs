@@ -55,15 +55,25 @@ if (dashboardCandleHandler.includes("localStorage.removeItem('dhanpulse-dashboar
 }
 console.log('PASS: exactly two visible tabs (Sureshot CE/PE, FYERS Connection); connection controls are separated from Sureshot.');
 console.log('PASS: legacy watchlist/alert browser data cleared; shared FYERS session preserved; frontend cooldown guard removed.');
+const scanTriggerStart = app.indexOf('const startAutomaticTopFiveScan');
+const scanTriggerEnd = app.indexOf('sureshotAutoScanTimer = window.setInterval', scanTriggerStart);
+if (scanTriggerStart < 0 || scanTriggerEnd < 0 || app.slice(scanTriggerStart, scanTriggerEnd).includes('sureshotRequestRunning')) {
+  throw new Error('Automatic Sureshot scan must not wait for a lower-priority chart/history request.');
+}
+if (!app.includes('function applyAuthoritativeFyersStatus(status, restCooldown = false)') ||
+    !app.includes("label = 'FYERS SOCKET DISCONNECTED'") ||
+    !app.includes("label = 'FYERS FEED PARTIAL'")) {
+  throw new Error('Dashboard connection labels must follow the authoritative backend NSE feed state.');
+}
 
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
 if (!app.includes('SURESHOT_AUTO_SCAN_ATTEMPT_KEY') ||
-    !html.includes('app.js?v=20261105-mcx-sureshot-v1') ||
-    !html.includes('sw.js?v=20261105-mcx-sureshot-v1') ||
-    !sw.includes('dhanpulse-shell-v130-mcx-sureshot-v1') ||
-    !sw.includes('app.js?v=20261105-mcx-sureshot-v1') ||
+    !html.includes('app.js?v=20261106-fyers-status-v1') ||
+    !html.includes('sw.js?v=20261106-fyers-status-v1') ||
+    !sw.includes('dhanpulse-shell-v131-fyers-status-v1') ||
+    !sw.includes('app.js?v=20261106-fyers-status-v1') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('PWA cache and bounded Sureshot automatic-attempt guard must be present in the published shell.');
 }
 if (!app.includes('settingsMcxFeed') || !app.includes('refreshConnectionDiagnostics') || !app.includes('updateMcxConnectionDiagnostics') || !app.includes('settingsNseSession') || !app.includes('settingsNseLiveFeed') || !app.includes('settingsMcxSession') || !app.includes('settingsMcxLiveFeed') || !app.includes('updateExchangeLiveSwitches')) throw new Error('MCX diagnostics must be visible in the existing FYERS Connection tab.');
-console.log('PASS: PWA shell v128 loads the bounded Sureshot scan-attempt guard, MCX diagnostics, and independent NSE/MCX live switches in the existing FYERS Connection tab.');
+console.log('PASS: PWA shell v131 loads the bounded Sureshot scan-attempt guard, MCX diagnostics, and independent NSE/MCX live switches in the existing FYERS Connection tab.');
