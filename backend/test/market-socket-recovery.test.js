@@ -66,16 +66,18 @@ test("one SDK auto-reconnect owner is configured and the application does not st
   assert.doesNotMatch(lifecycle, /setTimeout\s*\([^)]*connect/i);
 });
 
-test("socket reconnect reapplies mode and relies on SDK subscription restoration after first connect", async () => {
+test("socket reconnect reapplies mode and the complete subscriptions after every SDK reconnect", async () => {
   const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   const start = source.indexOf("socket.on('connect'");
   const end = source.indexOf("socket.on('message'", start);
   assert.ok(start >= 0 && end > start);
   const handler = source.slice(start, end);
   assert.match(handler, /socket\.mode\(socket\.FullMode\)/);
-  assert.match(handler, /if \(socketConnectCount === 1\)/);
+  assert.match(handler, /socketConnectCount \+= 1/);
+  assert.match(handler, /reconnect: socketConnectCount > 1/);
+  assert.match(handler, /Re-apply the complete required subscription set after EVERY connect/);
   assert.match(handler, /socket\.subscribe\(subscriptionSymbols\)/);
-  assert.match(handler, /retained subscriptions are restored by the SDK/);
+  assert.doesNotMatch(handler, /if \(socketConnectCount === 1\)/);
 });
 
 test("market ticks without exchange timestamps are rejected and live snapshots enforce timestamp freshness", async () => {

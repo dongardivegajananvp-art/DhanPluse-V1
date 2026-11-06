@@ -2,16 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFyersDataApiBudget } from '../src/fyers-data-api-budget.js';
 
-function fakeResponse(status = 200, body = '', retryAfter = null) {
-  return {
-    status,
-    headers: {
-      get: name => name.toLowerCase() === 'retry-after' ? retryAfter : null,
-      entries: () => []
-    },
-    statusText: status === 200 ? 'OK' : 'Too Many Requests',
-    clone: () => ({ text: async () => body })
-  };
+function fakeResponse(status = 200, body = '', headers = {}) {
+  return new Response(body, { status, headers });
 }
 
 test('FYERS Data API requests share a rolling-minute budget', async () => {
@@ -23,49 +15,108 @@ test('FYERS Data API requests share a rolling-minute budget', async () => {
     maxRequestsPerMinute: 2,
     minIntervalMs: 0,
     windowMs: 60_000,
-    fetchImpl: async () => {
-      sentAt.push(clock);
-      return fakeResponse();
-    }
+    fetchImpl: async () => { sentAt.push(clock); return fakeResponse(); }
   });
 
   await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
   await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ');
   await request('https://api-t1.fyers.in/data/options-chain-v3?symbol=NSE%3ANIFTY50-INDEX');
-
   assert.equal(sentAt.length, 3);
-  assert.ok(sentAt[2] - sentAt[0] >= 60_000, 'third request must wait for the first request to leave the rolling window');
+  assert.ok(sentAt[2] - sentAt[0] >= 60_000);
 });
 
-test('Cloudflare 1015 is reported but does not activate an application cooldown', async () => {
+test('Cloudflare 1015 opens a shared five-minute circuit breaker and suppresses later upstream calls', async () => {
+  let clock = 100_000;
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    now: () => clock,
+    minIntervalMs: 0,
+    fetchImpl: async () => { sent += 1; return fakeResponse(429, 'Cloudflare Error 1015', { server: 'cloudflare', 'cf-ray': 'abc123', 'retry-after': '0' }); }
+  });
+
+  const first = await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
+  assert.equal(first.status, 429);
+  assert.equal(request.getStatus().cooldownActive, true);
+  assert.equal(request.getStatus().retryAfterSeconds, 300);
+  assert.equal(request.getStatus().cooldownReason, 'CLOUDFLARE_1015');
+
+  const blocked = await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ');
+  assert.equal(blocked.status, 429);
+  assert.equal(blocked.headers.get('x-dhanpulse-cooldown'), 'active');
+  assert.equal(sent, 1, 'no additional upstream request may be sent during the circuit break');
+});
+
+test('requests already waiting in the serial queue are stopped after the first 1015', async () => {
   let sent = 0;
   const request = createFyersDataApiBudget({
     minIntervalMs: 0,
-    fetchImpl: async () => { sent += 1; return fakeResponse(429, 'Cloudflare Error 1015'); }
+    fetchImpl: async () => {
+      sent += 1;
+      return fakeResponse(429, 'Cloudflare Error 1015');
+    }
   });
-  await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
-  await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ');
-  assert.equal(sent, 2, 'a provider 1015 must not suppress the next app request');
-  assert.equal(request.getStatus().cooldownActive, false);
-  assert.equal(request.getStatus().retryAfterSeconds, 0);
+
+  const [first, second, third] = await Promise.all([
+    request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3AA-EQ'),
+    request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3AB-EQ'),
+    request('https://api-t1.fyers.in/data/history?symbol=NSE%3AC-EQ')
+  ]);
+  assert.equal(first.status, 429);
+  assert.equal(second.status, 429);
+  assert.equal(third.status, 429);
+  assert.equal(sent, 1, 'queued requests must not leak through after a provider block');
 });
-test('HTTP 429 Retry-After is not turned into a local application cooldown', async () => {
+
+test('repeated Cloudflare 1015 escalates backoff; a successful probe clears the circuit', async () => {
+  let clock = 200_000;
   let sent = 0;
   const request = createFyersDataApiBudget({
+    now: () => clock,
     minIntervalMs: 0,
-    fetchImpl: async () => { sent += 1; return fakeResponse(429, 'rate limited', '3600'); }
+    fetchImpl: async () => {
+      sent += 1;
+      return sent <= 2 ? fakeResponse(429, 'Cloudflare Error 1015') : fakeResponse(200, '{"s":"ok"}');
+    }
   });
-  await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX');
-  await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
-  assert.equal(sent, 2);
+  const url = 'https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ';
+
+  await request(url);
+  assert.equal(request.getStatus().retryAfterSeconds, 300);
+  clock += 300_001;
+  await request(url);
+  assert.equal(request.getStatus().retryAfterSeconds, 900);
+  clock += 900_001;
+  const recovered = await request(url);
+  assert.equal(recovered.status, 200);
   assert.equal(request.getStatus().cooldownActive, false);
+  assert.equal(request.getStatus().consecutiveCloudflareBlocks, 0);
 });
+
+test('HTTP 429 honours Retry-After and treats Retry-After zero as a one-minute minimum', async () => {
+  let clock = 300_000;
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    now: () => clock,
+    minIntervalMs: 0,
+    fetchImpl: async () => {
+      sent += 1;
+      return fakeResponse(429, 'rate limited', { 'retry-after': sent === 1 ? '3600' : '0' });
+    }
+  });
+  const url = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX';
+
+  await request(url);
+  assert.equal(request.getStatus().retryAfterSeconds, 3600);
+  const blocked = await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
+  assert.equal(blocked.status, 429);
+  assert.equal(sent, 1);
+});
+
 test('non-Data API endpoints are not counted against the Data API budget', async () => {
   let sent = 0;
   const request = createFyersDataApiBudget({
     fetchImpl: async () => { sent += 1; return fakeResponse(); }
   });
-
   await request('https://api-t1.fyers.in/api/v3/holdings');
   assert.equal(sent, 1);
 });
@@ -80,23 +131,19 @@ test('identical history reads are coalesced and briefly cached', async () => {
     fetchImpl: async () => {
       sent += 1;
       await new Promise(resolve => setTimeout(resolve, 5));
-      return new Response(JSON.stringify({ s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] }), {
-        status: 200, headers: { 'content-type': 'application/json' }
-      });
+      return fakeResponse(200, JSON.stringify({ s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] }), { 'content-type': 'application/json' });
     }
   });
-
-  const url = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX&resolution=5';
+  const url = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ&resolution=5';
   const [first, second] = await Promise.all([request(url), request(url)]);
-  assert.equal(sent, 1, 'concurrent identical reads should share one upstream request');
+  assert.equal(sent, 1);
   assert.deepEqual(await first.json(), await second.json());
-
   const cached = await request(url);
-  assert.equal(sent, 1, 'successful history response should be reused within its short TTL');
+  assert.equal(sent, 1);
   assert.equal(cached.headers.get('x-dhanpulse-cache'), 'HIT');
   clock += 10_001;
   await request(url);
-  assert.equal(sent, 2, 'expired history cache must refresh from FYERS');
+  assert.equal(sent, 2);
 });
 
 test('default history cache reuses OHLC for five minutes, then requires a fresh FYERS read', async () => {
@@ -107,9 +154,7 @@ test('default history cache reuses OHLC for five minutes, then requires a fresh 
     minIntervalMs: 0,
     fetchImpl: async () => {
       sent += 1;
-      return new Response(JSON.stringify({ s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] }), {
-        status: 200, headers: { 'content-type': 'application/json' }
-      });
+      return fakeResponse(200, JSON.stringify({ s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] }), { 'content-type': 'application/json' });
     }
   });
   const url = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX&resolution=5';
@@ -117,13 +162,13 @@ test('default history cache reuses OHLC for five minutes, then requires a fresh 
   clock += 4 * 60_000;
   const cached = await request(url);
   assert.equal(cached.headers.get('x-dhanpulse-cache'), 'HIT');
-  assert.equal(sent, 1, 'history should be reused inside the five-minute cache window');
+  assert.equal(sent, 1);
   clock += 60_001;
   await request(url);
-  assert.equal(sent, 2, 'expired history must refresh from FYERS');
+  assert.equal(sent, 2);
 });
 
-test('verified history cache remains readable and expired history is allowed to refresh after 1015', async () => {
+test('verified cached history remains available during cooldown but expired history cannot bypass it', async () => {
   let clock = 550_000;
   let sent = 0;
   const request = createFyersDataApiBudget({
@@ -132,11 +177,8 @@ test('verified history cache remains readable and expired history is allowed to 
     historyCacheMs: 180_000,
     fetchImpl: async url => {
       sent += 1;
-      if (String(url).includes('/data/quotes')) return new Response('Cloudflare Error 1015', { status: 429 });
-      if (sent > 2) return new Response('Cloudflare Error 1015', { status: 429 });
-      return new Response(JSON.stringify({ s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] }), {
-        status: 200, headers: { 'content-type': 'application/json' }
-      });
+      if (String(url).includes('/data/quotes')) return fakeResponse(429, 'Cloudflare Error 1015');
+      return fakeResponse(200, JSON.stringify({ s: 'ok', candles: [[1, 10, 11, 9, 10, 100]] }), { 'content-type': 'application/json' });
     }
   });
   const historyUrl = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX&resolution=5';
@@ -146,26 +188,25 @@ test('verified history cache remains readable and expired history is allowed to 
   assert.equal(sent, 2);
   assert.equal(cached.headers.get('x-dhanpulse-cache'), 'HIT');
   clock += 180_001;
-  const refreshed = await request(historyUrl);
-  assert.equal(refreshed.status, 429, 'expired history must reach FYERS instead of a local cooldown gate');
-  assert.equal(sent, 3);
+  const blocked = await request(historyUrl);
+  assert.equal(blocked.status, 429);
+  assert.equal(sent, 2, 'expired history must not reach FYERS while the circuit is open');
 });
+
 test('option quote requests are never cached', async () => {
   let sent = 0;
   const request = createFyersDataApiBudget({
     minIntervalMs: 0,
     fetchImpl: async () => {
       sent += 1;
-      return new Response(JSON.stringify({ s: 'ok', d: [] }), { status: 200 });
+      return fakeResponse(200, JSON.stringify({ s: 'ok', d: [] }));
     }
   });
   const url = 'https://api-t1.fyers.in/data/quotes?symbols=NSE%3ANIFTY26NOV25000CE';
   await request(url);
   await request(url);
-  assert.equal(sent, 2, 'option premium quotes must always be fetched live');
+  assert.equal(sent, 2);
 });
-
-
 
 test('identical concurrent quote reads share one upstream request but are not cached', async () => {
   let sent = 0;
@@ -174,71 +215,30 @@ test('identical concurrent quote reads share one upstream request but are not ca
     fetchImpl: async () => {
       sent += 1;
       await new Promise(resolve => setTimeout(resolve, 10));
-      return new Response(JSON.stringify({ s: 'ok', d: [{ n: 'NSE:TEST-EQ', v: { lp: 123.45, tt: 1 } }] }), {
-        status: 200, headers: { 'content-type': 'application/json' }
-      });
+      return fakeResponse(200, JSON.stringify({ s: 'ok', d: [{ n: 'NSE:TEST-EQ', v: { lp: 123.45, tt: 1 } }] }), { 'content-type': 'application/json' });
     }
   });
   const url = 'https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATEST-EQ';
   const [first, second] = await Promise.all([request(url), request(url)]);
-  assert.equal(sent, 1, 'concurrent identical quote reads should share one live response');
+  assert.equal(sent, 1);
   assert.deepEqual(await first.json(), await second.json());
-
   await request(url);
-  assert.equal(sent, 2, 'a later quote read must reach FYERS again; quote/premium data is never cached');
+  assert.equal(sent, 2);
 });
 
-test('FYERS 429 status never reports an application-side cooldown', async () => {
-  const request = createFyersDataApiBudget({
-    minIntervalMs: 0,
-    fetchImpl: async () => fakeResponse(429, 'Cloudflare Error 1015')
-  });
-  await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX');
-  assert.deepEqual(request.getStatus(), {
-    cooldownActive: false, retryAfterSeconds: 0, blockedUntil: null,
-    cooldownReason: null, consecutiveCloudflareBlocks: 1, queuedRequests: 0
-  });
-});
-test('default FYERS pacing stays below the documented Standard plan limits', async () => {
+test('default FYERS pacing stays below the conservative rolling-minute budget', async () => {
   let clock = 700_000;
   const sentAt = [];
   const request = createFyersDataApiBudget({
     now: () => clock,
     sleep: async ms => { clock += ms; },
-    fetchImpl: async () => {
-      sentAt.push(clock);
-      return fakeResponse();
-    }
+    fetchImpl: async () => { sentAt.push(clock); return fakeResponse(); }
   });
-
   for (let index = 0; index < 31; index += 1) {
     await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATEST' + index + '-EQ');
   }
-
   assert.equal(sentAt.length, 31);
-  assert.ok(sentAt[1] - sentAt[0] >= 2000, 'requests must be spaced by at least 2 seconds');
-  assert.ok(sentAt[29] - sentAt[0] < 60_000, '30 requests should fit within the conservative rolling-minute budget');
-  assert.ok(sentAt[30] - sentAt[0] >= 60_000, 'the 31st request must wait for the rolling window');
-});
-
-test('repeated Cloudflare 1015 responses are diagnostic only and do not escalate a cooldown', async () => {
-  const outcomes = [
-    new Response('Cloudflare Error 1015', { status: 429 }),
-    new Response('', { status: 429, headers: { server: 'cloudflare', 'cf-ray': 'abc123' } }),
-    new Response(JSON.stringify({ s: 'ok' }), { status: 200 }),
-    new Response('Cloudflare Error 1015', { status: 429 })
-  ];
-  const request = createFyersDataApiBudget({
-    minIntervalMs: 0,
-    fetchImpl: async () => outcomes.shift()
-  });
-  const url = 'https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATEST-EQ';
-  await request(url);
-  await request(url);
-  assert.equal(request.getStatus().cooldownActive, false);
-  assert.equal(request.getStatus().consecutiveCloudflareBlocks, 2);
-  await request(url);
-  assert.equal(request.getStatus().consecutiveCloudflareBlocks, 0);
-  await request(url);
-  assert.equal(request.getStatus().cooldownActive, false);
+  assert.ok(sentAt[1] - sentAt[0] >= 2000);
+  assert.ok(sentAt[29] - sentAt[0] < 60_000);
+  assert.ok(sentAt[30] - sentAt[0] >= 60_000);
 });

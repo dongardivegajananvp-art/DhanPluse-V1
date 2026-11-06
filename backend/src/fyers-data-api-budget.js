@@ -1,7 +1,8 @@
 // FYERS Data API calls share upstream/IP-level throttling. Serialize requests,
 // coalesce identical in-flight reads, and briefly cache successful market-data
 // snapshots so UI refreshes do not create duplicate provider traffic.
-// Never retry a 429/Cloudflare 1015 automatically.
+// Never retry a 429/Cloudflare 1015 automatically. Open a shared circuit breaker
+// instead, including for requests that were already waiting in the queue.
 export function createFyersDataApiBudget({
   fetchImpl = fetch,
   now = () => Date.now(),
@@ -9,25 +10,28 @@ export function createFyersDataApiBudget({
   maxRequestsPerMinute = 30,
   minIntervalMs = 2000,
   windowMs = 60_000,
-  // FYERS 429/Cloudflare 1015 is reported but never converted into an
-  // application-side cooldown. Continue serialized, paced requests so a
-  // provider block cannot freeze the workstation for 15-60 minutes.
   historyCacheMs = 5 * 60_000,
-  // Contract descriptors contain identity/expiry only (never premium/OI/volume).
   optionChainCacheMs = 60_000,
-  maxCacheEntries = 100
+  maxCacheEntries = 100,
+  cloudflareCooldownMs = [5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000],
+  rateLimitCooldownMs = [60_000, 2 * 60_000, 5 * 60_000],
+  maxCooldownMs = 60 * 60_000
 } = {}) {
   let queue = Promise.resolve();
   let requestTimes = [];
   let lastRequestAt = 0;
   let consecutiveCloudflareBlocks = 0;
+  let consecutiveRateLimitBlocks = 0;
+  let cooldownUntil = 0;
+  let cooldownReason = null;
+  let queuedRequests = 0;
   const responseCache = new Map();
   const inFlight = new Map();
 
   function cacheTtl(target) {
     if (target.pathname === '/data/history') return historyCacheMs;
     if (target.pathname === '/data/options-chain-v3') return optionChainCacheMs;
-    return 0; // Quotes must always be fetched live; never cache option premiums.
+    return 0; // Quotes, including option premiums, must always be fetched live.
   }
 
   function makeResponse(entry, cacheAgeMs = 0, cacheHit = false) {
@@ -35,6 +39,57 @@ export function createFyersDataApiBudget({
     headers.set('X-DhanPulse-Cache', cacheHit ? 'HIT' : 'MISS');
     headers.set('X-DhanPulse-Cache-Age-Ms', String(Math.max(0, cacheAgeMs)));
     return new Response(entry.body, { status: entry.status, statusText: entry.statusText, headers });
+  }
+
+  function retryAfterMs(response) {
+    const raw = response.headers?.get?.('retry-after');
+    if (!raw) return 0;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+    const date = Date.parse(raw);
+    return Number.isFinite(date) ? Math.max(0, date - now()) : 0;
+  }
+
+  function makeCooldownResponse() {
+    const remainingMs = Math.max(1, cooldownUntil - now());
+    const retrySeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+    return new Response(JSON.stringify({
+      s: 'error',
+      message: 'FYERS Data API circuit breaker is active; no upstream request was sent.',
+      retryAfterSeconds: retrySeconds,
+      cooldownReason
+    }), {
+      status: 429,
+      headers: {
+        'content-type': 'application/json',
+        'retry-after': String(retrySeconds),
+        'x-dhanpulse-cooldown': 'active'
+      }
+    });
+  }
+
+  function activateCooldown(response, body) {
+    const server = String(response.headers?.get?.('server') || '');
+    const cfRay = String(response.headers?.get?.('cf-ray') || '');
+    const cloudflare1015 =
+      /error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body) ||
+      (/cloudflare/i.test(server) && Boolean(cfRay));
+    const retryMs = Math.min(maxCooldownMs, retryAfterMs(response));
+    let backoffMs;
+    if (cloudflare1015) {
+      consecutiveCloudflareBlocks += 1;
+      const index = Math.min(consecutiveCloudflareBlocks - 1, cloudflareCooldownMs.length - 1);
+      backoffMs = cloudflareCooldownMs[index] || cloudflareCooldownMs[cloudflareCooldownMs.length - 1] || 5 * 60_000;
+      cooldownReason = 'CLOUDFLARE_1015';
+    } else {
+      consecutiveRateLimitBlocks += 1;
+      const index = Math.min(consecutiveRateLimitBlocks - 1, rateLimitCooldownMs.length - 1);
+      backoffMs = rateLimitCooldownMs[index] || rateLimitCooldownMs[rateLimitCooldownMs.length - 1] || 60_000;
+      cooldownReason = 'HTTP_429';
+    }
+    // Retry-After: 0 is not a meaningful clearance signal. Use a conservative
+    // local backoff and never let a provider header shorten it.
+    cooldownUntil = Math.max(cooldownUntil, now() + Math.min(maxCooldownMs, Math.max(backoffMs, retryMs)));
   }
 
   async function run(url, init) {
@@ -46,13 +101,14 @@ export function createFyersDataApiBudget({
     const method = String(init?.method || 'GET').toUpperCase();
     const ttl = method === 'GET' ? cacheTtl(target) : 0;
     const cacheKey = ttl > 0 ? target.toString() : null;
-    // Quote responses (including option premiums) are never cached, but
-    // identical concurrent GETs share one in-flight upstream request.
     const quoteFlightKey = method === 'GET' && target.pathname === '/data/quotes'
       ? 'quote:' + target.toString()
       : null;
     const inFlightKey = cacheKey || quoteFlightKey;
     const currentTime = now();
+
+    // Validated callers still decide whether cached candles are fresh enough.
+    // A cached historical response may be served during a quote API cooldown.
     if (cacheKey) {
       const cached = responseCache.get(cacheKey);
       if (cached && currentTime - cached.storedAt < ttl) {
@@ -60,17 +116,24 @@ export function createFyersDataApiBudget({
       }
       if (cached) responseCache.delete(cacheKey);
     }
+
+    if (cooldownUntil > currentTime) return makeCooldownResponse();
+
     const pending = inFlightKey && inFlight.get(inFlightKey);
     if (pending) {
       const result = await pending;
-      if (result.cacheEntry) {
-        return makeResponse(result, Math.max(0, now() - result.storedAt), true);
-      }
+      if (result.cacheEntry) return makeResponse(result, Math.max(0, now() - result.storedAt), true);
       return result.response.clone();
     }
 
     const requestPromise = (async () => {
+      queuedRequests += 1;
       const current = queue.then(async () => {
+        queuedRequests = Math.max(0, queuedRequests - 1);
+        // Recheck inside the serial queue: calls already waiting when a 1015
+        // arrives must be stopped locally instead of hitting the same WAF.
+        if (cooldownUntil > now()) return { response: makeCooldownResponse() };
+
         let time = now();
         while (true) {
           time = now();
@@ -84,24 +147,21 @@ export function createFyersDataApiBudget({
           await sleep(waitMs);
         }
 
+        // A prior queued request may have opened the circuit while this one waited.
+        if (cooldownUntil > now()) return { response: makeCooldownResponse() };
+
         time = now();
         requestTimes.push(time);
         lastRequestAt = time;
         const response = await fetchImpl(url, init);
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
-          const retryAfter = Number(response.headers?.get?.('retry-after'));
-          const server = String(response.headers?.get?.('server') || '');
-          const cfRay = String(response.headers?.get?.('cf-ray') || '');
-          const cloudflare1015 = /error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body) ||
-            (/cloudflare/i.test(server) && Boolean(cfRay));
-          if (cloudflare1015) consecutiveCloudflareBlocks += 1;
-          // Record repeated upstream blocks for diagnostics only. Never impose
-          // a local 429/1015 cooldown that suppresses subsequent requests.
+          activateCooldown(response, body);
         } else if (response.ok) {
-          // A successful provider response is the only evidence that the WAF
-          // throttle has cleared; do not reset the escalation merely on timer expiry.
           consecutiveCloudflareBlocks = 0;
+          consecutiveRateLimitBlocks = 0;
+          cooldownUntil = 0;
+          cooldownReason = null;
         }
 
         if ((cacheKey && response.ok) || quoteFlightKey) {
@@ -110,9 +170,6 @@ export function createFyersDataApiBudget({
             body, status: response.status, statusText: response.statusText,
             headers: [...response.headers.entries()], storedAt: now()
           };
-          // Only successful history/option-chain responses persist in cache.
-          // Quotes are serialized for concurrent callers and immediately
-          // evicted from inFlight when the request settles.
           if (cacheKey && response.ok) {
             responseCache.set(cacheKey, entry);
             while (responseCache.size > maxCacheEntries) {
@@ -138,14 +195,18 @@ export function createFyersDataApiBudget({
     }
   }
 
-  run.getStatus = () => ({
-    cooldownActive: false,
-    retryAfterSeconds: 0,
-    blockedUntil: null,
-    cooldownReason: null,
-    consecutiveCloudflareBlocks,
-    queuedRequests: 0
-  });
+  run.getStatus = () => {
+    const remainingMs = Math.max(0, cooldownUntil - now());
+    return {
+      cooldownActive: remainingMs > 0,
+      retryAfterSeconds: remainingMs > 0 ? Math.max(1, Math.ceil(remainingMs / 1000)) : 0,
+      blockedUntil: remainingMs > 0 ? new Date(cooldownUntil).toISOString() : null,
+      cooldownReason: remainingMs > 0 ? cooldownReason : null,
+      consecutiveCloudflareBlocks,
+      consecutiveRateLimitBlocks,
+      queuedRequests
+    };
+  };
 
   return run;
 }
