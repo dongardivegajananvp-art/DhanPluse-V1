@@ -2636,7 +2636,7 @@ function render(tab) {
   bindTabActions();
   if (tab === 'Sureshot CE/PE') {
     const startAutomaticTopFiveScan = () => {
-      if (currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession() || sureshotUniverseScanRunning  ) return;
+      if (currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession() || sureshotUniverseScanRunning) return;
       const today = indiaTradingDateKey();
       let completedToday = '', attemptedToday = sureshotAutoScanAttemptedToday;
       try {
