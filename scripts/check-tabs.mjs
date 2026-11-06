@@ -21,6 +21,8 @@ if (!app.includes("else if (tab === 'FYERS Connection') featureContent.innerHTML
 if (!app.includes("render('Sureshot CE/PE');")) throw new Error('Sureshot must be the initial landing page.');
 if (!app.includes("if (!['Sureshot CE/PE','FYERS Connection'].includes(tab)) tab = 'Sureshot CE/PE';")) throw new Error('Only Sureshot and FYERS Connection may be rendered.');
 if (!app.includes('sureshotExchangeStatus') || !app.includes('sureshotNseTitle') || !app.includes('sureshotMcxTitle')) throw new Error('Separate NSE and MCX Sureshot status cards are required.');
+if (html.includes('id="marketStatus"') || html.includes('<footer>') || html.includes('id="sideFeedStatus"')) throw new Error('A single global stale banner/footer must not replace the separate exchange cards.');
+if (!app.includes("label = mcxLive ? 'MCX LIVE · NSE CLOSED' : 'NSE MARKET CLOSED';") || !app.includes('updateSureshotExchangeCards(status);')) throw new Error('NSE-closed status must not globally mark an independently live MCX feed stale.');
 if (!app.includes('let nseSureshotScanRunning = false;') || !app.includes('let mcxSureshotScanRunning = false;')) throw new Error('NSE and MCX Sureshot scans must have independent state.');
 const renderStart = app.indexOf('function render(tab) {');
 const renderEnd = app.indexOf('\nfunction bindTabActions', renderStart);
