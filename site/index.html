@@ -2735,7 +2735,7 @@ function updateSureshotExchangeCards(status) {
   if (nseTick) nseTick.textContent = formatTick(nseTicks[0] && nseTicks[0].exchangeTimestamp);
   if (mcxTick) mcxTick.textContent = formatTick(mcxDiagnostic.exchangeTimestamp);
   if (nseScan) nseScan.textContent = nseClosed ? 'MARKET CLOSED' : nseSureshotScanRunning ? 'SCANNING TOP 5' : nseFeed === 'LIVE' ? 'TOP 5 READY' : 'WAITING FOR VERIFIED TICKS';
-  if (mcxScan) mcxScan.textContent = !mcxOpen ? 'MARKET CLOSED' : mcxSureshotScanRunning ? 'SCANNING TOP 5' : mcxFeed === 'LIVE' ? 'TOP 5 READY' : 'WAITING FOR MCX LIVE TICK';
+  if (mcxScan) mcxScan.textContent = !mcxOpen ? 'MARKET CLOSED' : mcxSureshotScanRunning ? 'SCANNING · VERIFYING CANDIDATES' : mcxFeed === 'LIVE' ? 'LIVE · SCAN AVAILABLE (NO RESULTS YET)' : mcxFeed === 'STALE' ? 'SCAN BLOCKED · FEED STALE' : mcxFeed === 'DISCONNECTED' ? 'SCAN BLOCKED · DISCONNECTED' : 'WAITING FOR VERIFIED MCX TICK';
 }
 
 function updateExchangeLiveSwitches(status) {
