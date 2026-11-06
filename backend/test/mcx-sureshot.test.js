@@ -112,10 +112,10 @@ test("MCX shortlist rejects partial quote coverage instead of ranking fresh peer
 
 test("MCX shortlist fails closed when no fresh quotes are available and rejects duplicate or unknown symbols", () => {
   const universe = buildMcxFuturesUniverse(master, now);
-  assert.throws(() => buildVerifiedMcxShortlist({ universe, quoteRows: [], now }), /no_fresh_mcx_future_quotes/);
+  assert.throws(() => buildVerifiedMcxShortlist({ universe, quoteRows: [], now }), /incomplete_mcx_quote_snapshot/);
   assert.throws(() => buildVerifiedMcxShortlist({
     universe, now, quoteRows: [{ n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, tt: Math.floor((now - 60000) / 1000) } }]
-  }), /no_fresh_mcx_future_quotes/);
+  }), /stale_or_invalid_mcx_quote_snapshot/);
   assert.throws(() => buildVerifiedMcxShortlist({
     universe, now, quoteRows: [
       { n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, tt: Math.floor(now / 1000) } },
