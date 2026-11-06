@@ -1311,6 +1311,7 @@ async function getNseFnoEquityUniverse() {
     const retryDelayMs = getReferenceDataRetryDelay(fnoUniverseFailureCount);
     fnoUniverseRetryAt = Date.now() + retryDelayMs;
     fnoUniverseLastError = String(error?.message || 'FYERS F&O symbol master unavailable.').slice(0, 160);
+    error.retryAfterSeconds = Math.max(1, Math.ceil(retryDelayMs / 1000));
     console.warn("FYERS NSE F&O symbol master retry backoff activated:", JSON.stringify({
       failureCount: fnoUniverseFailureCount,
       retryAfterSeconds: Math.ceil(retryDelayMs / 1000),
