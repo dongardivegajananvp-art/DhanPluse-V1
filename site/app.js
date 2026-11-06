@@ -315,7 +315,6 @@ function setConnection(message, muted) {
 
 function applyAuthoritativeFyersStatus(status, restCooldown = false) {
   lastAuthoritativeFyersStatus = status && typeof status === 'object' ? status : null;
-  authoritativeFyersStatusUpdatedAt = Date.now();
   const authenticated = status && status.fyers === 'connected';
   const socketConnected = status && status.marketSocketConnected === true;
   const nseFeed = String(status && status.exchangeLiveStatus && status.exchangeLiveStatus.NSE
@@ -358,6 +357,7 @@ async function refreshAuthoritativeFyersStatus() {
     const status = await response.json().catch(() => ({}));
     if (!status || status.backend !== 'online') throw new Error('Backend status not confirmed online.');
     setBackendStatus('ONLINE');
+    authoritativeFyersStatusUpdatedAt = Date.now();
     applyAuthoritativeFyersStatus(status);
   } catch {
     // Fail closed: never leave an old green/connected header when status cannot be verified.
@@ -381,6 +381,7 @@ async function refreshSocketStatusDuringCooldown() {
     if (!response.ok) return;
     const status = await response.json().catch(() => ({}));
     if (status.backend === 'online') setBackendStatus('ONLINE');
+    authoritativeFyersStatusUpdatedAt = Date.now();
     applyAuthoritativeFyersStatus(status, true);
   } catch {
     // Preserve the last known state if the lightweight status endpoint is unavailable.
@@ -2396,6 +2397,7 @@ async function refreshConnectionDiagnostics() {
     });
     const status = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error('Status endpoint unavailable.');
+    authoritativeFyersStatusUpdatedAt = Date.now();
     applyAuthoritativeFyersStatus(status);
     updateExchangeLiveSwitches(status);
     updateMcxConnectionDiagnostics(status);
@@ -3232,6 +3234,7 @@ async function testBackend() {
       const statusResponse = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const status = await statusResponse.json().catch(() => ({}));
       if (statusResponse.ok) {
+        authoritativeFyersStatusUpdatedAt = Date.now();
         applyAuthoritativeFyersStatus(status);
       } else {
         setFyersStatus('STATUS UNKNOWN');
