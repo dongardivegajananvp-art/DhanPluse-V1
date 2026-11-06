@@ -28,6 +28,7 @@ test('NSE F&O universe failures are locally throttled and expose retry timing', 
   assert.match(loader, /fnoUniverseFailureCount \+= 1/);
   assert.match(loader, /getReferenceDataRetryDelay\(fnoUniverseFailureCount\)/);
   assert.match(loader, /fnoUniverseRetryAt = Date\.now\(\) \+ retryDelayMs/);
+  assert.match(loader, /error\.retryAfterSeconds = Math\.max\(1, Math\.ceil\(retryDelayMs \/ 1000\)\)/);
   assert.match(loader, /fnoUniverseFailureCount = 0/);
   assert.match(loader, /fnoUniverseRetryAt = 0/);
 });
