@@ -20,6 +20,7 @@ import { isFyersAuthRejected } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
+import { summarizeFyersUpstreamFailure } from './fyers-upstream-diagnostics.js';
 import { buildMarketSocketSubscriptionSymbols } from './market-socket-recovery.js';
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
 import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist } from './mcx-sureshot.js';
@@ -779,15 +780,17 @@ async function fyersReadOnlyGet(url, { priority = 'normal' } = {}) {
     const message = upstreamMessage
       ? String(upstreamMessage).slice(0, 110)
       : (responseText ? responseText.replace(/\s+/g, ' ').slice(0, 110) : 'FYERS API returned no error message.');
-    const cloudflareRayId = response.headers.get('cf-ray') || null;
-    const upstreamServer = response.headers.get('server') || null;
-    const cloudflareMitigation = response.headers.get('cf-mitigated') || null;
+    const upstreamDiagnostics = summarizeFyersUpstreamFailure({
+      responseText, headers: response.headers, apiCode: data.code
+    });
+    const { cloudflareRayId, upstreamServer, cloudflareMitigation, cloudflareErrorCode } = upstreamDiagnostics;
     const diagnosticTags = [
       cloudflareRayId ? `CF-Ray ${cloudflareRayId}` : '',
       upstreamServer ? `server ${upstreamServer}` : '',
-      cloudflareMitigation ? `cf-mitigated ${cloudflareMitigation}` : ''
+      cloudflareMitigation ? `cf-mitigated ${cloudflareMitigation}` : '',
+      cloudflareErrorCode ? `Cloudflare error ${cloudflareErrorCode}` : ''
     ].filter(Boolean).join(', ');
-    const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}${retryAfterHeader ? `, Retry-After ${retryAfterHeader}` : ''}${diagnosticTags ? `, ${diagnosticTags}` : ''}): ${message}`.slice(0, 280));
+    const error = new Error(`FYERS API rejected the request (HTTP ${response.status}, status ${upstreamStatus}, code ${upstreamCode}${retryAfterHeader ? `, Retry-After ${retryAfterHeader}` : ''}${diagnosticTags ? `, ${diagnosticTags}` : ''}): ${message}`.slice(0, 500));
     error.statusCode = response.status === 429 ? 429 : (response.status === 401 || data.code === -16 ? 401 : 502);
     if (isFyersAuthRejected(response.status, data.code) && accessToken === requestAccessToken) {
       invalidateFyersSession(message);
@@ -801,9 +804,7 @@ async function fyersReadOnlyGet(url, { priority = 'normal' } = {}) {
       apiStatus: upstreamStatus,
       apiCode: upstreamCode,
       retryAfter: retryAfterHeader || null,
-      cloudflareRayId,
-      upstreamServer,
-      cloudflareMitigation,
+      ...upstreamDiagnostics,
       message
     }));
     throw error;
