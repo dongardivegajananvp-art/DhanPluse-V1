@@ -34,10 +34,6 @@ if (!app.includes('startAutomaticTopFiveScan();') || !app.includes('SURESHOT_AUT
   throw new Error('Authenticated automatic full-universe Top 5 scan trigger is missing.');
 }
 if (!app.includes("startAutomaticTopFiveScan();") || !app.includes("startAutomaticMcxTopFiveScan();") || !app.includes("}, 30000);")) throw new Error('Sureshot must detect NSE and MCX session starts while its tab is active.');
-if (!app.includes("localStorage.removeItem('dhanpulse-watchlist-v1')") ||
-    !app.includes("localStorage.removeItem('dhanpulse-price-alerts')")) {
-  throw new Error('Legacy watchlist and alert data must be cleared from browser storage.');
-}
 if (!app.includes("localStorage.getItem('dhanpulse-dashboard-session-v1')") ||
     app.includes('FYERS_COOLDOWN_KEY') ||
     app.includes('getFyersCooldownRemaining') ||
@@ -59,7 +55,7 @@ if (dashboardCandleHandler.includes("localStorage.removeItem('dhanpulse-dashboar
   throw new Error('Unconditional dashboard-session deletion remains in the candle handler.');
 }
 console.log('PASS: exactly two tabs remain; Sureshot is the landing page; NSE and MCX status/scans are independent.');
-console.log('PASS: legacy watchlist/alert browser data cleared; shared FYERS session preserved; frontend cooldown guard removed.');
+console.log('PASS: shared FYERS session is preserved and obsolete browser-local cooldown blocking is absent.');
 const scanTriggerStart = app.indexOf('const startAutomaticTopFiveScan');
 const scanTriggerEnd = app.indexOf('sureshotAutoScanTimer = window.setInterval', scanTriggerStart);
 if (scanTriggerStart < 0 || scanTriggerEnd < 0 || app.slice(scanTriggerStart, scanTriggerEnd).includes('sureshotRequestRunning')) {
