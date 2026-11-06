@@ -2084,7 +2084,8 @@ async function loadMcxSureshotUniverseShortlist() {
     if (!response.ok || result.ok !== true || result.scanComplete !== true || result.orderPlacement !== 'disabled' || !Array.isArray(result.results)) {
       throw new Error([result.stage, result.error, result.detail].filter(Boolean).join(' · ') || 'MCX full-universe scan was blocked.');
     }
-    const rows = result.results.map(item => {
+    const verifiedResults = result.results.filter(item => item && item.status === 'VERIFIED SETUP' && item.plan && item.plan.contract && item.plan.quote && item.plan.risk && Number(item.plan.risk.rr) >= 2);
+    const rows = verifiedResults.map(item => {
       const plan = item.plan || {};
       const contract = plan.contract || item.contract || {};
       const risk = plan.risk || {};
@@ -2098,10 +2099,10 @@ async function loadMcxSureshotUniverseShortlist() {
         '<p class="hint">' + escapeHtml(item.reason || 'Required live data or setup condition was not verified.') + '</p>') + '</article>';
     }).join('');
     host.innerHTML = '<div class="console-section-head"><div><h4>MCX Top 5 · ' + Number(result.scannedCandidateCount) + ' checked / ' + Number(result.universeCount) + ' active futures</h4><p>Fresh futures quotes: ' + Number(result.quoteCoverage?.fresh) + ' · excluded stale/invalid: ' + Number(result.quoteCoverage?.excluded) + ' · missing: ' + Number(result.quoteCoverage?.missing) + '</p><p>Verified setups: ' + Number(result.verifiedSetupCount) + ' · Best setup: ' + (result.bestSetup ? escapeHtml(result.bestSetup.underlying || result.bestSetup.underlyingSymbol) : 'NO TRADE') + '</p></div><span class="live-tag">FYERS · READ ONLY</span></div>' + (rows || '<div class="chart-empty">NO TRADE — no candidate passed every verification gate.</div>');
-    if (status) status.textContent = 'MCX scan complete. ' + Number(result.verifiedSetupCount) + ' verified setup(s); all other candidates are NO TRADE. Orders remain disabled.';
+    if (status) status.textContent = 'MCX scan complete. ' + verifiedResults.length + ' fully verified setup(s) displayed; unverified candidates are withheld. Orders remain disabled.';
     logEvent('MCX full-universe Top 5 Sureshot scan completed: ' + Number(result.verifiedSetupCount) + ' verified setup(s).', 'info');
   } catch (error) {
-    host.innerHTML = '<div class="chart-empty"><b>MCX NO TRADE — scan blocked.</b><p>' + escapeHtml(error.message || 'Verified MCX data unavailable.') + '</p><p>Partial results are discarded; reconnect or retry only after the issue is resolved.</p></div>';
+    host.innerHTML = '<div class="chart-empty"><b>MCX NO TRADE — scan blocked.</b><p>' + escapeHtml(error.message || 'Verified MCX data unavailable.') + '</p><p>Partial results are discarded. The MCX watchdog will retry its subscription automatically when the transport is available; scan remains blocked until a fresh exchange tick returns.</p></div>';
     if (status) status.textContent = 'MCX scan blocked · no partial plans were displayed.';
     logEvent('MCX Sureshot scan blocked: ' + (error.message || 'unknown error'), 'warn');
   } finally {
@@ -2406,9 +2407,9 @@ function updateMcxConnectionDiagnostics(status) {
     ? new Date(diagnostic.exchangeTimestamp).toLocaleString('en-IN')
     : 'Waiting for exchange tick';
   const age = diagnostic.ageSeconds != null && Number.isFinite(Number(diagnostic.ageSeconds)) ? ' · age ' + diagnostic.ageSeconds + 's' : '';
-  detail.textContent = (diagnostic.note || 'MCX is diagnostic only; no signal or order is generated.') +
+  detail.textContent = (diagnostic.note || 'MCX freshness is verified independently from NSE; subscription recovery never closes the shared transport.') +
     (diagnostic.expiryDate ? ' Contract expiry: ' + diagnostic.expiryDate + '.' : '') +
-    (diagnostic.subscribedOnCurrentSocket ? ' Subscribed on the existing socket.' : '') + age;
+    (diagnostic.subscribedOnCurrentSocket ? ' MCX subscribed on the FYERS Data Socket.' : '') + age;
 }
 
 async function refreshConnectionDiagnostics() {
