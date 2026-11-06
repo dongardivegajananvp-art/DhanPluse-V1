@@ -8,7 +8,7 @@ During 09:00–15:30 IST, every tab must show verified fresh data or an explicit
 ## Freshness gates
 - Index WebSocket quote: valid exchange timestamp, age 0–15 seconds, connected stream; reject missing/future timestamps and replayed last-known data.
 - Equity/F&O quote snapshot: valid exchange/last-traded timestamp, age 0–30 seconds for live candidates. Older/missing timestamps are STALE/TIME UNVERIFIED and excluded from rankings/signals. Illiquid/no-recent-trade symbols remain unavailable, never silently fresh.
-- Option chain: chain timestamp <=15 seconds and independent selected-contract quote <=15 seconds; validate positive bid/ask/LTP, bid <= ask, expiry and liquidity/spread. Fetch time alone is not proof of exchange freshness.
+- Option-chain response: use only contract identity, strike and expiry descriptors. Chain premium/OI/volume timestamps are UNVERIFIED and those fields must not drive ranking or signals. Independently selected option bid/ask/LTP must have a valid exchange timestamp no older than 15 seconds; validate positive prices, bid <= ask, expiry and spread. Fetch time alone is not proof of exchange freshness.
 - Intraday candles: valid OHLC, ordered/non-future timestamps and interval alignment. Missing/late latest expected candle blocks live signals. Historical candles are allowed only for clearly labelled historical analysis/backtests.
 - Complete rankings: verify every expected symbol. Partial coverage, rate limits or failed symbols block a complete ranking and dependent signals. Never fabricate or silently reuse prior snapshots.
 - Derived tabs inherit the freshness of every required input. Any failed input blocks the live result.
@@ -35,7 +35,7 @@ During 09:00–15:30 IST, every tab must show verified fresh data or an explicit
 10. Automated tests plus live-session test pass before marking complete. Merge alone does not prove live stability/OAuth success.
 
 ## Known gaps to resolve
-- Static policy and unit tests do not replace browser/mobile end-to-end checks across all 24 tabs.
+- Static policy and unit tests do not replace browser/mobile end-to-end checks across the two production tabs and their Sureshot/connection workflows.
 - Full NSE F&O symbol-master coverage and rate-limit recovery must be verified during a regular market session.
 - Option-chain display intentionally blocks unless FYERS returns an explicit verifiable exchange timestamp; verify the provider response or keep the module unavailable.
 - FII/DII source is not verified; keep unavailable until connected.
