@@ -146,6 +146,14 @@ const latestTicks = new Map();
 // silence in the NSE baseline feed.
 let lastAnyMarketTickAt = 0;
 let marketSocketConnectedAt = 0;
+// NSE heartbeat is independent of MCX and BSE activity.
+const NSE_TICK_HEARTBEAT_MS = 10_000;
+const NSE_TICK_FRESHNESS_SECONDS = 10;
+const nseIndexSymbols = allowedSymbols.filter(symbol => symbol.startsWith('NSE:'));
+let lastFreshNseTickAt = 0;
+let nseReconnectPending = false;
+let lastNseResubscribeAt = 0;
+let nseResubscribeCount = 0;
 const lastTickDiagnosticAt = new Map();
 const lastRejectedDiagnosticAt = new Map();
 const lastControlDiagnosticAt = new Map();
@@ -228,8 +236,16 @@ function parseTick(raw) {
         }));
       }
     }
-    // MCX is an auxiliary diagnostics tick; it must not mask silence in the NSE baseline feed.
+    // MCX and BSE activity must never mask silence in the NSE baseline feed.
     if (!isMcxDiagnostic) lastAnyMarketTickAt = Date.now();
+    if (symbol.startsWith('NSE:') && quoteTimestampStatus(exchangeTime, Date.now(), NSE_TICK_FRESHNESS_SECONDS) === 'FRESH') {
+      lastFreshNseTickAt = Date.now();
+      if (nseReconnectPending) {
+        nseReconnectPending = false;
+        nseResubscribeCount = 0;
+        console.log('NSE live feed restored after automatic recovery.', JSON.stringify({ symbol, exchangeTimestamp: tick.updatedAt }));
+      }
+    }
     acceptedCount += 1;
   }
   return acceptedCount;
@@ -242,6 +258,10 @@ function startMarketDataStream(token) {
   }
   streamError = '';
   streamConnected = false;
+  lastFreshNseTickAt = 0;
+  nseReconnectPending = false;
+  lastNseResubscribeAt = 0;
+  nseResubscribeCount = 0;
   latestTicks.clear();
   mcxDiagnosticTick = null;
   mcxSubscribedSocket = null;
@@ -257,7 +277,8 @@ function startMarketDataStream(token) {
     socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
     marketSocket = socket;
     marketSocketToken = token;
-    const SDK_RECONNECT_RETRIES = 6;
+    // FYERS documents a maximum of 50 SDK-managed reconnect attempts.
+    const SDK_RECONNECT_RETRIES = 50;
     // FYERS Node docs use `autoreconnect`; support the camelCase spelling
     // present in some published SDK examples without creating two controllers.
     const sdkReconnect = typeof socket.autoreconnect === 'function'
@@ -280,6 +301,9 @@ function startMarketDataStream(token) {
       streamError = '';
       marketSocketConnectedAt = Date.now();
       lastAnyMarketTickAt = 0;
+      lastFreshNseTickAt = 0;
+      nseReconnectPending = false;
+      lastNseResubscribeAt = 0;
       socketConnectCount += 1;
       console.log('FYERS market socket connected; restoring baseline subscription.', JSON.stringify({
         connectionNumber: socketConnectCount,
@@ -387,13 +411,15 @@ function startMarketDataStream(token) {
       if (marketSocket !== socket) return;
       streamConnected = false;
       const safeReason = reason == null ? '' : String(reason).slice(0, 160);
-      streamError = 'FYERS market socket disconnected; controlled recovery is pending.';
-      console.warn('FYERS market socket closed:', JSON.stringify({
+      streamError = 'FYERS market socket disconnected; automatic recovery is in progress.';
+      nseReconnectPending = true;
+      console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
         code: code ?? null,
         reason: safeReason || null,
         sdkAutoReconnect: true,
         retryPolicy: 'fyers-sdk-autoReconnect',
-        retryLimit: SDK_RECONNECT_RETRIES
+        retryLimit: SDK_RECONNECT_RETRIES,
+        nseHeartbeatMs: NSE_TICK_HEARTBEAT_MS
       }));
     });
     // Add one official MCX diagnostic contract to this same SDK socket.
@@ -428,25 +454,42 @@ function startMarketDataStream(token) {
   }
 }
 
-// Observe prolonged feed silence without manually closing the socket.
-// A programmatic close can be interpreted as an intentional shutdown by the
-// SDK and may suppress its auto-reconnect controller. Tick freshness gates
-// independently block signals while the feed is silent or stale.
+// NSE feed heartbeat: MCX/BSE ticks do not count as proof that NSE index
+// subscriptions are alive. After 10 seconds without a fresh exchange-timestamped
+// NSE tick, re-apply only NSE subscriptions on the existing shared socket. This
+// avoids opening a second FYERS socket and leaves the MCX diagnostic subscription
+// undisturbed. Actual transport closes use the SDK auto-reconnect controller.
 const marketSocketWatchdog = setInterval(() => {
   if (!accessToken || !marketSocket || !nseRegularSessionNow()) return;
   const now = Date.now();
-  const lastActivityAt = lastAnyMarketTickAt || marketSocketConnectedAt;
-  const feedSilentForMs = lastActivityAt ? now - lastActivityAt : Infinity;
-  const SOCKET_SILENCE_THRESHOLD_MS = 120_000;
-  if (feedSilentForMs <= SOCKET_SILENCE_THRESHOLD_MS) return;
-  console.warn('FYERS market socket feed silence detected; preserving SDK-managed socket lifecycle:', JSON.stringify({
-    feedSilentForMs,
-    thresholdMs: SOCKET_SILENCE_THRESHOLD_MS,
-    lastAnyMarketTickAt: lastAnyMarketTickAt ? new Date(lastAnyMarketTickAt).toISOString() : null,
-    reconnectOwner: 'fyers-sdk-autoReconnect',
-    forcedClose: false
-  }));
-}, 15_000);
+  const baselineAt = lastFreshNseTickAt || marketSocketConnectedAt;
+  const silentForMs = baselineAt ? now - baselineAt : Infinity;
+  if (silentForMs < NSE_TICK_HEARTBEAT_MS || now - lastNseResubscribeAt < NSE_TICK_HEARTBEAT_MS) return;
+  nseReconnectPending = true;
+  lastNseResubscribeAt = now;
+  nseResubscribeCount += 1;
+  try {
+    if (streamConnected && marketSocket && typeof marketSocket.subscribe === 'function') {
+      marketSocket.mode(marketSocket.FullMode);
+      marketSocket.subscribe(nseIndexSymbols);
+      streamError = 'NSE feed is reconnecting after 10 seconds without a fresh exchange tick.';
+      console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
+        reason: 'no_fresh_nse_tick_within_10_seconds', silentForMs,
+        retry: nseResubscribeCount, recovery: 'reapply_nse_subscriptions_on_existing_shared_socket',
+        transportConnected: true, symbols: nseIndexSymbols
+      }));
+    } else {
+      streamError = 'NSE socket disconnected; FYERS SDK auto-reconnect is in progress.';
+      console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
+        reason: 'socket_transport_not_connected', silentForMs,
+        retry: nseResubscribeCount, recovery: 'fyers_sdk_auto_reconnect'
+      }));
+    }
+  } catch (error) {
+    streamError = 'NSE subscription recovery failed; automatic retry remains active.';
+    console.error('NSE socket disconnected, reconnecting... subscription recovery failed:', String(error?.message || error).slice(0, 200));
+  }
+}, 1_000);
 marketSocketWatchdog.unref?.();
 
 function nseRegularSessionNow() {
@@ -510,11 +553,12 @@ app.get('/api/status', (_req, res) => {
   const nseSymbols = allowedSymbols.filter(symbol => symbol.startsWith('NSE:'));
   const nseFreshTickCount = nseSymbols.filter(symbol => {
     const tick = latestTicks.get(symbol);
-    return Boolean(tick && quoteTimestampStatus(Date.parse(tick.updatedAt) / 1000, Date.now(), 30) === 'FRESH');
+    return Boolean(tick && quoteTimestampStatus(Date.parse(tick.updatedAt) / 1000, Date.now(), NSE_TICK_FRESHNESS_SECONDS) === 'FRESH');
   }).length;
   const nseHasAnyTick = nseSymbols.some(symbol => latestTicks.has(symbol));
   const nseFeed = !accessToken ? 'NOT_CONNECTED'
-    : !streamConnected ? 'DISCONNECTED'
+    : nseReconnectPending ? 'RECONNECTING'
+    : !streamConnected ? 'RECONNECTING'
     : nseFreshTickCount === nseSymbols.length ? 'LIVE'
     : nseFreshTickCount > 0 ? 'PARTIAL'
     : nseHasAnyTick ? 'STALE' : 'WAITING';
