@@ -68,12 +68,16 @@ if (!app.includes('function applyAuthoritativeFyersStatus(status, restCooldown =
 
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
 if (!app.includes('SURESHOT_AUTO_SCAN_ATTEMPT_KEY') ||
-    !html.includes('app.js?v=20261106-fyers-status-v1') ||
-    !html.includes('sw.js?v=20261106-fyers-status-v1') ||
-    !sw.includes('dhanpulse-shell-v131-fyers-status-v1') ||
-    !sw.includes('app.js?v=20261106-fyers-status-v1') ||
+    !app.includes('refreshAuthoritativeFyersStatus') ||
+    !app.includes("window.setInterval(() => { void refreshAuthoritativeFyersStatus(); }, 5000)") ||
+    !app.includes("document.addEventListener('visibilitychange'") ||
+    !app.includes("window.addEventListener('pageshow'") ||
+    !html.includes('app.js?v=20261106-authoritative-status-v2') ||
+    !html.includes('sw.js?v=20261106-authoritative-status-v2') ||
+    !sw.includes('dhanpulse-shell-v132-authoritative-status-v2') ||
+    !sw.includes('app.js?v=20261106-authoritative-status-v2') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('PWA cache and bounded Sureshot automatic-attempt guard must be present in the published shell.');
 }
 if (!app.includes('settingsMcxFeed') || !app.includes('refreshConnectionDiagnostics') || !app.includes('updateMcxConnectionDiagnostics') || !app.includes('settingsNseSession') || !app.includes('settingsNseLiveFeed') || !app.includes('settingsMcxSession') || !app.includes('settingsMcxLiveFeed') || !app.includes('updateExchangeLiveSwitches')) throw new Error('MCX diagnostics must be visible in the existing FYERS Connection tab.');
-console.log('PASS: PWA shell v131 loads the bounded Sureshot scan-attempt guard, MCX diagnostics, and independent NSE/MCX live switches in the existing FYERS Connection tab.');
+console.log('PASS: PWA shell v132 loads the bounded Sureshot scan-attempt guard, MCX diagnostics, and independent NSE/MCX live switches in the existing FYERS Connection tab.');
