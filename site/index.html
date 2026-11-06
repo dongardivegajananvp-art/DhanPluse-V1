@@ -3865,7 +3865,7 @@ nav.addEventListener('click', event => {
 document.querySelector('#settingsBtn')?.addEventListener('click', () => render('FYERS Connection'));
 
 try { localStorage.removeItem('dhanpulse-watchlist-v1'); localStorage.removeItem('dhanpulse-price-alerts'); localStorage.removeItem('dhanpulse-trade-journal-v1'); } catch {}
-render('Sureshot CE/PE');
+render('Home');
 restoreLastKnownIndexQuotes();
 testBackend();
 void refreshAuthoritativeFyersStatus();
@@ -3881,5 +3881,5 @@ logEvent('DhanPulse console initialised.', 'info');
 if (!authExchangeInProgress) fetchLiveQuotes();
 
 </script>
-<script>if ("serviceWorker" in navigator && location.protocol === "https:") { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js?v=20261106-single-html-tabs-v1", { updateViaCache: "none" }).then(registration => registration.update()).catch(() => {})); }</script>
+<script>if ("serviceWorker" in navigator && location.protocol === "https:") { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js?v=20261106-public-pages-v1", { updateViaCache: "none" }).then(registration => registration.update()).catch(() => {})); }</script>
 </body></html>
