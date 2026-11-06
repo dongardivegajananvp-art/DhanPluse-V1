@@ -48,6 +48,9 @@ let chartStreamSymbol = null;
 // are intentionally ignored even if stale ALLOWED_ORIGIN(S) values remain set.
 const allowedOrigins = new Set([
   'https://dongardivegajananvp-art.github.io',
+  // Backward compatibility for the previously shared installed PWA origin.
+  // This is an exact host allow-list entry, not a wildcard or general preview permission.
+  'https://spectacular-gaufre-b5c029.netlify.app',
   'http://localhost:5173',
   'http://localhost:3000'
 ]);
