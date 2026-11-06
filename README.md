@@ -4,7 +4,7 @@
 
 ## Official links
 
-- **Website:** https://dongardivegajananvp-art.github.io/DhanPluse-V1/
+- **Website:** https://dongardivegajananvp-art.github.io/DhanPluse-V1/site/
 - **Backend API:** https://dhanpluse-v1.onrender.com
 - **Source of truth:** the `site/` frontend plus the `backend/` service in this repository.
 - Root and nested compatibility pages are redirects only; they are not separate applications.
@@ -40,9 +40,9 @@ The single frontend lives in `site/`. It retains the original Ultimate navigatio
 
 Automated syntax/unit checks are necessary but do not prove end-to-end behavior. Before calling the consolidation complete, verify:
 1. Browser API destination and CORS response on the official UI.
-2. All 24 tabs render and work without console errors, including Gap-Up/Gap-Down.
+2. Exactly two tabs render: Sureshot CE/PE and FYERS Connection. Both must pass desktop and Android-sized browser smoke tests without console errors.
 3. NIFTY, BANK NIFTY, SENSEX and F&O last-known LTPs show only when FYERS returns valid exchange-timestamped prices.
-4. Full F&O universe, historical OHLC charts, option chain, movers and FII/DII routes handle missing/rate-limited data safely.
+4. Full eligible NSE F&O and official MCX futures scans, underlying/option OHLC, contract descriptors, selected-option quotes, and risk plans fail closed on missing, stale, partial or rate-limited data.
 5. FYERS OAuth callback and WebSocket reconnect/fresh-tick recovery in a regular market session.
 6. Mobile/PWA refreshes to the current frontend without stale cached JavaScript.
 
