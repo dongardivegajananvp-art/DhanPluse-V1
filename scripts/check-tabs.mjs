@@ -7,16 +7,19 @@ if (!navBlock) throw new Error('Navigation block #nav is missing.');
 const navTabs = [...navBlock[1].matchAll(/data-tab="([^"]+)"/g)]
   .map(match => match[1].replace(/&amp;/g, '&'));
 if (navTabs.length !== 2 || navTabs[0] !== 'Sureshot CE/PE' || navTabs[1] !== 'FYERS Connection') {
-  throw new Error('Expected exactly two visible tabs (Sureshot CE/PE, FYERS Connection); found: ' + navTabs.join(', '));
+  throw new Error('Expected the two existing trading app tabs; found: ' + navTabs.join(', '));
 }
-if (!navBlock[1].includes('class="active"') || !navBlock[1].includes('class="active" data-tab="Sureshot CE/PE"')) {
-  throw new Error('Sureshot CE/PE must be the active initial tab.');
-}
+const publicNav = html.match(/<nav id="publicNav">([\\s\\S]*?)<\\/nav>/);
+if (!publicNav) throw new Error('Public website navigation is missing.');
+const publicTabs = [...publicNav[1].matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]);
+const requiredPublicTabs = ['Home','About','Features','Contact','Login','Signup','App'];
+if (publicTabs.length !== requiredPublicTabs.length || !requiredPublicTabs.every(tab => publicTabs.includes(tab))) throw new Error('Public website pages are incomplete: ' + publicTabs.join(', '));
+if (!publicNav[1].includes('class="active" data-tab="Home"')) throw new Error('Home must be the active public landing page.');
 if (app.includes('sureshotFyersConnectBtn')) throw new Error('FYERS connect button must not be rendered on the Sureshot tab.');
 if (!app.includes("else if (tab === 'FYERS Connection') featureContent.innerHTML = settingsMarkup();")) {
   throw new Error('Dedicated FYERS Connection tab renderer is missing.');
 }
-if (!app.includes("render('Sureshot CE/PE');")) throw new Error('Sureshot CE/PE must be the initial workspace.');
+if (!app.includes("render('Home');")) throw new Error('Home must be the initial landing page.');
 const renderStart = app.indexOf('function render(tab) {');
 const renderEnd = app.indexOf('\nfunction bindTabActions', renderStart);
 if (renderStart < 0 || renderEnd < 0) throw new Error('Workspace render function could not be located.');
@@ -53,7 +56,7 @@ if (!dashboardCandleHandler.includes("const requestSession = localStorage.getIte
 if (dashboardCandleHandler.includes("localStorage.removeItem('dhanpulse-dashboard-session-v1')")) {
   throw new Error('Unconditional dashboard-session deletion remains in the candle handler.');
 }
-console.log('PASS: exactly two visible tabs (Sureshot CE/PE, FYERS Connection); connection controls are separated from Sureshot.');
+console.log('PASS: public pages are present and the original two trading app tabs remain separate.');
 console.log('PASS: legacy watchlist/alert browser data cleared; shared FYERS session preserved; frontend cooldown guard removed.');
 const scanTriggerStart = app.indexOf('const startAutomaticTopFiveScan');
 const scanTriggerEnd = app.indexOf('sureshotAutoScanTimer = window.setInterval', scanTriggerStart);
@@ -74,10 +77,10 @@ if (!app.includes('SURESHOT_AUTO_SCAN_ATTEMPT_KEY') ||
     !app.includes("window.addEventListener('pageshow'") ||
     !html.includes('app.js?v=20261106-authoritative-status-v2') ||
     !html.includes('sw.js?v=20261106-authoritative-status-v2') ||
-    !sw.includes('dhanpulse-shell-v132-authoritative-status-v2') ||
+    !sw.includes('dhanpulse-shell-v134-public-pages-v1') ||
     !sw.includes('app.js?v=20261106-authoritative-status-v2') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('PWA cache and bounded Sureshot automatic-attempt guard must be present in the published shell.');
 }
 if (!app.includes('settingsMcxFeed') || !app.includes('refreshConnectionDiagnostics') || !app.includes('updateMcxConnectionDiagnostics') || !app.includes('settingsNseSession') || !app.includes('settingsNseLiveFeed') || !app.includes('settingsMcxSession') || !app.includes('settingsMcxLiveFeed') || !app.includes('updateExchangeLiveSwitches')) throw new Error('MCX diagnostics must be visible in the existing FYERS Connection tab.');
-console.log('PASS: PWA shell v132 loads the bounded Sureshot scan-attempt guard, MCX diagnostics, and independent NSE/MCX live switches in the existing FYERS Connection tab.');
+console.log('PASS: PWA shell v134 loads the bounded Sureshot scan-attempt guard, MCX diagnostics, and independent NSE/MCX live switches in the existing FYERS Connection tab.');
