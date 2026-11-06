@@ -29,7 +29,7 @@ test("OAuth re-authentication issues a new dashboard bearer without clearing oth
   assert.doesNotMatch(exchangeRoute, /dashboardSessions\.clear\(/);
 });
 
-test("protected API sessions require a valid bearer, an unexpired server session and a live FYERS token", async () => {
+test("protected API accepts a valid bearer and restores the signed PostgreSQL-backed session after restart", async () => {
   const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   const start = source.indexOf("function requireDashboardSession");
   const end = source.indexOf("app.use('/api/market'", start);
@@ -37,7 +37,10 @@ test("protected API sessions require a valid bearer, an unexpired server session
   const guard = source.slice(start, end);
   assert.match(guard, /\^Bearer \(\[a-f0-9\]\{64\}\)\$/);
   assert.match(guard, /Date\.now\(\) - session\.createdAt > DASHBOARD_SESSION_TTL_MS/);
-  assert.match(guard, /\|\| !accessToken/);
+  assert.match(guard, /token && accessToken && fyersTokenStore\\.configured/);
+  assert.match(guard, /token === createDashboardSessionToken\\(\\)/);
+  assert.ok(source.includes("crypto.createHmac('sha256'"));
+  assert.ok(source.includes('DhanPulse/dashboard-session/v1'));
   assert.match(guard, /session\.lastSeenAt = Date\.now\(\)/);
 });
 
