@@ -55,3 +55,21 @@ test("FYERS invalid-token rejection clears sessions and closes the owned socket"
   assert.match(invalidation, /latestTicks\.clear\(\)/);
   assert.match(invalidation, /expiredSocket\.close\(\)/);
 });
+
+test("NSE and MCX Sureshot scans use independent in-flight locks", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  assert.ok(source.includes("let nseSureshotAutoPlansInFlight = false;"));
+  assert.ok(source.includes("let mcxSureshotAutoPlansInFlight = false;"));
+  const nseStart = source.indexOf('app.get("/api/market/sureshot-auto-plans"');
+  const mcxStart = source.indexOf('app.get("/api/market/mcx-sureshot-auto-plans"');
+  const mcxEnd = source.indexOf("// Last-known F&O equity quotes", mcxStart);
+  assert.ok(nseStart >= 0 && mcxStart > nseStart && mcxEnd > mcxStart);
+  const nseRoute = source.slice(nseStart, mcxStart);
+  const mcxRoute = source.slice(mcxStart, mcxEnd);
+  assert.ok(nseRoute.includes("if (nseSureshotAutoPlansInFlight)"));
+  assert.ok(nseRoute.includes("nseSureshotAutoPlansInFlight = true;"));
+  assert.ok(nseRoute.includes("nseSureshotAutoPlansInFlight = false;"));
+  assert.ok(mcxRoute.includes("if (mcxSureshotAutoPlansInFlight)"));
+  assert.ok(mcxRoute.includes("mcxSureshotAutoPlansInFlight = true;"));
+  assert.ok(mcxRoute.includes("mcxSureshotAutoPlansInFlight = false;"));
+});
