@@ -1769,6 +1769,14 @@ async function performSureshotSetup() {
   if(!status||!cards||!symbolEl||!resolutionEl||!chart||!summary)return;
   let selectedContract=null;
   const symbol=symbolEl.value,resolution=resolutionEl.value;
+  if (!localStorage.getItem(DASHBOARD_SESSION_KEY)) {
+    const message='Connect FYERS to load verified underlying candles, chart zones and automatic option contract selection. No prices or candles are fabricated.';
+    status.textContent=message;
+    cards.innerHTML='<article class="console-section"><div class="console-section-head"><h4>FYERS SESSION REQUIRED</h4><span class="signal-tone neutral">NO TRADE</span></div><p>'+escapeHtml(message)+'</p><div class="data-row"><span>Chart / zones</span><b>WAITING FOR VERIFIED OHLC</b></div><div class="data-row"><span>Expiry / strike</span><b>AUTO AFTER VERIFIED DIRECTION</b></div><div class="data-row"><span>Entry / SL / Target / RR</span><b>BLOCKED</b></div></article>';
+    chart.innerHTML='<div class="chart-empty"><strong>Connect FYERS first.</strong><p>The candlestick chart will load automatically after a successful broker login.</p></div>';
+    summary.textContent='No underlying candles loaded. Chart, zones and option selection remain unavailable until an authenticated FYERS session exists.';
+    return;
+  }
   if (symbol.startsWith('MCX:')) {
     try {
       const exchangeStatusResponse = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
