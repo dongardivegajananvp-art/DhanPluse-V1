@@ -150,7 +150,6 @@ let marketSocketConnectedAt = 0;
 const NSE_TICK_HEARTBEAT_MS = 10_000;
 const NSE_TICK_FRESHNESS_SECONDS = 10;
 const nseIndexSymbols = allowedSymbols.filter(symbol => symbol.startsWith('NSE:'));
-let lastFreshNseTickAt = 0;
 let nseReconnectPending = false;
 let lastNseResubscribeAt = 0;
 let nseResubscribeCount = 0;
@@ -239,13 +238,13 @@ function parseTick(raw) {
     // MCX and BSE activity must never mask silence in the NSE baseline feed.
     if (!isMcxDiagnostic) lastAnyMarketTickAt = Date.now();
     if (symbol.startsWith('NSE:') && quoteTimestampStatus(exchangeTime, Date.now(), NSE_TICK_FRESHNESS_SECONDS) === 'FRESH') {
-      lastFreshNseTickAt = Date.now();
       if (nseReconnectPending && nseIndexSymbols.every(requiredSymbol => {
         const requiredTick = latestTicks.get(requiredSymbol);
         return Boolean(requiredTick && quoteTimestampStatus(Date.parse(requiredTick.updatedAt) / 1000, Date.now(), NSE_TICK_FRESHNESS_SECONDS) === 'FRESH');
       })) {
         nseReconnectPending = false;
         nseResubscribeCount = 0;
+        if (streamError.startsWith('NSE feed is reconnecting')) streamError = '';
         console.log('NSE live feed restored after automatic recovery.', JSON.stringify({ symbol, exchangeTimestamp: tick.updatedAt, allRequiredNseSymbolsFresh: true }));
       }
     }
@@ -261,7 +260,6 @@ function startMarketDataStream(token) {
   }
   streamError = '';
   streamConnected = false;
-  lastFreshNseTickAt = 0;
   nseReconnectPending = false;
   lastNseResubscribeAt = 0;
   nseResubscribeCount = 0;
@@ -304,7 +302,6 @@ function startMarketDataStream(token) {
       streamError = '';
       marketSocketConnectedAt = Date.now();
       lastAnyMarketTickAt = 0;
-      lastFreshNseTickAt = 0;
       nseReconnectPending = false;
       lastNseResubscribeAt = 0;
       socketConnectCount += 1;
@@ -468,7 +465,9 @@ const marketSocketWatchdog = setInterval(() => {
   const staleNseAgesMs = nseIndexSymbols.map(symbol => {
     const tick = latestTicks.get(symbol);
     const tickAt = tick ? Date.parse(tick.updatedAt) : marketSocketConnectedAt;
-    return Number.isFinite(tickAt) && tickAt > 0 ? Math.max(0, now - tickAt) : Infinity;
+    if (!Number.isFinite(tickAt) || tickAt <= 0) return Infinity;
+    const ageMs = now - tickAt;
+    return ageMs < 0 ? Infinity : ageMs;
   });
   const silentForMs = staleNseAgesMs.length ? Math.max(...staleNseAgesMs) : Infinity;
   if (silentForMs < NSE_TICK_HEARTBEAT_MS || now - lastNseResubscribeAt < NSE_TICK_HEARTBEAT_MS) return;
