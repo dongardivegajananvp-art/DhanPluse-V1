@@ -2408,7 +2408,7 @@ async function loadMcxFuturesIntoSureshotSelect() {
 }
 
 async function loadMcxSureshotUniverseShortlist() {
-  if (currentTab !== 'Sureshot CE/PE' || nseSureshotScanRunning) return;
+  if (currentTab !== 'Sureshot CE/PE' || mcxSureshotScanRunning) return;
   const button = document.querySelector('#scanMcxSureshotUniverseBtn');
   const host = document.querySelector('#mcxSureshotUniverseResults');
   const status = document.querySelector('#setupStatus');
@@ -2417,7 +2417,7 @@ async function loadMcxSureshotUniverseShortlist() {
     if (status) status.textContent = 'Connect FYERS first. MCX scan requires a valid broker session and fresh MCX exchange ticks.';
     return;
   }
-  nseSureshotScanRunning = true;
+  mcxSureshotScanRunning = true;
   if (button) button.disabled = true;
   host.innerHTML = '<div class="chart-empty">Scanning official MCX F&O universe. Stale or missing futures quotes will be excluded; every ranked candidate still requires fresh underlying candles, verified option contract, premium and option candles…</div>';
   try {
@@ -2449,7 +2449,7 @@ async function loadMcxSureshotUniverseShortlist() {
     if (status) status.textContent = 'MCX scan blocked · no partial plans were displayed.';
     logEvent('MCX Sureshot scan blocked: ' + (error.message || 'unknown error'), 'warn');
   } finally {
-    nseSureshotScanRunning = false;
+    mcxSureshotScanRunning = false;
     if (button) button.disabled = false;
   }
 }
