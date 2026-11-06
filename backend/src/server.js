@@ -352,10 +352,26 @@ function startMarketDataStream(token) {
     });
     socket.on('error', error => {
       if (marketSocket !== socket) return;
-      streamConnected = false;
-      streamError = 'FYERS market data socket reported an error; controlled recovery is pending.';
-      console.error('FYERS market socket error:', String(error?.message || error).slice(0, 240));
-
+      // FYERS SDK error events are not proof that the transport has closed.
+      // Keep the connection state until the close event or verified tick
+      // freshness says otherwise; liveSnapshot() remains fail-closed.
+      const detail = error && typeof error === 'object'
+        ? error
+        : { message: String(error ?? 'Unknown socket error') };
+      const code = detail.code ?? detail.statusCode ?? detail.status ?? detail.response?.status ?? null;
+      const message = String(detail.message ?? detail.error ?? detail.reason ?? 'Unspecified FYERS SDK socket error')
+        .replace(/\s+/g, ' ').slice(0, 240);
+      recordDiagnostic('warn', 'market_socket_error', {
+        code: code == null ? null : String(code).slice(0, 40),
+        message,
+        transportState: streamConnected ? 'connected-awaiting-close-or-freshness-check' : 'not-connected'
+      });
+      console.warn('FYERS market socket error event; transport state retained until close/freshness check:', JSON.stringify({
+        code: code == null ? null : String(code).slice(0, 40),
+        statusCode: detail.statusCode ?? detail.response?.status ?? null,
+        message,
+        transportState: streamConnected ? 'connected' : 'not-connected'
+      }));
     });
     socket.on('close', (code, reason) => {
       if (marketSocket !== socket) return;

@@ -99,3 +99,26 @@ test("FYERS SDK reconnect attempts are bounded to avoid repeated provider 429 pr
   assert.match(source, /const SDK_RECONNECT_RETRIES = 6;/);
   assert.doesNotMatch(source, /const SDK_RECONNECT_RETRIES = 50;/);
 });
+
+test("FYERS SDK error event does not falsely mark a still-ticking socket disconnected", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  const errorStart = source.indexOf("socket.on('error'");
+  const closeStart = source.indexOf("socket.on('close'", errorStart);
+  assert.ok(errorStart >= 0 && closeStart > errorStart);
+  const errorHandler = source.slice(errorStart, closeStart);
+  assert.doesNotMatch(errorHandler, /streamConnected\s*=\s*false/);
+  assert.match(errorHandler, /market_socket_error/);
+  assert.match(errorHandler, /transportState/);
+  const closeEnd = source.indexOf("// Add one official MCX", closeStart);
+  assert.ok(closeEnd > closeStart);
+  assert.match(source.slice(closeStart, closeEnd), /streamConnected\s*=\s*false/);
+});
+
+test("verified live snapshots continue to reject stale exchange timestamps", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  const start = source.indexOf("function liveSnapshot");
+  const end = source.indexOf("\n}", start) + 2;
+  assert.ok(start >= 0 && end > start);
+  assert.match(source.slice(start, end), /quoteTimestampStatus/);
+  assert.match(source.slice(start, end), /'FRESH'/);
+});
