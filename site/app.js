@@ -380,7 +380,8 @@ async function refreshSocketStatusDuringCooldown() {
     });
     if (!response.ok) return;
     const status = await response.json().catch(() => ({}));
-    if (status.backend === 'online') setBackendStatus('ONLINE');
+    if (!status || status.backend !== 'online') return;
+    setBackendStatus('ONLINE');
     authoritativeFyersStatusUpdatedAt = Date.now();
     applyAuthoritativeFyersStatus(status, true);
   } catch {
@@ -2396,7 +2397,8 @@ async function refreshConnectionDiagnostics() {
       headers: { Accept: 'application/json' }, cache: 'no-store'
     });
     const status = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error('Status endpoint unavailable.');
+    if (!response.ok || !status || status.backend !== 'online') throw new Error('Status endpoint unavailable.');
+    setBackendStatus('ONLINE');
     authoritativeFyersStatusUpdatedAt = Date.now();
     applyAuthoritativeFyersStatus(status);
     updateExchangeLiveSwitches(status);
@@ -3233,7 +3235,7 @@ async function testBackend() {
     try {
       const statusResponse = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const status = await statusResponse.json().catch(() => ({}));
-      if (statusResponse.ok) {
+      if (statusResponse.ok && status && status.backend === 'online') {
         authoritativeFyersStatusUpdatedAt = Date.now();
         applyAuthoritativeFyersStatus(status);
       } else {
