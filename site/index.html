@@ -288,14 +288,37 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
 
+/* Integrated public pages */
+#publicPage{display:none;max-width:1180px;margin:0 auto 28px}
+.public-hero{padding:clamp(28px,6vw,68px);border:1px solid #354a70;border-radius:24px;background:radial-gradient(circle at 85% 15%,#4356a64a,transparent 34%),linear-gradient(125deg,#172d47,#171b39 68%,#222044);box-shadow:0 24px 70px #0005}
+.public-kicker{color:#75f0d8;font-size:10px;font-weight:900;letter-spacing:2px}
+.public-hero h2{font-size:clamp(34px,6vw,64px);line-height:1.03;letter-spacing:-2px;max-width:760px;margin:14px 0}
+.public-hero p{max-width:680px;color:#c1cce0;font-size:clamp(14px,2vw,17px);line-height:1.8}
+.public-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}
+.public-btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:11px 17px;border:1px solid #426080;border-radius:10px;background:#192b46;color:#eaf4ff;font-weight:800;cursor:pointer;text-decoration:none}
+.public-btn.primary{background:linear-gradient(100deg,#63f0d2,#86b4ff);color:#071523;border:0}
+.public-section{margin-top:22px;padding:clamp(18px,3vw,28px);border:1px solid #2c3e5c;border-radius:18px;background:linear-gradient(145deg,#111c2d,#0c1422)}
+.public-section h3{font-size:clamp(20px,3vw,28px);margin:0 0 9px}
+.public-section>p{color:#aab8cf;line-height:1.8;max-width:820px}
+.public-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin-top:18px}
+.public-card{padding:19px;border:1px solid #304363;border-radius:14px;background:#121f32;min-width:0}
+.public-card .ico{font-size:25px}.public-card h4{margin:10px 0 6px}.public-card p{color:#9eafc9;font-size:12px;line-height:1.7;margin:0}
+.public-form{display:grid;gap:12px;max-width:480px;margin-top:18px}
+.public-form label{display:grid;gap:6px;color:#b6c5dc;font-size:12px}
+.public-form input,.public-form textarea{width:100%;padding:12px;border:1px solid #35496a;border-radius:9px;background:#0b1423;color:#f4f7ff;font:inherit}
+.public-form textarea{min-height:120px;resize:vertical}
+.public-notice{padding:12px;border:1px solid #725d34;border-radius:10px;background:#302817;color:#ffdf9c;font-size:12px;line-height:1.65}
+.public-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:14px}
+@media(max-width:760px){.public-cards{grid-template-columns:1fr 1fr}.public-grid{grid-template-columns:1fr}}
+@media(max-width:520px){.public-cards{grid-template-columns:1fr}.public-hero{border-radius:16px}.public-hero h2{letter-spacing:-1px}.public-actions .public-btn{width:100%}}
 </style>
 </head>
 <body>
 <aside class="sidebar"><div class="brand"><span class="brandmark">DP</span><div><b>DhanPulse</b><small>ULTIMATE · FYERS</small></div></div><nav id="nav">
-<button class="active" data-tab="Sureshot CE/PE">🎯 Sureshot</button>
-<button data-tab="FYERS Connection">🔐 FYERS Connect</button>
+<button class="active" data-tab="Home">⌂ Home</button><button data-tab="About">About</button><button data-tab="Features">Features</button><button data-tab="Contact">Contact</button><button data-tab="Login">Login</button><button data-tab="Signup">Sign up</button><button data-tab="App">🚀 Open App</button><button data-tab="Sureshot CE/PE">🎯 Sureshot</button><button data-tab="FYERS Connection">🔐 FYERS Connect</button>
 </nav><div class="sidefoot"><span class="dot gray" id="sideFeedDot"></span> <span id="sideFeedStatus">Waiting for verified live feed</span></div></aside>
 <main><header><div><p class="eyebrow">TRADING WORKSPACE / INDIA</p><h1 id="pageTitle">Sureshot CE/PE</h1></div><div class="header-right"><span class="market-pill"><i class="dot gray"></i><span id="marketStatus">LIVE DATA NOT CONNECTED</span></span><div class="avatar">DP</div></div></header>
+<section id="publicPage" aria-live="polite"></section>
 <section class="welcome"><div><p class="eyebrow">YOUR MARKET, ONE VIEW</p><h2>Trade with clarity.</h2><p>Waiting for the first verified FYERS quote response. Market prices appear only when received from the backend.</p></div><div class="welcome-icon">◈</div></section>
 <section class="metrics"><article class="metric"><span>MARKET CONNECTION</span><strong class="muted" id="connectionValue">Disconnected</strong><small>Waiting for verified FYERS quotes</small></article><article class="metric"><span>NIFTY 50</span><strong class="muted">—</strong><small>Waiting for live quote</small></article><article class="metric"><span>BANK NIFTY</span><strong class="muted">—</strong><small>Waiting for live quote</small></article><article class="metric"><span>SENSEX</span><strong class="muted">—</strong><small>Waiting for verified BSE quote</small></article><article class="metric"><span>LAST UPDATE</span><strong class="muted" id="lastUpdate">—</strong><small>Timestamp appears after data received</small></article></section>
 <section class="grid"><article class="panel large"><div class="panel-head"><div><h3 id="panelTitle">Market overview</h3><p>Verified data only</p></div><span class="tag">READ ONLY</span></div><div class="empty" id="mainWorkspaceContent"><div class="empty-icon">⌁</div><h3>Waiting for verified market data</h3><p>This panel updates when verified NIFTY 50 and BANK NIFTY quotes arrive from the backend.</p><button class="primary" id="settingsBtn">Open FYERS Settings</button></div></article><article class="panel"><div class="panel-head"><div><h3>Workspace status</h3><p>Service health</p></div></div><div class="statusrow"><span>Frontend</span><b class="ok">ONLINE</b></div><div class="statusrow"><span>Backend</span><b class="warn" id="backendStatus">NOT CHECKED</b></div><div class="statusrow"><span>FYERS auth</span><b class="warn">NOT CONNECTED</b></div><div class="statusrow"><span>Order placement</span><b class="warn">DISABLED</b></div><p class="hint">Backend health and live market quotes are checked separately.</p></article></section>
@@ -2929,7 +2952,47 @@ function renderLogs() {
   box.innerHTML = appLogs.length ? appLogs.map(item => '<div class="log-item"><time>' + item.time + '</time><span class="' + item.level + '">' + item.level.toUpperCase() + '</span><p>' + item.message.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p></div>').join('') : '<div class="chart-empty">No events recorded yet.</div>';
 }
 
+function renderPublicPage(page) {
+  const root = document.querySelector('#publicPage');
+  if (!root) return false;
+  if (connectionDiagnosticsTimer) { window.clearInterval(connectionDiagnosticsTimer); connectionDiagnosticsTimer = null; }
+  if (sureshotAutoScanTimer) { window.clearInterval(sureshotAutoScanTimer); sureshotAutoScanTimer = null; }
+  currentTab = page;
+  ['.welcome','.metrics','.grid','.feature-panel','footer'].forEach(selector => { const node=document.querySelector(selector); if(node) node.style.display='none'; });
+  root.style.display='block';
+  title.textContent = page === 'Signup' ? 'Create account' : page;
+  panelTitle.textContent = page; featureTitle.textContent = page; featureDesc.textContent = 'DhanPulse — verified market intelligence';
+  nav.querySelectorAll('button[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === page));
+  const pages = {};
+  pages.Home = '<div class="public-hero"><span class="public-kicker">DHANPULSE · INDIA MARKET WORKSPACE</span><h2>Make every market decision with clarity.</h2><p>A focused trading workstation built around verified FYERS market data, disciplined setups and risk-first analysis. Read-only by design: no order is placed from this website.</p><div class="public-actions"><button class="public-btn primary" data-public-action="app">Open DhanPulse App</button><button class="public-btn" data-public-action="features">Explore features</button></div></div><section class="public-section"><h3>One workspace. Verified information first.</h3><p>Market connectivity, live quotes, option setup research and system diagnostics stay together in one responsive app. If exchange data is missing or stale, actionable signals remain blocked.</p><div class="public-cards"><article class="public-card"><span class="ico">◉</span><h4>Verify the feed</h4><p>Separate backend health, broker authentication, socket state and fresh exchange ticks.</p></article><article class="public-card"><span class="ico">⌁</span><h4>Research setups</h4><p>Review CE/PE candidates only after the required underlying and option data are verified.</p></article><article class="public-card"><span class="ico">⛨</span><h4>Protect capital</h4><p>Read-only workflow with explicit risk levels. Order placement stays disabled.</p></article></div></section>';
+  pages.About = '<section class="public-section"><span class="public-kicker">ABOUT DHANPULSE</span><h3>Built for disciplined, data-first market research.</h3><p>DhanPulse is a personal trading workstation that brings FYERS connectivity, market monitoring and rule-based setup research into a single interface. Its operating principle is simple: verify data first, analyse later.</p><div class="public-cards"><article class="public-card"><h4>Data integrity</h4><p>No fabricated, demo or fallback market prices are presented as live data.</p></article><article class="public-card"><h4>Transparency</h4><p>Fresh, stale, last-known and unavailable states are kept distinct.</p></article><article class="public-card"><h4>Read-only safety</h4><p>Trading decisions remain yours; the application does not place orders.</p></article></div></section>';
+  pages.Features = '<section class="public-section"><span class="public-kicker">PLATFORM FEATURES</span><h3>Everything stays inside the DhanPulse app.</h3><p>Use the app navigation to access the existing FYERS-powered workspace. Availability of each data-driven feature depends on verified broker responses.</p><div class="public-cards"><article class="public-card"><h4>🎯 Sureshot CE/PE</h4><p>Rule-based options setup desk with contract identity, premium and candle verification.</p></article><article class="public-card"><h4>📡 FYERS Connection</h4><p>Secure broker login, backend health and live-feed diagnostics.</p></article><article class="public-card"><h4>📈 Market workspace</h4><p>Index monitoring, charts, scanners and research tools already present in the application.</p></article><article class="public-card"><h4>🛡️ Risk discipline</h4><p>Risk/reward planning and read-only analysis; no live order placement.</p></article><article class="public-card"><h4>📱 Mobile ready</h4><p>Responsive navigation and layouts for phone, tablet and desktop screens.</p></article><article class="public-card"><h4>🔒 Data boundaries</h4><p>Broker credentials and access tokens remain on the backend, not in page forms.</p></article></div><div class="public-actions"><button class="public-btn primary" data-public-action="app">Launch app</button></div></section>';
+  pages.Contact = '<div class="public-grid"><section class="public-section"><span class="public-kicker">CONTACT</span><h3>Send feedback about DhanPulse.</h3><p>Prepare a message with your name, reply address and feedback. This form copies your message; it does not pretend to send it to a server.</p><form class="public-form" id="dpContactForm"><label>Your name<input name="name" autocomplete="name" required maxlength="100"></label><label>Email address<input name="email" type="email" autocomplete="email" required maxlength="160"></label><label>Message<textarea name="message" required maxlength="3000"></textarea></label><button class="public-btn primary" type="submit">Prepare message</button><p id="dpContactResult" class="public-notice" hidden></p></form></section><section class="public-section"><h3>Support information</h3><p>For broker connectivity, open the FYERS Connection page inside the app. Never share your FYERS password, app secret, PIN or access token in a message.</p><button class="public-btn" data-public-action="fyers">Open FYERS Connection</button></section></div>';
+  pages.Login = '<section class="public-section"><span class="public-kicker">SECURE ACCESS</span><h3>Connect your trading account.</h3><p>DhanPulse currently uses the secure FYERS broker login flow for market-data access.</p><div class="public-notice">A separate DhanPulse username/password account service is not configured in the existing backend. This page will not collect or store a password, and it will not claim a login succeeded.</div><div class="public-actions"><button class="public-btn primary" data-public-action="fyers">Continue with secure FYERS login</button><button class="public-btn" data-public-action="app">Open app workspace</button></div></section>';
+  pages.Signup = '<section class="public-section"><span class="public-kicker">GET STARTED</span><h3>Start using DhanPulse.</h3><p>There is no separate DhanPulse account-registration API configured in the current project. You can open the existing app and connect FYERS through its broker-authorized flow.</p><div class="public-notice">No account is created by this page. Do not enter broker credentials into an unverified signup form.</div><div class="public-actions"><button class="public-btn primary" data-public-action="fyers">Connect FYERS securely</button><button class="public-btn" data-public-action="app">Open app workspace</button></div></section>';
+  root.innerHTML = pages[page] || pages.Home;
+  root.querySelectorAll('[data-public-action]').forEach(button => button.addEventListener('click', () => {
+    const action = button.dataset.publicAction;
+    if (action === 'app') render('App'); else if (action === 'features') render('Features'); else if (action === 'fyers') render('FYERS Connection');
+  }));
+  const contact = root.querySelector('#dpContactForm');
+  if (contact) contact.addEventListener('submit', async event => {
+    event.preventDefault();
+    const values = new FormData(contact);
+    const message = 'DhanPulse feedback\nName: ' + values.get('name') + '\nEmail: ' + values.get('email') + '\n\n' + values.get('message');
+    const result = root.querySelector('#dpContactResult');
+    try { await navigator.clipboard.writeText(message); result.textContent = 'Message copied. Paste it into your chosen support channel.'; }
+    catch { result.textContent = message; }
+    result.hidden = false;
+  });
+  return true;
+}
+
 function render(tab) {
+  if (['Home','About','Features','Contact','Login','Signup'].includes(tab)) { renderPublicPage(tab); return; }
+  if (tab === 'App') tab = 'Sureshot CE/PE';
+  const publicRoot = document.querySelector('#publicPage'); if (publicRoot) publicRoot.style.display = 'none';
+  ['.welcome','.metrics','.grid','.feature-panel','footer'].forEach(selector => { const node=document.querySelector(selector); if(node) node.style.display=''; });
   if (connectionDiagnosticsTimer) { window.clearInterval(connectionDiagnosticsTimer); connectionDiagnosticsTimer = null; }
   if (!descriptions[tab]) return;
   if (['Trade Journal','Capital Protection','Backtesting'].includes(tab)) {
