@@ -2602,7 +2602,7 @@ function render(tab) {
         attemptedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY) || attemptedToday;
       } catch {}
       if (completedToday === today || attemptedToday === today) return;
-      void loadSureshotUniverseShortlist({ automatic: true });
+      return loadSureshotUniverseShortlist({ automatic: true });
     };
     let mcxAutoScanStatusCheckInFlight = false;
     const startAutomaticMcxTopFiveScan = async () => {
@@ -2629,14 +2629,17 @@ function render(tab) {
         mcxAutoScanStatusCheckInFlight = false;
       }
     };
-    // Load the default chart first, then start the automatic scan immediately after
-    // that request settles. This prevents competing FYERS REST calls without waiting
-    // for the next 30-second timer tick.
-    void loadSureshotSetup().finally(() => {
-      if (currentTab !== 'Sureshot CE/PE') return;
-      startAutomaticTopFiveScan();
-      startAutomaticMcxTopFiveScan();
-    });
+    // Give the full-universe scan the first FYERS request slot. A slow chart/history
+    // request must never hold the automatic Top 5 scan behind it.
+    const initialNseScan = startAutomaticTopFiveScan();
+    startAutomaticMcxTopFiveScan();
+    if (initialNseScan && typeof initialNseScan.finally === 'function') {
+      void initialNseScan.finally(() => {
+        if (currentTab === 'Sureshot CE/PE') void loadSureshotSetup();
+      });
+    } else {
+      void loadSureshotSetup();
+    }
     // Check only local session/time state; no provider polling is done by this timer.
     sureshotAutoScanTimer = window.setInterval(() => {
       startAutomaticTopFiveScan();
