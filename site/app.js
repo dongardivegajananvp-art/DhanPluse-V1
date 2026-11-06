@@ -2341,6 +2341,19 @@ async function refreshConnectionDiagnostics() {
     if (!response.ok) throw new Error('Status endpoint unavailable.');
     updateExchangeLiveSwitches(status);
     updateMcxConnectionDiagnostics(status);
+    // Keep this diagnostic row aligned with the backend's exchange-specific
+    // fresh-tick validation. Dashboard quote-card state can lag while this tab
+    // is open and must not contradict the authoritative NSE feed switch.
+    const nseFeedDiagnostic = document.querySelector('#settingsFeed');
+    if (nseFeedDiagnostic) {
+      const nseFeed = status.exchangeLiveStatus && status.exchangeLiveStatus.NSE
+        ? status.exchangeLiveStatus.NSE.feed : 'UNAVAILABLE';
+      nseFeedDiagnostic.textContent = nseFeed === 'LIVE' ? 'LIVE · FRESH TICKS'
+        : nseFeed === 'PARTIAL' ? 'PARTIAL · INCOMPLETE'
+          : nseFeed === 'STALE' ? 'STALE' : nseFeed.replace(/_/g, ' ');
+    }
+    const settingsBackend = document.querySelector('#settingsBackend');
+    if (settingsBackend) settingsBackend.textContent = status.backend === 'online' ? 'ONLINE' : 'OFFLINE';
   } catch {
     updateExchangeLiveSwitches(null);
     updateMcxConnectionDiagnostics({
