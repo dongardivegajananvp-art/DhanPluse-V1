@@ -2621,9 +2621,15 @@ function render(tab) {
         mcxAutoScanStatusCheckInFlight = false;
       }
     };
+    // Load the default chart first, then start the automatic scan immediately after
+    // that request settles. This prevents competing FYERS REST calls without waiting
+    // for the next 30-second timer tick.
+    void loadSureshotSetup().finally(() => {
+      if (currentTab !== 'Sureshot CE/PE') return;
+      startAutomaticTopFiveScan();
+      startAutomaticMcxTopFiveScan();
+    });
     // Check only local session/time state; no provider polling is done by this timer.
-    startAutomaticTopFiveScan();
-    startAutomaticMcxTopFiveScan();
     sureshotAutoScanTimer = window.setInterval(() => {
       startAutomaticTopFiveScan();
       startAutomaticMcxTopFiveScan();
@@ -2714,9 +2720,7 @@ function bindTabActions() {
   });
   const setupRefresh=document.querySelector('#refreshSetupBtn');
   if(currentTab==='Sureshot CE/PE') {
-    // Render the default verified underlying chart/setup as soon as the tab opens.
-    // Keep the full-universe scan behind this request so both do not compete for FYERS REST capacity.
-    void loadSureshotSetup();
+    // Load the official NSE/MCX symbol descriptors independently of live quote coverage.
     void loadSureshotStockUniverse().then(loadMcxFuturesIntoSureshotSelect);
   }
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
