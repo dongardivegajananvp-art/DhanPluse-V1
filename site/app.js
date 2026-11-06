@@ -1,4 +1,3 @@
-
 const IS_ISOLATED_TEST_PREVIEW = /^deploy-preview-\d+--spectacular-gaufre-b5c029\.netlify\.app$/.test(window.location.hostname)
   || window.location.hostname === 'dhanpulse-clean-test-ui.onrender.com';
 const BACKEND_URL = IS_ISOLATED_TEST_PREVIEW
@@ -2625,7 +2624,47 @@ function renderLogs() {
   box.innerHTML = appLogs.length ? appLogs.map(item => '<div class="log-item"><time>' + item.time + '</time><span class="' + item.level + '">' + item.level.toUpperCase() + '</span><p>' + item.message.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p></div>').join('') : '<div class="chart-empty">No events recorded yet.</div>';
 }
 
+function renderPublicPage(page) {
+  const root = document.querySelector('#publicPage');
+  if (!root) return false;
+  if (connectionDiagnosticsTimer) { window.clearInterval(connectionDiagnosticsTimer); connectionDiagnosticsTimer = null; }
+  if (sureshotAutoScanTimer) { window.clearInterval(sureshotAutoScanTimer); sureshotAutoScanTimer = null; }
+  currentTab = page;
+  ['.welcome','.metrics','.grid','.feature-panel','footer'].forEach(selector => { const node=document.querySelector(selector); if(node) node.style.display='none'; });
+  root.style.display='block';
+  title.textContent = page === 'Signup' ? 'Create account' : page;
+  panelTitle.textContent = page; featureTitle.textContent = page; featureDesc.textContent = 'DhanPulse — verified market intelligence';
+  document.querySelectorAll('#publicNav button[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === page));
+  const pages = {};
+  pages.Home = '<div class="public-hero"><span class="public-kicker">DHANPULSE · INDIA MARKET WORKSPACE</span><h2>Make every market decision with clarity.</h2><p>A focused trading workstation built around verified FYERS market data, disciplined setups and risk-first analysis. Read-only by design: no order is placed from this website.</p><div class="public-actions"><button class="public-btn primary" data-public-action="app">Open DhanPulse App</button><button class="public-btn" data-public-action="features">Explore features</button></div></div><section class="public-section"><h3>One workspace. Verified information first.</h3><p>Market connectivity, live quotes, option setup research and system diagnostics stay together in one responsive app. If exchange data is missing or stale, actionable signals remain blocked.</p><div class="public-cards"><article class="public-card"><span class="ico">◉</span><h4>Verify the feed</h4><p>Separate backend health, broker authentication, socket state and fresh exchange ticks.</p></article><article class="public-card"><span class="ico">⌁</span><h4>Research setups</h4><p>Review CE/PE candidates only after the required underlying and option data are verified.</p></article><article class="public-card"><span class="ico">⛨</span><h4>Protect capital</h4><p>Read-only workflow with explicit risk levels. Order placement stays disabled.</p></article></div></section>';
+  pages.About = '<section class="public-section"><span class="public-kicker">ABOUT DHANPULSE</span><h3>Built for disciplined, data-first market research.</h3><p>DhanPulse is a personal trading workstation that brings FYERS connectivity, market monitoring and rule-based setup research into a single interface. Its operating principle is simple: verify data first, analyse later.</p><div class="public-cards"><article class="public-card"><h4>Data integrity</h4><p>No fabricated, demo or fallback market prices are presented as live data.</p></article><article class="public-card"><h4>Transparency</h4><p>Fresh, stale, last-known and unavailable states are kept distinct.</p></article><article class="public-card"><h4>Read-only safety</h4><p>Trading decisions remain yours; the application does not place orders.</p></article></div></section>';
+  pages.Features = '<section class="public-section"><span class="public-kicker">PLATFORM FEATURES</span><h3>Everything stays inside the DhanPulse app.</h3><p>Use the app navigation to access the existing FYERS-powered workspace. Availability of each data-driven feature depends on verified broker responses.</p><div class="public-cards"><article class="public-card"><h4>🎯 Sureshot CE/PE</h4><p>Rule-based options setup desk with contract identity, premium and candle verification.</p></article><article class="public-card"><h4>📡 FYERS Connection</h4><p>Secure broker login, backend health and live-feed diagnostics.</p></article><article class="public-card"><h4>📈 Market workspace</h4><p>Index monitoring, charts, scanners and research tools already present in the application.</p></article><article class="public-card"><h4>🛡️ Risk discipline</h4><p>Risk/reward planning and read-only analysis; no live order placement.</p></article><article class="public-card"><h4>📱 Mobile ready</h4><p>Responsive navigation and layouts for phone, tablet and desktop screens.</p></article><article class="public-card"><h4>🔒 Data boundaries</h4><p>Broker credentials and access tokens remain on the backend, not in page forms.</p></article></div><div class="public-actions"><button class="public-btn primary" data-public-action="app">Launch app</button></div></section>';
+  pages.Contact = '<div class="public-grid"><section class="public-section"><span class="public-kicker">CONTACT</span><h3>Send feedback about DhanPulse.</h3><p>Prepare a message with your name, reply address and feedback. This form copies your message; it does not pretend to send it to a server.</p><form class="public-form" id="dpContactForm"><label>Your name<input name="name" autocomplete="name" required maxlength="100"></label><label>Email address<input name="email" type="email" autocomplete="email" required maxlength="160"></label><label>Message<textarea name="message" required maxlength="3000"></textarea></label><button class="public-btn primary" type="submit">Prepare message</button><p id="dpContactResult" class="public-notice" hidden></p></form></section><section class="public-section"><h3>Support information</h3><p>For broker connectivity, open the FYERS Connection page inside the app. Never share your FYERS password, app secret, PIN or access token in a message.</p><button class="public-btn" data-public-action="fyers">Open FYERS Connection</button></section></div>';
+  pages.Login = '<section class="public-section"><span class="public-kicker">SECURE ACCESS</span><h3>Connect your trading account.</h3><p>DhanPulse currently uses the secure FYERS broker login flow for market-data access.</p><div class="public-notice">A separate DhanPulse username/password account service is not configured in the existing backend. This page will not collect or store a password, and it will not claim a login succeeded.</div><div class="public-actions"><button class="public-btn primary" data-public-action="fyers">Continue with secure FYERS login</button><button class="public-btn" data-public-action="app">Open app workspace</button></div></section>';
+  pages.Signup = '<section class="public-section"><span class="public-kicker">GET STARTED</span><h3>Start using DhanPulse.</h3><p>There is no separate DhanPulse account-registration API configured in the current project. You can open the existing app and connect FYERS through its broker-authorized flow.</p><div class="public-notice">No account is created by this page. Do not enter broker credentials into an unverified signup form.</div><div class="public-actions"><button class="public-btn primary" data-public-action="fyers">Connect FYERS securely</button><button class="public-btn" data-public-action="app">Open app workspace</button></div></section>';
+  root.innerHTML = pages[page] || pages.Home;
+  root.querySelectorAll('[data-public-action]').forEach(button => button.addEventListener('click', () => {
+    const action = button.dataset.publicAction;
+    if (action === 'app') render('App'); else if (action === 'features') render('Features'); else if (action === 'fyers') render('FYERS Connection');
+  }));
+  const contact = root.querySelector('#dpContactForm');
+  if (contact) contact.addEventListener('submit', async event => {
+    event.preventDefault();
+    const values = new FormData(contact);
+    const message = 'DhanPulse feedback\nName: ' + values.get('name') + '\nEmail: ' + values.get('email') + '\n\n' + values.get('message');
+    const result = root.querySelector('#dpContactResult');
+    try { await navigator.clipboard.writeText(message); result.textContent = 'Message copied. Paste it into your chosen support channel.'; }
+    catch { result.textContent = message; }
+    result.hidden = false;
+  });
+  return true;
+}
+
 function render(tab) {
+  if (['Home','About','Features','Contact','Login','Signup'].includes(tab)) { renderPublicPage(tab); return; }
+  if (tab === 'App') tab = 'Sureshot CE/PE';
+  const publicRoot = document.querySelector('#publicPage'); if (publicRoot) publicRoot.style.display = 'none';
+  ['.welcome','.metrics','.grid','.feature-panel','footer'].forEach(selector => { const node=document.querySelector(selector); if(node) node.style.display=''; });
   if (connectionDiagnosticsTimer) { window.clearInterval(connectionDiagnosticsTimer); connectionDiagnosticsTimer = null; }
   if (!descriptions[tab]) return;
   if (['Trade Journal','Capital Protection','Backtesting'].includes(tab)) {
@@ -3473,6 +3512,12 @@ window.addEventListener('appinstalled', () => {
   showMessage('DhanPulse app installed successfully.');
 });
 
+document.querySelector('#publicNav')?.addEventListener('click', event => {
+  const target = event.target instanceof Element ? event.target : event.target && event.target.parentElement;
+  const button = target && target.closest('button[data-tab]');
+  if (!button) return;
+  try { render(button.dataset.tab); } catch (error) { logEvent('Public page render failed: ' + (error.message || 'unknown error'), 'error'); }
+});
 nav.addEventListener('click', event => {
   const target = event.target instanceof Element ? event.target : event.target && event.target.parentElement;
   const button = target && target.closest('button[data-tab]');
@@ -3498,7 +3543,7 @@ nav.addEventListener('click', event => {
 document.querySelector('#settingsBtn')?.addEventListener('click', () => render('FYERS Connection'));
 
 try { localStorage.removeItem('dhanpulse-watchlist-v1'); localStorage.removeItem('dhanpulse-price-alerts'); localStorage.removeItem('dhanpulse-trade-journal-v1'); } catch {}
-render('Sureshot CE/PE');
+render('Home');
 restoreLastKnownIndexQuotes();
 testBackend();
 void refreshAuthoritativeFyersStatus();
