@@ -3542,7 +3542,7 @@ nav.addEventListener('click', event => {
 });
 document.querySelector('#settingsBtn')?.addEventListener('click', () => render('FYERS Connection'));
 
-try { localStorage.removeItem('dhanpulse-watchlist-v1'); localStorage.removeItem('dhanpulse-price-alerts'); localStorage.removeItem('dhanpulse-trade-journal-v1'); } catch {}
+// Preserve user-created watchlists, alerts and journal entries across reloads.
 render('Home');
 restoreLastKnownIndexQuotes();
 testBackend();
