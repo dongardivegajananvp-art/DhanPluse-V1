@@ -240,10 +240,13 @@ function parseTick(raw) {
     if (!isMcxDiagnostic) lastAnyMarketTickAt = Date.now();
     if (symbol.startsWith('NSE:') && quoteTimestampStatus(exchangeTime, Date.now(), NSE_TICK_FRESHNESS_SECONDS) === 'FRESH') {
       lastFreshNseTickAt = Date.now();
-      if (nseReconnectPending) {
+      if (nseReconnectPending && nseIndexSymbols.every(requiredSymbol => {
+        const requiredTick = latestTicks.get(requiredSymbol);
+        return Boolean(requiredTick && quoteTimestampStatus(Date.parse(requiredTick.updatedAt) / 1000, Date.now(), NSE_TICK_FRESHNESS_SECONDS) === 'FRESH');
+      })) {
         nseReconnectPending = false;
         nseResubscribeCount = 0;
-        console.log('NSE live feed restored after automatic recovery.', JSON.stringify({ symbol, exchangeTimestamp: tick.updatedAt }));
+        console.log('NSE live feed restored after automatic recovery.', JSON.stringify({ symbol, exchangeTimestamp: tick.updatedAt, allRequiredNseSymbolsFresh: true }));
       }
     }
     acceptedCount += 1;
@@ -462,8 +465,12 @@ function startMarketDataStream(token) {
 const marketSocketWatchdog = setInterval(() => {
   if (!accessToken || !marketSocket || !nseRegularSessionNow()) return;
   const now = Date.now();
-  const baselineAt = lastFreshNseTickAt || marketSocketConnectedAt;
-  const silentForMs = baselineAt ? now - baselineAt : Infinity;
+  const staleNseAgesMs = nseIndexSymbols.map(symbol => {
+    const tick = latestTicks.get(symbol);
+    const tickAt = tick ? Date.parse(tick.updatedAt) : marketSocketConnectedAt;
+    return Number.isFinite(tickAt) && tickAt > 0 ? Math.max(0, now - tickAt) : Infinity;
+  });
+  const silentForMs = staleNseAgesMs.length ? Math.max(...staleNseAgesMs) : Infinity;
   if (silentForMs < NSE_TICK_HEARTBEAT_MS || now - lastNseResubscribeAt < NSE_TICK_HEARTBEAT_MS) return;
   nseReconnectPending = true;
   lastNseResubscribeAt = now;
