@@ -83,7 +83,10 @@ test("frontend records one automatic attempt per session day and still marks com
   assert.ok(attempt >= 0 && attempt < firstFetch, "attempt marker must be written before any FYERS scan request");
   assert.match(loader.slice(0, catchAt), /TOP_FIVE_CANDIDATES_CHECKED/);
   assert.match(loader.slice(catchAt), /All partial plans are discarded/);
-  assert.doesNotMatch(loader.slice(catchAt), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
+  assert.match(loader.slice(catchAt), /SURESHOT_AUTO_SCAN_RETRY_KEY/);
+  assert.match(loader.slice(catchAt), /retryAfterSeconds/);
+  assert.match(loader.slice(catchAt), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
+  assert.match(trigger, /SURESHOT_AUTO_SCAN_RETRY_KEY/);
   const authStart = app.indexOf("localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken)");
   const authEnd = app.indexOf("authExchangeInProgress = false", authStart);
   assert.match(app.slice(authStart, authEnd), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY\)/);
