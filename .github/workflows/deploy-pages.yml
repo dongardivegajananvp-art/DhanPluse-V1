@@ -41,7 +41,7 @@ jobs:
           test -s dist/site/index.html
           grep -q "site/" dist/index.html
           grep -q "Sureshot CE/PE" dist/site/index.html
-          grep -q "dhanpulse-shell-v132-authoritative-status-v2" dist/site/sw.js
+          grep -q "dhanpulse-shell-v134-public-pages-v1" dist/site/sw.js
           grep -q "app.js?v=20261106-authoritative-status-v2" dist/site/index.html
           grep -q "SURESHOT_AUTO_SCAN_ATTEMPT_KEY" dist/site/app.js
       - name: Package static site for Pages
@@ -80,7 +80,7 @@ jobs:
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "dhanpulse-shell-v132-authoritative-status-v2" <<< "$sw"
+          grep -q "dhanpulse-shell-v134-public-pages-v1" <<< "$sw"
           app_js="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}app.js?v=20261106-authoritative-status-v2&deploy_smoke=$(date +%s)")"
           grep -q "SURESHOT_AUTO_SCAN_ATTEMPT_KEY" <<< "$app_js"
           grep -q "settingsMcxFeed" <<< "$app_js"
@@ -124,7 +124,7 @@ jobs:
             if (!response || !response.ok()) throw new Error('Original /site/ page did not return HTTP success');
             const tabs = page.locator('#nav button[data-tab]');
             const names = await tabs.evaluateAll(items => items.map(item => item.getAttribute('data-tab')));
-            if (names.length !== 2 || names[0] !== 'Sureshot CE/PE' || names[1] !== 'FYERS Connection') throw new Error('Expected exactly Sureshot and FYERS Connection tabs; found ' + names.length + ': ' + names.join(', '));
+            if (names.length !== 9 || !['Home','About','Features','Contact','Login','Signup','App','Sureshot CE/PE','FYERS Connection'].every(name => names.includes(name))) throw new Error('Expected public pages and the existing app tabs; found ' + names.length + ': ' + names.join(', '));
             let scanRequests = 0;
             await page.evaluate(() => { window.__scanRequests = 0; });
             await page.route('**/api/market/sureshot-auto-plans**', async route => {
@@ -162,7 +162,7 @@ jobs:
             await page.waitForTimeout(100);
             if (scanRequests !== 2) throw new Error('A failed Sureshot scan was automatically retried by the 30-second timer; the daily attempt guard did not hold.');
             if (pageErrors.length) throw new Error('Browser page errors: ' + pageErrors.join(' | '));
-            console.log('PASS: exactly two tabs; unauthenticated Sureshot does not scan; authenticated 09:30 IST session auto-starts full-universe scan; manual rescan works; rate-limit is handled safely.');
+            console.log('PASS: public pages and app navigation; unauthenticated Sureshot does not scan; authenticated 09:30 IST session auto-starts full-universe scan; manual rescan works; rate-limit is handled safely.');
             await page.close();
 
             // Exercise the production shell at a real Android-sized touch viewport.
@@ -178,7 +178,7 @@ jobs:
             const mobileResponse = await mobilePage.goto(appUrl + '?android_smoke=' + Date.now(), { waitUntil: 'networkidle', timeout: 60000 });
             if (!mobileResponse || !mobileResponse.ok()) throw new Error('Android-sized PWA page did not return HTTP success');
             const mobileTabs = mobilePage.locator('#nav button[data-tab]');
-            if (await mobileTabs.count() !== 2) throw new Error('Android viewport did not render exactly two production tabs');
+            if (await mobileTabs.count() !== 9) throw new Error('Android viewport did not render all nine website/app navigation items');
             if (await mobilePage.locator('link[rel="manifest"]').count() !== 1) throw new Error('PWA manifest link is missing on Android viewport');
             await mobilePage.locator('#nav button[data-tab="FYERS Connection"]').tap();
             await mobilePage.waitForSelector('#connectFyersBtn', { state: 'visible', timeout: 5000 });
@@ -187,7 +187,7 @@ jobs:
             await mobilePage.locator('#nav button[data-tab="Sureshot CE/PE"]').tap();
             await mobilePage.waitForSelector('#scanSureshotUniverseBtn', { timeout: 5000 });
             if (mobileErrors.length) throw new Error('Android viewport page errors: ' + mobileErrors.join(' | '));
-            console.log('PASS: Pixel 7 touch viewport loads PWA shell, switches both tabs, and has no uncaught browser errors.');
+            console.log('PASS: Pixel 7 touch viewport loads PWA shell, switches app tabs, and has no uncaught browser errors.');
             await mobile.close();
             await browser.close();
           })().catch(error => { console.error(error); process.exit(1); });
