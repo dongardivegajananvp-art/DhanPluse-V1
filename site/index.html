@@ -686,6 +686,7 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
     connection = 'FYERS login required';
   }
   setStatus(label);
+  updateSureshotExchangeCards(status);
   const cooldown = restCooldown || Boolean(status && status.fyersDataApi && status.fyersDataApi.cooldownActive);
   setConnection(connection + (cooldown ? ' · REST cooldown' : ''), nseClosed ? !mcxLive : nseFeed !== 'LIVE');
 }
