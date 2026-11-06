@@ -99,6 +99,7 @@ let connectionDiagnosticsTimer = null;
 let sureshotUniverseScanRunning = false;
 const SURESHOT_AUTO_SCAN_DAY_KEY = 'dhanpulse-sureshot-auto-scan-day-v1';
 const SURESHOT_AUTO_SCAN_ATTEMPT_KEY = 'dhanpulse-sureshot-auto-scan-attempt-v1';
+const SURESHOT_AUTO_SCAN_RETRY_KEY = 'dhanpulse-sureshot-auto-scan-retry-at-v1';
 let sureshotAutoScanAttemptedToday = '';
 let portfolioRequestRunning = false;
 let currentTab = 'Dashboard';
@@ -1707,13 +1708,14 @@ async function loadSureshotUniverseShortlist(options = {}) {
   const host = document.querySelector('#sureshotUniverseResults');
   const status = document.querySelector('#setupStatus');
   if (!host || (button && button.disabled)) return;
-  // Record one automatic attempt per India trading date before any FYERS request.
-  // A 429/network failure must not make the 30-second session timer hammer FYERS.
-  // Manual rescan remains available; a fresh OAuth session clears this attempt.
-  if (isRegularMarketSession()) {
+  // Keep the 30-second session timer from duplicating an active scan. Failed
+  // automatic scans are rescheduled using the provider Retry-After, not locked
+  // out for the rest of the trading day and not retried in a tight loop.
+  if (automatic && isRegularMarketSession()) {
     sureshotAutoScanAttemptedToday = indiaTradingDateKey();
     try { localStorage.setItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY, sureshotAutoScanAttemptedToday); } catch {}
   }
+  let retryAfterSeconds = 0;
   sureshotUniverseScanRunning = true;
   if (button) button.disabled = true;
   host.innerHTML = '<div class="chart-empty">Starting full eligible NSE F&O Top 5 scan in small sequential FYERS batches…</div>';
@@ -1726,8 +1728,14 @@ async function loadSureshotUniverseShortlist(options = {}) {
         headers: { Accept: 'application/json' }, cache: 'no-store'
       });
       const payload = await response.json().catch(() => ({}));
+      const retryHeader = Number(response.headers.get('Retry-After'));
+      const retryPayload = Number(payload.retryAfterSeconds);
+      if (Number.isFinite(retryPayload) && retryPayload > 0) retryAfterSeconds = retryPayload;
+      else if (Number.isFinite(retryHeader) && retryHeader > 0) retryAfterSeconds = retryHeader;
       if (!response.ok || payload.ok !== true || payload.orderPlacement !== 'disabled') {
-        throw new Error([payload.stage ? 'Blocked at ' + String(payload.stage).replace(/_/g, ' ').toLowerCase() : '', payload.detail || payload.error || 'Full-universe FYERS scan was blocked.'].filter(Boolean).join(' · '));
+        const error = new Error([payload.stage ? 'Blocked at ' + String(payload.stage).replace(/_/g, ' ').toLowerCase() : '', payload.detail || payload.error || 'Full-universe FYERS scan was blocked.'].filter(Boolean).join(' · '));
+        error.statusCode = response.status;
+        throw error;
       }
       if (payload.scanComplete === true) { result = payload; break; }
       if (payload.batchComplete !== true || !payload.scanId || !Number.isInteger(payload.nextOffset)) {
@@ -1803,7 +1811,10 @@ async function loadSureshotUniverseShortlist(options = {}) {
       : 'Full-universe scan complete · NO TRADE. No candidate passed every direction, contract, fresh quote, candle and ≥1:2 risk check.';
     // Mark the trading date only after every selected Top 5 candidate was checked.
     // Failed/incomplete scans remain eligible for the automatic session retry.
-    try { localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY, indiaTradingDateKey()); } catch {}
+    try {
+      localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY, indiaTradingDateKey());
+      localStorage.removeItem(SURESHOT_AUTO_SCAN_RETRY_KEY);
+    } catch {}
 
   } catch (error) {
     if (/Market session is closed/i.test(String(error.message || ''))) {
@@ -1815,6 +1826,17 @@ async function loadSureshotUniverseShortlist(options = {}) {
     host.innerHTML = '<div class="console-section"><div class="console-section-head"><h4>NO TRADE · FULL-UNIVERSE SCAN BLOCKED</h4><span class="signal-tone neutral">FYERS VERIFICATION</span></div><p>' +
       escapeHtml(error.message || 'Complete verified full-universe scan unavailable.') +
       '</p><p class="hint">All partial plans are discarded. No stale fallback, sample price or partial ranking is shown as actionable.</p></div>';
+    if (automatic && Number(error.statusCode) !== 401) {
+      // Honour FYERS/our circuit-breaker Retry-After. For other transient
+      // failures, wait five minutes; never let the 30-second UI timer hammer it.
+      const delayMs = Math.min(60 * 60 * 1000, Math.max(60 * 1000,
+        retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 5 * 60 * 1000));
+      try {
+        localStorage.setItem(SURESHOT_AUTO_SCAN_RETRY_KEY, String(Date.now() + delayMs));
+        localStorage.removeItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY);
+        sureshotAutoScanAttemptedToday = '';
+      } catch {}
+    }
     if (status) status.textContent = 'Full-universe scan withheld · ' + (error.message || 'FYERS verification failed.');
   } finally {
     sureshotUniverseScanRunning = false;
@@ -2671,12 +2693,13 @@ function render(tab) {
     const startAutomaticTopFiveScan = () => {
       if (currentTab !== 'Sureshot CE/PE' || !isRegularMarketSession() || sureshotUniverseScanRunning) return;
       const today = indiaTradingDateKey();
-      let completedToday = '', attemptedToday = sureshotAutoScanAttemptedToday;
+      let completedToday = '', attemptedToday = sureshotAutoScanAttemptedToday, retryAt = 0;
       try {
         completedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_DAY_KEY) || '';
         attemptedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY) || attemptedToday;
+        retryAt = Number(localStorage.getItem(SURESHOT_AUTO_SCAN_RETRY_KEY)) || 0;
       } catch {}
-      if (completedToday === today || attemptedToday === today) return;
+      if (completedToday === today || attemptedToday === today || retryAt > Date.now()) return;
       return loadSureshotUniverseShortlist({ automatic: true });
     };
     let mcxAutoScanStatusCheckInFlight = false;
