@@ -232,32 +232,45 @@ function setStatus(message) {
   const marketOpen = isRegularMarketSession();
   const connected = quoteReceived && marketOpen;
   const closedQuote = quoteReceived && !marketOpen;
+  const disconnected = /DISCONNECTED/.test(message);
+  const stale = /STALE/.test(message);
+  const partial = /PARTIAL/.test(message);
+  const notConnected = /NOT CONNECTED|LOGIN REQUIRED/.test(message);
   const waiting = document.querySelector('#sideFeedStatus') || document.querySelector('.sidefoot span:last-child');
   const footer = document.querySelector('#footerFeedStatus') || document.querySelector('footer span:last-child');
   const dot = document.querySelector('#sideFeedDot') || document.querySelector('.sidefoot .dot');
   const headerDot = document.querySelector('.market-pill .dot');
   if (el && closedQuote) el.textContent = 'MARKET CLOSED · LAST QUOTES';
-  if (waiting) waiting.textContent = connected ? 'Live feed connected' : closedQuote ? 'Market closed · last quotes' : message === 'LIVE DATA STALE' ? 'Live feed stale' : 'Waiting for verified live feed';
-  if (footer) footer.textContent = connected ? 'Live FYERS quotes received' : closedQuote ? 'Last received quotes · market closed' : message === 'LIVE DATA STALE' ? 'Last quote is stale' : 'Waiting for verified live feed';
+  const feedLabel = connected ? 'Live feed connected' : closedQuote ? 'Market closed · last quotes'
+    : disconnected ? 'Live feed disconnected' : stale ? 'Live feed stale'
+      : partial ? 'Live feed partial' : notConnected ? 'FYERS login required' : 'Waiting for verified live feed';
+  if (waiting) waiting.textContent = feedLabel;
+  if (footer) footer.textContent = connected ? 'Live FYERS quotes received' : closedQuote ? 'Last received quotes · market closed'
+    : disconnected ? 'FYERS socket disconnected' : stale ? 'Last exchange tick is stale'
+      : partial ? 'Not all required exchange ticks are fresh' : notConnected ? 'Connect FYERS to resume data' : 'Waiting for verified live feed';
   [dot, headerDot].filter(Boolean).forEach(item => {
     item.style.background = connected ? '#63e6d0' : '#64738a';
-    item.title = connected ? 'Verified quote response received' : 'No fresh verified quote response';
+    item.title = connected ? 'Fresh exchange-timestamped FYERS ticks verified' : 'No complete fresh verified NSE tick set';
   });
   const connectionDetail = document.querySelector('.metrics .metric:first-child small');
-  if (connectionDetail) connectionDetail.textContent = connected ? 'Live quotes verified from backend' : closedQuote ? 'Market closed · last quotes only' : 'Awaiting verified response';
+  if (connectionDetail) connectionDetail.textContent = connected ? 'Fresh exchange-timestamped FYERS ticks verified'
+    : closedQuote ? 'Market closed · last quotes only' : disconnected ? 'Socket disconnected; live signals blocked'
+      : stale ? 'Last exchange tick is stale' : partial ? 'Incomplete NSE tick set · signals blocked'
+        : notConnected ? 'FYERS authentication required' : 'Awaiting verified exchange ticks';
   const welcomeCopy = document.querySelector('.welcome > div > p:last-child');
   if (welcomeCopy) welcomeCopy.textContent = connected
-    ? 'FYERS live market ticks are arriving for NIFTY 50, BANK NIFTY and SENSEX.'
+    ? 'Fresh FYERS exchange ticks are verified for NIFTY 50, BANK NIFTY and SENSEX.'
     : closedQuote ? 'Indian market hours have ended. These are the latest quotes returned by FYERS, not a live-moving feed.'
-    : 'Live quotes appear here only after the backend returns verified FYERS data.';
+      : disconnected ? 'The FYERS socket is disconnected. Live signals remain blocked until fresh exchange ticks return.'
+        : 'Live quotes appear here only after the backend verifies fresh exchange-timestamped FYERS data.';
   const empty = document.querySelector('.empty');
   if (empty) {
     const heading = empty.querySelector('h3');
     const copy = empty.querySelector('p');
-    if (heading) heading.textContent = connected ? 'Live market feed connected' : 'Waiting for a verified FYERS quote';
+    if (heading) heading.textContent = connected ? 'Live market feed connected' : disconnected ? 'FYERS socket disconnected' : 'Waiting for a verified FYERS quote';
     if (copy) copy.textContent = connected
-      ? 'The backend is returning fresh NIFTY 50, BANK NIFTY and SENSEX quotes.'
-      : 'The console will display prices only after verified quote data is received.';
+      ? 'The backend is returning fresh NIFTY 50, BANK NIFTY and SENSEX exchange ticks.'
+      : 'The console will display prices only after all required fresh exchange-timestamped ticks are verified.';
   }
 }
 
@@ -297,9 +310,40 @@ function setConnection(message, muted) {
   el.classList.toggle('muted', muted !== false);
 }
 
+function applyAuthoritativeFyersStatus(status, restCooldown = false) {
+  const authenticated = status && status.fyers === 'connected';
+  const socketConnected = status && status.marketSocketConnected === true;
+  const nseFeed = String(status && status.exchangeLiveStatus && status.exchangeLiveStatus.NSE
+    ? status.exchangeLiveStatus.NSE.feed || 'UNAVAILABLE' : 'UNAVAILABLE');
+  setFyersStatus(authenticated ? 'CONNECTED' : 'NOT CONNECTED');
+  let label = 'WAITING FOR LIVE TICKS';
+  let connection = 'Waiting for fresh exchange-timestamped FYERS ticks';
+  if (!authenticated) {
+    label = 'FYERS NOT CONNECTED';
+    connection = 'FYERS login required';
+  } else if (nseFeed === 'LIVE') {
+    label = 'FYERS QUOTES RECEIVED';
+    connection = socketConnected ? 'FYERS WebSocket connected · NSE fresh ticks' : 'NSE fresh ticks verified · socket disconnected';
+  } else if (nseFeed === 'DISCONNECTED') {
+    label = 'FYERS SOCKET DISCONNECTED';
+    connection = 'FYERS WebSocket disconnected · live signals blocked';
+  } else if (nseFeed === 'STALE') {
+    label = 'LIVE DATA STALE';
+    connection = 'FYERS WebSocket active · exchange ticks stale';
+  } else if (nseFeed === 'PARTIAL') {
+    label = 'FYERS FEED PARTIAL';
+    connection = 'Only part of the required NSE tick set is fresh · signals blocked';
+  } else if (nseFeed === 'NOT_CONNECTED') {
+    label = 'FYERS NOT CONNECTED';
+    connection = 'FYERS login required';
+  }
+  setStatus(label);
+  const cooldown = restCooldown || Boolean(status && status.fyersDataApi && status.fyersDataApi.cooldownActive);
+  setConnection(connection + (cooldown ? ' · REST cooldown' : ''), nseFeed !== 'LIVE');
+}
+
 async function refreshSocketStatusDuringCooldown() {
-  // /api/status is backend health metadata, not a FYERS Data API quote request.
-  // Keep the socket indicator independent from REST quote/candle/option availability.
+  // Read only backend status; never probe FYERS REST quotes during cooldown.
   try {
     const response = await fetch(BACKEND_URL + '/api/status', {
       headers: { Accept: 'application/json' },
@@ -307,26 +351,10 @@ async function refreshSocketStatusDuringCooldown() {
     });
     if (!response.ok) return;
     const status = await response.json().catch(() => ({}));
-    if (status.fyers === 'connected') setFyersStatus('CONNECTED');
     if (status.backend === 'online') setBackendStatus('ONLINE');
-    const tickAt = Date.parse(status.lastTickAt || '');
-    const tickAge = Date.now() - tickAt;
-    const freshTick = Number.isFinite(tickAt) && tickAge >= 0 && tickAge <= 15000;
-    if (status.marketSocketConnected === true && freshTick) {
-      setConnection('FYERS WebSocket connected · fresh index ticks · REST cooldown', false);
-      const detail = document.querySelector('.metrics .metric:first-child small');
-      if (detail) detail.textContent = 'WebSocket ticks fresh · REST quotes/options cooling down';
-    } else if (status.marketSocketConnected === true) {
-      setConnection('FYERS WebSocket connected · waiting for fresh ticks · REST cooldown', true);
-      const detail = document.querySelector('.metrics .metric:first-child small');
-      if (detail) detail.textContent = 'Socket connected · latest tick is not fresh';
-    } else {
-      setConnection('FYERS WebSocket disconnected · REST cooldown', true);
-      const detail = document.querySelector('.metrics .metric:first-child small');
-      if (detail) detail.textContent = 'Market socket disconnected · REST quotes/options cooling down';
-    }
+    applyAuthoritativeFyersStatus(status, true);
   } catch {
-    // Preserve the existing connection state if even the lightweight status endpoint fails.
+    // Preserve the last known state if the lightweight status endpoint is unavailable.
   }
 }
 
@@ -2339,6 +2367,7 @@ async function refreshConnectionDiagnostics() {
     });
     const status = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error('Status endpoint unavailable.');
+    applyAuthoritativeFyersStatus(status);
     updateExchangeLiveSwitches(status);
     updateMcxConnectionDiagnostics(status);
     // Keep this diagnostic row aligned with the backend's exchange-specific
@@ -3166,8 +3195,7 @@ async function testBackend() {
       const statusResponse = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const status = await statusResponse.json().catch(() => ({}));
       if (statusResponse.ok) {
-        setFyersStatus(status.fyers === 'connected' ? 'CONNECTED' : 'NOT CONNECTED');
-        if (status.liveData === 'streaming') setStatus('FYERS QUOTES RECEIVED');
+        applyAuthoritativeFyersStatus(status);
       } else {
         setFyersStatus('STATUS UNKNOWN');
       }
