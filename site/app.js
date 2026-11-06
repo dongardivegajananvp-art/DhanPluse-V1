@@ -161,6 +161,9 @@ function restoreLastKnownIndexQuotes() {
   }
 }
 let historyBySymbol = {};
+let lastAuthoritativeFyersStatus = null;
+let authoritativeFyersStatusUpdatedAt = 0;
+let authoritativeFyersStatusRefreshRunning = false;
 // The historical OHLC baseline is kept separate from the currently forming candle.
 let dashboardCandleState = null;
 let stockExplorerMoverRows = [];
@@ -311,6 +314,8 @@ function setConnection(message, muted) {
 }
 
 function applyAuthoritativeFyersStatus(status, restCooldown = false) {
+  lastAuthoritativeFyersStatus = status && typeof status === 'object' ? status : null;
+  authoritativeFyersStatusUpdatedAt = Date.now();
   const authenticated = status && status.fyers === 'connected';
   const socketConnected = status && status.marketSocketConnected === true;
   const nseFeed = String(status && status.exchangeLiveStatus && status.exchangeLiveStatus.NSE
@@ -340,6 +345,30 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
   setStatus(label);
   const cooldown = restCooldown || Boolean(status && status.fyersDataApi && status.fyersDataApi.cooldownActive);
   setConnection(connection + (cooldown ? ' · REST cooldown' : ''), nseFeed !== 'LIVE');
+}
+
+async function refreshAuthoritativeFyersStatus() {
+  if (authoritativeFyersStatusRefreshRunning || document.visibilityState === 'hidden') return;
+  authoritativeFyersStatusRefreshRunning = true;
+  try {
+    const response = await fetch(BACKEND_URL + '/api/status', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    if (!response.ok) throw new Error('Authoritative FYERS status unavailable.');
+    const status = await response.json().catch(() => ({}));
+    if (!status || status.backend !== 'online') throw new Error('Backend status not confirmed online.');
+    setBackendStatus('ONLINE');
+    applyAuthoritativeFyersStatus(status);
+  } catch {
+    // Fail closed: never leave an old green/connected header when status cannot be verified.
+    lastAuthoritativeFyersStatus = null;
+    authoritativeFyersStatusUpdatedAt = 0;
+    setStatus('LIVE DATA UNAVAILABLE');
+    setFyersStatus('STATUS UNKNOWN');
+    setConnection('Authoritative backend status unavailable · live signals blocked', true);
+  } finally {
+    authoritativeFyersStatusRefreshRunning = false;
+  }
 }
 
 async function refreshSocketStatusDuringCooldown() {
@@ -2929,6 +2958,14 @@ function updateQuoteCards(quotes, fetchedAt, source, streamConnected) {
   }
   setFyersStatus('CONNECTED');
   setBackendStatus('ONLINE');
+  // Quote snapshots may update prices, but the backend's exchange-level status owns
+  // the connection indicator. Reapply it while recent; otherwise fail closed.
+  if (lastAuthoritativeFyersStatus && Date.now() - authoritativeFyersStatusUpdatedAt <= 10000) {
+    applyAuthoritativeFyersStatus(lastAuthoritativeFyersStatus);
+  } else if (isRegularMarketSession()) {
+    setStatus('WAITING FOR LIVE TICKS');
+    setConnection('Waiting for current authoritative FYERS status · signals blocked', true);
+  }
   const lastUpdate = document.querySelector('#lastUpdate');
   if (lastUpdate) {
     lastUpdate.textContent = fetchedAt && Number.isFinite(Date.parse(fetchedAt)) ? new Date(fetchedAt).toLocaleTimeString('en-IN') : new Date().toLocaleTimeString('en-IN');
@@ -3436,6 +3473,13 @@ try { localStorage.removeItem('dhanpulse-watchlist-v1'); localStorage.removeItem
 render('Sureshot CE/PE');
 restoreLastKnownIndexQuotes();
 testBackend();
+void refreshAuthoritativeFyersStatus();
+window.setInterval(() => { void refreshAuthoritativeFyersStatus(); }, 5000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') void refreshAuthoritativeFyersStatus();
+});
+window.addEventListener('focus', () => void refreshAuthoritativeFyersStatus());
+window.addEventListener('pageshow', () => void refreshAuthoritativeFyersStatus());
 exchangeAuthCode();
 logEvent('DhanPulse console initialised.', 'info');
 // The OAuth callback performs its own quote check after the new bearer is stored.
