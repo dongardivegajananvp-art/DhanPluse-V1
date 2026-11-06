@@ -149,10 +149,16 @@ let marketSocketConnectedAt = 0;
 // NSE heartbeat is independent of MCX and BSE activity.
 const NSE_TICK_HEARTBEAT_MS = 10_000;
 const NSE_TICK_FRESHNESS_SECONDS = 10;
+// MCX has its own freshness gate and subscription retry on the shared FYERS
+// Data Socket. NSE silence must never trigger this controller, or vice versa.
+const MCX_TICK_HEARTBEAT_MS = 10_000;
+const MCX_TICK_FRESHNESS_SECONDS = 10;
 const nseIndexSymbols = allowedSymbols.filter(symbol => symbol.startsWith('NSE:'));
 let nseReconnectPending = false;
 let lastNseResubscribeAt = 0;
 let nseResubscribeCount = 0;
+let lastMcxResubscribeAt = 0;
+let mcxResubscribeCount = 0;
 const lastTickDiagnosticAt = new Map();
 const lastRejectedDiagnosticAt = new Map();
 const lastControlDiagnosticAt = new Map();
@@ -316,16 +322,32 @@ function startMarketDataStream(token) {
         // Re-apply the complete required subscription set after EVERY connect,
         // including SDK-managed reconnects. Do not assume the provider retained
         // subscriptions across a dropped WebSocket session.
-        const subscriptionSymbols = buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStreamSymbol);
-        if (mcxDiagnosticInstrument) subscriptionSymbols.push(mcxDiagnosticInstrument.symbol);
-        socket.subscribe(subscriptionSymbols);
-        if (mcxDiagnosticInstrument) mcxSubscribedSocket = socket;
-        console.log('FYERS market subscriptions applied after socket connect.', JSON.stringify({
-          connectionNumber: socketConnectCount,
-          reconnect: socketConnectCount > 1,
-          symbols: subscriptionSymbols,
-          mcxIncluded: Boolean(mcxDiagnosticInstrument)
-        }));
+        const nseSubscriptionSymbols = buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStreamSymbol);
+        try {
+          socket.subscribe(nseSubscriptionSymbols);
+          console.log('FYERS NSE subscriptions applied after socket connect.', JSON.stringify({
+            connectionNumber: socketConnectCount, reconnect: socketConnectCount > 1,
+            symbols: nseSubscriptionSymbols
+          }));
+        } catch (nseSubscriptionError) {
+          nseReconnectPending = true;
+          console.error('FYERS NSE subscription restore failed; MCX subscription restore will still be attempted:', String(nseSubscriptionError?.message || nseSubscriptionError).slice(0, 200));
+        }
+        // Keep MCX subscription restoration independent from NSE subscription
+        // restoration even though FYERS requires one Data Socket transport.
+        if (mcxDiagnosticInstrument) {
+          try {
+            socket.subscribe([mcxDiagnosticInstrument.symbol]);
+            mcxSubscribedSocket = socket;
+            console.log('FYERS MCX subscription restored independently after socket connect.', JSON.stringify({
+              connectionNumber: socketConnectCount, reconnect: socketConnectCount > 1,
+              symbol: mcxDiagnosticInstrument.symbol
+            }));
+          } catch (mcxSubscriptionError) {
+            mcxSubscribedSocket = null;
+            console.error('FYERS MCX subscription restore failed independently of NSE:', String(mcxSubscriptionError?.message || mcxSubscriptionError).slice(0, 200));
+          }
+        }
       } catch (error) {
         streamConnected = false;
         streamError = 'Could not subscribe to FYERS index symbols; controlled recovery is pending.';
@@ -456,9 +478,8 @@ function startMarketDataStream(token) {
 
 // NSE feed heartbeat: MCX/BSE ticks do not count as proof that NSE index
 // subscriptions are alive. After 10 seconds without a fresh exchange-timestamped
-// NSE tick, re-apply only NSE subscriptions on the existing shared socket. This
-// avoids opening a second FYERS socket and leaves the MCX diagnostic subscription
-// undisturbed. Actual transport closes use the SDK auto-reconnect controller.
+// NSE tick, re-apply only NSE subscriptions on the existing FYERS Data Socket.
+// Actual transport closes use the SDK auto-reconnect controller.
 const marketSocketWatchdog = setInterval(() => {
   if (!accessToken || !marketSocket || !nseRegularSessionNow()) return;
   const now = Date.now();
@@ -497,6 +518,34 @@ const marketSocketWatchdog = setInterval(() => {
   }
 }, 1_000);
 marketSocketWatchdog.unref?.();
+
+// MCX-only silence watchdog. It never closes/reconnects the transport and never
+// changes NSE subscription state. On a healthy shared transport it re-applies
+// only the official MCX diagnostic contract after 10 seconds without a fresh tick.
+const mcxMarketSocketWatchdog = setInterval(() => {
+  if (!accessToken || !marketSocket || !mcxDiagnosticInstrument ||
+      getExchangeSessionWindows().MCX?.session !== 'SCHEDULED_OPEN') return;
+  const now = Date.now();
+  if (!streamConnected || typeof marketSocket.subscribe !== 'function') return;
+  const tickAt = mcxDiagnosticTick ? Date.parse(mcxDiagnosticTick.updatedAt) : marketSocketConnectedAt;
+  const silentForMs = Number.isFinite(tickAt) && tickAt > 0 ? Math.max(0, now - tickAt) : Infinity;
+  if (silentForMs < MCX_TICK_HEARTBEAT_MS || now - lastMcxResubscribeAt < MCX_TICK_HEARTBEAT_MS) return;
+  lastMcxResubscribeAt = now;
+  mcxResubscribeCount += 1;
+  try {
+    marketSocket.mode(marketSocket.FullMode);
+    marketSocket.subscribe([mcxDiagnosticInstrument.symbol]);
+    mcxSubscribedSocket = marketSocket;
+    console.warn('MCX feed watchdog re-applied MCX-only subscription after 10 seconds without a fresh exchange tick.', JSON.stringify({
+      reason: 'no_fresh_mcx_tick_within_10_seconds', silentForMs,
+      retry: mcxResubscribeCount, recovery: 'mcx_only_resubscribe_on_existing_transport',
+      transportConnected: true, symbol: mcxDiagnosticInstrument.symbol
+    }));
+  } catch (error) {
+    console.error('MCX-only subscription recovery failed; retry remains scheduled:', String(error?.message || error).slice(0, 200));
+  }
+}, 1_000);
+mcxMarketSocketWatchdog.unref?.();
 
 function nseRegularSessionNow() {
   return getNseSessionWindow().isRegularHours;
@@ -574,7 +623,7 @@ app.get('/api/status', (_req, res) => {
     : !streamConnected ? 'DISCONNECTED'
     : mcxSubscribedSocket !== marketSocket ? 'SUBSCRIPTION_PENDING'
     : mcxTickAgeSeconds === null ? 'WAITING'
-    : mcxTickAgeSeconds >= 0 && mcxTickAgeSeconds <= 30 ? 'LIVE' : 'STALE';
+    : mcxTickAgeSeconds >= 0 && mcxTickAgeSeconds <= MCX_TICK_FRESHNESS_SECONDS ? 'LIVE' : 'STALE';
   res.json({
     backend: 'online', fyers: accessToken ? 'connected' : 'not-connected',
     liveData: streamConnected && snapshot ? 'streaming' : 'waiting-for-live-ticks',
@@ -596,7 +645,7 @@ app.get('/api/status', (_req, res) => {
       const tick = mcxDiagnosticTick;
       const exchangeTime = tick ? Date.parse(tick.updatedAt) / 1000 : null;
       const ageSeconds = Number.isFinite(exchangeTime) ? Number((Date.now() / 1000 - exchangeTime).toFixed(1)) : null;
-      const freshness = ageSeconds === null || ageSeconds < 0 ? 'TIME_UNVERIFIED' : ageSeconds <= 30 ? 'FRESH' : 'STALE';
+      const freshness = ageSeconds === null || ageSeconds < 0 ? 'TIME_UNVERIFIED' : ageSeconds <= MCX_TICK_FRESHNESS_SECONDS ? 'FRESH' : 'STALE';
       let status = mcxDiagnosticMasterStatus;
       if (status === 'READY') {
         if (!accessToken) status = 'FYERS_NOT_CONNECTED';
@@ -1853,7 +1902,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
   if (!mcxSessionOpen()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "MCX session is closed; actionable option plans are withheld." });
   const mcxSocketAgeSeconds = mcxDiagnosticTick ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
-  if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(mcxSocketAgeSeconds) || mcxSocketAgeSeconds < 0 || mcxSocketAgeSeconds > 30) {
+  if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(mcxSocketAgeSeconds) || mcxSocketAgeSeconds < 0 || mcxSocketAgeSeconds > MCX_TICK_FRESHNESS_SECONDS) {
     return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "MCX WebSocket feed is not fresh; reconnect or wait for a verified MCX exchange tick before scanning." });
   }
   if (mcxSureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "An MCX Sureshot scan is already running." });
@@ -1866,6 +1915,8 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
     stage = "VERIFY_MCX_FUTURES_QUOTES";
     const quoteRows = [];
     for (let offset = 0; offset < universe.data.length; offset += 50) {
+      const currentMcxTickAge = mcxDiagnosticTick ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
+      if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(currentMcxTickAge) || currentMcxTickAge < 0 || currentMcxTickAge > MCX_TICK_FRESHNESS_SECONDS) { const error = new Error('MCX feed became stale during quote scan; partial results discarded.'); error.statusCode = 409; throw error; }
       if (!mcxSessionOpen()) { const error = new Error("MCX session closed during quote scan; partial results discarded."); error.statusCode = 409; throw error; }
       const batch = universe.data.slice(offset, offset + 50).map(item => item.symbol);
       const url = new URL("https://api-t1.fyers.in/data/quotes");
@@ -1900,6 +1951,8 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
     const results = [];
     const prepared = [];
     for (const candidate of ranked.data) {
+      const currentMcxTickAge = mcxDiagnosticTick ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
+      if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(currentMcxTickAge) || currentMcxTickAge < 0 || currentMcxTickAge > MCX_TICK_FRESHNESS_SECONDS) { const error = new Error('MCX feed became stale during plan verification; partial plans discarded.'); error.statusCode = 409; throw error; }
       if (!mcxSessionOpen()) { const error = new Error("MCX session closed during scan; partial plans discarded."); error.statusCode = 409; throw error; }
       const base = { rank: candidate.rank, underlyingSymbol: candidate.symbol, underlying: candidate.underlying,
         changePct: candidate.changePct, ltp: candidate.price, quoteAgeSeconds: candidate.quoteAgeSeconds };

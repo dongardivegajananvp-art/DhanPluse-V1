@@ -81,7 +81,7 @@ test("socket reconnect reapplies mode and the complete subscriptions after every
   assert.match(handler, /socketConnectCount \+= 1/);
   assert.match(handler, /reconnect: socketConnectCount > 1/);
   assert.match(handler, /Re-apply the complete required subscription set after EVERY connect/);
-  assert.match(handler, /socket\.subscribe\(subscriptionSymbols\)/);
+  assert.match(handler, /socket\.subscribe\(nseSubscriptionSymbols\)/);
   assert.doesNotMatch(handler, /if \(socketConnectCount === 1\)/);
 });
 
@@ -134,4 +134,13 @@ test("NSE status exposes RECONNECTING while a fresh-tick recovery is pending and
   assert.match(source, /const mcxFeed = !accessToken \? 'NOT_CONNECTED'[\s\S]*?mcxSubscribedSocket !== marketSocket/);
   assert.match(source, /NSE socket disconnected, reconnecting\.\.\./);
   assert.match(source, /NSE live feed restored after automatic recovery/);
+  assert.match(source, /MCX_TICK_HEARTBEAT_MS = 10_000/);
+  assert.match(source, /MCX_TICK_FRESHNESS_SECONDS = 10/);
+  const mcxWatchdogStart = source.indexOf("const mcxMarketSocketWatchdog = setInterval");
+  const mcxWatchdogEnd = source.indexOf("mcxMarketSocketWatchdog.unref", mcxWatchdogStart);
+  assert.ok(mcxWatchdogStart >= 0 && mcxWatchdogEnd > mcxWatchdogStart);
+  const mcxWatchdog = source.slice(mcxWatchdogStart, mcxWatchdogEnd);
+  assert.match(mcxWatchdog, /getExchangeSessionWindows\(\)\.MCX\?\.session !== 'SCHEDULED_OPEN'/);
+  assert.match(mcxWatchdog, /marketSocket\.subscribe\(\[mcxDiagnosticInstrument\.symbol\]\)/);
+  assert.doesNotMatch(mcxWatchdog, /marketSocket\.close\(|subscribe\(nseIndexSymbols\)/);
 });
