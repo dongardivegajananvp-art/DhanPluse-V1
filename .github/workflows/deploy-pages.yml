@@ -149,12 +149,15 @@ jobs:
             await page.locator('#nav button[data-tab="Sureshot CE/PE"]').click();
             await page.waitForSelector('#scanSureshotUniverseBtn', { timeout: 5000 });
             await page.waitForSelector('#sureshotUniverseResults', { timeout: 5000 });
-            await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent?.toLowerCase()?.includes('verify fno quotes'), { timeout: 5000 });
+            // The chart/setup request shares #setupStatus and may overwrite its text after the scan.
+            // Assert the actual intercepted scan request and its dedicated results panel instead.
+            await page.waitForFunction(() => window.__scanRequests === 1, { timeout: 5000 });
+            await page.waitForFunction(() => document.querySelector('#sureshotUniverseResults')?.textContent?.toLowerCase()?.includes('full-universe scan blocked'), { timeout: 5000 });
             if (scanRequests !== 1) throw new Error('Authenticated live-session Sureshot tab did not auto-start exactly one full-universe scan.');
             await page.locator('#scanSureshotUniverseBtn').click();
             await page.waitForFunction(() => window.__scanRequests === 2, { timeout: 5000 });
             if (scanRequests !== 2) throw new Error('Manual Sureshot rescan did not issue exactly one additional controlled API request.');
-            await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent?.toLowerCase()?.includes('full-universe scan withheld'), { timeout: 5000 });
+            await page.waitForFunction(() => document.querySelector('#sureshotUniverseResults')?.textContent?.toLowerCase()?.includes('full-universe scan blocked'), { timeout: 5000 });
             await page.clock.fastForward(31_000);
             await page.waitForTimeout(100);
             if (scanRequests !== 2) throw new Error('A failed Sureshot scan was automatically retried by the 30-second timer; the daily attempt guard did not hold.');
