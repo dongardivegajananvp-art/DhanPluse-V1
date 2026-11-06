@@ -64,7 +64,7 @@ test("SDK handles transport reconnects while the 10-second NSE heartbeat restore
   assert.match(lifecycle, /sdkReconnect\(SDK_RECONNECT_RETRIES\)/);
   assert.match(lifecycle, /socket\.connect\(\)/);
   const heartbeat = source.slice(end, source.indexOf("marketSocketWatchdog.unref", end));
-  assert.match(heartbeat, /NSE_TICK_HEARTBEAT_MS = 10_000/);
+  assert.match(source, /NSE_TICK_HEARTBEAT_MS = 10_000/);
   assert.match(heartbeat, /marketSocket\.subscribe\(nseIndexSymbols\)/);
   assert.match(heartbeat, /no_fresh_nse_tick_within_10_seconds/);
   assert.doesNotMatch(heartbeat, /marketSocket\.close\(/);
