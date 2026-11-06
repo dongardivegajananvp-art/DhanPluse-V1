@@ -81,7 +81,7 @@ test("socket reconnect reapplies mode and the complete subscriptions after every
   assert.match(handler, /socketConnectCount \+= 1/);
   assert.match(handler, /reconnect: socketConnectCount > 1/);
   assert.match(handler, /Re-apply the complete required subscription set after EVERY connect/);
-  assert.match(handler, /socket\.subscribe\(subscriptionSymbols\)/);
+  assert.match(handler, /socket\.subscribe\(nseSubscriptionSymbols\)/);
   assert.doesNotMatch(handler, /if \(socketConnectCount === 1\)/);
 });
 
