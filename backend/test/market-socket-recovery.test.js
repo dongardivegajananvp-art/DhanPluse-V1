@@ -54,16 +54,21 @@ test("ordinary SDK close keeps the socket owner intact for SDK-managed reconnect
   assert.doesNotMatch(closeHandler[0], /marketSocket\s*=\s*null|marketSocketToken\s*=/);
 });
 
-test("one SDK auto-reconnect owner is configured and the application does not start a second reconnect timer", async () => {
+test("SDK handles transport reconnects while the 10-second NSE heartbeat restores silent subscriptions", async () => {
   const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   const start = source.indexOf("function startMarketDataStream");
-  const end = source.indexOf("// Observe prolonged feed silence", start);
+  const end = source.indexOf("// NSE feed heartbeat:", start);
   assert.ok(start >= 0 && end > start);
   const lifecycle = source.slice(start, end);
   assert.match(lifecycle, /socket\.autoreconnect|socket\.autoReconnect/);
   assert.match(lifecycle, /sdkReconnect\(SDK_RECONNECT_RETRIES\)/);
   assert.match(lifecycle, /socket\.connect\(\)/);
-  assert.doesNotMatch(lifecycle, /setTimeout\s*\([^)]*connect/i);
+  const heartbeat = source.slice(end, source.indexOf("marketSocketWatchdog.unref", end));
+  assert.match(heartbeat, /NSE_TICK_HEARTBEAT_MS = 10_000/);
+  assert.match(heartbeat, /marketSocket\.subscribe\(nseIndexSymbols\)/);
+  assert.match(heartbeat, /no_fresh_nse_tick_within_10_seconds/);
+  assert.doesNotMatch(heartbeat, /marketSocket\.close\(/);
+  assert.match(heartbeat, /setInterval\([\s\S]*?,\s*1_000\)/);
 });
 
 test("socket reconnect reapplies mode and the complete subscriptions after every SDK reconnect", async () => {
@@ -96,8 +101,8 @@ test("market ticks without exchange timestamps are rejected and live snapshots e
 
 test("FYERS SDK reconnect attempts are bounded to avoid repeated provider 429 pressure", async () => {
   const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
-  assert.match(source, /const SDK_RECONNECT_RETRIES = 6;/);
-  assert.doesNotMatch(source, /const SDK_RECONNECT_RETRIES = 50;/);
+  assert.match(source, /const SDK_RECONNECT_RETRIES = 50;/);
+  assert.match(source, /NSE_TICK_HEARTBEAT_MS = 10_000/);
 });
 
 test("FYERS SDK error event does not falsely mark a still-ticking socket disconnected", async () => {
@@ -121,4 +126,12 @@ test("verified live snapshots continue to reject stale exchange timestamps", asy
   assert.ok(start >= 0 && end > start);
   assert.match(source.slice(start, end), /quoteTimestampStatus/);
   assert.match(source.slice(start, end), /'FRESH'/);
+});
+
+test("NSE status exposes RECONNECTING while a fresh-tick recovery is pending and keeps MCX independent", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  assert.match(source, /: nseReconnectPending \? 'RECONNECTING'/);
+  assert.match(source, /const mcxFeed = !accessToken \? 'NOT_CONNECTED'[\s\S]*?mcxSubscribedSocket !== marketSocket/);
+  assert.match(source, /NSE socket disconnected, reconnecting\.\.\./);
+  assert.match(source, /NSE live feed restored after automatic recovery/);
 });
