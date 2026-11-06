@@ -276,21 +276,19 @@ function startMarketDataStream(token) {
         // Re-apply mode and subscriptions on every connect event. A TCP/WebSocket
         // reconnect does not guarantee that the provider retained subscriptions.
         socket.mode(socket.FullMode);
-        if (socketConnectCount === 1) {
-          const subscriptionSymbols = buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStreamSymbol);
-          if (mcxDiagnosticInstrument) subscriptionSymbols.push(mcxDiagnosticInstrument.symbol);
-          socket.subscribe(subscriptionSymbols);
-          if (mcxDiagnosticInstrument) mcxSubscribedSocket = socket;
-          console.log('FYERS baseline market socket subscription request sent.', JSON.stringify({
-            connectionNumber: socketConnectCount,
-            symbols: subscriptionSymbols
-          }));
-        } else {
-          // FYERS SDK autoReconnect restores the previous subscription set.
-          console.log('FYERS SDK reconnect established; retained subscriptions are restored by the SDK.', JSON.stringify({
-            connectionNumber: socketConnectCount
-          }));
-        }
+        // Re-apply the complete required subscription set after EVERY connect,
+        // including SDK-managed reconnects. Do not assume the provider retained
+        // subscriptions across a dropped WebSocket session.
+        const subscriptionSymbols = buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStreamSymbol);
+        if (mcxDiagnosticInstrument) subscriptionSymbols.push(mcxDiagnosticInstrument.symbol);
+        socket.subscribe(subscriptionSymbols);
+        if (mcxDiagnosticInstrument) mcxSubscribedSocket = socket;
+        console.log('FYERS market subscriptions applied after socket connect.', JSON.stringify({
+          connectionNumber: socketConnectCount,
+          reconnect: socketConnectCount > 1,
+          symbols: subscriptionSymbols,
+          mcxIncluded: Boolean(mcxDiagnosticInstrument)
+        }));
       } catch (error) {
         streamConnected = false;
         streamError = 'Could not subscribe to FYERS index symbols; controlled recovery is pending.';
