@@ -37,8 +37,8 @@ test("protected API accepts a valid bearer and restores the signed PostgreSQL-ba
   const guard = source.slice(start, end);
   assert.match(guard, /\^Bearer \(\[a-f0-9\]\{64\}\)\$/);
   assert.match(guard, /Date\.now\(\) - session\.createdAt > DASHBOARD_SESSION_TTL_MS/);
-  assert.match(guard, /token && accessToken && fyersTokenStore\\.configured/);
-  assert.match(guard, /token === createDashboardSessionToken\\(\\)/);
+  assert.ok(guard.includes('token && accessToken && fyersTokenStore.configured'));
+  assert.ok(guard.includes('token === createDashboardSessionToken()'));
   assert.ok(source.includes("crypto.createHmac('sha256'"));
   assert.ok(source.includes('DhanPulse/dashboard-session/v1'));
   assert.match(guard, /session\.lastSeenAt = Date\.now\(\)/);
