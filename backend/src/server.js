@@ -98,6 +98,13 @@ const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const dashboardSessions = new Map();
 const DASHBOARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 let marketSocket = null;
+let marketSocketGeneration = 0;
+let marketSocketStartedAt = 0;
+let marketSocketLastCloseAt = 0;
+// A one-way SHA-256 fingerprint is diagnostic only; never log or expose a token.
+function socketTokenFingerprint(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex').slice(0, 12);
+}
 // Track which FYERS access token owns the one active SDK socket. A repeated
 // OAuth exchange with the same token must never close/recreate a healthy or
 // SDK-reconnecting socket; doing so resets SDK reconnect state and subscriptions.
@@ -266,9 +273,18 @@ function parseTick(raw) {
   return acceptedCount;
 }
 
-function startMarketDataStream(token) {
+function startMarketDataStream(token, startReason = 'unspecified') {
+  const requestedFingerprint = socketTokenFingerprint(token);
+  const currentFingerprint = marketSocketToken ? socketTokenFingerprint(marketSocketToken) : null;
+  console.log('FYERS market socket start requested.', JSON.stringify({
+    reason: startReason, requestedTokenFingerprint: requestedFingerprint,
+    currentTokenFingerprint: currentFingerprint, socketPresent: Boolean(marketSocket),
+    transportConnected: streamConnected, generation: marketSocketGeneration
+  }));
   if (marketSocket && marketSocketToken === token) {
-    console.log('FYERS market socket start skipped: same access token already owns the socket; preserving SDK lifecycle.');
+    console.log('FYERS market socket start skipped: same access token already owns the socket; preserving SDK lifecycle.', JSON.stringify({
+      reason: startReason, tokenFingerprint: requestedFingerprint, generation: marketSocketGeneration
+    }));
     return;
   }
   streamError = '';
@@ -282,6 +298,11 @@ function startMarketDataStream(token) {
   let socket = null;
   try {
     if (marketSocket) {
+      console.warn('FYERS market socket owner is being replaced for a different token.', JSON.stringify({
+        reason: startReason, previousTokenFingerprint: currentFingerprint,
+        nextTokenFingerprint: requestedFingerprint, previousGeneration: marketSocketGeneration,
+        previousTransportConnected: streamConnected
+      }));
       try { marketSocket.close(); } catch {}
       marketSocket = null;
     }
@@ -291,6 +312,13 @@ function startMarketDataStream(token) {
     socket = fyersDataSocket.getInstance(`${appId}:${token}`, '', false);
     marketSocket = socket;
     marketSocketToken = token;
+    marketSocketGeneration += 1;
+    const socketGeneration = marketSocketGeneration;
+    marketSocketStartedAt = Date.now();
+    console.log('FYERS market socket owner created.', JSON.stringify({
+      reason: startReason, tokenFingerprint: requestedFingerprint,
+      generation: socketGeneration, startedAt: new Date(marketSocketStartedAt).toISOString()
+    }));
     // FYERS documents a maximum of 50 SDK-managed reconnect attempts.
     const SDK_RECONNECT_RETRIES = 50;
     // FYERS Node docs use `autoreconnect`; support the camelCase spelling
@@ -319,8 +347,10 @@ function startMarketDataStream(token) {
       lastNseResubscribeAt = 0;
       socketConnectCount += 1;
       console.log('FYERS market socket connected; restoring baseline subscription.', JSON.stringify({
-        connectionNumber: socketConnectCount,
-        reconnect: socketConnectCount > 1
+        generation: socketGeneration, tokenFingerprint: requestedFingerprint,
+        connectionNumber: socketConnectCount, reconnect: socketConnectCount > 1,
+        connectedAt: new Date(marketSocketConnectedAt).toISOString(),
+        secondsSinceSocketOwnerCreated: Number(((marketSocketConnectedAt - marketSocketStartedAt) / 1000).toFixed(1))
       }));
       try {
         // Re-apply mode and subscriptions on every connect event. A TCP/WebSocket
@@ -442,9 +472,13 @@ function startMarketDataStream(token) {
       const safeReason = reason == null ? '' : String(reason).slice(0, 160);
       streamError = 'FYERS market socket disconnected; automatic recovery is in progress.';
       nseReconnectPending = true;
+      marketSocketLastCloseAt = Date.now();
       console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
+        generation: socketGeneration, tokenFingerprint: requestedFingerprint,
         code: code ?? null,
         reason: safeReason || null,
+        closedAt: new Date(marketSocketLastCloseAt).toISOString(),
+        connectedDurationSeconds: marketSocketConnectedAt ? Number(((marketSocketLastCloseAt - marketSocketConnectedAt) / 1000).toFixed(1)) : null,
         sdkAutoReconnect: true,
         retryPolicy: 'fyers-sdk-autoReconnect',
         retryLimit: SDK_RECONNECT_RETRIES,
@@ -844,7 +878,7 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
     dashboardSessions.set(dashboardSessionToken, { createdAt: Date.now(), lastSeenAt: Date.now() });
     restQuoteCache = null;
     restQuoteFetchedAt = 0;
-    startMarketDataStream(accessToken);
+    startMarketDataStream(accessToken, 'fyers_oauth_callback');
     res.json({ ok: true, fyers: 'connected', liveData: 'connecting', dashboardSessionToken, authenticatedAt });
   } catch {
     res.status(502).json({ error: 'Could not reach FYERS authentication service.' });
@@ -2658,8 +2692,10 @@ async function startServer() {
       if (savedAuth?.accessToken) {
         accessToken = savedAuth.accessToken;
         authenticatedAt = savedAuth.authenticatedAt;
-        console.log('Encrypted FYERS token restored from PostgreSQL; reconnecting the read-only market data socket.');
-        startMarketDataStream(accessToken);
+        console.log('Encrypted FYERS token restored from PostgreSQL; reconnecting the read-only market data socket.', JSON.stringify({
+          tokenFingerprint: socketTokenFingerprint(accessToken), authenticatedAt
+        }));
+        startMarketDataStream(accessToken, 'postgresql_startup_restore');
       } else {
         console.log('FYERS PostgreSQL token store ready; no saved token exists. Connect FYERS to authenticate.');
       }
