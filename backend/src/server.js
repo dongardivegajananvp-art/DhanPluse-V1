@@ -25,6 +25,7 @@ import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
 import { summarizeFyersUpstreamFailure } from './fyers-upstream-diagnostics.js';
 import { buildMarketSocketSubscriptionSymbols } from './market-socket-recovery.js';
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
+import { getMcxWatchdogRetryDelay } from './mcx-watchdog.js';
 import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist } from './mcx-sureshot.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
@@ -233,6 +234,9 @@ function parseTick(raw) {
     latestTicks.set(symbol, tick);
     if (isMcxDiagnostic) {
       mcxDiagnosticTick = tick;
+      // A verified exchange tick proves recovery; restart the bounded retry schedule.
+      mcxResubscribeCount = 0;
+      lastMcxResubscribeAt = 0;
       if (shouldLogSocketDiagnostic(lastTickDiagnosticAt, symbol)) {
         const ageSeconds = Number(((Date.now() / 1000) - exchangeTime).toFixed(1));
         console.log('FYERS MCX diagnostic tick accepted.', JSON.stringify({
@@ -529,7 +533,8 @@ const mcxMarketSocketWatchdog = setInterval(() => {
   if (!streamConnected || typeof marketSocket.subscribe !== 'function') return;
   const tickAt = mcxDiagnosticTick ? Date.parse(mcxDiagnosticTick.updatedAt) : marketSocketConnectedAt;
   const silentForMs = Number.isFinite(tickAt) && tickAt > 0 ? Math.max(0, now - tickAt) : Infinity;
-  if (silentForMs < MCX_TICK_HEARTBEAT_MS || now - lastMcxResubscribeAt < MCX_TICK_HEARTBEAT_MS) return;
+  const retryDelayMs = getMcxWatchdogRetryDelay(mcxResubscribeCount);
+  if (silentForMs < MCX_TICK_HEARTBEAT_MS || now - lastMcxResubscribeAt < retryDelayMs) return;
   lastMcxResubscribeAt = now;
   mcxResubscribeCount += 1;
   try {
@@ -538,7 +543,8 @@ const mcxMarketSocketWatchdog = setInterval(() => {
     mcxSubscribedSocket = marketSocket;
     console.warn('MCX feed watchdog re-applied MCX-only subscription after 10 seconds without a fresh exchange tick.', JSON.stringify({
       reason: 'no_fresh_mcx_tick_within_10_seconds', silentForMs,
-      retry: mcxResubscribeCount, recovery: 'mcx_only_resubscribe_on_existing_transport',
+      retry: mcxResubscribeCount, nextRetryDelayMs: getMcxWatchdogRetryDelay(mcxResubscribeCount),
+      recovery: 'mcx_only_resubscribe_on_existing_transport',
       transportConnected: true, symbol: mcxDiagnosticInstrument.symbol
     }));
   } catch (error) {
@@ -590,12 +596,44 @@ app.get('/', (_req, res) => {
 app.get('/health', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
+  const checkedAt = Date.now();
+  const nseFreshTickCount = nseIndexSymbols.filter(symbol => {
+    const tick = latestTicks.get(symbol);
+    return Boolean(tick && quoteTimestampStatus(Date.parse(tick.updatedAt) / 1000, checkedAt, NSE_TICK_FRESHNESS_SECONDS) === 'FRESH');
+  }).length;
+  const mcxTickAgeSeconds = mcxDiagnosticTick
+    ? (checkedAt - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : null;
+  const mcxFeedFresh = Boolean(streamConnected && mcxSubscribedSocket === marketSocket &&
+    Number.isFinite(mcxTickAgeSeconds) && mcxTickAgeSeconds >= 0 &&
+    mcxTickAgeSeconds <= MCX_TICK_FRESHNESS_SECONDS);
+  const nseFeedFresh = nseFreshTickCount === nseIndexSymbols.length;
   res.json({
-    ok: true, service: 'dhanpulse-backend',
+    ok: true,
+    service: 'dhanpulse-backend',
+    serviceHealth: 'HEALTHY',
     fyersConfigured: Boolean(appId && appSecret && redirectUri),
+    fyersAuthenticated: Boolean(accessToken),
     liveDataConnected: Boolean(streamConnected && snapshot),
     marketSocketConnected: streamConnected,
     lastTickAt: snapshot?.fetchedAt || null,
+    dataReadiness: {
+      NSE: {
+        status: nseFeedFresh ? 'FRESH' : nseFreshTickCount > 0 ? 'PARTIAL' : 'WAITING_OR_STALE',
+        freshTickCount: nseFreshTickCount,
+        requiredTickCount: nseIndexSymbols.length,
+        freshnessWindowSeconds: NSE_TICK_FRESHNESS_SECONDS,
+        liveSignalsAllowed: nseRegularSessionNow() && nseFeedFresh
+      },
+      MCX: {
+        status: mcxFeedFresh ? 'FRESH' : 'WAITING_OR_STALE',
+        exchangeTimestamp: mcxDiagnosticTick?.updatedAt || null,
+        receivedAt: mcxDiagnosticTick?.receivedAt || null,
+        ageSeconds: Number.isFinite(mcxTickAgeSeconds) ? Number(mcxTickAgeSeconds.toFixed(1)) : null,
+        freshnessWindowSeconds: MCX_TICK_FRESHNESS_SECONDS,
+        liveSignalsAllowed: getExchangeSessionWindows().MCX?.session === 'SCHEDULED_OPEN' && mcxFeedFresh
+      }
+    },
+    tradingDataReady: nseRegularSessionNow() ? nseFeedFresh : false,
     orderPlacementEnabled: false,
     timestamp: new Date().toISOString()
   });
@@ -1909,6 +1947,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
   mcxSureshotAutoPlansInFlight = true;
   sureshotAutoPlansInFlight = true;
   let stage = "LOAD_MCX_MASTER";
+  let quoteRowsReceived = 0;
   try {
     const universe = await getMcxFnoUniverse();
     if (!universe.count) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "No MCX futures with active CE/PE contracts are currently inside their official trading sessions." });
@@ -1923,6 +1962,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
       url.searchParams.set("symbols", batch.join(","));
       const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
       const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
+      quoteRowsReceived += rows.length;
       const sample = rows[0] || null;
       const sampleQuote = sample?.v || sample || {};
       console.info("FYERS MCX futures quote batch received:", JSON.stringify({
@@ -2066,7 +2106,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
     const status = Number(error.statusCode) || 503;
     console.warn("FYERS MCX Sureshot scan failed:", JSON.stringify({
       stage, status, message: String(error.message || error).slice(0, 280),
-      quoteRowsReceived: typeof quoteRows !== "undefined" ? quoteRows.length : null
+      quoteRowsReceived
     }));
     if (status === 429 && error.retryAfterSeconds) res.set("Retry-After", String(error.retryAfterSeconds));
     return res.status(status).json({
