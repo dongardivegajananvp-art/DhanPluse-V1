@@ -234,9 +234,12 @@ function parseTick(raw) {
     latestTicks.set(symbol, tick);
     if (isMcxDiagnostic) {
       mcxDiagnosticTick = tick;
-      // A verified exchange tick proves recovery; restart the bounded retry schedule.
-      mcxResubscribeCount = 0;
-      lastMcxResubscribeAt = 0;
+      // Only a fresh exchange-stamped tick proves recovery; stale frames do not
+      // reset the watchdog or postpone the next bounded subscription attempt.
+      if (quoteTimestampStatus(exchangeTime, Date.now(), MCX_TICK_FRESHNESS_SECONDS) === 'FRESH') {
+        mcxResubscribeCount = 0;
+        lastMcxResubscribeAt = 0;
+      }
       if (shouldLogSocketDiagnostic(lastTickDiagnosticAt, symbol)) {
         const ageSeconds = Number(((Date.now() / 1000) - exchangeTime).toFixed(1));
         console.log('FYERS MCX diagnostic tick accepted.', JSON.stringify({
