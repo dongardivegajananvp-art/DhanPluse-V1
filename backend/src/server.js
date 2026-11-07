@@ -18,7 +18,7 @@ import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 import { buildOptionRiskPlan } from './option-risk-plan.js';
 import { getVerifiedOptionContractMetadata as resolveOptionContractMetadata } from './option-contract-metadata.js';
-import { isFyersAuthRejected } from './fyers-auth-recovery.js';
+import { isFyersAuthRejected, isExpiredFyersAccessTokenError } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
@@ -470,7 +470,18 @@ function startMarketDataStream(token) {
     socket.connect();
   } catch (error) {
     streamConnected = false;
-    streamError = 'Could not start the FYERS market data socket; controlled recovery is pending.';
+    if (isExpiredFyersAccessTokenError(error)) {
+      // Do not report a restored-but-expired PostgreSQL token as authenticated.
+      // Keep the encrypted DB record untouched; a successful OAuth exchange
+      // replaces it after the user reconnects FYERS.
+      accessToken = '';
+      authenticatedAt = null;
+      streamError = 'Saved FYERS session expired; reconnect FYERS to restore live data.';
+      recordDiagnostic('warn', 'fyers_persisted_token_expired', { reconnectRequired: true });
+      console.warn('Saved FYERS access token is expired; in-memory session cleared and fresh OAuth login is required.');
+    } else {
+      streamError = 'Could not start the FYERS market data socket; controlled recovery is pending.';
+    }
     console.error('FYERS market socket startup failed:', String(error?.message || error).slice(0, 240));
     // A startup exception is different from an ordinary SDK close/reconnect.
     // Release only this failed socket so a later auth/start attempt can retry;
