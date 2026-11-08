@@ -2132,7 +2132,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
             '</td><td>' + (Number.isInteger(Number(row.lotSize)) && Number(row.lotSize) > 0 ? Number(row.lotSize).toLocaleString('en-IN') + ' units' : 'Contract verify') + '</td><td>' + escapeHtml(row.direction || '—') + '</td><td>' +
             (row.status === 'NO TRADE' ? '<span class="signal-tone neutral">CHECKED</span>' : escapeHtml(row.status || 'CHECKING')) +
             '</td><td>' + escapeHtml(row.reason || 'Direction / option contract / premium / RR verification passed to next stage.') + '</td></tr>';
-        }).join('') + '</tbody></table></div><p class="hint">A setup appears only after fresh option quote and completed option candles pass the 1:2 risk check. No sample prices or partial trade signals.</p>';
+        }).join('') + '</tbody></table></div><p class="hint">A setup appears only after fresh option quote and completed option candles pass the fixed risk and minimum 1:1.5 T1 RR check. No sample prices or partial trade signals.</p>';
     }
     if (!Array.isArray(result.results) || result.scannedCandidateCount !== result.results.length ||
         result.selectedCandidatesComplete !== true ||
@@ -2175,7 +2175,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
           (plan ? '₹' + formatPrice(plan.risk.target1) : '—') + '</td><td>' +
           (plan ? '₹' + formatPrice(plan.risk.target2) : '—') + '</td><td>' +
           (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
-          (plan ? '' : '<tr><td colspan="12" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
+          (plan ? '' : '<tr><td colspan="14" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
       }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 30% below entry; T1 = 1.5x entry; T2 = 2.5x entry. One-lot rupee risk uses official FYERS lot size; fees and slippage are excluded. No orders are placed.</p>';
     if (status) status.textContent = verified.length
       ? (result.selectedCandidatesComplete
