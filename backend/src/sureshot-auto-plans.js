@@ -1,5 +1,6 @@
 import { buildOptionRiskPlan } from "./option-risk-plan.js";
 import { buildFixedOptionRiskPlan, validateCompletedOptionCandles } from "./fixed-option-risk-plan.js";
+import { validateSureshotTrend } from "./sureshot-trend-validation.js";
 
 function epochSeconds(value) {
   if (typeof value === "number" || (typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value))) {
@@ -26,7 +27,7 @@ function expiryTime(value) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now = Date.now()) {
+export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now = Date.now(), { strictTrend = false } = {}) {
   const minutes = Number(resolution);
   if (![5, 15, 30, 60].includes(minutes) || !Array.isArray(candles)) {
     return { ok: false, reason: "Unsupported or missing underlying candles." };
@@ -73,11 +74,19 @@ export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now
     side = "PE";
     reason = "Latest completed FYERS candle closed below the demand zone and prior close.";
   }
+  let trend = null;
+  if (strictTrend) {
+    trend = validateSureshotTrend({ candles, resolution: "5", now, minAdx: 20, minVolumeRatio: 1.5, minTrendScore: 70 });
+    if (!trend.ok) return { ok: false, reason: trend.reason };
+    side = trend.side;
+    reason = "Verified " + side + " trend: ADX, EMA(20), session VWAP, same-time five-session volume and Trend Score gates passed.";
+  }
   return {
     ok: true, side, reason, spot: latest.close,
     latestCandleAt: new Date(latest.time * 1000).toISOString(),
     candleAgeSeconds: Number((ageMs / 1000).toFixed(1)),
-    completedCandleCount: valid.length, supply, demand
+    completedCandleCount: valid.length, supply, demand,
+    ...(trend ? { trendScore: trend.trendScore, trendMetrics: trend } : {})
   };
 }
 
