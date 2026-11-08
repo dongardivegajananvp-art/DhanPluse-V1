@@ -1,7 +1,7 @@
 const amountFor = row => {
   if (!row || typeof row !== 'object') return { equity: null, commodity: null };
-  const equity = Number(row.equityAmount);
-  const commodity = Number(row.commodityAmount);
+  const equity = row.equityAmount === null || row.equityAmount === undefined || row.equityAmount === '' ? NaN : Number(row.equityAmount);
+  const commodity = row.commodityAmount === null || row.commodityAmount === undefined || row.commodityAmount === '' ? NaN : Number(row.commodityAmount);
   return {
     equity: Number.isFinite(equity) ? equity : null,
     commodity: Number.isFinite(commodity) ? commodity : null
