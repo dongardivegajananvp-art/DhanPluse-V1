@@ -18,6 +18,7 @@ import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 import { buildOptionRiskPlan } from './option-risk-plan.js';
+import { buildFixedOptionRiskPlan, validateCompletedOptionCandles } from './fixed-option-risk-plan.js';
 import { getVerifiedOptionContractMetadata as resolveOptionContractMetadata } from './option-contract-metadata.js';
 import { isFyersAuthRejected, isExpiredFyersAccessTokenError } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
@@ -2683,7 +2684,20 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
       return res.status(502).json({ ok: false, error: 'Selected option bid/ask/LTP quote is missing, invalid or older than 15 seconds.' });
     }
     const candles = Array.isArray(historyResult?.candles) ? historyResult.candles : [];
-    const plan = buildOptionRiskPlan({ candles, entryPrice: ask, lotSize: contractMetadata.lotSize, tickSize: contractMetadata.tickSize, resolution, now: Date.now(), lookback: 12 });
+    if (ask < 30 || ask > 150) {
+      return res.status(422).json({ ok: false, error: "Verified option ask premium must be between ₹30 and ₹150.", quote: {
+        bid, ask, ltp, quoteTimeMs: quoteTime * 1000,
+        quoteAgeSeconds: Number(((Date.now() - quoteTime * 1000) / 1000).toFixed(1))
+      } });
+    }
+    const candleCheck = validateCompletedOptionCandles({ candles, resolution, now: Date.now(), lookback: 12 });
+    const plan = candleCheck.ok
+      ? buildFixedOptionRiskPlan({ entryPrice: ask, lotSize: contractMetadata.lotSize, tickSize: contractMetadata.tickSize })
+      : { ok: false, reason: candleCheck.reason };
+    if (plan.ok) {
+      plan.completedCandleCount = candleCheck.completedCandleCount;
+      plan.latestCompletedCandleAt = candleCheck.latestCompletedCandleAt;
+    }
     if (!plan.ok) {
       return res.status(422).json({ ok: false, error: plan.reason, quote: {
         bid, ask, ltp, quoteTimeMs: quoteTime * 1000,
