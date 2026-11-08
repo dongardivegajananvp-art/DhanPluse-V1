@@ -376,7 +376,19 @@ window.fetch = function(input, init = {}) {
     requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
     if (requestSession) headers.set('Authorization', 'Bearer ' + requestSession);
   }
-  return nativeFetch(input, { ...init, headers }).then(response => {
+  // Health/status/OAuth-start endpoints must never leave the UI in CHECKING
+  // or "Preparing secure FYERS login…" indefinitely. Abort only these short,
+  // backend-control requests; market/history/scanner requests keep their own
+  // endpoint-specific lifetimes.
+  const controlRequestTimeoutMs = isBackend &&
+    ['/health', '/api/status', '/api/fyers/auth/start'].includes(pathname) ? 12000 : 0;
+  const timeoutController = controlRequestTimeoutMs ? new AbortController() : null;
+  const timeoutId = controlRequestTimeoutMs
+    ? window.setTimeout(() => timeoutController.abort(), controlRequestTimeoutMs)
+    : null;
+  const requestInit = { ...init, headers };
+  if (timeoutController) requestInit.signal = timeoutController.signal;
+  return nativeFetch(input, requestInit).then(response => {
     if (isBackend && response.status === 401 && !publicPaths.includes(pathname)) {
       const currentSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
       // Ignore a late 401 from an older request if a newer OAuth session has
@@ -399,6 +411,13 @@ window.fetch = function(input, init = {}) {
       }
     }
     return response;
+  }).catch(error => {
+    if (timeoutController && timeoutController.signal.aborted) {
+      throw new Error('Backend request timed out after 12 seconds (' + pathname + '). Check the backend connection and retry.');
+    }
+    throw error;
+  }).finally(() => {
+    if (timeoutId !== null) window.clearTimeout(timeoutId);
   });
 };
 
@@ -3692,11 +3711,12 @@ async function testBackend() {
     logEvent('Backend health check succeeded.', 'info');
     showMessage('Backend is online. FYERS authentication and live quotes are checked separately.');
     return data;
-  } catch {
+  } catch (error) {
     setBackendStatus('UNREACHABLE');
     setStatus('BACKEND UNAVAILABLE');
-    logEvent('Backend health check failed.', 'error');
-    showMessage('Backend test failed. Check Render status and CORS settings.', true);
+    const detail = error && error.message ? error.message : 'Network or CORS request failed.';
+    logEvent('Backend health check failed: ' + detail, 'error');
+    showMessage('Backend test failed: ' + detail, true);
     return null;
   }
 }
