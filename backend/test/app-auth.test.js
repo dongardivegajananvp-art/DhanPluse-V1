@@ -18,4 +18,18 @@ test('fails closed when persistent storage and MSG91 are not configured', () => 
   const auth = createAppAuth({ databaseUrl: '', msg91AuthKey: '', msg91OtpTemplateId: '' });
   assert.equal(auth.configured, false);
   assert.equal(auth.msg91Configured, false);
+  assert.equal(auth.allowedMobileConfigured, false);
+});
+
+test('requires an explicit owner mobile allowlist', async () => {
+  const auth = createAppAuth({
+    databaseUrl: 'postgresql://user:password@localhost:5432/gv2vpd_test',
+    msg91AuthKey: 'test-authkey',
+    msg91OtpTemplateId: 'test-template',
+    allowedMobile: '+91 98765 43210'
+  });
+  assert.equal(auth.configured, true);
+  assert.equal(auth.msg91Configured, true);
+  assert.equal(auth.allowedMobileConfigured, true);
+  await auth.close();
 });
