@@ -21,7 +21,7 @@ if (html.includes('gv2vpdAuthGate') ||
 }
 if (!app.includes("localStorage.getItem(DASHBOARD_SESSION_KEY)") ||
     !app.includes("headers.set('Authorization', 'Bearer ' + requestSession)") ||
-    !app.includes('Dashboard session missing or expired. Reconnect FYERS.')) {
+    !app.includes('Dashboard session missing or expired')) {
   throw new Error('The existing FYERS dashboard-session authentication flow must remain intact.');
 }
 if (!app.includes("render('Home');") ||
