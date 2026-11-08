@@ -324,6 +324,26 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 </style>
 </head>
 <body>
+<div id="gv2vpdAuthGate" role="dialog" aria-modal="true" aria-labelledby="gv2vpdLoginTitle" style="position:fixed;inset:0;z-index:9999;background:#080d17;display:grid;place-items:center;padding:20px">
+  <section style="width:min(100%,420px);background:#111b2a;border:1px solid #2b3d53;border-radius:20px;padding:26px;box-shadow:0 24px 80px #0009">
+    <div style="font-size:11px;letter-spacing:2px;color:#63e6d0;font-weight:800">GV2VPD · SECURE ACCESS</div>
+    <h2 id="gv2vpdLoginTitle" style="margin:12px 0 4px;font-size:25px">Mobile App Login</h2>
+    <p style="color:#a3b1c8;font-size:13px;margin:0 0 20px">Verify your mobile number with a one-time SMS code. FYERS Login is a separate step after App Login.</p>
+    <form id="gv2vpdMobileForm">
+      <label for="gv2vpdMobile" style="display:block;font-size:12px;color:#b9c5d8;margin-bottom:7px">Indian mobile number</label>
+      <input id="gv2vpdMobile" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="14" placeholder="10-digit mobile number" required style="width:100%;padding:14px;border-radius:10px;border:1px solid #344967;background:#0a111c;color:#fff;font:inherit">
+      <button id="gv2vpdSendOtp" type="submit" style="width:100%;margin-top:12px;padding:13px;border:0;border-radius:10px;background:#63e6d0;color:#06141a;font-weight:900">Send OTP</button>
+    </form>
+    <form id="gv2vpdOtpForm" hidden style="margin-top:16px">
+      <label for="gv2vpdOtp" style="display:block;font-size:12px;color:#b9c5d8;margin-bottom:7px">6-digit SMS OTP</label>
+      <input id="gv2vpdOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="Enter OTP" required style="width:100%;padding:14px;border-radius:10px;border:1px solid #344967;background:#0a111c;color:#fff;font:inherit;letter-spacing:5px">
+      <button id="gv2vpdVerifyOtp" type="submit" style="width:100%;margin-top:12px;padding:13px;border:0;border-radius:10px;background:#63e6d0;color:#06141a;font-weight:900">Verify & Continue</button>
+      <button id="gv2vpdResendOtp" type="button" style="width:100%;margin-top:8px;padding:10px;border:1px solid #344967;border-radius:10px;background:transparent;color:#b9c5d8">Resend OTP</button>
+    </form>
+    <p id="gv2vpdAuthMessage" aria-live="polite" style="min-height:20px;color:#ffcc76;font-size:12px;margin:14px 0 0">Checking secure App Login…</p>
+    <p style="color:#718098;font-size:10px;margin:12px 0 0">OTP expires in 5 minutes. Never share your OTP. Dashboard access requires a verified App Login and a separate FYERS login.</p>
+  </section>
+</div>
 <aside class="sidebar"><div class="brand"><span class="brandmark">GV</span><div><b>GV2VPD</b><small>FYERS WORKSTATION</small></div></div><nav id="nav">
 <button data-tab="Sureshot CE/PE">🎯 Sureshot</button><button data-tab="FYERS Connection">🔐 FYERS Connect</button>
 </nav></aside>
@@ -370,6 +390,10 @@ window.fetch = function(input, init = {}) {
   // to a production-configured callback by mistake.
   if (IS_ISOLATED_TEST_PREVIEW && isBackend && pathname === '/api/fyers/auth/start') {
     return Promise.reject(new Error('OAuth is disabled in this isolated test preview until the test redirect URI is verified.'));
+  }
+  if (isBackend && !['/health', '/api/status', '/api/app-auth/send-otp', '/api/app-auth/verify-otp', '/api/app-auth/session'].includes(pathname)) {
+    const appSession = localStorage.getItem('gv2vpd-app-session-v1') || '';
+    if (appSession) headers.set('X-GV2VPD-Session', appSession);
   }
   let requestSession = '';
   if (isBackend && !publicPaths.includes(pathname)) {
@@ -3941,6 +3965,70 @@ logEvent('DhanPulse console initialised.', 'info');
 // The OAuth callback performs its own quote check after the new bearer is stored.
 if (!authExchangeInProgress) fetchLiveQuotes();
 
+</script>
+<script>
+(() => {
+  const gate = document.getElementById('gv2vpdAuthGate');
+  const mobileForm = document.getElementById('gv2vpdMobileForm');
+  const otpForm = document.getElementById('gv2vpdOtpForm');
+  const mobileInput = document.getElementById('gv2vpdMobile');
+  const otpInput = document.getElementById('gv2vpdOtp');
+  const message = document.getElementById('gv2vpdAuthMessage');
+  const sendButton = document.getElementById('gv2vpdSendOtp');
+  const verifyButton = document.getElementById('gv2vpdVerifyOtp');
+  const resendButton = document.getElementById('gv2vpdResendOtp');
+  const key = 'gv2vpd-app-session-v1';
+  const backend = 'https://dhanpluse-v1.onrender.com';
+  let sending = false;
+  async function sendOtp() {
+    if (sending) return;
+    sending = true; sendButton.disabled = true; resendButton.disabled = true;
+    message.textContent = 'Requesting OTP from secure SMS provider…';
+    try {
+      const response = await fetch(backend + '/api/app-auth/send-otp', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ mobile: mobileInput.value })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok !== true) throw new Error(data.error || 'OTP could not be sent.');
+      otpForm.hidden = false;
+      message.textContent = 'OTP sent to ' + data.mobile + '. Enter it within 5 minutes.';
+      otpInput.focus();
+    } catch (error) { message.textContent = error.message || 'OTP service unavailable.'; }
+    finally { sending = false; sendButton.disabled = false; resendButton.disabled = false; }
+  }
+  mobileForm.addEventListener('submit', event => { event.preventDefault(); void sendOtp(); });
+  resendButton.addEventListener('click', () => { void sendOtp(); });
+  otpForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    verifyButton.disabled = true;
+    message.textContent = 'Verifying OTP…';
+    try {
+      const response = await fetch(backend + '/api/app-auth/verify-otp', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ mobile: mobileInput.value, otp: otpInput.value })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok !== true || !data.appSessionToken) throw new Error(data.error || 'OTP verification failed.');
+      localStorage.setItem(key, data.appSessionToken);
+      message.textContent = 'Mobile verified. Opening GV2VPD…';
+      window.location.reload();
+    } catch (error) { message.textContent = error.message || 'OTP verification failed.'; }
+    finally { verifyButton.disabled = false; }
+  });
+  async function checkSession() {
+    const token = localStorage.getItem(key) || '';
+    if (!token) { message.textContent = 'Enter your mobile number to continue.'; return; }
+    try {
+      const response = await fetch(backend + '/api/app-auth/session', { headers: { 'X-GV2VPD-Session': token, Accept: 'application/json' }, cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.ok === true && data.session) { gate.remove(); return; }
+    } catch {}
+    localStorage.removeItem(key);
+    message.textContent = 'App Login session expired. Verify your mobile number again.';
+  }
+  void checkSession();
+})();
 </script>
 <script>if ("serviceWorker" in navigator && location.protocol === "https:") { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js?v=20261106-authoritative-status-v2", { updateViaCache: "none" }).then(registration => registration.update()).catch(() => {})); }</script>
 </body></html>
