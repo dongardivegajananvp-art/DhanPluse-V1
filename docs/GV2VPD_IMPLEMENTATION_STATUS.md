@@ -12,6 +12,7 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - Home is the default landing page and maps to the existing Dashboard renderer.
 - Sureshot maps to the existing verified FYERS Sureshot scanner; existing scan behavior is retained rather than silently replacing strategy logic.
 - Position reads the backend's FYERS positions endpoint and displays broker-returned rows; it does not synthesize positions or fills.
+- Adds the fixed Sureshot option risk model and wires it into the existing NSE/MCX auto-plan scanner: Entry = verified ask, SL = 30% below entry, T1 = 1.5x, T2 = 2.5x, tick-rounded values, lot-level rupee risk/reward, and >=1:1.5 T1 RR. The model still requires 12 fresh completed option candles and verified lot/tick metadata.
 - Updates app identity/PWA manifest/cache to GV2VPD.
 - Adds structural checks for the three-tab and App Login shell, plus App Login unit tests.
 
