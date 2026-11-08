@@ -30,7 +30,8 @@ export function normalizeOptionContractDiscovery(payload) {
       symbol: String(row.symbol),
       strike_price: strike,
       option_type: optionType,
-      expiry: String(expiry)
+      expiry: String(expiry),
+      ...(Number.isFinite(Number(row.greeks?.delta)) ? { delta: Number(row.greeks.delta) } : {})
     };
   }).filter(Boolean);
 
