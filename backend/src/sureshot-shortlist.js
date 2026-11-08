@@ -105,6 +105,7 @@ export function buildVerifiedSureshotShortlist({
     rankedBy: "absolute FYERS percentage change; complete F&O equities plus individually fresh NIFTY/BANKNIFTY/SENSEX ticks",
     topGainers,
     topLosers,
+    equityCandidates: equityRows.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct) || a.symbol.localeCompare(b.symbol)),
     moverBoardsComplete: topGainers.length === 10 && topLosers.length === 10,
     signalsAllowed: false,
     data: candidates.slice(0, limit).map((row, index) => ({ rank: index + 1, ...row }))
