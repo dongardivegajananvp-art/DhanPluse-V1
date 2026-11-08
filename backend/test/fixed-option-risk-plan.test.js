@@ -15,7 +15,9 @@ test("fixed risk plan uses 30 percent stop, 1.5x target and 2.5x target", () => 
   assert.equal(result.stopLoss, 70);
   assert.equal(result.target1, 150);
   assert.equal(result.target2, 250);
-  assert.equal(result.rr, 1.6667);
+  assert.equal(result.rr, 5);
+  assert.equal(result.rrTarget1, 1.6667);
+  assert.equal(result.rrTarget2, 5);
   assert.equal(result.riskPerLot, 750);
   assert.equal(result.target1RewardPerLot, 1250);
   assert.equal(result.target2RewardPerLot, 3750);
