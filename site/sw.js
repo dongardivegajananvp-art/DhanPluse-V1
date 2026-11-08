@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gv2vpd-shell-v1';
+const CACHE_NAME = 'gv2vpd-shell-v2-otp-login';
 // Inline app bundle compatibility marker: app.js?v=gv2vpd-foundation-v1
 const SHELL = ['./', './index.html', './manifest.webmanifest', './gv2vpd-icon.svg'];
 
@@ -7,7 +7,7 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('dhanpulse-shell-') && key !== CACHE_NAME).map(key => caches.delete(key)))).then(() => self.clients.claim()));
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(key => (key.startsWith('dhanpulse-shell-') || key.startsWith('gv2vpd-shell-')) && key !== CACHE_NAME).map(key => caches.delete(key)))).then(() => self.clients.claim()));
 });
 
 self.addEventListener('fetch', event => {
