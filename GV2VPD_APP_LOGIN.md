@@ -9,8 +9,9 @@ Keep all values in the Render backend environment, never in GitHub source, brows
 - `DATABASE_URL` — existing PostgreSQL connection used by the FYERS token store. App Login creates its own `gv2vpd_app_*` tables in this database.
 - `MSG91_AUTHKEY` — MSG91 API authkey.
 - `MSG91_OTP_TEMPLATE_ID` — the approved MSG91 OTP template ID. The template must contain the `##OTP##` placeholder.
+- `GV2VPD_ALLOWED_MOBILE` — the single owner mobile number authorized to receive OTPs, as 10 digits or `+91` followed by 10 digits. This allowlist is mandatory; unapproved numbers are rejected.
 
-The MSG91 account must be enabled for the OTP API, and the SMS sender/template must meet Indian DLT requirements. Check MSG91 IP security rules if Render's outbound IP is not allowed. Do not disable provider-side security without understanding the account's access policy.
+Only the owner-allowlisted mobile can sign in; open registration is disabled to prevent another verified phone from accessing the single configured FYERS broker account. The MSG91 account must be enabled for the OTP API, and the SMS sender/template must meet Indian DLT requirements. Check MSG91 IP security rules if Render's outbound IP is not allowed. Do not disable provider-side security without understanding the account's access policy.
 
 ## Login behavior
 
