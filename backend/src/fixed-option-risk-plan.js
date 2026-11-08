@@ -54,10 +54,11 @@ export function buildFixedOptionRiskPlan({ entryPrice, lotSize, tickSize = 0.05 
   const riskPerUnit = fixedEntry - stopLoss;
   const reward1PerUnit = target1 - fixedEntry;
   const reward2PerUnit = target2 - fixedEntry;
-  const rr = reward1PerUnit / riskPerUnit;
+  const rrTarget1 = reward1PerUnit / riskPerUnit;
+  const rr = reward2PerUnit / riskPerUnit;
   if (!(riskPerUnit > 0 && reward1PerUnit > 0 && reward2PerUnit > reward1PerUnit) ||
-      !Number.isFinite(rr) || rr < 1.5) {
-    return { ok: false, reason: "Tick-rounded fixed SL/Target 1 fails the minimum 1:1.5 reward/risk rule." };
+      !Number.isFinite(rr) || rr < 2) {
+    return { ok: false, reason: "Tick-rounded fixed SL/Target 2 fails the minimum 1:2 reward/risk rule." };
   }
   const money = value => Number(value.toFixed(2));
   return {
@@ -72,6 +73,8 @@ export function buildFixedOptionRiskPlan({ entryPrice, lotSize, tickSize = 0.05 
     rewardPerUnit: money(reward1PerUnit),
     rewardTarget2PerUnit: money(reward2PerUnit),
     rr: Number(rr.toFixed(4)),
+    rrTarget1: Number(rrTarget1.toFixed(4)),
+    rrTarget2: Number(rr.toFixed(4)),
     lotSize: lots,
     quantity: lots,
     riskPerLot: money(riskPerUnit * lots),
