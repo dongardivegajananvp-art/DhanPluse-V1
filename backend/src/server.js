@@ -49,7 +49,7 @@ const fyersTokenStore = createFyersTokenStore({
   encryptionKey: process.env.FYERS_TOKEN_ENCRYPTION_KEY
 });
 let fyersTokenStoreReady = false;
-const appAuth = createAppAuth({ databaseUrl: process.env.DATABASE_URL, msg91AuthKey: process.env.MSG91_AUTHKEY, msg91OtpTemplateId: process.env.MSG91_OTP_TEMPLATE_ID });
+const appAuth = createAppAuth({ databaseUrl: process.env.DATABASE_URL, msg91AuthKey: process.env.MSG91_AUTHKEY, msg91OtpTemplateId: process.env.MSG91_OTP_TEMPLATE_ID, allowedMobile: process.env.GV2VPD_ALLOWED_MOBILE });
 let appAuthReady = false;
 const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
 let chartStreamSymbol = null;
