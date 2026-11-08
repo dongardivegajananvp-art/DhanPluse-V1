@@ -44,14 +44,14 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - Required next verification: wake/check the original service through a user-approved normal visit or Render dashboard, inspect the current instance/app logs, then run `/health`, `/api/status`, allowed-origin preflight, and denied-origin checks again. Reconnect FYERS through the existing OAuth flow only when the user is present. Do not rotate, overwrite, or clear the persisted token manually.
 - No deployment, restart, environment mutation, database mutation, token refresh, or live order was performed during this investigation.
 
-## Latest verification pass — 2026-11-08
+## Latest verification pass — 2026-11-08 (15:10 UTC)
 
-- GitHub Actions now reports the dedicated `Validate DhanPulse backend` workflow as completed successfully for the current PR head.
-- The broader `Validate DhanPulse` workflow remains in progress; it is not yet a full green result.
-- Render metrics query for HTTP requests/latency, instance count, CPU and memory returned empty time series for the requested current window. This does not prove the service is healthy or unhealthy; it means no usable metric points were returned.
-- The original Render service remains configured on Free and tracks `main`; no production deploy was initiated.
-- FYERS remains disconnected until a fresh OAuth login succeeds. No old token was manually altered.
-- Live broker account snapshot is implemented but awaits a real authenticated FYERS response test. Durable Paper Mode is still outstanding; live order routes remain blocked.
+- Corrected PR head `e0f7f7d878ed8b5ba6f2e62aa78f42767135b158` passed JavaScript syntax, PWA/three-tab structural checks, dependency audit and backend regression tests in GitHub Actions.
+- The dedicated backend workflow passed, including the new FYERS funds mapping tests. A real authenticated FYERS funds/positions response is still not available for an integration test.
+- The production health/CORS workflow failed after six attempts between 15:07 and 15:08 UTC because the original Render `/health` endpoint returned no valid response. It did not reach the CORS checks.
+- Render request/application logs queried for 15:08–15:10 UTC returned no records; the latest Render service events still show the last successful deploy at 08:50 UTC. This does not establish the exact reason the endpoint is unreachable.
+- The original Render service remains on Free and tracks `main`; no production deploy, restart, environment/database mutation, token refresh, or live order was initiated.
+- FYERS needs a fresh user-authorized OAuth connection. Persistent Paper Mode ledger/auto exits/reconciliation remain outstanding; live order routes remain HTTP 403.
 
 
 ## Login correction — existing login preserved
