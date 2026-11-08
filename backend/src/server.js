@@ -2088,7 +2088,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
     console.info("FYERS MCX Sureshot futures quote coverage:", JSON.stringify(ranked.coverage));
     const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
     const today = indiaNow.toISOString().slice(0, 10);
-    const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 6)).toISOString().slice(0, 10);
+    const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 10)).toISOString().slice(0, 10);
     const results = [];
     const prepared = [];
     for (const candidate of ranked.data) {
