@@ -4,10 +4,8 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 
 ## Implemented in this branch
 
-- Reuses the existing App Login foundation from draft PR #159 without merging its diverged branch wholesale.
-- Adds owner-mobile allowlist + MSG91 OTP backend routes, PostgreSQL-backed hashed app sessions, OTP expiry/cooldown/daily send limit, failed-attempt lockout, session validation and revocation.
-- Adds a server-side /api App Login gate. Health/status and the narrowly scoped App Login bootstrap routes remain reachable; private APIs fail closed without a valid App Login session.
-- Keeps the existing FYERS OAuth and dashboard-session checks as a separate second authentication step.
+- Preserves the existing FYERS OAuth login and its existing backend-issued Dashboard Session. No second App Login, SMS OTP, mobile registration, or duplicate authentication gate is added.
+- Private market, quote, candle, portfolio and signal endpoints continue to require the existing FYERS Dashboard Session; the existing FYERS OAuth exchange remains the only login/connect flow.
 - Changes the app shell to exactly three visible navigation tabs: Home, Sureshot, Position.
 - Home is the default landing page and maps to the existing Dashboard renderer.
 - Sureshot maps to the existing verified FYERS Sureshot scanner; existing scan behavior is retained rather than silently replacing strategy logic.
@@ -17,12 +15,10 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - The NSE F&O auto-scan now publishes separate Top 10 Gainers and Top 10 Losers boards from the complete verified F&O equity snapshot, then selects up to five stock candidates from those boards for option verification. Index ticks do not displace stock candidates.
 - NSE/MCX Sureshot direction now has a strict trend gate: ADX(14) >=20, EMA(20) direction/slope, current-session VWAP alignment, same-elapsed-time volume ratio >=1.5 against five prior sessions, transparent Trend Score >=70, and final NSE selection blocked before 09:30. Candle history requests include a ten-calendar-day window to find five prior sessions.
 - Updates app identity/PWA manifest/cache to GV2VPD.
-- Adds structural checks for the three-tab and App Login shell, plus App Login unit tests.
+- Adds structural checks for the three-tab shell and verifies the existing FYERS Dashboard Session remains the authentication mechanism.
 
 ## Still blocked / not claimed complete
 
-- Real App Login cannot pass until the existing Render service has its already-owned PostgreSQL connection and approved MSG91 credentials/template plus the owner's allowlisted mobile configured and tested. Never put any secret in GitHub or chat.
-- This branch has not been run against the live MSG91 provider or production PostgreSQL.
 - Home account funds / realised P&L / unrealised P&L presentation still needs a verified funds endpoint and field-by-field response mapping.
 - The current NSE auto-scan shows Top 10 gainers/losers and verifies up to five candidates from those boards. It is not yet a full five-contract shortlist when fewer than five candidates pass; it correctly returns fewer or zero rather than relaxing gates.
 - Home account funds / realised P&L / unrealised P&L presentation remains to be implemented and verified against live FYERS funds/positions responses.
@@ -33,11 +29,10 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 ## Required verification before merge/deploy
 
 1. CI: backend node --test, frontend structural checks, syntax checks and all existing repository checks pass.
-2. Render staging/production-safe test: App Login DB initialization succeeds without disrupting the existing FYERS token store.
-3. Real MSG91 send, valid/invalid/expired OTP, cooldown, daily cap, lockout, session expiry and logout/revocation pass.
-4. A browser without App Login cannot call private APIs; App Login alone cannot bypass FYERS OAuth/session protection.
-5. The existing FYERS OAuth callback, socket reconnect, fresh exchange timestamps, and current Sureshot scanner pass regression tests.
-6. The production UI is not changed until a separately approved merge/deploy.
+2. Existing FYERS OAuth callback and Dashboard Session issue/validation remain unchanged.
+3. A browser without a valid FYERS Dashboard Session cannot call private market, quote, candle, portfolio or signal APIs.
+4. The existing FYERS OAuth callback, socket reconnect, fresh exchange timestamps, and current Sureshot scanner pass regression tests.
+5. Production UI is not changed until all remaining scope and deployment checks are complete.
 
 **Safety:** no live orders, no fake data, no automatic deployment, and no secret/config mutation in this branch.
 
@@ -51,7 +46,7 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - Required next verification: wake/check the original service through a user-approved normal visit or Render dashboard, inspect the current instance/app logs, then run `/health`, `/api/status`, allowed-origin preflight, and denied-origin checks again. Reconnect FYERS through the existing OAuth flow only when the user is present. Do not rotate, overwrite, or clear the persisted token manually.
 - No deployment, restart, environment mutation, database mutation, token refresh, or live order was performed during this investigation.
 
-## Latest verification pass — 2026-11-08 (15:xx UTC)
+## Latest verification pass — 2026-11-08
 
 - GitHub Actions now reports the dedicated `Validate DhanPulse backend` workflow as completed successfully for the current PR head.
 - The broader `Validate DhanPulse` workflow remains in progress; it is not yet a full green result.
@@ -59,3 +54,11 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - The original Render service remains configured on Free and tracks `main`; no production deploy was initiated.
 - FYERS remains disconnected until a fresh OAuth login succeeds. No old token was manually altered.
 - Account snapshot and durable Paper Mode are still explicitly outstanding; live order routes remain blocked.
+
+
+## Login correction — existing login preserved
+
+- Removed the added MSG91 OTP/mobile App Login UI, frontend storage/header requirement, backend OTP routes, and global /api OTP session middleware from this implementation branch.
+- Removed the new App Login module and its OTP-only unit tests; the existing FYERS OAuth + Dashboard Session flow remains the single login/connect mechanism.
+- Updated structural checks to fail if a duplicate OTP login gate returns and to assert the original Dashboard Session bearer flow remains.
+- No Render environment variables, PostgreSQL tables, FYERS tokens, production deployment, or live order permissions were changed.
