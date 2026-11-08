@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "DhanPulse Ultimate — FYERS",
-  "short_name": "DhanPulse",
-  "description": "DhanPulse verified FYERS market screener and trading workspace.",
+  "name": "GV2VPD Ultimate — FYERS",
+  "short_name": "GV2VPD",
+  "description": "GV2VPD verified FYERS market screener and trading workspace.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
