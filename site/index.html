@@ -1469,7 +1469,7 @@ function dashboardMarkup() {
   const chartUniverseNote = fnoChartSymbols.length
     ? 'Symbol list includes ' + fnoChartSymbols.length + ' equities from the verified FYERS NSE F&O symbol master, plus NIFTY, BANK NIFTY and SENSEX.'
     : 'NIFTY 50, BANK NIFTY and SENSEX are listed now; connect FYERS to load the complete NSE F&O chart universe.';
-  return '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
+  return '<article class="console-section" id="homeAccountSnapshot"><div class="console-section-head"><div><h4>FYERS account snapshot</h4><p id="homeAccountStatus">Waiting for verified account response…</p></div><button type="button" class="secondary" id="homeAccountRefresh">Refresh account</button></div><div class="console-grid console-grid-2"><div class="console-card"><div class="console-card-head">AVAILABLE BALANCE</div><strong class="console-price" id="homeAvailableBalance">—</strong><span class="quote-time">FYERS capital ledger</span></div><div class="console-card"><div class="console-card-head">UTILIZED MARGIN</div><strong class="console-price" id="homeUsedMargin">—</strong><span class="quote-time">FYERS capital ledger</span></div><div class="console-card"><div class="console-card-head">REALISED P&amp;L</div><strong class="console-price" id="homeRealisedPnl">—</strong><span class="quote-time">FYERS funds ledger</span></div><div class="console-card"><div class="console-card-head">UNREALISED P&amp;L</div><strong class="console-price" id="homeUnrealisedPnl">—</strong><span class="quote-time">FYERS open positions</span></div></div><p class="hint">Read-only FYERS account data. Values remain blank when the broker does not return the required field.</p></article>' +\n    '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
     '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
     '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol">' + chartSymbolOptions + '</select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
     '<div id="dashboardCandleStatus" class="hint">Choose a symbol and load verified historical candles. ' + escapeHtml(chartUniverseNote) + '</div><div id="dashboardChart"><div class="chart-empty">Candlesticks have not been loaded yet.</div></div>' +
@@ -3055,6 +3055,52 @@ function renderPublicPage(page) {
   return true;
 }
 
+async function loadHomeAccountSnapshot() {
+  const statusNode = document.querySelector('#homeAccountStatus');
+  const availableNode = document.querySelector('#homeAvailableBalance');
+  const usedNode = document.querySelector('#homeUsedMargin');
+  const realisedNode = document.querySelector('#homeRealisedPnl');
+  const unrealisedNode = document.querySelector('#homeUnrealisedPnl');
+  if (!statusNode || !availableNode || !usedNode || !realisedNode || !unrealisedNode) return;
+  statusNode.textContent = 'Requesting read-only FYERS funds and positions…';
+  const money = value => Number.isFinite(value) ? '₹' + value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+  try {
+    const [fundsResponse, positionsResponse] = await Promise.all([
+      fetch(BACKEND_URL + '/api/fyers/funds', { headers: { Accept: 'application/json' }, cache: 'no-store' }),
+      fetch(BACKEND_URL + '/api/fyers/positions', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+    ]);
+    const [fundsPayload, positionsPayload] = await Promise.all([
+      fundsResponse.json().catch(() => ({})), positionsResponse.json().catch(() => ({}))
+    ]);
+    if (!fundsResponse.ok || fundsPayload.ok !== true) throw new Error(fundsPayload.error || 'FYERS funds are unavailable.');
+    if (!positionsResponse.ok || positionsPayload.ok !== true) throw new Error(positionsPayload.error || 'FYERS positions are unavailable.');
+    const funds = fundsPayload.data || {};
+    const positionsData = positionsPayload.data || {};
+    const rows = Array.isArray(positionsData.netPositions) ? positionsData.netPositions
+      : Array.isArray(positionsData.positions) ? positionsData.positions : null;
+    const unrealisedValues = rows ? rows.map(row => {
+      const raw = row.unrealized_profit ?? row.unrealisedProfit ?? row.unrealizedProfit;
+      return raw === null || raw === undefined || raw === '' ? NaN : Number(raw);
+    }).filter(Number.isFinite) : [];
+    const unrealised = rows && rows.length === 0 ? 0
+      : unrealisedValues.length ? unrealisedValues.reduce((sum, value) => sum + value, 0) : NaN;
+    const available = Number(funds.availableBalance?.equity);
+    const utilized = Number(funds.utilizedAmount?.equity);
+    const realised = Number(funds.realizedProfitLoss?.equity);
+    availableNode.textContent = money(available);
+    usedNode.textContent = money(utilized);
+    realisedNode.textContent = money(realised);
+    unrealisedNode.textContent = money(unrealised);
+    statusNode.textContent = 'FYERS funds + positions received · ' + (fundsPayload.fetchedAt || positionsPayload.fetchedAt || 'timestamp unavailable');
+  } catch (error) {
+    availableNode.textContent = '—';
+    usedNode.textContent = '—';
+    realisedNode.textContent = '—';
+    unrealisedNode.textContent = '—';
+    statusNode.textContent = (error.message || 'FYERS account snapshot unavailable.') + ' No values were substituted.';
+  }
+}
+
 async function loadPositionSnapshot() {
   const statusNode = document.querySelector('#gvPositionStatus');
   const rowsNode = document.querySelector('#gvPositionRows');
@@ -3150,7 +3196,7 @@ function render(tab) {
       else fetchLiveQuotes(true);
     });
   }
-  if (tab === 'Dashboard') { featureContent.innerHTML = dashboardMarkup(); loadFnoChartUniverse(); }
+  if (tab === 'Dashboard') { featureContent.innerHTML = dashboardMarkup(); loadFnoChartUniverse(); void loadHomeAccountSnapshot(); document.querySelector('#homeAccountRefresh')?.addEventListener('click', () => void loadHomeAccountSnapshot()); }
   else if (tab === 'Stock Explorer') featureContent.innerHTML = stockExplorerMarkup();
   else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
   else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
