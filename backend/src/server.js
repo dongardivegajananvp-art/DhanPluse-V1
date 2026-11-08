@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import { createFyersTokenStore } from './fyers-token-store.js';
+import { createAppAuth } from './app-auth.js';
 import { createRequire } from 'node:module';
 import express from 'express';
 import helmet from 'helmet';
@@ -48,6 +49,8 @@ const fyersTokenStore = createFyersTokenStore({
   encryptionKey: process.env.FYERS_TOKEN_ENCRYPTION_KEY
 });
 let fyersTokenStoreReady = false;
+const appAuth = createAppAuth({ databaseUrl: process.env.DATABASE_URL, msg91AuthKey: process.env.MSG91_AUTHKEY, msg91OtpTemplateId: process.env.MSG91_OTP_TEMPLATE_ID, allowedMobile: process.env.GV2VPD_ALLOWED_MOBILE });
+let appAuthReady = false;
 const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
 let chartStreamSymbol = null;
 
@@ -687,6 +690,50 @@ app.get('/health', (_req, res) => {
   });
 });
 
+app.post('/api/app-auth/send-otp', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (!appAuthReady) return res.status(503).json({ ok: false, error: 'GV2VPD App Login is not ready. Check persistent storage and OTP provider configuration.' });
+    const result = await appAuth.sendOtp(req.body?.mobile);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(error.status || 502).json({ ok: false, error: error.message || 'Could not send OTP.' });
+  }
+});
+
+app.post('/api/app-auth/verify-otp', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (!appAuthReady) return res.status(503).json({ ok: false, error: 'GV2VPD App Login is not ready.' });
+    const result = await appAuth.verifyOtp(req.body?.mobile, req.body?.otp);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(error.status || 502).json({ ok: false, error: error.message || 'OTP verification failed.' });
+  }
+});
+
+app.get('/api/app-auth/session', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (!appAuthReady) return res.status(503).json({ ok: false, error: 'GV2VPD App Login is not ready.' });
+    const token = String(req.get('x-gv2vpd-session') || '');
+    const session = await appAuth.validateSession(token);
+    return res.json({ ok: Boolean(session), session: session ? { mobile: '+91 ' + session.phone.slice(2, 4) + '••••' + session.phone.slice(-4), expiresAt: session.expiresAt } : null });
+  } catch {
+    return res.status(503).json({ ok: false, error: 'GV2VPD App Login session check unavailable.' });
+  }
+});
+
+app.post('/api/app-auth/logout', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (appAuthReady) await appAuth.revokeSession(String(req.get('x-gv2vpd-session') || ''));
+    return res.json({ ok: true });
+  } catch {
+    return res.status(503).json({ ok: false, error: 'Could not revoke App Login session.' });
+  }
+});
+
 app.get('/api/status', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
@@ -771,6 +818,9 @@ app.get('/api/status', (_req, res) => {
     configCheck: { hasAppId: !!appId, hasSecret: !!appSecret, hasRedirect: !!redirectUri, redirectUri }
   });
 });
+
+// App Login is an independent gate; FYERS OAuth/session checks remain in place after it.
+app.use('/api', (req, res, next) => appAuth.requireSession(req, res, next));
 
 function createDashboardSessionToken() {
   const keyHex = String(process.env.FYERS_TOKEN_ENCRYPTION_KEY || '').trim();
@@ -2708,6 +2758,22 @@ async function initializeFyersTokenStore() {
   }
 }
 
+async function initializeAppAuth() {
+  if (!appAuth.configured) {
+    appAuthReady = false;
+    console.warn('GV2VPD App Login remains fail-closed: DATABASE_URL is missing.');
+    return;
+  }
+  try {
+    await appAuth.initialize();
+    appAuthReady = true;
+    console.log('GV2VPD App Login PostgreSQL store ready.');
+  } catch (error) {
+    appAuthReady = false;
+    console.error('GV2VPD App Login initialization failed; protected APIs remain blocked:', error?.message || 'database error');
+  }
+}
+
 function startServer() {
   // Bind the HTTP listener before restoring FYERS auth from PostgreSQL. The
   // health endpoint must stay responsive even when the optional token-store
@@ -2716,6 +2782,7 @@ function startServer() {
   const server = app.listen(port, () => {
     console.log(`DhanPulse backend listening on ${port}`);
     void initializeFyersTokenStore();
+    void initializeAppAuth();
   });
   server.on('error', error => {
     console.error('DhanPulse backend listener failed:', error?.message || 'listen error');
