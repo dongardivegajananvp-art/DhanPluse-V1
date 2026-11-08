@@ -1,0 +1,35 @@
+name: Keep Render Free Backend Warm
+
+on:
+  schedule:
+    # Render Free web services spin down after 15 minutes without inbound traffic.
+    # A 10-minute health request reduces cold starts without changing backend data.
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-free-backend-keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping-production-health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping the original production backend health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://dhanpluse-v1.onrender.com/health"
+          response="$(curl --fail --silent --show-error --location \
+            --retry 3 --retry-delay 15 --retry-all-errors \
+            --connect-timeout 15 --max-time 45 "$url")"
+          printf '%s\n' "$response"
+          if ! grep -q '"serviceHealth":"HEALTHY"' <<< "$response"; then
+            echo "::error::The backend did not return its expected HEALTHY JSON response."
+            exit 1
+          fi
+          echo "PASS: original Render backend returned a healthy HTTP response."
