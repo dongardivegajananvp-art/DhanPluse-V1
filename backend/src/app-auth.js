@@ -7,7 +7,7 @@ const OTP_COOLDOWN_MS = 60_000;
 const MAX_SENDS_PER_DAY = 5;
 const MAX_VERIFY_ATTEMPTS = 5;
 
-function normalizeIndianMobile(value) {
+export function normalizeIndianMobile(value) {
   const digits = String(value || '').replace(/[^0-9]/g, '');
   const national = digits.startsWith('91') && digits.length === 12 ? digits.slice(2) : digits;
   if (!/^[6-9][0-9]{9}$/.test(national)) return '';
