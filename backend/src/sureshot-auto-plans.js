@@ -1,4 +1,5 @@
 import { buildOptionRiskPlan } from "./option-risk-plan.js";
+import { buildFixedOptionRiskPlan, validateCompletedOptionCandles } from "./fixed-option-risk-plan.js";
 
 function epochSeconds(value) {
   if (typeof value === "number" || (typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value))) {
@@ -118,7 +119,7 @@ export function selectNearestVerifiedOptionContract({
 
 export function buildVerifiedSureshotTradePlan({
   underlyingSymbol, direction, contract, quote, optionCandles,
-  resolution = "5", now = Date.now(), maxSpreadPct = 5, lotSize, tickSize = 0.05
+  resolution = "5", now = Date.now(), maxSpreadPct = 5, lotSize, tickSize = 0.05, riskModel = "swing-low"
 }) {
   if (!direction?.ok || !["CE", "PE"].includes(direction.side) ||
       !underlyingSymbol || !contract?.symbol || !quote || !Array.isArray(optionCandles)) {
@@ -163,10 +164,19 @@ export function buildVerifiedSureshotTradePlan({
   if (!Number.isFinite(spreadPct) || spreadPct > maxSpreadPct) {
     return { ok: false, reason: "Option bid/ask spread exceeds the configured " + maxSpreadPct + "% limit; trade blocked." };
   }
-  const risk = buildOptionRiskPlan({
-    candles: optionCandles, entryPrice: ask, lotSize, tickSize, resolution, now, lookback: 12
-  });
-  if (!risk.ok || risk.rr < 2) return { ok: false, reason: risk.reason || "Minimum 1:2 risk/reward was not met." };
+  let risk;
+  if (riskModel === "fixed") {
+    const candleCheck = validateCompletedOptionCandles({ candles: optionCandles, resolution, now, lookback: 12 });
+    if (!candleCheck.ok) return { ok: false, reason: candleCheck.reason };
+    risk = buildFixedOptionRiskPlan({ entryPrice: ask, lotSize, tickSize });
+  } else if (riskModel === "swing-low") {
+    risk = buildOptionRiskPlan({
+      candles: optionCandles, entryPrice: ask, lotSize, tickSize, resolution, now, lookback: 12
+    });
+  } else {
+    return { ok: false, reason: "Unknown option risk model." };
+  }
+  if (!risk.ok) return { ok: false, reason: risk.reason || "Option risk plan validation failed." };
   return {
     ok: true,
     underlyingSymbol,
