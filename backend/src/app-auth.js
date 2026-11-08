@@ -22,7 +22,9 @@ function maskMobile(mobile) {
   return '+91 ••••••' + mobile.slice(-4);
 }
 
-export function createAppAuth({ databaseUrl, msg91AuthKey, msg91OtpTemplateId }) {
+export function createAppAuth({ databaseUrl, msg91AuthKey, msg91OtpTemplateId, allowedMobile: allowedMobileInput }) {
+  const allowedMobile = normalizeIndianMobile(allowedMobileInput);
+  const allowedMobileConfigured = Boolean(allowedMobile);
   const configured = Boolean(String(databaseUrl || '').trim());
   const msg91Configured = Boolean(String(msg91AuthKey || '').trim() && String(msg91OtpTemplateId || '').trim());
   const pool = configured ? new Pool({
@@ -61,9 +63,11 @@ export function createAppAuth({ databaseUrl, msg91AuthKey, msg91OtpTemplateId })
   }
 
   async function sendOtp(mobileInput) {
+    if (!allowedMobileConfigured) throw Object.assign(new Error('GV2VPD_ALLOWED_MOBILE is not configured. App Login remains closed until an owner mobile number is allowlisted.'), { status: 503 });
     if (!msg91Configured) throw Object.assign(new Error('MSG91 is not configured. Add MSG91_AUTHKEY and MSG91_OTP_TEMPLATE_ID in Render environment variables.'), { status: 503 });
     const mobile = normalizeIndianMobile(mobileInput);
     if (!mobile) throw Object.assign(new Error('Enter a valid 10-digit Indian mobile number.'), { status: 400 });
+    if (mobile !== allowedMobile) throw Object.assign(new Error('This mobile number is not authorized for GV2VPD App Login.'), { status: 403 });
 
     const client = await pool.connect();
     try {
@@ -120,10 +124,12 @@ export function createAppAuth({ databaseUrl, msg91AuthKey, msg91OtpTemplateId })
   }
 
   async function verifyOtp(mobileInput, otpInput) {
+    if (!allowedMobileConfigured) throw Object.assign(new Error('GV2VPD_ALLOWED_MOBILE is not configured. App Login remains closed.'), { status: 503 });
     if (!msg91Configured) throw Object.assign(new Error('MSG91 is not configured.'), { status: 503 });
     const mobile = normalizeIndianMobile(mobileInput);
     const otp = String(otpInput || '').trim();
     if (!mobile || !/^[0-9]{6}$/.test(otp)) throw Object.assign(new Error('Enter the valid mobile number and 6-digit OTP.'), { status: 400 });
+    if (mobile !== allowedMobile) throw Object.assign(new Error('This mobile number is not authorized for GV2VPD App Login.'), { status: 403 });
 
     const limit = await pool.query('SELECT verify_failures, locked_until, last_sent_at FROM gv2vpd_app_otp_limits WHERE phone=$1', [mobile]);
     const row = limit.rows[0];
@@ -206,5 +212,5 @@ export function createAppAuth({ databaseUrl, msg91AuthKey, msg91OtpTemplateId })
     }
   }
 
-  return { configured, msg91Configured, initialize, sendOtp, verifyOtp, validateSession, revokeSession, requireSession, close: async () => { if (pool) await pool.end(); } };
+  return { configured, msg91Configured, allowedMobileConfigured, initialize, sendOtp, verifyOtp, validateSession, revokeSession, requireSession, close: async () => { if (pool) await pool.end(); } };
 }
