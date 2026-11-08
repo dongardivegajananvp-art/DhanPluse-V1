@@ -12,6 +12,7 @@ import { getNseSessionWindow } from './market-data.js';
 import { getExchangeSessionWindows } from './exchange-session-status.js';
 
 import { buildFnoEquityUniverse } from './fno-universe.js';
+import { normalizeFyersFunds } from './fyers-funds.js';
 import { getReferenceDataRetryDelay } from './reference-data-backoff.js';
 import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
@@ -810,6 +811,7 @@ app.use('/api/market', requireDashboardSession);
 app.use('/api/fyers/options-chain', requireDashboardSession);
 app.use('/api/fyers/option-quote', requireDashboardSession);
 app.use('/api/fyers/option-risk-plan', requireDashboardSession);
+app.use('/api/fyers/funds', requireDashboardSession);
 app.use('/api/fyers/holdings', requireDashboardSession);
 app.use('/api/fyers/positions', requireDashboardSession);
 
@@ -2665,6 +2667,21 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
       ok: false,
       error: statusCode === 429 ? 'FYERS rate-limit cooldown active; retry after the stated cooldown.' : 'Unable to verify option quote and historical candles.',
       detail: String(error.message || 'FYERS option risk request failed.').slice(0, 220)
+    });
+  }
+});
+
+app.get('/api/fyers/funds', async (_req, res) => {
+  try {
+    const result = await fyersReadOnlyGet('https://api-t1.fyers.in/api/v3/funds');
+    const data = normalizeFyersFunds(result);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, fetchedAt: new Date().toISOString(), data });
+  } catch (error) {
+    return res.status(error.statusCode || 502).json({
+      ok: false,
+      error: error.statusCode === 401 ? 'Connect FYERS to view account funds.' : 'FYERS funds request failed.',
+      detail: String(error.message || 'Upstream request failed.').slice(0, 220)
     });
   }
 });
