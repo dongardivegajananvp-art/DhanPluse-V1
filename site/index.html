@@ -321,13 +321,25 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 .app-mode-label{color:#94a5bf;font-size:9px;letter-spacing:1px;font-weight:800}
 #nav{display:grid;gap:8px;margin-top:6px}#nav button{padding:14px 13px;font-weight:750;border-radius:11px}
 @media(max-width:650px){.exchange-status-grid{grid-template-columns:1fr;gap:10px}.exchange-status-card{padding:14px}.exchange-card-top>b{font-size:12px}}
+#gv2vpdAuthGate{position:fixed;inset:0;z-index:9999;background:#080d17;display:grid;place-items:center;padding:20px}#gv2vpdAuthGate[hidden]{display:none!important}.gv-login-card{width:min(100%,430px);padding:26px;border:1px solid #2b3d53;border-radius:20px;background:#111b2a;box-shadow:0 24px 80px #0009}.gv-login-card input{width:100%;padding:13px;border-radius:10px;border:1px solid #344967;background:#0a111c;color:#fff;font:inherit}.gv-login-card button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:10px;background:#63e6d0;color:#06141a;font-weight:900}.gv-login-card button:disabled{opacity:.55}.gv-login-card .secondary-login{background:transparent;border:1px solid #344967;color:#b9c5d8}.gv-auth-message{min-height:20px;color:#ffcc76;font-size:12px;margin:14px 0 0}#nav{display:grid;gap:8px;margin-top:6px}#nav button{padding:14px 13px;font-weight:750;border-radius:11px}
 </style>
 </head>
 <body>
-<aside class="sidebar"><div class="brand"><span class="brandmark">DP</span><div><b>DhanPulse</b><small>ULTIMATE · FYERS</small></div></div><nav id="nav">
-<button data-tab="Sureshot CE/PE">🎯 Sureshot</button><button data-tab="FYERS Connection">🔐 FYERS Connect</button>
+<div id="gv2vpdAuthGate" role="dialog" aria-modal="true" aria-labelledby="gv2vpdLoginTitle">
+  <section class="gv-login-card">
+    <div style="font-size:11px;letter-spacing:2px;color:#63e6d0;font-weight:800">GV2VPD · SECURE ACCESS</div>
+    <h2 id="gv2vpdLoginTitle" style="margin:12px 0 4px;font-size:25px">App Login</h2>
+    <p style="color:#a3b1c8;font-size:13px;margin:0 0 20px">Verify your owner mobile number. FYERS login remains a separate required step.</p>
+    <form id="gv2vpdMobileForm"><label for="gv2vpdMobile">Indian mobile number</label><input id="gv2vpdMobile" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="14" placeholder="10-digit mobile number" required><button id="gv2vpdSendOtp" type="submit">Send OTP</button></form>
+    <form id="gv2vpdOtpForm" hidden style="margin-top:16px"><label for="gv2vpdOtp">6-digit SMS OTP</label><input id="gv2vpdOtp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="Enter OTP" required><button id="gv2vpdVerifyOtp" type="submit">Verify & Continue</button><button id="gv2vpdResendOtp" class="secondary-login" type="button">Resend OTP</button></form>
+    <p id="gv2vpdAuthMessage" class="gv-auth-message" aria-live="polite">Checking secure App Login…</p>
+    <p style="color:#718098;font-size:10px;margin:12px 0 0">OTP expires in 5 minutes. Never share your OTP.</p>
+  </section>
+</div>
+<aside class="sidebar"><div class="brand"><span class="brandmark">GV</span><div><b>GV2VPD</b><small>FYERS WORKSTATION</small></div></div><nav id="nav">
+<button data-tab="Home" class="active">⌂ Home</button><button data-tab="Sureshot">🎯 Sureshot</button><button data-tab="Position">▣ Position</button>
 </nav></aside>
-<main><header><div><p class="eyebrow">TRADING WORKSPACE / INDIA</p><h1 id="pageTitle">Sureshot CE/PE</h1></div><div class="header-right"><span class="app-mode-label">READ ONLY · ORDER PLACEMENT DISABLED</span><div class="avatar">DP</div></div></header>
+<main><header><div><p class="eyebrow">TRADING WORKSPACE / INDIA</p><h1 id="pageTitle">Home</h1></div><div class="header-right"><span class="app-mode-label">VERIFIED FYERS DATA · PAPER MODE</span><div class="avatar">GV</div></div></header>
 <section class="welcome"><div><p class="eyebrow">YOUR MARKET, ONE VIEW</p><h2>Trade with clarity.</h2><p>Waiting for the first verified FYERS quote response. Market prices appear only when received from the backend.</p></div><div class="welcome-icon">◈</div></section>
 <section class="metrics"><article class="metric"><span>MARKET CONNECTION</span><strong class="muted" id="connectionValue">Disconnected</strong><small>Waiting for verified FYERS quotes</small></article><article class="metric"><span>NIFTY 50</span><strong class="muted">—</strong><small>Waiting for live quote</small></article><article class="metric"><span>BANK NIFTY</span><strong class="muted">—</strong><small>Waiting for live quote</small></article><article class="metric"><span>SENSEX</span><strong class="muted">—</strong><small>Waiting for verified BSE quote</small></article><article class="metric"><span>LAST UPDATE</span><strong class="muted" id="lastUpdate">—</strong><small>Timestamp appears after data received</small></article></section>
 <section class="grid"><article class="panel large"><div class="panel-head"><div><h3 id="panelTitle">Market overview</h3><p>Verified data only</p></div><span class="tag">READ ONLY</span></div><div class="empty" id="mainWorkspaceContent"><div class="empty-icon">⌁</div><h3>Waiting for verified market data</h3><p>This panel updates when verified NIFTY 50 and BANK NIFTY quotes arrive from the backend.</p><button class="primary" id="settingsBtn">Open FYERS Settings</button></div></article><article class="panel"><div class="panel-head"><div><h3>Workspace status</h3><p>Service health</p></div></div><div class="statusrow"><span>Frontend</span><b class="ok">ONLINE</b></div><div class="statusrow"><span>Backend</span><b class="warn" id="backendStatus">NOT CHECKED</b></div><div class="statusrow"><span>FYERS auth</span><b class="warn">NOT CONNECTED</b></div><div class="statusrow"><span>Order placement</span><b class="warn">DISABLED</b></div><p class="hint">Backend health and live market quotes are checked separately.</p></article></section>
@@ -372,6 +384,10 @@ window.fetch = function(input, init = {}) {
     return Promise.reject(new Error('OAuth is disabled in this isolated test preview until the test redirect URI is verified.'));
   }
   let requestSession = '';
+  if (isBackend && !['/health','/api/status','/api/app-auth/send-otp','/api/app-auth/verify-otp','/api/app-auth/session'].includes(pathname)) {
+    const appSession = localStorage.getItem('gv2vpd-app-session-v1') || '';
+    if (appSession) headers.set('X-GV2VPD-Session', appSession);
+  }
   if (isBackend && !publicPaths.includes(pathname)) {
     requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
     if (requestSession) headers.set('Authorization', 'Bearer ' + requestSession);
@@ -537,6 +553,7 @@ const descriptions = {
   'Technical Indicators': ['Technical indicators', 'EMA, RSI, ATR, volume and trend calculated from verified FYERS historical OHLC candles.'],
   'AI Signals': ['Market signals', 'Transparent momentum summaries from recent received quotes, not investment advice.'],
   'Holdings': ['Holdings & positions', 'Account data is private and shown only after a verified account endpoint is available.'],
+  'Position': ['Positions', 'Broker-confirmed FYERS positions and paper-trade ledger. No order is represented as filled without broker confirmation.'],
   'Alerts': ['Price alerts', 'Browser-local alerts for the two live index quotes.'],
   'FYERS Settings': ['FYERS connection settings', 'Connect through the secure backend; credentials remain server-side.'],
   'Logs': ['System logs', 'Recent frontend, backend, and live-quote events.'],
@@ -3042,12 +3059,62 @@ function renderPublicPage(page) {
   return true;
 }
 
+async function loadPositionSnapshot() {
+  const statusNode = document.querySelector('#gvPositionStatus');
+  const rowsNode = document.querySelector('#gvPositionRows');
+  if (!statusNode || !rowsNode) return;
+  statusNode.textContent = 'Requesting current FYERS positions…';
+  rowsNode.textContent = 'Loading verified broker response…';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/fyers/positions', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok !== true) throw new Error(payload.error || 'FYERS positions are unavailable.');
+    const data = payload.data || {};
+    const rows = Array.isArray(data.netPositions) ? data.netPositions : Array.isArray(data.positions) ? data.positions : [];
+    statusNode.textContent = 'FYERS response received · ' + (payload.fetchedAt || 'timestamp unavailable');
+    if (!rows.length) {
+      rowsNode.innerHTML = '<div class="chart-empty">FYERS returned no open position rows. This is not a simulated position.</div>';
+      return;
+    }
+    rowsNode.innerHTML = '<div style="overflow:auto"><table class="data-table"><thead><tr><th>Symbol</th><th>Qty</th><th>Avg Entry</th><th>Realised P&L</th><th>Unrealised P&L</th><th>Net P&L</th><th>Status</th></tr></thead><tbody>' +
+      rows.map(row => {
+        const symbol = escapeHtml(String(row.symbol || row.tradingSymbol || '—'));
+        const qty = escapeHtml(String(row.netQty ?? row.qty ?? row.quantity ?? '—'));
+        const avg = Number(row.netAvg ?? row.buyAvg ?? row.avgPrice);
+        const realised = Number(row.realized_profit ?? row.realisedProfit ?? row.realizedProfit);
+        const unrealised = Number(row.unrealized_profit ?? row.unrealisedProfit ?? row.unrealizedProfit);
+        const net = Number(row.pl ?? row.netProfit ?? (Number.isFinite(realised) && Number.isFinite(unrealised) ? realised + unrealised : NaN));
+        const money = value => Number.isFinite(value) ? '₹' + value.toFixed(2) : '—';
+        const state = Number(row.netQty ?? row.qty ?? 0) === 0 ? 'CLOSED' : 'BROKER POSITION';
+        return '<tr><td>' + symbol + '</td><td>' + qty + '</td><td>' + money(avg) + '</td><td>' + money(realised) + '</td><td>' + money(unrealised) + '</td><td>' + money(net) + '</td><td>' + state + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  } catch (error) {
+    statusNode.textContent = 'FYERS position check failed';
+    rowsNode.innerHTML = '<div class="chart-empty">' + escapeHtml(error.message || 'Position data unavailable.') + '</div>';
+  }
+}
+
 function render(tab) {
-  if (!['Sureshot CE/PE','FYERS Connection'].includes(tab)) tab = 'Sureshot CE/PE';
+  const requestedTab = tab;
+  if (tab === 'Home') tab = 'Dashboard';
+  else if (tab === 'Sureshot') tab = 'Sureshot CE/PE';
+  if (!['Dashboard','Sureshot CE/PE','FYERS Connection','Position'].includes(tab)) tab = 'Sureshot CE/PE';
   const publicRoot = document.querySelector('#publicPage'); if (publicRoot) publicRoot.style.display = 'none';
   ['.welcome','.metrics','.grid','.feature-panel','footer'].forEach(selector => { const node=document.querySelector(selector); if(node) node.style.display=''; });
   if (connectionDiagnosticsTimer) { window.clearInterval(connectionDiagnosticsTimer); connectionDiagnosticsTimer = null; }
   if (!descriptions[tab]) return;
+  if (tab === 'Position') {
+    currentTab = 'Position';
+    ['.welcome','.metrics','.grid'].forEach(selector => { const node=document.querySelector(selector); if(node) node.style.display='none'; });
+    title.textContent='Position'; panelTitle.textContent='Broker-confirmed positions'; featureTitle.textContent='Position & paper ledger'; featureDesc.textContent='Only verified FYERS position responses are displayed. Live BUY remains disabled.';
+    nav.querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.tab === requestedTab));
+    const mainPanel=document.querySelector('#mainWorkspaceContent');
+    if(mainPanel) mainPanel.innerHTML='<div class="main-view-heading"><span class="eyebrow">FYERS ACCOUNT</span><h2>Position status</h2><p>Broker-reconciled position snapshot; stale or unavailable data is never presented as current.</p></div><p class="hint">Paper Mode only · Live order placement is disabled.</p>';
+    featureContent.innerHTML='<article class="console-section"><div class="console-section-head"><div><h4>Open & closed positions</h4><p id="gvPositionStatus">Waiting for verified FYERS positions…</p></div><button type="button" class="secondary" id="gvPositionRefresh">Refresh positions</button></div><div id="gvPositionRows" class="chart-empty">No position snapshot loaded.</div></article><article class="console-section"><h4>Paper trade ledger</h4><p class="hint">No paper trade is created from sample data. A paper entry will be recorded only from a fully verified Sureshot contract and its timestamped quote.</p><div id="gvPaperLedger" class="chart-empty">No verified paper trades yet.</div></article>';
+    const refresh=document.querySelector('#gvPositionRefresh'); if(refresh) refresh.addEventListener('click',()=>loadPositionSnapshot());
+    void loadPositionSnapshot();
+    return;
+  }
   if (['Trade Journal','Capital Protection','Backtesting'].includes(tab)) {
     currentTab = tab;
     ['.welcome','.metrics','.grid'].forEach(selector => { const section=document.querySelector(selector); if(section) section.style.display='none'; });
@@ -3070,7 +3137,7 @@ function render(tab) {
   panelTitle.textContent = descriptions[tab][0];
   featureTitle.textContent = tab === 'Dashboard' ? 'Live console' : tab;
   featureDesc.textContent = descriptions[tab][1];
-  nav.querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.tab === tab));
+  nav.querySelectorAll('button').forEach(button => button.classList.toggle('active', button.dataset.tab === requestedTab));
   const mainPanel = document.querySelector('#mainWorkspaceContent');
   if (mainPanel) {
     const symbol = tab === 'BANKNIFTY' ? SYMBOLS[1].symbol : SYMBOLS[0].symbol;
@@ -3943,4 +4010,53 @@ if (!authExchangeInProgress) fetchLiveQuotes();
 
 </script>
 <script>if ("serviceWorker" in navigator && location.protocol === "https:") { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js?v=20261106-authoritative-status-v2", { updateViaCache: "none" }).then(registration => registration.update()).catch(() => {})); }</script>
+
+<script>
+(() => {
+  const gate=document.getElementById('gv2vpdAuthGate');
+  const mobileForm=document.getElementById('gv2vpdMobileForm');
+  const otpForm=document.getElementById('gv2vpdOtpForm');
+  const mobile=document.getElementById('gv2vpdMobile');
+  const otp=document.getElementById('gv2vpdOtp');
+  const message=document.getElementById('gv2vpdAuthMessage');
+  const send=document.getElementById('gv2vpdSendOtp');
+  const verify=document.getElementById('gv2vpdVerifyOtp');
+  const resend=document.getElementById('gv2vpdResendOtp');
+  const key='gv2vpd-app-session-v1';
+  let busy=false;
+  async function api(path,body,token) {
+    const headers={Accept:'application/json'};
+    if(body!==undefined) headers['Content-Type']='application/json';
+    if(token) headers['X-GV2VPD-Session']=token;
+    const response=await fetch('https://dhanpluse-v1.onrender.com/api/app-auth/'+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok||data.ok!==true) throw new Error(data.error||'App Login service unavailable.');
+    return data;
+  }
+  async function sendCode() {
+    if(busy) return; busy=true; send.disabled=true; resend.disabled=true;
+    message.textContent='Requesting owner OTP…';
+    try { const result=await api('send-otp',{mobile:mobile.value}); otpForm.hidden=false; message.textContent='OTP sent to '+result.mobile+'. Enter it within 5 minutes.'; otp.focus(); }
+    catch(error){ message.textContent=error.message||'OTP request failed.'; }
+    finally{ busy=false; send.disabled=false; resend.disabled=false; }
+  }
+  mobileForm.addEventListener('submit',event=>{event.preventDefault();void sendCode();});
+  resend.addEventListener('click',()=>void sendCode());
+  otpForm.addEventListener('submit',async event=>{
+    event.preventDefault(); if(busy)return; busy=true; verify.disabled=true; message.textContent='Verifying OTP…';
+    try { const result=await api('verify-otp',{mobile:mobile.value,otp:otp.value}); if(!result.appSessionToken) throw new Error('No valid app session was returned.'); localStorage.setItem(key,result.appSessionToken); message.textContent='App Login verified. Loading workspace…'; window.location.reload(); }
+    catch(error){ message.textContent=error.message||'OTP verification failed.'; }
+    finally{busy=false;verify.disabled=false;}
+  });
+  async function check() {
+    const token=localStorage.getItem(key)||'';
+    if(!token){message.textContent='Enter your owner mobile number to continue.';return;}
+    try { const result=await api('session',undefined,token); if(result.ok&&result.session){gate.hidden=true;return;} }
+    catch {}
+    localStorage.removeItem(key); message.textContent='App Login session expired. Verify your mobile number again.';
+  }
+  void check();
+})();
+</script>
+
 </body></html>
