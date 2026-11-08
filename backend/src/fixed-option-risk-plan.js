@@ -75,6 +75,7 @@ export function buildFixedOptionRiskPlan({ entryPrice, lotSize, tickSize = 0.05 
     lotSize: lots,
     quantity: lots,
     riskPerLot: money(riskPerUnit * lots),
+    premiumPerLot: money(fixedEntry * lots),
     target1RewardPerLot: money(reward1PerUnit * lots),
     target2RewardPerLot: money(reward2PerUnit * lots),
     targetAllocation: "SEQUENTIAL_OR_TESTED_LOT_SPLIT_REQUIRED"
