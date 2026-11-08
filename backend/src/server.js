@@ -2684,7 +2684,7 @@ app.use((err, _req, res, _next) => {
 
 const port = Number(process.env.PORT || 8080);
 
-async function startServer() {
+async function initializeFyersTokenStore() {
   if (fyersTokenStore.configured) {
     try {
       const savedAuth = await fyersTokenStore.initialize();
@@ -2706,12 +2706,22 @@ async function startServer() {
   } else {
     console.warn('FYERS PostgreSQL persistence is not configured yet; existing in-memory authentication remains enabled until DATABASE_URL and FYERS_TOKEN_ENCRYPTION_KEY are added. Tokens will not survive a backend restart yet.');
   }
-  app.listen(port, () => {
-    console.log(`DhanPulse backend listening on ${port}`);
-  });
 }
 
-startServer().catch(error => {
-  console.error('DhanPulse backend startup failed:', error?.message || 'startup error');
-  process.exitCode = 1;
-});
+function startServer() {
+  // Bind the HTTP listener before restoring FYERS auth from PostgreSQL. The
+  // health endpoint must stay responsive even when the optional token-store
+  // connection is slow or unavailable; auth routes remain gated by
+  // fyersTokenStoreReady until initialization completes.
+  const server = app.listen(port, () => {
+    console.log(`DhanPulse backend listening on ${port}`);
+    void initializeFyersTokenStore();
+  });
+  server.on('error', error => {
+    console.error('DhanPulse backend listener failed:', error?.message || 'listen error');
+    process.exitCode = 1;
+  });
+  return server;
+}
+
+startServer();
