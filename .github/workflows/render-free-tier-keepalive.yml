@@ -17,19 +17,23 @@ concurrency:
 jobs:
   ping-production-health:
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
       - name: Ping the original production backend health endpoint
         shell: bash
         run: |
           set -euo pipefail
           url="https://dhanpluse-v1.onrender.com/health"
-          response="$(curl --fail --silent --show-error --location \
-            --retry 3 --retry-delay 15 --retry-all-errors \
-            --connect-timeout 15 --max-time 45 "$url")"
-          printf '%s\n' "$response"
-          if ! grep -q '"serviceHealth":"HEALTHY"' <<< "$response"; then
-            echo "::error::The backend did not return its expected HEALTHY JSON response."
-            exit 1
-          fi
-          echo "PASS: original Render backend returned a healthy HTTP response."
+          for attempt in 1 2 3 4; do
+            response="$(curl --silent --show-error --location \
+              --connect-timeout 10 --max-time 20 "$url" 2>/dev/null || true)"
+            if grep -q '"serviceHealth":"HEALTHY"' <<< "$response"; then
+              printf '%s\n' "$response"
+              echo "PASS: original Render backend returned a healthy HTTP response."
+              exit 0
+            fi
+            echo "Backend is waking up or did not return its health JSON (attempt $attempt/4)."
+            sleep 10
+          done
+          echo "::error::The original Render backend did not return its expected HEALTHY JSON response."
+          exit 1
