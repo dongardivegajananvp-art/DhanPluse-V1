@@ -1974,7 +1974,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       topGainers: state.topGainers, topLosers: state.topLosers, moverBoardsComplete: state.moverBoardsComplete,
       scannedCandidateCount: results.length, verifiedSetupCount: verified.length,
       bestSetup: verified[0] || null, results,
-      notice: "The complete eligible FYERS NSE F&O universe was ranked from a verified quote snapshot; all selected top-five candidates were checked independently for fresh underlying candles, contract identity, live option premium, completed option candles and >=1:2 risk/reward. No orders are placed." };
+      notice: "The complete eligible FYERS NSE F&O universe was ranked from a verified quote snapshot; all selected top-five candidates were checked independently for fresh underlying candles, contract identity, live option premium, completed option candles and T2 reward/risk >=1:2. No orders are placed." };
     sureshotScanState = null;
     return res.json(payload);
   } catch (error) {
