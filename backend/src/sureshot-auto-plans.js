@@ -223,7 +223,8 @@ export function buildVerifiedSureshotTradePlan({
       spot: direction.spot,
       latestCandleAt: direction.latestCandleAt,
       candleAgeSeconds: direction.candleAgeSeconds,
-      completedCandleCount: direction.completedCandleCount
+      completedCandleCount: direction.completedCandleCount,
+      ...(Number.isFinite(Number(direction.trendScore)) ? { trendScore: Number(direction.trendScore), trendMetrics: direction.trendMetrics } : {})
     },
     contract,
     quote: {
