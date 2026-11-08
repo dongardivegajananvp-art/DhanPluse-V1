@@ -7,7 +7,7 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - Preserves the existing FYERS OAuth login and its existing backend-issued Dashboard Session. No second App Login, SMS OTP, mobile registration, or duplicate authentication gate is added.
 - Private market, quote, candle, portfolio and signal endpoints continue to require the existing FYERS Dashboard Session; the existing FYERS OAuth exchange remains the only login/connect flow.
 - Changes the app shell to exactly three visible navigation tabs: Home, Sureshot, Position.
-- Home is the default landing page and maps to the existing Dashboard renderer.
+- Home is the default landing page and maps to the existing Dashboard renderer. It now reads FYERS `/api/v3/funds` by `fund_limit[].title` and the current positions endpoint to show available balance, utilised margin, realised P&L and unrealised P&L; missing broker fields remain unavailable rather than being displayed as zero.
 - Sureshot maps to the existing verified FYERS Sureshot scanner; existing scan behavior is retained rather than silently replacing strategy logic.
 - Position reads the backend's FYERS positions endpoint and displays broker-returned rows; it does not synthesize positions or fills.
 - Adds the fixed Sureshot option risk model and wires it into the existing NSE/MCX auto-plan scanner: Entry = verified ask, SL = 30% below entry, T1 = 1.5x, T2 = 2.5x, tick-rounded values, lot-level rupee risk/reward, and >=1:1.5 T1 RR. The model still requires 12 fresh completed option candles and verified lot/tick metadata.
@@ -19,9 +19,7 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 
 ## Still blocked / not claimed complete
 
-- Home account funds / realised P&L / unrealised P&L presentation still needs a verified funds endpoint and field-by-field response mapping.
 - The current NSE auto-scan shows Top 10 gainers/losers and verifies up to five candidates from those boards. It is not yet a full five-contract shortlist when fewer than five candidates pass; it correctly returns fewer or zero rather than relaxing gates.
-- Home account funds / realised P&L / unrealised P&L presentation remains to be implemented and verified against live FYERS funds/positions responses.
 - Position currently displays FYERS broker positions; durable paper-trade creation, paper BUY/Manual Exit controls, automatic SL/T1/T2 paper exits, daily loss lock and restart reconciliation remain to be implemented.
 - Live order placement remains disabled. Existing backend /api/orders/* still returns 403. Do not remove that block until static-IP eligibility for the FYERS Trading App, broker permissions, order-fill reconciliation, protection acknowledgement, partial-fill handling, two-target allocation, daily loss lock, max-two-position guard and emergency exit tests have all passed.
 - The current Render Free service does not provide the dedicated static egress IP required by the FYERS Individual Trading App. No paid hosting change is made here.
@@ -53,7 +51,7 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - Render metrics query for HTTP requests/latency, instance count, CPU and memory returned empty time series for the requested current window. This does not prove the service is healthy or unhealthy; it means no usable metric points were returned.
 - The original Render service remains configured on Free and tracks `main`; no production deploy was initiated.
 - FYERS remains disconnected until a fresh OAuth login succeeds. No old token was manually altered.
-- Account snapshot and durable Paper Mode are still explicitly outstanding; live order routes remain blocked.
+- Live broker account snapshot is implemented but awaits a real authenticated FYERS response test. Durable Paper Mode is still outstanding; live order routes remain blocked.
 
 
 ## Login correction — existing login preserved
