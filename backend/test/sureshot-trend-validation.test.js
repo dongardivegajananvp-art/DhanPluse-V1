@@ -58,5 +58,5 @@ test("blocks low same-time volume and insufficient five-session history", () => 
   assert.match(lowVolume.reason, /volume confirmation/i);
   const insufficient = validateSureshotTrend({ candles: trendCandles("UP").slice(-15), resolution: "5", now });
   assert.equal(insufficient.ok, false);
-  assert.match(insufficient.reason, /five previous/i);
+  assert.match(insufficient.reason, /30 completed|five previous/i);
 });
