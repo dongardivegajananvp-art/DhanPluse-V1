@@ -2179,7 +2179,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
         const plan = buildVerifiedSureshotTradePlan({
           underlyingSymbol: item.candidate.symbol, direction: item.direction, contract: item.contract,
           quote, optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
-          resolution: "5", lotSize: item.sizing.lotSize, tickSize: item.sizing.tickSize, riskModel: "fixed", now: Date.now()
+          resolution: "5", lotSize: item.sizing.lotSize, tickSize: item.sizing.tickSize, riskModel: "fixed", requirePremiumRange: true, now: Date.now()
         });
         results.push(plan.ok
           ? { ...item.base, status: "VERIFIED SETUP", plan }
