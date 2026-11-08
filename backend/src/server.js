@@ -1903,7 +1903,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         chainUrl.searchParams.set("symbol", candidate.symbol); chainUrl.searchParams.set("strikecount", "10"); chainUrl.searchParams.set("greeks", "1");
         const chainResult = await fyersReadOnlyGet(chainUrl, { priority: "sureshot" });
         const discovery = normalizeOptionContractDiscovery(chainResult?.data);
-        const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now() });
+        const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(), requireDelta: true, strikeMode: "one-otm" });
         if (!selected.ok) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
           continue;
@@ -1974,7 +1974,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         scanStage = "BUILD_RISK_PLAN";
         const plan = buildVerifiedSureshotTradePlan({ underlyingSymbol: candidate.symbol, direction, contract, quote,
           optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5",
-          lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, riskModel: "fixed", now: Date.now() });
+          lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, riskModel: "fixed", requirePremiumRange: true, now: Date.now() });
         resultBySymbol.set(candidate.symbol, plan.ok ? { ...base, status: "VERIFIED SETUP", plan } :
           { ...base, status: "NO TRADE", direction: direction.side, contract, reason: plan.reason });
       } catch (error) {
@@ -2127,7 +2127,8 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
         };
         stage = "SELECT_MCX_OPTION_CONTRACT";
         const selected = selectNearestVerifiedOptionContract({
-          discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now()
+          discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(),
+          requireDelta: true, strikeMode: "one-otm"
         });
         if (!selected.ok) {
           results.push({ ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
