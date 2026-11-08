@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import { createFyersTokenStore } from './fyers-token-store.js';
+import { createAppAuth } from './app-auth.js';
 import { createRequire } from 'node:module';
 import express from 'express';
 import helmet from 'helmet';
@@ -48,6 +49,8 @@ const fyersTokenStore = createFyersTokenStore({
   encryptionKey: process.env.FYERS_TOKEN_ENCRYPTION_KEY
 });
 let fyersTokenStoreReady = false;
+const appAuth = createAppAuth({ databaseUrl: process.env.DATABASE_URL, msg91AuthKey: process.env.MSG91_AUTHKEY, msg91OtpTemplateId: process.env.MSG91_OTP_TEMPLATE_ID });
+let appAuthReady = false;
 const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
 let chartStreamSymbol = null;
 
@@ -687,6 +690,49 @@ app.get('/health', (_req, res) => {
   });
 });
 
+app.post('/api/app-auth/send-otp', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (!appAuthReady) return res.status(503).json({ ok: false, error: 'GV2VPD App Login database is not ready.' });
+    const result = await appAuth.sendOtp(req.body?.mobile);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(error.status || 502).json({ ok: false, error: error.message || 'Could not send OTP.' });
+  }
+});
+
+app.post('/api/app-auth/verify-otp', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    if (!appAuthReady) return res.status(503).json({ ok: false, error: 'GV2VPD App Login database is not ready.' });
+    const result = await appAuth.verifyOtp(req.body?.mobile, req.body?.otp);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(error.status || 502).json({ ok: false, error: error.message || 'OTP verification failed.' });
+  }
+});
+
+app.get('/api/app-auth/session', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const token = String(req.get('x-gv2vpd-session') || '');
+    const session = await appAuth.validateSession(token);
+    return res.json({ ok: Boolean(session), session: session ? { mobile: session.phone.replace(/^91/, '+91 ').replace(/(\\d{2})\\d{4}(\\d{4})$/, '$1••••$2'), expiresAt: session.expiresAt } : null });
+  } catch {
+    return res.status(503).json({ ok: false, error: 'GV2VPD App Login session check unavailable.' });
+  }
+});
+
+app.post('/api/app-auth/logout', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    await appAuth.revokeSession(String(req.get('x-gv2vpd-session') || ''));
+    return res.json({ ok: true });
+  } catch {
+    return res.status(503).json({ ok: false, error: 'Could not revoke App Login session.' });
+  }
+});
+
 app.get('/api/status', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   const snapshot = liveSnapshot();
@@ -782,7 +828,7 @@ function createDashboardSessionToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-function requireDashboardSession(req, res, next) {
+// Every API except health/status, OTP bootstrap and the public symbol master requires a verified GV2VPD app session.\napp.use('/api', (req, res, next) => appAuth.requireSession(req, res, next));\n\nfunction requireDashboardSession(req, res, next) {
   // The official FYERS NSE F&O instrument master is public reference data.
   // Exempt only this read-only GET endpoint; all quotes, candles, options,
   // portfolio and signal endpoints remain protected by the dashboard session.
