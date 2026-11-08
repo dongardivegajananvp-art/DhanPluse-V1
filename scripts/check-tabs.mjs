@@ -75,10 +75,10 @@ if (!app.includes('SURESHOT_AUTO_SCAN_ATTEMPT_KEY') ||
     !app.includes("window.setInterval(() => { void refreshAuthoritativeFyersStatus(); }, 5000)") ||
     !app.includes("document.addEventListener('visibilitychange'") ||
     !app.includes("window.addEventListener('pageshow'") ||
-    !html.includes('app.js?v=20261106-authoritative-status-v2') ||
-    !html.includes('sw.js?v=20261106-authoritative-status-v2') ||
-    !sw.includes('dhanpulse-shell-v134-public-pages-v1') ||
-    !sw.includes('app.js?v=20261106-authoritative-status-v2') ||
+    !html.includes('app.js?v=20261108-gv2vpd-otp-login-v1') ||
+    !html.includes('sw.js?v=20261108-gv2vpd-otp-login-v1') ||
+    !sw.includes('gv2vpd-shell-v2-otp-login') ||
+    !sw.includes('app.js?v=20261108-gv2vpd-otp-login-v1') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('PWA cache and bounded Sureshot automatic-attempt guard must be present in the published shell.');
 }
