@@ -23,3 +23,10 @@ test('keeps missing or invalid FYERS fund fields unavailable instead of showing 
   assert.deepEqual(result.utilizedAmount, { equity: null, commodity: null });
   assert.deepEqual(result.realizedProfitLoss, { equity: null, commodity: null });
 });
+
+test('does not coerce explicit null fund amounts into a real zero balance', () => {
+  const result = normalizeFyersFunds({ fund_limit: [
+    { title: 'Available Balance', equityAmount: null, commodityAmount: null }
+  ] });
+  assert.deepEqual(result.availableBalance, { equity: null, commodity: null });
+});
