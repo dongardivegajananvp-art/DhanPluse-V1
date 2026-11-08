@@ -10,7 +10,7 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - Home is the default landing page and maps to the existing Dashboard renderer. It now reads FYERS `/api/v3/funds` by `fund_limit[].title` and the current positions endpoint to show available balance, utilised margin, realised P&L and unrealised P&L; missing broker fields remain unavailable rather than being displayed as zero.
 - Sureshot maps to the existing verified FYERS Sureshot scanner; existing scan behavior is retained rather than silently replacing strategy logic.
 - Position reads the backend's FYERS positions endpoint and displays broker-returned rows; it does not synthesize positions or fills.
-- Adds the fixed Sureshot option risk model and wires it into the existing NSE/MCX auto-plan scanner: Entry = verified ask, SL = 30% below entry, T1 = 1.5x, T2 = 2.5x, tick-rounded values, lot-level rupee risk/reward, and T2 >=1:2 T1 RR. The model still requires 12 fresh completed option candles and verified lot/tick metadata.
+- Adds the fixed Sureshot option risk model and wires it into the existing NSE/MCX auto-plan scanner: Entry = verified ask, SL = 30% below entry, T1 = 1.5x, T2 = 2.5x, tick-rounded values, lot-level rupee risk/reward, T2 reward/risk >=1:2 (T1 ratio is shown separately). The model still requires 12 fresh completed option candles and verified lot/tick metadata.
 - NSE/MCX auto-plan selection now requires the exact ATM + 1 OTM strike, official FYERS nested delta in the absolute 0.35–0.55 band, and verified ask premium ₹30–₹150. Option-chain LTP/OI/volume remain excluded; premium is independently read from a fresh quote.
 - The NSE F&O auto-scan now publishes separate Top 10 Gainers and Top 10 Losers boards from the complete verified F&O equity snapshot, then selects up to five stock candidates from those boards for option verification. Index ticks do not displace stock candidates.
 - NSE/MCX Sureshot direction now has a strict trend gate: ADX(14) >=20, EMA(20) direction/slope, current-session VWAP alignment, same-elapsed-time volume ratio >=1.5 against five prior sessions, transparent Trend Score >=70, and final NSE selection blocked before 09:30. Candle history requests include a ten-calendar-day window to find five prior sessions.
@@ -46,7 +46,8 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 
 ## Latest verification pass — 2026-11-08 (15:10 UTC)
 
-- Corrected PR head `e0f7f7d878ed8b5ba6f2e62aa78f42767135b158` passed JavaScript syntax, PWA/three-tab structural checks, dependency audit and backend regression tests in GitHub Actions.
+- Earlier corrected PR head `e0f7f7d878ed8b5ba6f2e62aa78f42767135b158` passed JavaScript syntax, PWA/three-tab structural checks, dependency audit and backend regression tests in GitHub Actions.
+- Current PR head changes the fixed-risk acceptance ratio to use T2 reward/risk (minimum 2.0) while separately reporting T1 ratio; its new CI runs are in progress.
 - The dedicated backend workflow passed, including the new FYERS funds mapping tests. A real authenticated FYERS funds/positions response is still not available for an integration test.
 - The production health/CORS workflow failed after six attempts between 15:07 and 15:08 UTC because the original Render `/health` endpoint returned no valid response. It did not reach the CORS checks.
 - Render request/application logs queried for 15:08–15:10 UTC returned no records; the latest Render service events still show the last successful deploy at 08:50 UTC. This does not establish the exact reason the endpoint is unreachable.
