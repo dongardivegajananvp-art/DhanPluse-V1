@@ -82,7 +82,8 @@ export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now
 }
 
 export function selectNearestVerifiedOptionContract({
-  discovery, underlyingSymbol, side, spot, now = Date.now()
+  discovery, underlyingSymbol, side, spot, now = Date.now(),
+  requireDelta = false, deltaMin = 0.35, deltaMax = 0.55, strikeMode = "nearest"
 }) {
   if (!discovery || !Array.isArray(discovery.expiryData) ||
       !Array.isArray(discovery.optionsChain) || !["CE", "PE"].includes(side) ||
@@ -97,14 +98,38 @@ export function selectNearestVerifiedOptionContract({
     .sort((a, b) => a.expiryMs - b.expiryMs);
   if (!expiries.length) return { ok: false, reason: "No current or future listed expiry was returned by FYERS." };
   const expiry = expiries[0];
-  const eligible = discovery.optionsChain.filter(row =>
+  let eligible = discovery.optionsChain.filter(row =>
     String(row.symbol || "").startsWith(exchange + ":") &&
     row.option_type === side && String(row.expiry) === expiry.expiry &&
     Number.isFinite(Number(row.strike_price)) && Number(row.strike_price) > 0
   );
-  if (!eligible.length) return { ok: false, reason: "No matching " + side + " contract exists for the nearest listed expiry on this exchange." };
-  eligible.sort((a, b) => Math.abs(Number(a.strike_price) - spot) - Math.abs(Number(b.strike_price) - spot));
-  const chosen = eligible[0];
+  if (requireDelta) {
+    eligible = eligible.filter(row => Number.isFinite(Number(row.delta)) &&
+      Math.abs(Number(row.delta)) >= deltaMin && Math.abs(Number(row.delta)) <= deltaMax);
+  }
+  if (!eligible.length) return { ok: false, reason: requireDelta
+    ? "No " + side + " contract has a verified FYERS delta inside the configured range for the nearest expiry."
+    : "No matching " + side + " contract exists for the nearest listed expiry on this exchange." };
+  let chosen;
+  if (strikeMode === "one-otm") {
+    const strikes = [...new Set(discovery.optionsChain
+      .filter(row => String(row.symbol || "").startsWith(exchange + ":") && String(row.expiry) === expiry.expiry &&
+        Number.isFinite(Number(row.strike_price)) && Number(row.strike_price) > 0)
+      .map(row => Number(row.strike_price)))].sort((a, b) => a - b);
+    const atm = strikes.reduce((best, strike) =>
+      Math.abs(strike - Number(spot)) < Math.abs(best - Number(spot)) ? strike : best, strikes[0]);
+    const steps = strikes.slice(1).map((strike, index) => strike - strikes[index]).filter(step => step > 0);
+    const step = Math.min(...steps);
+    if (!Number.isFinite(step)) return { ok: false, reason: "Listed strike interval is unavailable for ATM + 1 OTM selection." };
+    const targetStrike = Number((atm + (side === "CE" ? step : -step)).toFixed(4));
+    chosen = eligible.find(row => Math.abs(Number(row.strike_price) - targetStrike) < 0.0001);
+    if (!chosen) return { ok: false, reason: "The exact ATM + 1 OTM " + side + " strike is not listed with the required verified delta." };
+  } else if (strikeMode === "nearest") {
+    eligible.sort((a, b) => Math.abs(Number(a.strike_price) - spot) - Math.abs(Number(b.strike_price) - spot));
+    chosen = eligible[0];
+  } else {
+    return { ok: false, reason: "Unsupported option strike selection mode." };
+  }
   return {
     ok: true,
     contract: {
@@ -112,14 +137,15 @@ export function selectNearestVerifiedOptionContract({
       strike: Number(chosen.strike_price),
       side,
       expiry: expiry.expiry,
-      expiryDate: expiry.date || indiaDateKey(expiry.expiryMs)
+      expiryDate: expiry.date || indiaDateKey(expiry.expiryMs),
+      ...(Number.isFinite(Number(chosen.delta)) ? { delta: Number(chosen.delta) } : {})
     }
   };
 }
 
 export function buildVerifiedSureshotTradePlan({
   underlyingSymbol, direction, contract, quote, optionCandles,
-  resolution = "5", now = Date.now(), maxSpreadPct = 5, lotSize, tickSize = 0.05, riskModel = "swing-low"
+  resolution = "5", now = Date.now(), maxSpreadPct = 5, lotSize, tickSize = 0.05, riskModel = "swing-low", requirePremiumRange = false, premiumMin = 30, premiumMax = 150
 }) {
   if (!direction?.ok || !["CE", "PE"].includes(direction.side) ||
       !underlyingSymbol || !contract?.symbol || !quote || !Array.isArray(optionCandles)) {
@@ -159,6 +185,9 @@ export function buildVerifiedSureshotTradePlan({
   if (![bid, ask, ltp].every(Number.isFinite) || bid <= 0 || ask < bid || ltp <= 0 ||
       !Number.isFinite(ageMs) || ageMs < 0 || ageMs > 15_000) {
     return { ok: false, reason: "Option bid/ask/LTP quote is missing, invalid or older than 15 seconds." };
+  }
+  if (requirePremiumRange && (ask < premiumMin || ask > premiumMax)) {
+    return { ok: false, reason: "Verified option ask premium is outside the ₹" + premiumMin + "–₹" + premiumMax + " eligibility range." };
   }
   const spreadPct = ((ask - bid) / ((ask + bid) / 2)) * 100;
   if (!Number.isFinite(spreadPct) || spreadPct > maxSpreadPct) {
