@@ -50,3 +50,12 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - No Render request logs or service events were returned for the CI health-check window 13:50–14:15 UTC. This is consistent with an unreachable/asleep or otherwise non-responsive Free instance at that time, but does not prove which Render runtime condition caused it.
 - Required next verification: wake/check the original service through a user-approved normal visit or Render dashboard, inspect the current instance/app logs, then run `/health`, `/api/status`, allowed-origin preflight, and denied-origin checks again. Reconnect FYERS through the existing OAuth flow only when the user is present. Do not rotate, overwrite, or clear the persisted token manually.
 - No deployment, restart, environment mutation, database mutation, token refresh, or live order was performed during this investigation.
+
+## Latest verification pass — 2026-11-08 (15:xx UTC)
+
+- GitHub Actions now reports the dedicated `Validate DhanPulse backend` workflow as completed successfully for the current PR head.
+- The broader `Validate DhanPulse` workflow remains in progress; it is not yet a full green result.
+- Render metrics query for HTTP requests/latency, instance count, CPU and memory returned empty time series for the requested current window. This does not prove the service is healthy or unhealthy; it means no usable metric points were returned.
+- The original Render service remains configured on Free and tracks `main`; no production deploy was initiated.
+- FYERS remains disconnected until a fresh OAuth login succeeds. No old token was manually altered.
+- Account snapshot and durable Paper Mode are still explicitly outstanding; live order routes remain blocked.
