@@ -375,7 +375,7 @@ window.fetch = function(input, init = {}) {
   try { url = new URL(typeof input === 'string' ? input : input.url, window.location.href).href; } catch {}
   const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
   const isBackend = url.startsWith(BACKEND_URL + '/');
-  const publicPaths = ['/health', '/api/status', '/api/fyers/auth/start', '/api/fyers/auth/exchange'];
+  const publicPaths = ['/health', '/api/status', '/api/fyers/auth/start', '/api/fyers/auth/exchange', '/api/app-auth/send-otp', '/api/app-auth/verify-otp', '/api/app-auth/session', '/api/app-auth/logout'];
   const pathname = isBackend ? new URL(url).pathname : '';
   // Never initiate OAuth from an isolated preview until its redirect URI is
   // independently verified. This prevents a test page from sending auth flow
