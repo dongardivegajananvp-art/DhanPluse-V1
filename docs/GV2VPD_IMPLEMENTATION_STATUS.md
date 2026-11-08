@@ -24,8 +24,9 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - Real App Login cannot pass until the existing Render service has its already-owned PostgreSQL connection and approved MSG91 credentials/template plus the owner's allowlisted mobile configured and tested. Never put any secret in GitHub or chat.
 - This branch has not been run against the live MSG91 provider or production PostgreSQL.
 - Home account funds / realised P&L / unrealised P&L presentation still needs a verified funds endpoint and field-by-field response mapping.
-- The existing Sureshot strategy is not yet upgraded to the full Top 10 gainers + Top 10 losers, 9:30 gate, completed-candle trend, same-time five-day volume ratio, VWAP, delta and fixed risk-plan rules. Existing FYERS validation must remain intact during that work.
-- Position lifecycle currently displays FYERS position data; durable paper-trade creation, fill/exit simulation, SL/target event tests and restart reconciliation remain to be implemented.
+- The current NSE auto-scan shows Top 10 gainers/losers and verifies up to five candidates from those boards. It is not yet a full five-contract shortlist when fewer than five candidates pass; it correctly returns fewer or zero rather than relaxing gates.
+- Home account funds / realised P&L / unrealised P&L presentation remains to be implemented and verified against live FYERS funds/positions responses.
+- Position currently displays FYERS broker positions; durable paper-trade creation, paper BUY/Manual Exit controls, automatic SL/T1/T2 paper exits, daily loss lock and restart reconciliation remain to be implemented.
 - Live order placement remains disabled. Existing backend /api/orders/* still returns 403. Do not remove that block until static-IP eligibility for the FYERS Trading App, broker permissions, order-fill reconciliation, protection acknowledgement, partial-fill handling, two-target allocation, daily loss lock, max-two-position guard and emergency exit tests have all passed.
 - The current Render Free service does not provide the dedicated static egress IP required by the FYERS Individual Trading App. No paid hosting change is made here.
 
