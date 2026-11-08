@@ -1,5 +1,5 @@
 const CACHE_NAME = 'gv2vpd-shell-v2-otp-login';
-// Inline app bundle compatibility marker: app.js?v=gv2vpd-foundation-v1
+// Inline app bundle compatibility marker: app.js?v=20261108-gv2vpd-otp-login-v1
 const SHELL = ['./', './index.html', './manifest.webmanifest', './gv2vpd-icon.svg'];
 
 self.addEventListener('install', event => {
