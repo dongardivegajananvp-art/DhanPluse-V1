@@ -68,8 +68,9 @@ export function createAppAuth({ databaseUrl, msg91AuthKey, msg91OtpTemplateId })
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      await client.query('INSERT INTO gv2vpd_app_otp_limits(phone) VALUES($1) ON CONFLICT(phone) DO NOTHING', [mobile]);
       const current = await client.query(
-        'SELECT last_sent_at, day_key, sends_today, locked_until FROM gv2vpd_app_otp_limits WHERE phone = $1 FOR UPDATE',
+        'SELECT last_sent_at, day_key, sends_today, locked_until, (day_key=CURRENT_DATE) AS same_day FROM gv2vpd_app_otp_limits WHERE phone = $1 FOR UPDATE',
         [mobile]
       );
       const row = current.rows[0];
@@ -80,15 +81,12 @@ export function createAppAuth({ databaseUrl, msg91AuthKey, msg91OtpTemplateId })
       if (row?.last_sent_at && now - new Date(row.last_sent_at).getTime() < OTP_COOLDOWN_MS) {
         throw Object.assign(new Error('Please wait 60 seconds before requesting another OTP.'), { status: 429 });
       }
-      const sameDay = row && new Date(row.day_key).toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10);
-      const sendsToday = sameDay ? Number(row.sends_today || 0) : 0;
+      const sendsToday = row?.same_day ? Number(row.sends_today || 0) : 0;
       if (sendsToday >= MAX_SENDS_PER_DAY) {
         throw Object.assign(new Error('Daily OTP send limit reached. Try again tomorrow.'), { status: 429 });
       }
       await client.query(
-        `INSERT INTO gv2vpd_app_otp_limits(phone,last_sent_at,day_key,sends_today,verify_failures,locked_until)
-         VALUES($1,NULL,CURRENT_DATE,0,0,NULL)
-         ON CONFLICT(phone) DO NOTHING`,
+        'UPDATE gv2vpd_app_otp_limits SET last_sent_at=NOW(), sends_today=CASE WHEN day_key=CURRENT_DATE THEN sends_today+1 ELSE 1 END, day_key=CURRENT_DATE, verify_failures=0, locked_until=NULL WHERE phone=$1',
         [mobile]
       );
       await client.query('COMMIT');
@@ -118,15 +116,6 @@ export function createAppAuth({ databaseUrl, msg91AuthKey, msg91OtpTemplateId })
     if (!response.ok || payload.type !== 'success') {
       throw Object.assign(new Error('MSG91 did not confirm OTP delivery. Check Authkey, template, DLT and provider account status.'), { status: 502 });
     }
-    await pool.query(
-      `INSERT INTO gv2vpd_app_otp_limits(phone,last_sent_at,day_key,sends_today,verify_failures,locked_until)
-       VALUES($1,NOW(),CURRENT_DATE,1,0,NULL)
-       ON CONFLICT(phone) DO UPDATE SET
-         last_sent_at=NOW(),
-         sends_today=CASE WHEN gv2vpd_app_otp_limits.day_key=CURRENT_DATE THEN gv2vpd_app_otp_limits.sends_today+1 ELSE 1 END,
-         day_key=CURRENT_DATE, verify_failures=0, locked_until=NULL`,
-      [mobile]
-    );
     return { mobile: maskMobile(mobile), expiresInSeconds: 300, resendAfterSeconds: 60 };
   }
 
