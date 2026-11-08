@@ -386,7 +386,8 @@ window.fetch = function(input, init = {}) {
   let requestSession = '';
   if (isBackend && !['/health','/api/status','/api/app-auth/send-otp','/api/app-auth/verify-otp','/api/app-auth/session'].includes(pathname)) {
     const appSession = localStorage.getItem('gv2vpd-app-session-v1') || '';
-    if (appSession) headers.set('X-GV2VPD-Session', appSession);
+    if (!appSession) return Promise.reject(new Error('GV2VPD App Login required before accessing private APIs.'));
+    headers.set('X-GV2VPD-Session', appSession);
   }
   if (isBackend && !publicPaths.includes(pathname)) {
     requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
