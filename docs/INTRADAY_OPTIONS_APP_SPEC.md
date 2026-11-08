@@ -51,7 +51,7 @@ States to display separately: App login required, FYERS login required, authenti
 - Only candidates passing all gates remain eligible. Show explicit rejection reasons for the rest.
 - From the eligible Top-10 lists, select up to five option contracts total. Positive directional candidate maps to CE; negative directional candidate maps to PE.
 - Contract identity/expiry/strike/lot size/tick size comes from the current FYERS option master/chain. Strike rule: CE one strike OTM above ATM; PE one strike OTM below ATM, with ATM determined from the verified underlying LTP and listed strike interval.
-- Required contract filters: premium ₹30–₹150 inclusive; verified delta 0.35–0.55 inclusive; transparent Trend Score >=70. Do not estimate or invent delta. If the current FYERS response/approved FYERS data source does not supply a verifiable delta, mark the contract unavailable and do not select it.
+- Required contract filters: premium ₹30–₹150 inclusive; verified delta 0.35–0.55 inclusive; transparent Trend Score >=70. FYERS official Option Chain documentation confirms that `greeks=1` returns nested `greeks.delta` (along with gamma, theta, vega and IV). Use that field only when the response is valid and current; never estimate or invent delta. [FYERS Option Chain](https://fyers.in/api-docs/v3/api/market-data/option-chain/).
 - Trend Score must be a deterministic, versioned, explainable score using only verified inputs. Publish its components/weights in the UI and tests before enabling selection; no opaque AI score.
 - Display: rank, stock, CE/PE, expiry, strike, premium, delta, trend score, lot size, chart action, fixed entry, fixed SL, Target 1, Target 2, risk/reward in rupees, exchange timestamp, and status/reason.
 - No trade row is actionable unless every required gate passes and all quote/candle/contract data is fresh.
@@ -115,7 +115,7 @@ Order lifecycle:
 6. If protective SL placement fails, enter PROTECTION_FAILED, block further BUYs, and execute the documented emergency risk procedure; do not leave an unprotected position silently.
 7. Use broker order/trade updates where available and periodic reconciliation as a recovery mechanism. A backend restart or socket disconnect must not erase position state or protection state.
 
-If FYERS cannot provide broker-held stop protection/OCO semantics for this workflow, do not enable live BUY based only on an in-process Render worker. First design and test a durable, reconnect-safe protection service and clearly disclose residual broker/network risk.
+FYERS's official API reference documents order placement, order/position updates over the General WebSocket, position exit, and a position-level Stop Loss & Take Profit operation. These are promising building blocks, not proof of a tested live protection workflow. If broker-held protection is not confirmed for the exact option product/segment, do not enable live BUY based only on an in-process Render worker. First design and test a durable, reconnect-safe protection service and clearly disclose residual broker/network risk.
 
 ## 7. Safety gates
 
@@ -128,7 +128,17 @@ If FYERS cannot provide broker-held stop protection/OCO semantics for this workf
 - All guardrails are enforced server-side in a transaction/lock, not only by hiding/disabling UI buttons.
 - Default state remains read-only / order placement disabled until a separately approved release.
 
-## 8. Backend integration structure
+## 8. FYERS and hosting constraints verified from official documentation
+
+- FYERS Standard is free. Its documented limits are Data APIs: 5 requests/second, 50/minute, 5,000/day; Transaction + User Info APIs: 10/second, 200/minute, 100,000/day; Quotes: 50 symbols/request; Data Socket: 100 symbols per user across connections. More than three per-minute limit violations in a day can block the user for the rest of that day. Design around shared request budgets, one coordinated scheduler, caching, and backoff; never retry in a tight loop. [FYERS Plans & Limits](https://fyers.in/api-docs/v3/getting-started/plans-and-limits/)
+- FYERS Option Chain supports `greeks=1`, which returns option Greeks including delta. [FYERS Option Chain](https://fyers.in/api-docs/v3/api/market-data/option-chain/)
+- FYERS Funds returns capital and commodity ledger rows including Available Balance, Utilized Amount and Realized Profit and Loss. The app must map rows by `title`, not fixed array position. [FYERS Funds](https://fyers.in/api-docs/v3/api/account/funds/)
+- FYERS Positions API documents get positions, exit position, and set/modify/cancel Stop Loss & Take Profit. The General WebSocket separately provides order, trade and position updates. Verify actual response semantics and product compatibility before production use. [FYERS Positions](https://fyers.in/api-docs/v3/api/trading/positions/) · [FYERS WebSocket Overview](https://fyers.in/api-docs/v3/api/websockets/websocket-overview/)
+- **Critical live-order hosting constraint:** FYERS Individual Trading Apps require a primary static IP; an Individual Non-Trading App is data-only and cannot place orders. [FYERS Individual App](https://fyers.in/api-docs/v3/getting-started/create-an-app/individual-app/)
+- The existing Render service `DhanPluse-V1` is currently on the Free plan in Singapore. Render documents shared regional outbound IP ranges for ordinary services; dedicated outbound IPs require a Pro workspace or higher plus an additional monthly fee. Therefore the current Free Render service does not provide the dedicated static egress IP required by a FYERS Individual Trading App. A no-paid-subscription live-order deployment is blocked unless the user already has another FYERS-acceptable static public IP/hosting route. Do not change hosting or incur fees without explicit approval. [Render Outbound IPs](https://render.com/docs/outbound-ip-addresses) · [Render Dedicated IPs](https://render.com/docs/dedicated-ips)
+- Render Free web services can spin down after 15 minutes without inbound traffic and may restart at any time; this is unsuitable as the sole in-process auto-exit monitor. Broker-held protection must be verified and attached successfully before live order release. [Render Free limitations](https://render.com/docs/free)
+
+## 9. Backend integration structure
 
 Keep the existing Node/Express service and FYERS SDK. Add isolated modules with narrow contracts:
 
@@ -153,7 +163,7 @@ Suggested read APIs: `/api/app/session`, `/api/fyers/session`, `/api/home/snapsh
 Suggested protected action APIs (remain disabled until release): `POST /api/orders/entry`, `POST /api/positions/:id/exit`, `POST /api/orders/:id/cancel`.
 All protected routes validate app session, FYERS session, CSRF, idempotency and server-side risk guards.
 
-## 9. Frontend structure
+## 10. Frontend structure
 
 - Replace the current primary workspace navigation only after the three-tab shell is implemented and tested; do not leave old tabs reachable from hidden menus.
 - Login screen: App Login state, FYERS Connect state, independent status/error messages.
@@ -163,11 +173,11 @@ All protected routes validate app session, FYERS session, CSRF, idempotency and 
 - Mobile-first responsive design; no fabricated placeholder prices or example positions in production UI.
 - UI refresh every five seconds reads backend snapshots and never independently calls FYERS from the browser.
 
-## 10. Implementation phases and acceptance gates
+## 11. Implementation phases and acceptance gates
 
 **Phase 0 — API capability verification (before implementation of live actions)**
-- Confirm current FYERS API endpoints/response fields for profile/session, funds/margins, positions, orderbook, tradebook, option chain, Greeks/delta, 5-minute history, NSE/MCX WebSocket, order types, stop-loss, target and order updates.
-- Record actual rate limits, market-data permissions and order-protection semantics from current official FYERS docs/account response. No guessed endpoint names or fields.
+- Confirm current FYERS API endpoints/response fields for profile/session, funds, positions, orderbook, tradebook, option chain, Greeks/delta, 5-minute history, NSE/MCX Data Socket, General WebSocket, order types, position SL/TP and order updates. Official docs now confirm the core endpoints/fields listed in Section 8; account-level permissions and actual live responses still need verification.
+- Record actual Standard-plan rate limits, market-data permissions, FYERS app type (Trading vs Non-Trading), approved primary static IP, hosting egress-IP compatibility, and exact position SL/TP semantics. No guessed endpoint names or fields. If no accepted static IP is available without a paid service, keep live orders blocked.
 
 **Phase 1 — Authentication + three-tab read-only shell**
 - App session + existing FYERS OAuth; protect dashboard until both valid.
@@ -195,7 +205,7 @@ All protected routes validate app session, FYERS session, CSRF, idempotency and 
 - Only after all prior gates, current FYERS capabilities verified, paper/test results reviewed, and explicit user authorization.
 - Keep order placement disabled until then. No automatic merge/deploy/restart authorization is implied by this spec.
 
-## 11. Required test matrix
+## 12. Required test matrix
 
 - App login missing/expired; FYERS login missing/expired/revoked; bad OAuth state; permission denied.
 - NSE fresh/stale/disconnected; MCX fresh/stale/disconnected; market closed; timestamp absent/future/invalid.
@@ -206,7 +216,7 @@ All protected routes validate app session, FYERS session, CSRF, idempotency and 
 - Order reject/timeout/unknown acknowledgement; partial fill; duplicate callback; SL rejection; target rejection; socket loss; backend restart; broker position mismatch; manual-exit double tap; exit partial fill.
 - Confirm every blocked state displays NO TRADE / precise reason and does not fabricate values.
 
-## 12. Existing repository items to reconcile (do not blindly merge)
+## 13. Existing repository items to reconcile (do not blindly merge)
 
 - Existing `backend/src/sureshot-shortlist.js` ranks a complete verified quote snapshot by absolute percentage move and explicitly does not create directional signals/risk plans. It is a reusable foundation, not the requested scanner.
 - Existing `backend/src/option-risk-plan.js` calculates a swing-low stop and minimum 1:2 RR from completed option candles; it does not implement the requested fixed 30% SL and 1.5x/2.5x targets.
@@ -216,7 +226,7 @@ All protected routes validate app session, FYERS session, CSRF, idempotency and 
 - Open PR #163 contains a frontend request-timeout change and is not part of this spec. Do not merge it automatically.
 - The current Render backend has previously restored an expired FYERS token and reported an unreachable health endpoint. Verify backend health and obtain a fresh FYERS OAuth session before any live integration test.
 
-## 13. Explicit non-goals
+## 14. Explicit non-goals
 
 - No fabricated/demo/sample/Yahoo/third-party paid data.
 - No use of option-chain OI/volume as a substitute for the user's stated stock-volume rule.
