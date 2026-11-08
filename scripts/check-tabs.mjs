@@ -30,7 +30,9 @@ if (!app.includes("render('Home');") ||
   throw new Error('Home must be the landing page and Sureshot must map to the existing verified scanner.');
 }
 const backend = fs.readFileSync(new URL('../backend/src/server.js', import.meta.url), 'utf8');
-if (!app.includes("BACKEND_URL + '/api/fyers/funds'") || !app.includes('homeAccountSnapshot') || !backend.includes('normalizeFyersFunds')) {\n  throw new Error('Home must show verified FYERS funds and position P&L fields.');\n}\nif (!app.includes("if (tab === 'Position')") ||
+if (!app.includes("BACKEND_URL + '/api/fyers/funds'") || !app.includes('homeAccountSnapshot') || !backend.includes('normalizeFyersFunds')) {
+  throw new Error('Home must show verified FYERS funds and position P&L fields.');
+}\nif (!app.includes("if (tab === 'Position')") ||
     !app.includes("BACKEND_URL + '/api/fyers/positions'") ||
     !app.includes('Broker-confirmed positions')) {
   throw new Error('Position must display the broker-confirmed FYERS position response.');
