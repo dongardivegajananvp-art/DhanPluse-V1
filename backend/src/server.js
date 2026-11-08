@@ -1870,8 +1870,14 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         quoteSnapshot: snapshot, universe, indexTicks, now: Date.now(), limit: SURESHOT_UNIVERSE_SCAN_LIMIT
       });
       console.info("Sureshot F&O shortlist verified:", JSON.stringify({ universeCount: universe.count, quotedCount: snapshot.quotedCount, rankedCandidateCount: ranked.candidateCount, selectedForOptionVerification: ranked.data.length }));
+      const moverCandidates = [...ranked.topGainers, ...ranked.topLosers]
+        .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct) || a.symbol.localeCompare(b.symbol))
+        .slice(0, SURESHOT_UNIVERSE_SCAN_LIMIT)
+        .map((row, index) => ({ ...row, rank: index + 1 }));
       sureshotScanState = { id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
-        candidates: ranked.data, rankedCandidateCount: ranked.candidateCount, nextOffset: 0, results: [] };
+        candidates: moverCandidates, topGainers: ranked.topGainers, topLosers: ranked.topLosers,
+        moverBoardsComplete: ranked.moverBoardsComplete,
+        rankedCandidateCount: ranked.topGainers.length + ranked.topLosers.length, nextOffset: 0, results: [] };
     }
     const state = sureshotScanState;
     if (!state || state.nextOffset !== offset) return res.status(409).json({ ok: false, scanComplete: false, error: "Scan state unavailable. Start a fresh scan." });
@@ -1998,6 +2004,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       orderPlacement: "disabled", scanId: state.id, nextOffset: state.nextOffset,
       scannedCandidateCount: state.results.length, rankedCandidateCount: state.rankedCandidateCount,
       totalCandidateCount: state.candidates.length, batchSize: batchResults.length,
+      topGainers: state.topGainers, topLosers: state.topLosers, moverBoardsComplete: state.moverBoardsComplete,
       scannedCandidates: state.results.map(item => ({
         rank: item.rank, underlyingSymbol: item.underlyingSymbol, underlyingType: item.underlyingType,
         changePct: item.changePct, ltp: item.ltp, lotSize: item.lotSize ?? null, status: item.status, direction: item.direction || null,
@@ -2011,6 +2018,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       signalsAllowed: verified.length > 0,
       orderPlacement: "disabled", readOnly: true, source: "FYERS only",
       rankedCandidateCount: state.rankedCandidateCount, selectedCandidateCount: state.candidates.length,
+      topGainers: state.topGainers, topLosers: state.topLosers, moverBoardsComplete: state.moverBoardsComplete,
       scannedCandidateCount: results.length, verifiedSetupCount: verified.length,
       bestSetup: verified[0] || null, results,
       notice: "The complete eligible FYERS NSE F&O universe was ranked from a verified quote snapshot; all selected top-five candidates were checked independently for fresh underlying candles, contract identity, live option premium, completed option candles and >=1:2 risk/reward. No orders are placed." };
