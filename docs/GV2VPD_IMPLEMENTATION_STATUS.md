@@ -40,3 +40,13 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 6. The production UI is not changed until a separately approved merge/deploy.
 
 **Safety:** no live orders, no fake data, no automatic deployment, and no secret/config mutation in this branch.
+
+## Production health investigation — 2026-11-08
+
+- The PR validation job completed JavaScript syntax, PWA asset, backend unit tests, dependency graph checks, and dependency audit successfully.
+- The production health step then made six attempts against the original Render `/health` endpoint and received no valid response. The workflow exited before its CORS checks; therefore this run does not establish a CORS regression.
+- Render service metadata still identifies the original service as the Free plan on the `main` branch. No service settings were changed.
+- Render startup logs from 2026-11-08 08:49–08:50 UTC show the Node server binding port 10000 and Render reporting the service live. The same startup logs show the encrypted PostgreSQL-restored FYERS token was rejected as expired (`Failed to decode JWT: You are passing an expired token`), and the in-memory FYERS session was cleared. Thus FYERS authentication and live market data were not ready.
+- No Render request logs or service events were returned for the CI health-check window 13:50–14:15 UTC. This is consistent with an unreachable/asleep or otherwise non-responsive Free instance at that time, but does not prove which Render runtime condition caused it.
+- Required next verification: wake/check the original service through a user-approved normal visit or Render dashboard, inspect the current instance/app logs, then run `/health`, `/api/status`, allowed-origin preflight, and denied-origin checks again. Reconnect FYERS through the existing OAuth flow only when the user is present. Do not rotate, overwrite, or clear the persisted token manually.
+- No deployment, restart, environment mutation, database mutation, token refresh, or live order was performed during this investigation.
