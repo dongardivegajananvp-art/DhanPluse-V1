@@ -1,6 +1,6 @@
-const CACHE_NAME = 'dhanpulse-shell-v134-public-pages-v1';
-// Inline app bundle compatibility marker: app.js?v=20261106-authoritative-status-v2
-const SHELL = ['./', './index.html', './manifest.webmanifest', './dhanpulse-icon.svg'];
+const CACHE_NAME = 'gv2vpd-shell-v1';
+// Inline app bundle compatibility marker: app.js?v=gv2vpd-foundation-v1
+const SHELL = ['./', './index.html', './manifest.webmanifest', './gv2vpd-icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
