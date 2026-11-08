@@ -717,7 +717,7 @@ app.get('/api/app-auth/session', async (req, res) => {
   try {
     const token = String(req.get('x-gv2vpd-session') || '');
     const session = await appAuth.validateSession(token);
-    return res.json({ ok: Boolean(session), session: session ? { mobile: session.phone.replace(/^91/, '+91 ').replace(/(\\d{2})\\d{4}(\\d{4})$/, '$1••••$2'), expiresAt: session.expiresAt } : null });
+    return res.json({ ok: Boolean(session), session: session ? { mobile: ('+91 ' + session.phone.slice(2, 4) + '••••' + session.phone.slice(-4)), expiresAt: session.expiresAt } : null });
   } catch {
     return res.status(503).json({ ok: false, error: 'GV2VPD App Login session check unavailable.' });
   }
@@ -828,7 +828,10 @@ function createDashboardSessionToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-// Every API except health/status, OTP bootstrap and the public symbol master requires a verified GV2VPD app session.\napp.use('/api', (req, res, next) => appAuth.requireSession(req, res, next));\n\nfunction requireDashboardSession(req, res, next) {
+// Every API except health/status, OTP bootstrap and the public symbol master requires a verified GV2VPD app session.
+app.use('/api', (req, res, next) => appAuth.requireSession(req, res, next));
+
+function requireDashboardSession(req, res, next) {
   // The official FYERS NSE F&O instrument master is public reference data.
   // Exempt only this read-only GET endpoint; all quotes, candles, options,
   // portfolio and signal endpoints remain protected by the dashboard session.
@@ -2731,6 +2734,12 @@ app.use((err, _req, res, _next) => {
 const port = Number(process.env.PORT || 8080);
 
 async function startServer() {
+  if (appAuth.configured) {
+    try { await appAuth.initialize(); appAuthReady = true; console.log('GV2VPD App Login PostgreSQL store ready.'); }
+    catch (error) { appAuthReady = false; console.error('GV2VPD App Login initialization failed; app login is blocked:', error?.message || 'database error'); }
+  } else {
+    console.warn('GV2VPD App Login is fail-closed: DATABASE_URL is not configured.');
+  }
   if (fyersTokenStore.configured) {
     try {
       const savedAuth = await fyersTokenStore.initialize();
