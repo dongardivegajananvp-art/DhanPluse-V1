@@ -1874,7 +1874,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     if (!state || state.nextOffset !== offset) return res.status(409).json({ ok: false, scanComplete: false, error: "Scan state unavailable. Start a fresh scan." });
     const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
     const today = indiaNow.toISOString().slice(0, 10);
-    const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 6)).toISOString().slice(0, 10);
+    const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 10)).toISOString().slice(0, 10);
     const batch = state.candidates.slice(offset, offset + SURESHOT_BATCH_SIZE);
     const resultBySymbol = new Map();
     const prepared = [];
@@ -1892,7 +1892,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         underlyingUrl.searchParams.set("range_to", today); underlyingUrl.searchParams.set("cont_flag", "1");
         scanStage = "VERIFY_UNDERLYING_CANDLES";
         const underlyingHistory = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot" });
-        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [], "5", Date.now());
+        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [], "5", Date.now(), { strictTrend: true });
         if (!direction.ok || !direction.side) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
           continue;
@@ -2101,7 +2101,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
         historyUrl.searchParams.set("date_format", "1"); historyUrl.searchParams.set("range_from", from);
         historyUrl.searchParams.set("range_to", today); historyUrl.searchParams.set("cont_flag", "1");
         const history = await fyersReadOnlyGet(historyUrl, { priority: "sureshot" });
-        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now());
+        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now(), { strictTrend: true });
         if (!direction.ok || !direction.side) {
           results.push({ ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
           continue;
