@@ -89,6 +89,13 @@ export function buildVerifiedSureshotShortlist({
 
   candidates.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct) ||
     a.symbol.localeCompare(b.symbol));
+  const equityRows = candidates.filter(row => row.underlyingType === "FNO_EQUITY");
+  const topGainers = equityRows.filter(row => row.changePct > 0)
+    .sort((a, b) => b.changePct - a.changePct || a.symbol.localeCompare(b.symbol))
+    .slice(0, 10).map((row, index) => ({ rank: index + 1, ...row }));
+  const topLosers = equityRows.filter(row => row.changePct < 0)
+    .sort((a, b) => a.changePct - b.changePct || a.symbol.localeCompare(b.symbol))
+    .slice(0, 10).map((row, index) => ({ rank: index + 1, ...row }));
   return {
     ok: true,
     source: "FYERS complete NSE F&O quote snapshot + individually fresh FYERS WebSocket index ticks",
@@ -96,6 +103,9 @@ export function buildVerifiedSureshotShortlist({
     universeCount: requested.size + candidates.filter(row => row.underlyingType === "INDEX").length,
     candidateCount: candidates.length,
     rankedBy: "absolute FYERS percentage change; complete F&O equities plus individually fresh NIFTY/BANKNIFTY/SENSEX ticks",
+    topGainers,
+    topLosers,
+    moverBoardsComplete: topGainers.length === 10 && topLosers.length === 10,
     signalsAllowed: false,
     data: candidates.slice(0, limit).map((row, index) => ({ rank: index + 1, ...row }))
   };
