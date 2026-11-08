@@ -1974,7 +1974,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         scanStage = "BUILD_RISK_PLAN";
         const plan = buildVerifiedSureshotTradePlan({ underlyingSymbol: candidate.symbol, direction, contract, quote,
           optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5",
-          lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, now: Date.now() });
+          lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, riskModel: "fixed", now: Date.now() });
         resultBySymbol.set(candidate.symbol, plan.ok ? { ...base, status: "VERIFIED SETUP", plan } :
           { ...base, status: "NO TRADE", direction: direction.side, contract, reason: plan.reason });
       } catch (error) {
@@ -2178,7 +2178,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
         const plan = buildVerifiedSureshotTradePlan({
           underlyingSymbol: item.candidate.symbol, direction: item.direction, contract: item.contract,
           quote, optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
-          resolution: "5", lotSize: item.sizing.lotSize, tickSize: item.sizing.tickSize, now: Date.now()
+          resolution: "5", lotSize: item.sizing.lotSize, tickSize: item.sizing.tickSize, riskModel: "fixed", now: Date.now()
         });
         results.push(plan.ok
           ? { ...item.base, status: "VERIFIED SETUP", plan }
