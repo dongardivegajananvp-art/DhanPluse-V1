@@ -1877,7 +1877,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       sureshotScanState = { id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
         candidates: moverCandidates, topGainers: ranked.topGainers, topLosers: ranked.topLosers,
         moverBoardsComplete: ranked.moverBoardsComplete,
-        rankedCandidateCount: ranked.topGainers.length + ranked.topLosers.length, nextOffset: 0, results: [] };
+        rankedCandidateCount: ranked.equityCandidates.length, nextOffset: 0, results: [] };
     }
     const state = sureshotScanState;
     if (!state || state.nextOffset !== offset) return res.status(409).json({ ok: false, scanComplete: false, error: "Scan state unavailable. Start a fresh scan." });
