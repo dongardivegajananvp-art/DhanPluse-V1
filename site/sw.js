@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gv2vpd-shell-v135-public-pages-v1';
+const CACHE_NAME = 'dhanpulse-shell-v135-gv2vpd-public-pages-v1';
 // Inline app bundle compatibility marker: app.js?v=20261106-authoritative-status-v2
 const SHELL = ['./', './index.html', './manifest.webmanifest', './dhanpulse-icon.svg'];
 
