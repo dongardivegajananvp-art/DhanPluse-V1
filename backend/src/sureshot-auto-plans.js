@@ -207,6 +207,10 @@ export function buildVerifiedSureshotTradePlan({
     const candleCheck = validateCompletedOptionCandles({ candles: optionCandles, resolution, now, lookback: 12 });
     if (!candleCheck.ok) return { ok: false, reason: candleCheck.reason };
     risk = buildFixedOptionRiskPlan({ entryPrice: ask, lotSize, tickSize });
+    if (risk.ok) {
+      risk.completedCandleCount = candleCheck.completedCandleCount;
+      risk.latestCompletedCandleAt = candleCheck.latestCompletedCandleAt;
+    }
   } else if (riskModel === "swing-low") {
     risk = buildOptionRiskPlan({
       candles: optionCandles, entryPrice: ask, lotSize, tickSize, resolution, now, lookback: 12
