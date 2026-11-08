@@ -3084,9 +3084,10 @@ async function loadHomeAccountSnapshot() {
     }).filter(Number.isFinite) : [];
     const unrealised = rows && rows.length === 0 ? 0
       : unrealisedValues.length ? unrealisedValues.reduce((sum, value) => sum + value, 0) : NaN;
-    const available = Number(funds.availableBalance?.equity);
-    const utilized = Number(funds.utilizedAmount?.equity);
-    const realised = Number(funds.realizedProfitLoss?.equity);
+    const numeric = value => value === null || value === undefined || value === '' ? NaN : Number(value);
+    const available = numeric(funds.availableBalance?.equity);
+    const utilized = numeric(funds.utilizedAmount?.equity);
+    const realised = numeric(funds.realizedProfitLoss?.equity);
     availableNode.textContent = money(available);
     usedNode.textContent = money(utilized);
     realisedNode.textContent = money(realised);
