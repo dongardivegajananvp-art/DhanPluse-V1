@@ -13,16 +13,16 @@ if (navTabs.length !== 3 || navTabs.join('|') !== 'Home|Sureshot|Position') {
 if (html.includes('id="publicNav"') || /data-tab="(?:Dashboard|FYERS Connection|Stock Explorer|About|Features|Contact|Login|Signup)"/.test(html)) {
   throw new Error('Legacy or public navigation remains exposed.');
 }
-if (!html.includes('id="gv2vpdAuthGate"') ||
-    !html.includes('id="gv2vpdMobileForm"') ||
-    !html.includes('id="gv2vpdOtpForm"') ||
-    !html.includes('gv2vpd-app-session-v1')) {
-  throw new Error('GV2VPD App Login gate is incomplete.');
+if (html.includes('gv2vpdAuthGate') ||
+    html.includes('gv2vpd-app-session-v1') ||
+    html.includes('X-GV2VPD-Session') ||
+    html.includes('/api/app-auth/')) {
+  throw new Error('A duplicate GV2VPD OTP App Login must not replace the existing FYERS login.');
 }
-if (!app.includes("localStorage.getItem('gv2vpd-app-session-v1')") ||
-    !app.includes('X-GV2VPD-Session') ||
-    !app.includes('GV2VPD App Login required before accessing private APIs')) {
-  throw new Error('Private API requests must fail closed without the App Login session.');
+if (!app.includes("localStorage.getItem(DASHBOARD_SESSION_KEY)") ||
+    !app.includes("headers.set('Authorization', 'Bearer ' + requestSession)") ||
+    !app.includes('Dashboard session missing or expired. Reconnect FYERS.')) {
+  throw new Error('The existing FYERS dashboard-session authentication flow must remain intact.');
 }
 if (!app.includes("render('Home');") ||
     !app.includes("if (tab === 'Home') tab = 'Dashboard';") ||
@@ -54,4 +54,4 @@ if (!sw.includes('gv2vpd-shell-v3-three-tab-app') ||
   throw new Error('GV2VPD service-worker cache shell is incomplete.');
 }
 console.log('PASS: exactly three tabs; Home is default; Sureshot scanner preserved; Position reads FYERS positions.');
-console.log('PASS: App Login gate and private API fail-closed behavior are present.');
+console.log('PASS: existing FYERS OAuth/dashboard-session login is retained; no duplicate OTP login gate exists.');
