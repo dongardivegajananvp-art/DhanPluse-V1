@@ -666,7 +666,7 @@ async function loadDashboardCandles() {
     logEvent('Dashboard candlestick chart failed: '+message,'warn');
   } finally {
     dashboardCandleRequestRunning=false;
-    if(button)button.disabled=false;
+    if(button)button.disabled = Date.now() < dashboardCandleCooldownUntil;
   }
 }
 
