@@ -50,8 +50,8 @@ test("Sureshot publishes only after all selected candidates finish and discards 
   const route = server.slice(start, end);
   assert.match(route, /const selectedCandidatesComplete = state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /selectedCandidatesComplete,/);
-  assert.match(route, /stopReason: "TOP_FIVE_CANDIDATES_CHECKED"/);
-  assert.match(route, /bestSetup: verified\[0\] \|\| null/);
+  assert.match(route, /stopReason: "ALL_ELIGIBLE_CANDIDATES_CHECKED"/);
+  assert.match(route, /bestSetup: topThreeSetups\[0\] \|\| null/);
   assert.match(route, /sureshotScanState = null;[\s\S]*partialPlansDiscarded: true/);
   assert.match(route, /orderPlacement: "disabled"/);
 });
@@ -79,7 +79,7 @@ test("frontend automatic scan requires active Sureshot tab, open session and sha
   assert.match(trigger, /loadSureshotUniverseShortlist\(\{ automatic: true \}\)/);
 });
 
-test("frontend records one automatic attempt per session day and still marks completion only after all five pass", () => {
+test("frontend records one automatic attempt per session day and marks completion only after every eligible candidate passes", () => {
   const start = app.indexOf("async function loadSureshotUniverseShortlist");
   const end = app.indexOf("async function performSureshotSetup", start);
   assert.ok(start >= 0 && end > start);
@@ -94,7 +94,7 @@ test("frontend records one automatic attempt per session day and still marks com
   const attempt = loader.indexOf("localStorage.setItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY");
   const firstFetch = loader.indexOf("fetch(BACKEND_URL + '/api/market/sureshot-auto-plans'");
   assert.ok(attempt >= 0 && attempt < firstFetch, "attempt marker must be written before any FYERS scan request");
-  assert.match(loader.slice(0, catchAt), /TOP_FIVE_CANDIDATES_CHECKED/);
+  assert.match(loader.slice(0, catchAt), /ALL_ELIGIBLE_CANDIDATES_CHECKED/);
   assert.match(loader.slice(catchAt), /All partial plans are discarded/);
   assert.match(loader.slice(catchAt), /SURESHOT_AUTO_SCAN_RETRY_KEY/);
   assert.match(loader.slice(catchAt), /retryAfterSeconds/);
