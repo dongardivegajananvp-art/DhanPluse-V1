@@ -7,7 +7,7 @@ test("returns only contract identity, strike, side and expiry", () => {
     expiryData: [{ expiry: "1793404800", date: "2026-10-31", expiry_flag: "WEEKLY" }],
     optionsChain: [
       { symbol: "NSE:NIFTY26OCT25000CE", strike_price: 25000, option_type: "CALL",
-        ltp: 123.4, bid: 123, ask: 124, oi: 9000, volume: 5000 }
+        ltp: 123.4, bid: 123, ask: 124, oi: 9000, volume: 5000, greeks: { delta: 0.42 } }
     ]
   });
   assert.deepEqual(result.optionsChain, [{
@@ -17,6 +17,7 @@ test("returns only contract identity, strike, side and expiry", () => {
   assert.equal("ltp" in result.optionsChain[0], false);
   assert.equal("oi" in result.optionsChain[0], false);
   assert.equal("volume" in result.optionsChain[0], false);
+  assert.equal("delta" in result.optionsChain[0], false);
   assert.equal(result.expiryData[0].expiry_flag, "WEEKLY");
 });
 
