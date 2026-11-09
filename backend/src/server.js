@@ -2104,8 +2104,32 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       }
     }
 
+    // Fetch option candles before the final quote batch. The quote request is
+    // deliberately last so its exchange timestamp is still fresh when plans build.
+    const finalOptionCandlesBySymbol = new Map();
+    const finalCandleCandidates = finalCheckCandidates.filter(item => finalDirections.has(item.underlyingSymbol));
+    for (const item of finalCandleCandidates) {
+      if (!nseRegularSessionNow()) { const error = new Error("Market session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
+      try {
+        const optionHistoryUrl = new URL("https://api-t1.fyers.in/data/history");
+        optionHistoryUrl.searchParams.set("symbol", item.contract.symbol); optionHistoryUrl.searchParams.set("resolution", "5");
+        optionHistoryUrl.searchParams.set("date_format", "1"); optionHistoryUrl.searchParams.set("range_from", from);
+        optionHistoryUrl.searchParams.set("range_to", today); optionHistoryUrl.searchParams.set("cont_flag", "1");
+        scanStage = "FINAL_REVALIDATE_OPTION_CANDLES";
+        const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot" });
+        finalOptionCandlesBySymbol.set(item.underlyingSymbol, Array.isArray(optionHistory?.candles) ? optionHistory.candles : []);
+      } catch (error) {
+        const status = Number(error.statusCode) || 0;
+        if (status === 429 || status === 401) throw error;
+        item.status = "NO TRADE";
+        item.reason = "Final option-candle revalidation failed: " + String(error.message || "FYERS history unavailable.").slice(0, 140);
+        delete item.plan;
+      }
+    }
+
     const finalQuoteBySymbol = new Map();
-    const finalQuoteCandidates = finalCheckCandidates.filter(item => finalDirections.has(item.underlyingSymbol));
+    const finalQuoteCandidates = finalCandleCandidates.filter(item =>
+      item.status === "VERIFIED SETUP" && finalOptionCandlesBySymbol.has(item.underlyingSymbol));
     if (finalQuoteCandidates.length) {
       try {
         const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes");
@@ -2128,6 +2152,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       }
     }
 
+    if (!nseRegularSessionNow()) { const error = new Error("Market session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
     for (const item of finalQuoteCandidates) {
       if (item.status !== "VERIFIED SETUP") continue;
       const contract = item.contract;
@@ -2138,36 +2163,21 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         delete item.plan;
         continue;
       }
-      try {
-        if (!nseRegularSessionNow()) { const error = new Error("Market session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
-        const optionHistoryUrl = new URL("https://api-t1.fyers.in/data/history");
-        optionHistoryUrl.searchParams.set("symbol", contract.symbol); optionHistoryUrl.searchParams.set("resolution", "5");
-        optionHistoryUrl.searchParams.set("date_format", "1"); optionHistoryUrl.searchParams.set("range_from", from);
-        optionHistoryUrl.searchParams.set("range_to", today); optionHistoryUrl.searchParams.set("cont_flag", "1");
-        scanStage = "FINAL_REVALIDATE_OPTION_CANDLES";
-        const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot" });
-        const freshPlan = buildVerifiedSureshotTradePlan({
-          underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
-          contract, quote, optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
-          resolution: "5", lotSize: contract.lotSize, tickSize: contract.tickSize,
-          riskModel: "fixed", requirePremiumRange: true, now: Date.now()
-        });
-        if (!freshPlan.ok) {
-          item.status = "NO TRADE";
-          item.reason = "Final option premium/candle revalidation failed: " + freshPlan.reason;
-          delete item.plan;
-          continue;
-        }
-        item.plan = freshPlan;
-        item.finalVerifiedAt = new Date().toISOString();
-        item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
-      } catch (error) {
-        const status = Number(error.statusCode) || 0;
-        if (status === 429 || status === 401) throw error;
+      const freshPlan = buildVerifiedSureshotTradePlan({
+        underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
+        contract, quote, optionCandles: finalOptionCandlesBySymbol.get(item.underlyingSymbol) || [],
+        resolution: "5", lotSize: contract.lotSize, tickSize: contract.tickSize,
+        riskModel: "fixed", requirePremiumRange: true, now: Date.now()
+      });
+      if (!freshPlan.ok) {
         item.status = "NO TRADE";
-        item.reason = "Final option-candle revalidation failed: " + String(error.message || "FYERS history unavailable.").slice(0, 140);
+        item.reason = "Final option premium/candle revalidation failed: " + freshPlan.reason;
         delete item.plan;
+        continue;
       }
+      item.plan = freshPlan;
+      item.finalVerifiedAt = new Date().toISOString();
+      item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
     }
 
     const finalCheckedSet = new Set(finalCheckCandidates);
