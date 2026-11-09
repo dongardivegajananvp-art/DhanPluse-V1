@@ -47,7 +47,7 @@ jobs:
           ! grep -q 'risk-calculator.js' site/index.html
           ! grep -q 'backtest.js' site/index.html
           test -s site/sw.js
-          test -s site/dhanpulse-icon.svg
+          test -s site/gv2vpd-icon.svg
           node scripts/check-tabs.mjs
           node scripts/check-preview-isolation.mjs
           node scripts/check-oauth-offline.mjs
