@@ -1837,7 +1837,7 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
 // plus the shared F&O snapshot, leaving headroom under the rolling API budget.
 const SURESHOT_UNIVERSE_SCAN_LIMIT = 5;
 const SURESHOT_BATCH_SIZE = 5;
-const SURESHOT_SCAN_TTL_MS = 30 * 60 * 1000;
+const SURESHOT_SCAN_TTL_MS = 2 * 60 * 60 * 1000;
 let sureshotAutoPlansInFlight = false;
 let nseSureshotAutoPlansInFlight = false;
 let mcxSureshotAutoPlansInFlight = false;
@@ -2069,15 +2069,26 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     return res.json(payload);
   } catch (error) {
     const status = Number(error.statusCode) || 503;
-    if (status === 429 && error.retryAfterSeconds) res.set("Retry-After", String(error.retryAfterSeconds));
-    console.warn("Sureshot scan blocked:", JSON.stringify({ stage: scanStage, status, retryAfterSeconds: Number(error.retryAfterSeconds) || null, detail: String(error.message || "Verification failed.").slice(0, 180) }));
-    sureshotScanState = null;
+    const retryAfterSeconds = status === 429 ? Math.max(0, Number(error.retryAfterSeconds) || 0) : 0;
+    if (retryAfterSeconds > 0) res.set("Retry-After", String(retryAfterSeconds));
+    console.warn("Sureshot scan blocked:", JSON.stringify({ stage: scanStage, status, retryAfterSeconds: retryAfterSeconds || null, detail: String(error.message || "Verification failed.").slice(0, 180) }));
+    // Keep the server-held cursor on a provider cooldown. Completed batches stay
+    // committed; the in-progress batch is not appended until every candidate is
+    // checked, so resuming re-runs that batch safely after Retry-After.
+    const resumableScan = status === 429 && Boolean(sureshotScanState && sureshotScanState.id);
+    if (!resumableScan) sureshotScanState = null;
     return res.status(status).json({ ok: false, scanComplete: false, signalsAllowed: false, orderPlacement: "disabled", stage: scanStage,
-      error: status === 429 ? "FYERS API cooldown/rate limit interrupted the full-universe scan; all partial plans were discarded."
+      error: status === 429 ? "FYERS API cooldown/rate limit paused the full-universe scan; its server cursor is retained for a safe resume."
         : status === 401 ? "FYERS session expired; reconnect and rerun the scan."
         : status === 409 ? String(error.message || "Market session closed; full-universe scan blocked.")
         : "Automatic full-universe trade-plan scan could not verify required data.",
-      detail: String(error.message || "Verification failed.").slice(0, 180), partialPlansDiscarded: true });
+      detail: String(error.message || "Verification failed.").slice(0, 180),
+      retryAfterSeconds: retryAfterSeconds || null,
+      scanPaused: resumableScan,
+      scanId: resumableScan ? sureshotScanState.id : null,
+      nextOffset: resumableScan ? sureshotScanState.nextOffset : null,
+      scannedCandidateCount: resumableScan ? sureshotScanState.results.length : 0,
+      partialPlansDiscarded: !resumableScan });
   } finally {
     nseSureshotAutoPlansInFlight = false;
     sureshotAutoPlansInFlight = mcxSureshotAutoPlansInFlight;
