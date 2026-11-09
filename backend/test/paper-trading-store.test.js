@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validatePaperPlan } from '../src/paper-trading-store.js';
+import { validatePaperPlan, isNewerExchangeTimestamp } from '../src/paper-trading-store.js';
 
 const now = Date.parse('2026-11-09T03:00:00.000Z');
 const valid = {
@@ -41,4 +41,12 @@ test('rejects non-positive or non-integer lot quantity', () => {
   assert.throws(() => validatePaperPlan({
     ...valid, plan: { ...valid.plan, quantity: 0 }
   }, now), /Immutable entry/);
+});
+
+test('accepts only strictly newer exchange timestamps for automatic exit processing', () => {
+  const previous = '2026-11-09T03:00:00.000Z';
+  assert.equal(isNewerExchangeTimestamp('2026-11-09T03:00:01.000Z', previous), true);
+  assert.equal(isNewerExchangeTimestamp(previous, previous), false);
+  assert.equal(isNewerExchangeTimestamp('2026-11-09T02:59:59.000Z', previous), false);
+  assert.equal(isNewerExchangeTimestamp('', previous), false);
 });
