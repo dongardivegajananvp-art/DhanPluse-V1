@@ -2,10 +2,12 @@ const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
 const previewUrl = process.env.GV2VPD_PREVIEW_URL;
+const backendUrl = process.env.GV2VPD_BACKEND_URL || 'https://dhanpulse-clean-test.onrender.com';
+const backendOrigin = new URL(backendUrl).origin;
 if (!previewUrl) throw new Error('GV2VPD_PREVIEW_URL is required.');
 
 async function mockTestBackend(page) {
-  await page.route('https://dhanpulse-clean-test.onrender.com/**', async route => {
+  await page.route(backendOrigin + '/**', async route => {
     const url = new URL(route.request().url());
     const json = (status, body) => route.fulfill({
       status,
