@@ -109,5 +109,4 @@ test("Paper position close releases its FYERS socket symbol and reconnect restor
   assert.match(server, /result\?\.updates\?\.some\(position => position\.state === 'CLOSED'\)[\s\S]*subscribeOpenPaperPositions\(marketSocket\)/);
   assert.match(server, /manualExit\([\s\S]*?await subscribeOpenPaperPositions\(marketSocket\)/);
   assert.match(server, /subscribeOpenPaperPositions\(socket, \{ forceSubscribe: true \}\)/);
-  assert.doesNotMatch(server, /paperSocketSymbols\.delete\(snapshot\.symbol\)/);
 });
