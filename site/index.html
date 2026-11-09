@@ -2170,7 +2170,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
       ? (result.selectedCandidatesComplete
         ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s). Best valid setup is ranked first.'
         : 'First verified setup found after checking ' + result.scannedCandidateCount + ' / ' + result.rankedCandidateCount + ' ranked candidates. Lower-ranked candidates were not scanned.')
-      : 'Full-universe scan complete · NO TRADE. No candidate passed every direction, contract, fresh quote, candle and ≥1:1.5 T1 risk check.';
+      : 'Full-universe scan complete · NO TRADE. No candidate passed every direction, contract, fresh quote, candle and minimum 1:2 T2 reward/risk check.';
     // Mark the trading date only after every selected Top 5 candidate was checked.
     // Failed/incomplete scans remain eligible for the automatic session retry.
     try {
