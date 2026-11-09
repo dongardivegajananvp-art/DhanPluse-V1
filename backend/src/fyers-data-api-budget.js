@@ -13,7 +13,7 @@ export function createFyersDataApiBudget({
   historyCacheMs = 5 * 60_000,
   optionChainCacheMs = 60_000,
   maxCacheEntries = 100,
-  cloudflareCooldownMs = [5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000],
+  cloudflareCooldownMs = [15 * 60_000, 30 * 60_000, 60 * 60_000],
   rateLimitCooldownMs = [60_000, 2 * 60_000, 5 * 60_000],
   maxCooldownMs = 60 * 60_000
 } = {}) {
@@ -24,6 +24,9 @@ export function createFyersDataApiBudget({
   let consecutiveRateLimitBlocks = 0;
   let cooldownUntil = 0;
   let cooldownReason = null;
+  // A success from a different FYERS endpoint does not prove that the
+  // Cloudflare-blocked endpoint/IP path has recovered.
+  let cooldownPathname = null;
   let queuedRequests = 0;
   const responseCache = new Map();
   const inFlight = new Map();
@@ -68,7 +71,7 @@ export function createFyersDataApiBudget({
     });
   }
 
-  function activateCooldown(response, body) {
+  function activateCooldown(response, body, pathname) {
     const server = String(response.headers?.get?.('server') || '');
     const cfRay = String(response.headers?.get?.('cf-ray') || '');
     const cloudflare1015 =
@@ -89,6 +92,7 @@ export function createFyersDataApiBudget({
     }
     // Retry-After: 0 is not a meaningful clearance signal. Use a conservative
     // local backoff and never let a provider header shorten it.
+    cooldownPathname = pathname;
     cooldownUntil = Math.max(cooldownUntil, now() + Math.min(maxCooldownMs, Math.max(backoffMs, retryMs)));
   }
 
@@ -156,10 +160,13 @@ export function createFyersDataApiBudget({
         const response = await fetchImpl(url, init);
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
-          activateCooldown(response, body);
+          activateCooldown(response, body, target.pathname);
         } else if (response.ok) {
-          consecutiveCloudflareBlocks = 0;
-          consecutiveRateLimitBlocks = 0;
+          if (cooldownPathname === target.pathname) {
+            consecutiveCloudflareBlocks = 0;
+            consecutiveRateLimitBlocks = 0;
+            cooldownPathname = null;
+          }
           cooldownUntil = 0;
           cooldownReason = null;
         }
