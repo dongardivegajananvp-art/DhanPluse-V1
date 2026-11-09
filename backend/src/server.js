@@ -2042,8 +2042,10 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         const plan = buildVerifiedSureshotTradePlan({ underlyingSymbol: candidate.symbol, direction, contract, quote,
           optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5",
           lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, riskModel: "fixed", requirePremiumRange: true, now: Date.now() });
-        resultBySymbol.set(candidate.symbol, plan.ok ? { ...base, status: "VERIFIED SETUP", plan } :
-          { ...base, status: "NO TRADE", direction: direction.side, contract, reason: plan.reason });
+        resultBySymbol.set(candidate.symbol, plan.ok ? {
+          ...base, status: "VERIFIED SETUP", initiallyVerified: true,
+          direction: direction.side, contract, plan
+        } : { ...base, status: "NO TRADE", direction: direction.side, contract, reason: plan.reason });
       } catch (error) {
         const status = Number(error.statusCode) || 0;
         if (status === 429 || status === 401) throw error;
@@ -2069,9 +2071,116 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         reason: item.reason || null
       })) });
     const results = state.results;
+    const initiallyVerifiedCandidateCount = results.filter(item => item.initiallyVerified === true).length;
+    // The full scan may take several minutes. Revalidate the highest-ranked ten
+    // initial passes at completion so their underlying candles, option premium
+    // and completed option candles are still fresh when Paper IDs are issued.
+    const finalCheckCandidates = results.filter(item =>
+      item.initiallyVerified === true && item.status === "VERIFIED SETUP").slice(0, 10);
+    const finalDirections = new Map();
+    for (const item of finalCheckCandidates) {
+      if (!nseRegularSessionNow()) { const error = new Error("Market session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
+      try {
+        const underlyingUrl = new URL("https://api-t1.fyers.in/data/history");
+        underlyingUrl.searchParams.set("symbol", item.underlyingSymbol); underlyingUrl.searchParams.set("resolution", "5");
+        underlyingUrl.searchParams.set("date_format", "1"); underlyingUrl.searchParams.set("range_from", from);
+        underlyingUrl.searchParams.set("range_to", today); underlyingUrl.searchParams.set("cont_flag", "1");
+        scanStage = "FINAL_REVALIDATE_UNDERLYING";
+        const history = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot" });
+        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now(), { strictTrend: true });
+        if (!direction.ok || direction.side !== item.direction) {
+          item.status = "NO TRADE";
+          item.reason = "Final freshness revalidation failed: underlying direction is no longer confirmed.";
+          delete item.plan;
+          continue;
+        }
+        finalDirections.set(item.underlyingSymbol, direction);
+      } catch (error) {
+        const status = Number(error.statusCode) || 0;
+        if (status === 429 || status === 401) throw error;
+        item.status = "NO TRADE";
+        item.reason = "Final underlying-candle revalidation failed: " + String(error.message || "FYERS history unavailable.").slice(0, 140);
+        delete item.plan;
+      }
+    }
+
+    const finalQuoteBySymbol = new Map();
+    const finalQuoteCandidates = finalCheckCandidates.filter(item => finalDirections.has(item.underlyingSymbol));
+    if (finalQuoteCandidates.length) {
+      try {
+        const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes");
+        quoteUrl.searchParams.set("symbols", finalQuoteCandidates.map(item => item.contract.symbol).join(","));
+        scanStage = "FINAL_REVALIDATE_OPTION_QUOTES";
+        const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: "sureshot" });
+        const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
+        for (const row of quoteRows) {
+          const symbol = row?.n || row?.symbol || row?.v?.symbol;
+          if (symbol && finalQuoteCandidates.some(item => item.contract.symbol === symbol)) finalQuoteBySymbol.set(symbol, row?.v || row);
+        }
+      } catch (error) {
+        const status = Number(error.statusCode) || 0;
+        if (status === 429 || status === 401) throw error;
+        for (const item of finalQuoteCandidates) {
+          item.status = "NO TRADE";
+          item.reason = "Final FYERS option quote revalidation failed: " + String(error.message || "Quote unavailable.").slice(0, 140);
+          delete item.plan;
+        }
+      }
+    }
+
+    for (const item of finalQuoteCandidates) {
+      if (item.status !== "VERIFIED SETUP") continue;
+      const contract = item.contract;
+      const quote = finalQuoteBySymbol.get(contract.symbol);
+      if (!quote) {
+        item.status = "NO TRADE";
+        item.reason = "Final FYERS option quote revalidation returned no contract quote.";
+        delete item.plan;
+        continue;
+      }
+      try {
+        if (!nseRegularSessionNow()) { const error = new Error("Market session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
+        const optionHistoryUrl = new URL("https://api-t1.fyers.in/data/history");
+        optionHistoryUrl.searchParams.set("symbol", contract.symbol); optionHistoryUrl.searchParams.set("resolution", "5");
+        optionHistoryUrl.searchParams.set("date_format", "1"); optionHistoryUrl.searchParams.set("range_from", from);
+        optionHistoryUrl.searchParams.set("range_to", today); optionHistoryUrl.searchParams.set("cont_flag", "1");
+        scanStage = "FINAL_REVALIDATE_OPTION_CANDLES";
+        const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot" });
+        const freshPlan = buildVerifiedSureshotTradePlan({
+          underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
+          contract, quote, optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
+          resolution: "5", lotSize: contract.lotSize, tickSize: contract.tickSize,
+          riskModel: "fixed", requirePremiumRange: true, now: Date.now()
+        });
+        if (!freshPlan.ok) {
+          item.status = "NO TRADE";
+          item.reason = "Final option premium/candle revalidation failed: " + freshPlan.reason;
+          delete item.plan;
+          continue;
+        }
+        item.plan = freshPlan;
+        item.finalVerifiedAt = new Date().toISOString();
+        item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
+      } catch (error) {
+        const status = Number(error.statusCode) || 0;
+        if (status === 429 || status === 401) throw error;
+        item.status = "NO TRADE";
+        item.reason = "Final option-candle revalidation failed: " + String(error.message || "FYERS history unavailable.").slice(0, 140);
+        delete item.plan;
+      }
+    }
+
+    const finalCheckedSet = new Set(finalCheckCandidates);
+    for (const item of results) {
+      if (item.initiallyVerified === true && item.status === "VERIFIED SETUP" && !finalCheckedSet.has(item)) {
+        item.status = "INITIAL CHECK PASSED";
+        item.reason = "Initial scan passed; not selected for final live freshness revalidation, so this candidate is not actionable.";
+        delete item.plan;
+        delete item.paperPlanId;
+        delete item.paperPlanExpiresAt;
+      }
+    }
     const verified = results.filter(item => item.status === "VERIFIED SETUP");
-    // Only the top three verified plans receive short-lived Paper BUY IDs.
-    // All remaining candidates stay visible in the full-universe audit results.
     const topThreeSetups = verified.slice(0, 3);
     const sessionToken = /^Bearer ([a-f0-9]{64})$/.exec(String(req.get('authorization') || ''))?.[1] || '';
     for (const item of topThreeSetups) {
@@ -2098,10 +2207,10 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       rankedCandidateCount: state.rankedCandidateCount, rankedEquityCount: state.rankedEquityCount,
       selectedCandidateCount: state.candidates.length,
       topGainers: state.topGainers, topLosers: state.topLosers, moverBoardsComplete: state.moverBoardsComplete,
-      scannedCandidateCount: results.length, verifiedSetupCount: verified.length,
+      scannedCandidateCount: results.length, verifiedSetupCount: verified.length, initiallyVerifiedCandidateCount,
       topThreeSetupCount: topThreeSetups.length, topThreeSetups,
       bestSetup: topThreeSetups[0] || null, results,
-      notice: "The complete eligible FYERS NSE F&O universe plus individually fresh index ticks was ranked by absolute FYERS percentage move. Every candidate was checked sequentially for fresh underlying candles, contract identity, live option premium, completed option candles and T2 reward/risk >=1:2. The top three verified plans receive Paper Mode IDs; no orders are placed." };
+      notice: "The complete eligible FYERS NSE F&O universe plus individually fresh index ticks was ranked by absolute FYERS percentage move and every candidate was checked sequentially. The highest-ranked initial passes were revalidated at completion with fresh underlying candles, option quotes and completed option candles; only current top-three plans receive Paper Mode IDs. No orders are placed." };
     sureshotScanState = null;
     return res.json(payload);
   } catch (error) {
