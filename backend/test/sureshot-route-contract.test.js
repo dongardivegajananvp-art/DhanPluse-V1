@@ -102,3 +102,12 @@ test("option-chain Greeks are not requested or used for Sureshot strike selectio
   assert.doesNotMatch(server, /requireDelta\s*:\s*true/);
   assert.doesNotMatch(discovery, /row\.greeks\?\.delta|delta:\s*Number/);
 });
+
+
+test("Paper position close releases its FYERS socket symbol and reconnect restores only open positions", () => {
+  assert.match(server, /reconcilePaperSocketSubscriptions/);
+  assert.match(server, /result\?\.updates\?\.some\(position => position\.state === 'CLOSED'\)[\s\S]*subscribeOpenPaperPositions\(marketSocket\)/);
+  assert.match(server, /manualExit\([\s\S]*?await subscribeOpenPaperPositions\(marketSocket\)/);
+  assert.match(server, /subscribeOpenPaperPositions\(socket, \{ forceSubscribe: true \}\)/);
+  assert.doesNotMatch(server, /paperSocketSymbols\.delete\(snapshot\.symbol\)/);
+});
