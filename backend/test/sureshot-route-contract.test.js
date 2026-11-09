@@ -133,3 +133,33 @@ test("Paper position close releases its FYERS socket symbol and reconnect restor
   assert.match(server, /manualExit\([\s\S]*?await subscribeOpenPaperPositions\(marketSocket\)/);
   assert.match(server, /subscribeOpenPaperPositions\(socket, \{ forceSubscribe: true \}\)/);
 });
+
+test("MCX Sureshot audits and verifies every eligible future in resumable batches before publishing Top 3", () => {
+  const start = server.indexOf('app.get("/api/market/mcx-sureshot-auto-plans"');
+  const end = server.indexOf("// Last-known F&O equity quotes", start);
+  assert.ok(start >= 0 && end > start);
+  const route = server.slice(start, end);
+  assert.match(route, /buildVerifiedMcxAudit\(/);
+  assert.match(route, /limit: universe\.data\.length/);
+  assert.match(route, /const batch = state\.candidates\.slice\(offset, offset \+ SURESHOT_BATCH_SIZE\)/);
+  assert.match(route, /VERIFY_MCX_UNDERLYING_CANDLES/);
+  assert.match(route, /SELECT_MCX_OPTION_CONTRACT/);
+  assert.match(route, /VERIFY_MCX_OPTION_QUOTES/);
+  assert.match(route, /VERIFY_MCX_OPTION_CANDLES/);
+  assert.match(route, /state\.results\.push\(\.\.\.batchResults\)/);
+  assert.match(route, /state\.nextOffset \+= batchResults\.length/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_UNDERLYING/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_OPTION_CANDLES/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_OPTION_QUOTES/);
+  assert.match(route, /topThreeSetups = verified\.slice\(0, 3\)/);
+  assert.match(route, /ALL_ELIGIBLE_MCX_CANDIDATES_CHECKED/);
+  assert.match(route, /fullUniverseAuditCount: fullUniverseAudit\.length/);
+  assert.match(route, /partialPlansDiscarded: !resumableScan/);
+  assert.match(app, /MCX FULL UNIVERSE AUDIT RESULTS/);
+  assert.match(app, /MCX TOP 3 VERIFIED SETUPS/);
+  assert.match(app, /while \(attempts\+\+ < 100\)/);
+  assert.match(app, /payload\.scanPaused === true/);
+  assert.match(app, /row\.optionPremium/);
+  assert.match(indexHtml, /MCX FULL UNIVERSE AUDIT RESULTS/);
+  assert.match(indexHtml, /MCX TOP 3 VERIFIED SETUPS/);
+});
