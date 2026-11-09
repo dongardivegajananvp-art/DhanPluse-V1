@@ -2151,7 +2151,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
         Number(best.plan.risk.completedCandleCount) + ' · 5 min</b></div>' +
         (best.paperPlanId ? '<button type="button" class="primary" id="gvPaperBuyBest" data-plan-id="' + escapeHtml(best.paperPlanId) + '">Paper BUY · 1 lot</button><p class="hint">Plan ID expires at ' + escapeHtml(best.paperPlanExpiresAt || 'shortly') + '. BUY rechecks a fresh FYERS option ask before saving a simulation.</p>' : '<p class="hint">Paper BUY unavailable: this backend response did not issue a short-lived verified plan ID.</p>') +
         '</article>' : '') +
-      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR</th></tr></thead><tbody>' +
+      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR</th><th>Paper BUY</th></tr></thead><tbody>' +
       result.results.map(row => {
         const plan = row.plan, move = Number(row.changePct);
         const moveText = (move > 0 ? '+' : '') + move.toFixed(2) + '%';
@@ -2162,16 +2162,20 @@ async function loadSureshotUniverseShortlist(options = {}) {
           '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td>₹' + formatPrice(row.ltp) + '</td><td>' + moveText + '</td><td>' + lotText + '</td><td>' +
           (plan ? '<span class="signal-tone positive">VERIFIED</span>' : '<span class="signal-tone neutral">NO TRADE</span>') +
           '</td><td>' + (plan ? escapeHtml(plan.direction) : '—') + '</td><td>' +
-          (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '—') +
+          (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '<span class="signal-tone neutral">NO VERIFIED STRIKE</span>') +
           '</td><td>' + (plan ? '₹' + formatPrice(plan.risk.entryPrice) : '—') + '</td><td>' +
           (plan ? '₹' + formatPrice(plan.risk.stopLoss) : '—') + '</td><td>' +
           (plan ? '₹' + formatPrice(plan.risk.target1) : '—') + '</td><td>' +
           (plan ? '₹' + formatPrice(plan.risk.target2) : '—') + '</td><td>' +
-          (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
+          (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td><td>' +
+          (plan && row.paperPlanId ? '<button type="button" class="primary gvPaperBuyRow" data-plan-id="' + escapeHtml(row.paperPlanId) + '">Paper BUY</button>' : '<span class="signal-tone neutral">BLOCKED</span>') +
+          '</td></tr>' +
           (plan ? '' : '<tr><td colspan="14" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
       }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 30% below entry; T1 = 1.5x entry; T2 = 2.5x entry. One-lot rupee risk uses official FYERS lot size; fees and slippage are excluded. No orders are placed.</p>';
     const paperBuyButton = host.querySelector('#gvPaperBuyBest');
     if (paperBuyButton) paperBuyButton.addEventListener('click', () => submitPaperBuy(paperBuyButton.dataset.planId, paperBuyButton));
+    host.querySelectorAll('.gvPaperBuyRow').forEach(rowButton =>
+      rowButton.addEventListener('click', () => submitPaperBuy(rowButton.dataset.planId, rowButton)));
     if (status) status.textContent = verified.length
       ? (result.selectedCandidatesComplete
         ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s). Best valid setup is ranked first.'
@@ -3120,6 +3124,7 @@ async function loadHomeAccountSnapshot() {
 async function submitPaperBuy(planId, button) {
   if (!planId || !button || button.disabled) return;
   if (!window.confirm('Create a one-lot PAPER simulation using a fresh FYERS quote? No broker order will be sent.')) return;
+  const positionTab = window.open('about:blank', '_blank');
   button.disabled = true;
   const oldText = button.textContent;
   button.textContent = 'Verifying fresh FYERS quote…';
@@ -3131,10 +3136,16 @@ async function submitPaperBuy(planId, button) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.ok !== true) throw new Error(payload.error || 'Paper BUY was rejected.');
     button.textContent = payload.created ? 'Paper position created' : 'Existing paper position';
+    const positionUrl = new URL(window.location.href);
+    positionUrl.searchParams.set('tab', 'Position');
+    positionUrl.hash = '';
+    if (positionTab) positionTab.location.replace(positionUrl.href);
+    else render('Position');
     const status = document.querySelector('#sureshotAutoStatus');
     if (status) status.textContent = 'Paper simulation saved · fresh FYERS quote revalidated · no broker order sent.';
     logEvent('One-lot Paper Mode position saved for ' + String(payload.position?.symbol || 'verified option') + '.', 'info');
   } catch (error) {
+    if (positionTab && !positionTab.closed) positionTab.close();
     button.disabled = false;
     button.textContent = oldText;
     const status = document.querySelector('#sureshotAutoStatus');
@@ -4128,7 +4139,8 @@ document.querySelector('#settingsBtn')?.addEventListener('click', () => render('
 document.querySelector('#gv2vpdFyersConnect')?.addEventListener('click', () => startFyersLogin());
 
 // Preserve user-created watchlists, alerts and journal entries across reloads.
-render('Home');
+const initialTab = new URLSearchParams(window.location.search).get('tab');
+render(initialTab === 'Position' ? 'Position' : 'Home');
 restoreLastKnownIndexQuotes();
 testBackend();
 void refreshAuthoritativeFyersStatus();
