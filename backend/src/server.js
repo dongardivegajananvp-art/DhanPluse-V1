@@ -2820,9 +2820,7 @@ app.get('/api/paper/positions', async (_req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!paperStoreReady) return res.status(503).json({ ok: false, error: 'Durable Paper Mode database is not ready.' });
   try {
-    const [todayPositions, openPositions] = await Promise.all([paperStore.listPositions(), paperStore.listOpenPositions()]);
-    const byId = new Map([...todayPositions, ...openPositions].map(row => [String(row.id), row]));
-    const positions = [...byId.values()].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+    const [positions, openPositions] = await Promise.all([paperStore.listPositions(), paperStore.listOpenPositions()]);
     return res.json({ ok: true, mode: 'PAPER_SIMULATION', positions, openPositionCount: openPositions.length,
       orderPlacement: 'disabled', source: 'GV2VPD PostgreSQL paper ledger; not FYERS broker positions' });
   } catch (error) {
