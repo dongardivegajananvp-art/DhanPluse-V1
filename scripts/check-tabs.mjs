@@ -57,6 +57,7 @@ if (!backend.includes("app.use('/api/paper', requireDashboardSession)") ||
 if (!paperStore.includes("pg_advisory_xact_lock(716202611)") ||
     !paperStore.includes("last_quote_timestamp") ||
     !paperStore.includes("Maximum two open Paper positions allowed.") ||
+    !paperStore.includes("An open Paper position already exists for this option contract.") ||
     !paperStore.includes("Daily paper loss limit of ₹5,000")) {
   throw new Error('Paper ledger persistence, concurrency, out-of-order quote, max-position and daily-loss guards are required.');
 }
