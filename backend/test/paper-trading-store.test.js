@@ -33,7 +33,7 @@ test('rejects non-FYERS sources and incomplete contract identity', () => {
 
 test('rejects a risk plan below the minimum T2 1:2 reward/risk', () => {
   assert.throws(() => validatePaperPlan({
-    ...valid, plan: { ...valid.plan, target2: 129 }
+    ...valid, plan: { ...valid.plan, target2: 155 }
   }, now), /minimum 1:2/);
 });
 
