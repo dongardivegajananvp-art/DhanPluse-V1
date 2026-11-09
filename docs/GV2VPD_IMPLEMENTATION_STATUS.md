@@ -99,3 +99,14 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - The current implementation branch now contains server-owned short-lived verified plan IDs, Dashboard Session-bound Paper Mode routes, fresh FYERS quote/metadata revalidation at BUY, PostgreSQL ledger integration, FYERS socket subscription/fan-out for open paper contracts, and a separate Position UI ledger.
 - This remains an unmerged proposal. Do not infer production activation from the branch code or CI. Production database initialization, route authorization/integration coverage, automatic exit/restart reconciliation under real PostgreSQL, and UI/browser testing must be verified before any merge/deploy.
 - Live `/api/orders/*` remains HTTP 403. Paper Mode never calls FYERS order endpoints. Existing FYERS OAuth and Dashboard Session login remain unchanged.
+
+
+## Paper Mode integration CI — 2026-11-09
+
+- Current branch head at verification: `811472707798750f3bec84af266b9e4b557477c1`.
+- GitHub Actions full validation run `42559725384`: **success** — JavaScript syntax, PWA manifest/assets, backend unit tests, dependency graph/audit, and production `/health` + CORS verification all passed.
+- GitHub Actions backend regression run `42559725312`: **success** — backend regression suite passed.
+- Netlify PR preview check: **success**. This is a pull-request preview only, not a production deployment.
+- The final refinements after the earlier run include plan-ID-derived idempotency, duplicate-open-contract protection, reconnect subscription recovery, and structural checks for the Paper Mode safety gates; the successful runs above include these changes.
+- Still not claimed complete: real PostgreSQL route/integration tests, process-restart and manual/automatic-exit race tests against a database, and browser UI testing. The production health/CORS check does not verify a current FYERS OAuth token or authenticated account data.
+- PR remains an unmerged proposal. No production merge, Render deploy/restart, production database mutation, FYERS token refresh, or broker order was performed. Live `/api/orders/*` remains blocked.
