@@ -1935,10 +1935,10 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
 
         scanStage = "DISCOVER_OPTION_CONTRACT";
         const chainUrl = new URL("https://api-t1.fyers.in/data/options-chain-v3");
-        chainUrl.searchParams.set("symbol", candidate.symbol); chainUrl.searchParams.set("strikecount", "10"); chainUrl.searchParams.set("greeks", "1");
+        chainUrl.searchParams.set("symbol", candidate.symbol); chainUrl.searchParams.set("strikecount", "10");
         const chainResult = await fyersReadOnlyGet(chainUrl, { priority: "sureshot" });
         const discovery = normalizeOptionContractDiscovery(chainResult?.data);
-        const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(), requireDelta: true, strikeMode: "one-otm" });
+        const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(), strikeMode: "one-otm" });
         if (!selected.ok) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
           continue;
@@ -2620,7 +2620,6 @@ app.get('/api/fyers/options-chain', async (req, res) => {
     const url = new URL('https://api-t1.fyers.in/data/options-chain-v3');
     url.searchParams.set('symbol', symbol);
     url.searchParams.set('strikecount', String(strikeCount));
-    url.searchParams.set('greeks', '1');
     if (timestamp) url.searchParams.set('timestamp', timestamp);
     const result = await fyersReadOnlyGet(url);
     const discovery = normalizeOptionContractDiscovery(result?.data);
