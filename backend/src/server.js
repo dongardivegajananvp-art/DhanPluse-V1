@@ -2816,6 +2816,9 @@ app.post('/api/paper/buy', async (req, res) => {
     }
     const risk = buildFixedOptionRiskPlan({ entryPrice: ask, lotSize: metadata.lotSize, tickSize: metadata.tickSize });
     if (!risk.ok || risk.rr < 2) return res.status(422).json({ ok: false, error: risk.reason || 'Fresh quote fails the minimum 1:2 risk/reward gate.' });
+    if (!verifiedPlanRegistry.get(sessionToken, planId)) {
+      return res.status(409).json({ ok: false, error: 'Verified Plan ID expired during quote revalidation; rerun Sureshot.' });
+    }
     const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '');
     paperSocketSymbols.add(snapshot.symbol);
     try {
