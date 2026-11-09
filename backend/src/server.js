@@ -2193,7 +2193,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
         stage = "SELECT_MCX_OPTION_CONTRACT";
         const selected = selectNearestVerifiedOptionContract({
           discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(),
-          requireDelta: true, strikeMode: "one-otm"
+          strikeMode: "one-otm"
         });
         if (!selected.ok) {
           results.push({ ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
