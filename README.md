@@ -31,6 +31,8 @@ The single frontend lives in `site/`. The current post-login workspace has exact
 - Backend secrets stay server-side: `FYERS_APP_ID`, `FYERS_APP_SECRET`, `FYERS_REDIRECT_URI`. `ALLOWED_ORIGIN` lists allowed browser origins.
 - FYERS redirect URI must exactly match the registered developer-app URI and the backend environment value.
 - API budget/cooldown handling must avoid bursts and discard partial rankings when the upstream response is incomplete or rate-limited.
+- FYERS Standard Data Socket allows 100 unique symbols per user across all Data Socket connections. GV2VPD's current app-owned set is limited to three baseline indices, one optional chart symbol, one MCX diagnostic symbol and at most two open Paper option symbols (at most seven distinct symbols). Closed Paper positions are unsubscribed. Full F&O universe ranking uses bounded REST quote batches, not 218 simultaneous WebSocket subscriptions.
+- `/api/status` reports the GV2VPD-local tracked symbol count only; it cannot see subscriptions from the user's other FYERS apps or connections.
 
 ## Safety
 
