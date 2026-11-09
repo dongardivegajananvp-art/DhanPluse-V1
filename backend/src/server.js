@@ -2319,8 +2319,9 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
     const results = [];
     const prepared = [];
     for (const candidate of ranked.data) {
-      const currentMcxTickAge = mcxDiagnosticTick ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
-      if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(currentMcxTickAge) || currentMcxTickAge < 0 || currentMcxTickAge > MCX_TICK_FRESHNESS_SECONDS) { const error = new Error('MCX feed became stale during plan verification; partial plans discarded.'); error.statusCode = 409; throw error; }
+      // The complete futures quote snapshot was already exchange-timestamp
+      // validated for every contract. Do not let a quiet watchdog-only symbol
+      // invalidate the independently timestamped REST snapshot mid-scan.
       if (!mcxSessionOpen()) { const error = new Error("MCX session closed during scan; partial plans discarded."); error.statusCode = 409; throw error; }
       const base = { rank: candidate.rank, underlyingSymbol: candidate.symbol, underlying: candidate.underlying,
         changePct: candidate.changePct, ltp: candidate.price, quoteAgeSeconds: candidate.quoteAgeSeconds };
