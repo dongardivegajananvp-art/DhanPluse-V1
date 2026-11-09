@@ -32,6 +32,7 @@ import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist } from './mcx-suresh
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 import { createPaperTradingStore } from './paper-trading-store.js';
+import { reconcilePaperSocketSubscriptions } from './paper-socket-subscriptions.js';
 import { createVerifiedPlanRegistry } from './verified-plan-registry.js';
 
 const require = createRequire(import.meta.url);
@@ -56,6 +57,7 @@ const paperStore = createPaperTradingStore({ databaseUrl: process.env.DATABASE_U
 const verifiedPlanRegistry = createVerifiedPlanRegistry({ ttlMs: 30_000 });
 let paperStoreReady = false;
 const paperSocketSymbols = new Set();
+let paperSocketSyncQueue = Promise.resolve();
 const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
 let chartStreamSymbol = null;
 
@@ -251,6 +253,10 @@ function parseTick(raw) {
     if (isPaperOption && paperStoreReady) {
       void paperStore.processVerifiedQuote({
         symbol, price: ltp, exchangeTimestamp: tick.updatedAt, source: 'FYERS_VERIFIED'
+      }).then(result => {
+        if (result?.updates?.some(position => position.state === 'CLOSED')) {
+          void subscribeOpenPaperPositions(marketSocket);
+        }
       }).catch(error => console.error('Paper position quote processing failed:', String(error?.message || error).slice(0, 180)));
     }
     if (isMcxDiagnostic) {
@@ -316,21 +322,38 @@ async function reconcileOpenPaperPositions(symbols) {
   }
 }
 
-async function subscribeOpenPaperPositions(socket) {
+async function subscribeOpenPaperPositions(socket, { forceSubscribe = false } = {}) {
   if (!paperStoreReady || !socket || marketSocket !== socket || !streamConnected) return;
-  try {
-    const positions = await paperStore.listOpenPositions();
-    const symbols = [...new Set(positions.map(row => String(row.symbol || '')).filter(isSupportedOptionContractSymbol))];
-    for (const symbol of symbols) paperSocketSymbols.add(symbol);
-    if (symbols.length && marketSocket === socket && streamConnected) {
-      socket.mode(socket.FullMode);
-      socket.subscribe(symbols);
-      console.log('FYERS paper-position subscriptions restored.', JSON.stringify({ openPositionCount: symbols.length }));
-      void reconcileOpenPaperPositions(symbols);
+  const task = paperSocketSyncQueue.then(async () => {
+    if (!paperStoreReady || !socket || marketSocket !== socket || !streamConnected) return;
+    try {
+      const positions = await paperStore.listOpenPositions();
+      const symbols = [...new Set(positions.map(row => String(row.symbol || '')).filter(isSupportedOptionContractSymbol))];
+      const reservedSymbols = [...allowedSymbols, chartStreamSymbol, mcxDiagnosticInstrument?.symbol].filter(Boolean);
+      const result = reconcilePaperSocketSubscriptions({
+        socket, currentSymbols: paperSocketSymbols, desiredSymbols: symbols,
+        reservedSymbols, maxSymbols: 100, forceSubscribe
+      });
+      for (const symbol of result.removed) latestTicks.delete(symbol);
+      if (result.removed.length) {
+        console.log('FYERS closed Paper position symbols unsubscribed.', JSON.stringify({
+          removedCount: result.removed.length, activePaperPositionSymbols: paperSocketSymbols.size,
+          knownSocketSymbolCount: result.totalKnownSymbols
+        }));
+      }
+      if (result.added.length) {
+        console.log('FYERS open Paper position symbols subscribed.', JSON.stringify({
+          addedCount: result.added.length, activePaperPositionSymbols: paperSocketSymbols.size,
+          knownSocketSymbolCount: result.totalKnownSymbols, reconnectRestore: forceSubscribe
+        }));
+        void reconcileOpenPaperPositions(result.added);
+      }
+    } catch (error) {
+      console.error('Could not reconcile FYERS Paper position subscriptions:', String(error?.message || error).slice(0, 180));
     }
-  } catch (error) {
-    console.error('Could not restore FYERS paper-position subscriptions:', String(error?.message || error).slice(0, 180));
-  }
+  });
+  paperSocketSyncQueue = task.catch(() => {});
+  return task;
 }
 
 function startMarketDataStream(token, startReason = 'unspecified') {
@@ -445,7 +468,7 @@ function startMarketDataStream(token, startReason = 'unspecified') {
             console.error('FYERS MCX subscription restore failed independently of NSE:', String(mcxSubscriptionError?.message || mcxSubscriptionError).slice(0, 200));
           }
         }
-        void subscribeOpenPaperPositions(socket);
+        void subscribeOpenPaperPositions(socket, { forceSubscribe: true });
       } catch (error) {
         streamConnected = false;
         streamError = 'Could not subscribe to FYERS index symbols; controlled recovery is pending.';
@@ -2897,7 +2920,7 @@ app.post('/api/paper/buy', async (req, res) => {
       });
     } catch (error) {
       const open = await paperStore.listOpenPositions().catch(() => []);
-      if (!open.some(position => position.symbol === snapshot.symbol)) paperSocketSymbols.delete(snapshot.symbol);
+      if (!open.some(position => position.symbol === snapshot.symbol)) await subscribeOpenPaperPositions(marketSocket);
       throw error;
     }
     // Re-read the durable open-position set after commit to close a socket reconnect race.
@@ -2935,6 +2958,7 @@ app.post('/api/paper/positions/:id/exit', async (req, res) => {
     }
     const closed = await paperStore.manualExit({ id: position.id, confirmed: req.body?.confirmed === true,
       price: ltp, exchangeTimestamp: new Date(quoteTime * 1000).toISOString(), source: 'FYERS_VERIFIED' });
+    await subscribeOpenPaperPositions(marketSocket);
     return res.json({ ok: true, mode: 'PAPER_SIMULATION', position: closed, orderPlacement: 'disabled' });
   } catch (error) {
     const status = Number(error.statusCode) || 409;
