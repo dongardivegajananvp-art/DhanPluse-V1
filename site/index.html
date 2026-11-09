@@ -3116,7 +3116,7 @@ async function submitPaperBuy(planId, button) {
   button.textContent = 'Verifying fresh FYERS quote…';
   try {
     const response = await fetch(BACKEND_URL + '/api/paper/buy', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'Idempotency-Key': 'gv2vpd:' + crypto.randomUUID() },
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ planId }), cache: 'no-store'
     });
     const payload = await response.json().catch(() => ({}));
