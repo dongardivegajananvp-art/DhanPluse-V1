@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit } from "../src/mcx-sureshot.js";
+import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit, summarizeMcxQuoteTimestampFields } from "../src/mcx-sureshot.js";
 
 const now = Date.parse("2026-11-05T14:00:00.000Z");
 const expiry = Math.floor(Date.parse("2026-11-19T00:00:00.000Z") / 1000);
@@ -221,4 +221,18 @@ test("MCX audit rejects date-only tt when no intraday exchange timestamp exists"
   assert.equal(audit.audit[0].status, "STALE_OR_INVALID_QUOTE");
   assert.equal(audit.audit[0].exchangeTime, null);
   assert.equal(audit.data.length, 0);
+});
+
+
+test("MCX timestamp diagnostics expose timestamp field names/types without quote payload values", () => {
+  const result = summarizeMcxQuoteTimestampFields([{
+    n: "MCX:CRUDEOIL26NOVFUT", s: "ok",
+    v: { lp: 8400, fyToken: "must-not-appear", tt: "2026-11-09", ltt: 1794250000, exch_feed_time: null }
+  }]);
+  assert.equal(result.length, 1);
+  assert.equal(result[0].symbol, "MCX:CRUDEOIL26NOVFUT");
+  assert.deepEqual(result[0].timestampFields.tt, { type: "string", value: "2026-11-09" });
+  assert.deepEqual(result[0].timestampFields.ltt, { type: "number", value: 1794250000 });
+  assert.equal(JSON.stringify(result).includes("8400"), false);
+  assert.equal(JSON.stringify(result).includes("must-not-appear"), false);
 });
