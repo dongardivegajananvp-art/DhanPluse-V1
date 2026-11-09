@@ -93,33 +93,99 @@ export function buildMcxFuturesUniverse(master, now = Date.now()) {
 }
 
 /**
+ * Build a row-by-row audit for every official MCX future. Partial, stale or
+ * malformed snapshots remain visible as audit findings but are never ranked.
+ */
+export function buildVerifiedMcxAudit({ universe, quoteRows, now = Date.now(), limit = 5, maxAgeMs = 30000 }) {
+  if (!Array.isArray(universe) || !universe.length || !Array.isArray(quoteRows) ||
+      !Number.isInteger(limit) || limit < 1 || limit > 250) {
+    throw new Error("complete_mcx_quote_snapshot_required");
+  }
+  const expected = new Map(universe.map(row => [row.symbol, row]));
+  if (expected.size !== universe.length) throw new Error("duplicate_mcx_future_symbols");
+  const received = new Map();
+  const unexpectedSymbols = [];
+  const duplicateSymbols = [];
+  for (const row of quoteRows) {
+    const symbol = row?.n || row?.symbol;
+    if (!expected.has(symbol)) { unexpectedSymbols.push(String(symbol || "UNKNOWN")); continue; }
+    if (received.has(symbol)) { duplicateSymbols.push(symbol); continue; }
+    received.set(symbol, row);
+  }
+  const audit = universe.map(item => {
+    const row = received.get(item.symbol);
+    if (!row) return {
+      symbol: item.symbol, underlying: item.underlying, status: "MISSING_QUOTE",
+      reason: "FYERS did not return a quote row for this official MCX future."
+    };
+    const quote = row?.v || row;
+    const price = Number(quote?.lp ?? quote?.ltp);
+    const changePct = Number(quote?.chp ?? quote?.changePct);
+    const rawTime = quote?.tt ?? quote?.ltt ?? quote?.exch_feed_time;
+    const numeric = Number(rawTime);
+    const timestamp = Number.isFinite(numeric) && numeric > 0
+      ? (numeric > 1e12 ? numeric : numeric * 1000)
+      : Date.parse(String(rawTime || ""));
+    const age = now - timestamp;
+    const rowStatus = String(row?.s || "ok").toLowerCase();
+    if (rowStatus !== "ok" || !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct) ||
+        !Number.isFinite(timestamp) || age < -5000 || age > maxAgeMs) {
+      return {
+        symbol: item.symbol, underlying: item.underlying, status: "STALE_OR_INVALID_QUOTE",
+        exchangeTime: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null,
+        quoteAgeSeconds: Number.isFinite(age) ? Number((age / 1000).toFixed(1)) : null,
+        reason: "Quote is stale, invalid, or missing a valid exchange timestamp."
+      };
+    }
+    return {
+      symbol: item.symbol, underlying: item.underlying, status: "FRESH_QUOTE",
+      price, changePct, exchangeTime: new Date(timestamp).toISOString(),
+      quoteAgeSeconds: Math.max(0, Number((age / 1000).toFixed(1)))
+    };
+  });
+  const fresh = audit.filter(row => row.status === "FRESH_QUOTE");
+  const missing = audit.filter(row => row.status === "MISSING_QUOTE");
+  const excluded = audit.filter(row => row.status === "STALE_OR_INVALID_QUOTE");
+  const complete = missing.length === 0 && excluded.length === 0 &&
+    unexpectedSymbols.length === 0 && duplicateSymbols.length === 0 && fresh.length === expected.size;
+  const ranked = complete ? fresh.slice().sort((a, b) =>
+    Math.abs(b.changePct) - Math.abs(a.changePct) || a.symbol.localeCompare(b.symbol)
+  ) : [];
+  return {
+    ok: complete, complete, source: "FYERS MCX_COM master + fresh exchange-timestamped futures quotes",
+    universeCount: universe.length, receivedQuoteCount: received.size,
+    freshQuoteCount: fresh.length, excludedQuoteCount: excluded.length,
+    missingQuoteCount: missing.length, unexpectedSymbols, duplicateSymbols,
+    candidateCount: complete ? ranked.length : 0,
+    coverage: { requested: universe.length, received: received.size, fresh: fresh.length,
+      excluded: excluded.length, missing: missing.length },
+    audit,
+    data: ranked.slice(0, limit).map((row, index) => ({
+      rank: index + 1, symbol: row.symbol, underlying: row.underlying,
+      price: row.price, changePct: row.changePct, exchangeTime: row.exchangeTime,
+      quoteAgeSeconds: row.quoteAgeSeconds,
+      ...expected.get(row.symbol)
+    }))
+  };
+}
+
+/**
  * Validate complete exchange-timestamped MCX future quotes before ranking.
  * This ranking is only a shortlist; it is not a trade signal.
  */
 export function buildVerifiedMcxShortlist({ universe, quoteRows, now = Date.now(), limit = 5, maxAgeMs = 30000 }) {
-  if (!Array.isArray(universe) || !universe.length || !Array.isArray(quoteRows) || !Number.isInteger(limit) || limit < 1 || limit > 5) throw new Error("complete_mcx_quote_snapshot_required");
-  const expected = new Map(universe.map(row => [row.symbol, row]));
-  if (expected.size !== universe.length) throw new Error("duplicate_mcx_future_symbols");
-  const seen = new Set(); const candidates = []; let excludedQuoteCount = 0;
-  for (const row of quoteRows) {
-    const symbol = row?.n || row?.symbol;
-    if (!expected.has(symbol) || seen.has(symbol)) throw new Error("mcx_quote_coverage_mismatch");
-    seen.add(symbol); const quote = row?.v || row;
-    const price = Number(quote?.lp ?? quote?.ltp); const changePct = Number(quote?.chp ?? quote?.changePct);
-    const rawTime = quote?.tt ?? quote?.ltt ?? quote?.exch_feed_time; const numeric = Number(rawTime);
-    const timestamp = Number.isFinite(numeric) && numeric > 0 ? (numeric > 1e12 ? numeric : numeric * 1000) : Date.parse(String(rawTime || ""));
-    const age = now - timestamp;
-    if (String(row?.s || "ok").toLowerCase() !== "ok" || !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct) || !Number.isFinite(timestamp) || age < -5000 || age > maxAgeMs) { excludedQuoteCount += 1; continue; }
-    candidates.push({ symbol, underlying: expected.get(symbol).underlying, price, changePct, exchangeTime: new Date(timestamp).toISOString(), quoteAgeSeconds: Math.max(0, Number((age / 1000).toFixed(1))) });
-  }
-  const missingQuoteCount = universe.length - seen.size;
-  // A shortlist is valid only when every expected future has one fresh,
-  // exchange-timestamped quote. Never rank the fresh subset of a partial scan.
-  if (missingQuoteCount > 0) throw new Error("incomplete_mcx_quote_snapshot");
-  if (excludedQuoteCount > 0 || candidates.length !== expected.size) {
+  const audit = buildVerifiedMcxAudit({ universe, quoteRows, now, limit, maxAgeMs });
+  if (audit.unexpectedSymbols.length || audit.duplicateSymbols.length) throw new Error("mcx_quote_coverage_mismatch");
+  if (audit.missingQuoteCount > 0) throw new Error("incomplete_mcx_quote_snapshot");
+  if (audit.excludedQuoteCount > 0 || audit.freshQuoteCount !== audit.universeCount) {
     throw new Error("stale_or_invalid_mcx_quote_snapshot");
   }
-  if (!candidates.length) throw new Error("no_fresh_mcx_future_quotes");
-  candidates.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct) || a.symbol.localeCompare(b.symbol));
-  return { ok: true, verified: true, source: "FYERS MCX_COM master + fresh exchange-timestamped futures quotes", universeCount: universe.length, receivedQuoteCount: seen.size, freshQuoteCount: candidates.length, excludedQuoteCount, missingQuoteCount, candidateCount: candidates.length, rankingIsSignal: false, coverage: { requested: universe.length, received: seen.size, fresh: candidates.length, excluded: excludedQuoteCount, missing: missingQuoteCount }, data: candidates.slice(0, limit).map((row, index) => ({ rank: index + 1, ...row })) };
+  if (!audit.data.length) throw new Error("no_fresh_mcx_future_quotes");
+  return {
+    ok: true, verified: true, source: audit.source,
+    universeCount: audit.universeCount, receivedQuoteCount: audit.receivedQuoteCount,
+    freshQuoteCount: audit.freshQuoteCount, excludedQuoteCount: audit.excludedQuoteCount,
+    missingQuoteCount: audit.missingQuoteCount, candidateCount: audit.candidateCount,
+    rankingIsSignal: false, coverage: audit.coverage, data: audit.data
+  };
 }

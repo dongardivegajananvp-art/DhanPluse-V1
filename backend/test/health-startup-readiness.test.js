@@ -28,8 +28,12 @@ test('health endpoint responds while FYERS PostgreSQL token restore is pending',
       FYERS_APP_SECRET: 'startup-test-secret',
       FYERS_REDIRECT_URI: 'https://example.invalid/site/'
     },
-    stdio: 'ignore'
+    stdio: ['ignore', 'ignore', 'pipe']
   });
+
+  let childStderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', chunk => { childStderr += chunk; });
 
   t.after(() => {
     if (child.exitCode === null && !child.killed) child.kill('SIGTERM');
@@ -40,7 +44,7 @@ test('health endpoint responds while FYERS PostgreSQL token restore is pending',
   const deadline = Date.now() + 4000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
-      throw new Error(`Backend exited before health response (code ${child.exitCode}).`);
+      throw new Error(`Backend exited before health response (code ${child.exitCode}). ${childStderr.slice(-4000)}`);
     }
     try {
       response = await fetch(`http://127.0.0.1:${port}/health`, {
