@@ -47,6 +47,7 @@ if (!backend.includes("app.use('/api/paper', requireDashboardSession)") ||
     !backend.includes("verifiedPlanRegistry.get(sessionToken, planId)") ||
     !backend.includes("quoteTimestampStatus(quoteTime, Date.now(), 10)") ||
     !backend.includes("buildFixedOptionRiskPlan({ entryPrice: ask") ||
+    !backend.includes("const idempotencyKey = 'paper:' + planId;") ||
     !backend.includes("void paperStore.processVerifiedQuote") ||
     !backend.includes("void reconcileOpenPaperPositions(symbols)") ||
     !planRegistry.includes("crypto.randomBytes(32).toString(\"base64url\")") ||
