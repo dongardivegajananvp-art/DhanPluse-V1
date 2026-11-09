@@ -287,6 +287,35 @@ function parseTick(raw) {
   return acceptedCount;
 }
 
+async function reconcileOpenPaperPositions(symbols) {
+  if (!paperStoreReady || !accessToken || !nseRegularSessionNow() || !symbols.length) return;
+  try {
+    const needsRestCheck = symbols.filter(symbol => {
+      const tick = latestTicks.get(symbol);
+      return !tick || quoteTimestampStatus(epochSeconds(tick.updatedAt), Date.now(), 10) !== 'FRESH';
+    });
+    if (!needsRestCheck.length) return;
+    const url = new URL('https://api-t1.fyers.in/data/quotes');
+    url.searchParams.set('symbols', needsRestCheck.join(','));
+    const result = await fyersReadOnlyGet(url, { priority: 'sureshot' });
+    const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
+    for (const row of rows) {
+      const symbol = row?.n || row?.symbol || row?.v?.symbol;
+      if (!needsRestCheck.includes(symbol)) continue;
+      const quote = row?.v || row;
+      const price = Number(quote?.lp ?? quote?.ltp);
+      const timestamp = epochSeconds(quote?.ltt ?? quote?.tt ?? quote?.exch_feed_time);
+      if (Number.isFinite(price) && price > 0 && quoteTimestampStatus(timestamp, Date.now(), 10) === 'FRESH') {
+        await paperStore.processVerifiedQuote({
+          symbol, price, exchangeTimestamp: new Date(timestamp * 1000).toISOString(), source: 'FYERS_VERIFIED'
+        });
+      }
+    }
+  } catch (error) {
+    console.warn('Paper position restart/reconnect quote reconciliation deferred; no stale quote was applied:', String(error?.message || error).slice(0, 180));
+  }
+}
+
 async function subscribeOpenPaperPositions(socket) {
   if (!paperStoreReady || !socket || marketSocket !== socket || !streamConnected) return;
   try {
@@ -297,6 +326,7 @@ async function subscribeOpenPaperPositions(socket) {
       socket.mode(socket.FullMode);
       socket.subscribe(symbols);
       console.log('FYERS paper-position subscriptions restored.', JSON.stringify({ openPositionCount: symbols.length }));
+      void reconcileOpenPaperPositions(symbols);
     }
   } catch (error) {
     console.error('Could not restore FYERS paper-position subscriptions:', String(error?.message || error).slice(0, 180));
@@ -2813,6 +2843,12 @@ app.post('/api/paper/buy', async (req, res) => {
     if (!Number.isFinite(ask) || ask < 30 || ask > 150 ||
         quoteTimestampStatus(quoteTime, Date.now(), 10) !== 'FRESH') {
       return res.status(409).json({ ok: false, error: 'Fresh FYERS option ask (₹30–₹150) with exchange timestamp <=10 seconds is required; Paper BUY blocked.' });
+    }
+    const finalIndiaClock = new Date(Date.now() + 330 * 60_000);
+    const finalIndiaMinutes = finalIndiaClock.getUTCHours() * 60 + finalIndiaClock.getUTCMinutes();
+    if (!nseRegularSessionNow() || finalIndiaMinutes < 9 * 60 + 15 || finalIndiaMinutes >= 15 * 60 + 15 ||
+        !streamConnected || !marketSocket) {
+      return res.status(409).json({ ok: false, error: 'Market session, 15:15 cutoff or FYERS WebSocket changed during revalidation; Paper BUY blocked.' });
     }
     const risk = buildFixedOptionRiskPlan({ entryPrice: ask, lotSize: metadata.lotSize, tickSize: metadata.tickSize });
     if (!risk.ok || risk.rr < 2) return res.status(422).json({ ok: false, error: risk.reason || 'Fresh quote fails the minimum 1:2 risk/reward gate.' });
