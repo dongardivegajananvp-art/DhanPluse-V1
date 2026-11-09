@@ -2260,8 +2260,17 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
   if (!mcxSessionOpen()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "MCX session is closed; actionable option plans are withheld." });
   if (sureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Another Sureshot universe scan is already running." });
-  const scanId = String(req.query.scanId || "");
-  const offset = Math.max(0, Number.parseInt(String(req.query.offset || "0"), 10) || 0);
+  let scanId = String(req.query.scanId || "");
+  let offset = Number(req.query.offset ?? 0);
+  if (!Number.isInteger(offset) || offset < 0) {
+    return res.status(400).json({ ok: false, scanComplete: false, error: "Invalid MCX scan offset." });
+  }
+  if (!scanId && mcxSureshotScanState && Date.now() - mcxSureshotScanState.createdAt <= SURESHOT_SCAN_TTL_MS) {
+    scanId = mcxSureshotScanState.id;
+    offset = mcxSureshotScanState.nextOffset;
+  } else if (!scanId && mcxSureshotScanState) {
+    mcxSureshotScanState = null;
+  }
   if (!scanId) {
     const mcxSocketAgeSeconds = mcxDiagnosticTick ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
     if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(mcxSocketAgeSeconds) ||
@@ -2312,7 +2321,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
       };
     }
     const state = mcxSureshotScanState;
-    if (!state || state.id !== scanId && scanId || Date.now() - state.createdAt > SURESHOT_SCAN_TTL_MS || state.nextOffset !== offset) {
+    if (!state || (scanId && state.id !== scanId) || Date.now() - state.createdAt > SURESHOT_SCAN_TTL_MS || state.nextOffset !== offset) {
       mcxSureshotScanState = null;
       return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "MCX scan cursor expired or mismatched. Start a fresh full-universe scan." });
     }
@@ -2515,6 +2524,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
       if (item.initiallyVerified === true && item.status === "VERIFIED SETUP" && !finalChecked.has(item)) {
         item.status = "INITIAL CHECK PASSED";
         item.reason = "Initial scan passed; not selected for final live freshness revalidation, so this candidate is not actionable.";
+        item.initialPlanAudit = item.plan;
         delete item.plan;
       }
     }
@@ -2534,8 +2544,25 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
     const auditResultBySymbol = new Map(results.map(item => [item.underlyingSymbol, item]));
     const fullUniverseAudit = state.audit.map(row => {
       const result = auditResultBySymbol.get(row.symbol);
-      return result ? { ...row, candidateRank: result.rank, candidateStatus: result.status,
-        rejectionReason: result.reason || null } : { ...row, candidateStatus: "NOT_CHECKED", rejectionReason: null };
+      if (!result) return { ...row, candidateStatus: "NOT_CHECKED", rejectionReason: null };
+      const plan = result.plan || result.initialPlanAudit || null;
+      const contract = result.contract || plan?.contract || null;
+      const risk = plan?.risk || null;
+      return {
+        ...row, candidateRank: result.rank, candidateStatus: result.status,
+        direction: result.direction || plan?.direction || null,
+        underlyingCandleStatus: plan?.underlying ? "VERIFIED" : (result.direction ? "VERIFIED_DIRECTION" : "NOT_VERIFIED"),
+        contract: contract ? {
+          symbol: contract.symbol, side: contract.side, expiryDate: contract.expiryDate || contract.expiry || null,
+          strike: contract.strike, lotSize: contract.lotSize, tickSize: contract.tickSize
+        } : null,
+        optionQuoteStatus: plan?.quote ? (result.status === "VERIFIED SETUP" ? "FINAL_VERIFIED" : "INITIAL_ONLY_NOT_ACTIONABLE") : "NOT_VERIFIED",
+        optionPremium: plan?.quote?.ltp ?? null, optionQuoteTime: plan?.quote?.quoteTime || null,
+        completedOptionCandleCount: risk?.completedCandleCount ?? risk?.candleCount ?? null,
+        entry: risk?.entryPrice ?? null, stopLoss: risk?.stopLoss ?? null,
+        target: risk?.target2 ?? risk?.target ?? null, rr: risk?.rr ?? null,
+        rejectionReason: result.reason || null
+      };
     });
     const payload = { ok: true, scanComplete: true, signalsAllowed: topThreeSetups.length > 0,
       orderPlacement: "disabled", readOnly: true, source: "FYERS MCX_COM master + FYERS market data",
