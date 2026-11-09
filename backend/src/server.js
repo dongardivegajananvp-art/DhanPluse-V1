@@ -29,6 +29,7 @@ import { buildMarketSocketSubscriptionSymbols, getMarketSocketReconnectDelay } f
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
 import { getMcxWatchdogRetryDelay } from './mcx-watchdog.js';
 import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit, summarizeMcxQuoteTimestampFields } from './mcx-sureshot.js';
+import { normalizeFyersCandleOrder } from './candle-order.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 import { createPaperTradingStore } from './paper-trading-store.js';
@@ -1270,18 +1271,19 @@ app.get('/api/market/candles', async (req, res) => {
         invalidCandleCount
       });
     }
-    for (let i = 1; i < candles.length; i++) {
-      if (Number(candles[i][0]) <= Number(candles[i - 1][0])) {
-        res.set('Cache-Control', 'no-store');
-        return res.status(502).json({
-          ok: false,
-          error: 'FYERS candle timestamps are duplicate or non-increasing; analysis blocked.',
-          detail: 'No partial candle set was returned because timestamp order must be verified.'
-        });
-      }
+    const orderedCandles = normalizeFyersCandleOrder(candles);
+    if (!orderedCandles.ok) {
+      res.set('Cache-Control', 'no-store');
+      return res.status(502).json({
+        ok: false,
+        error: orderedCandles.reason === 'duplicate_timestamps'
+          ? 'FYERS candle timestamps contain duplicates; analysis blocked.'
+          : 'FYERS candle timestamps are not consistently ordered; analysis blocked.',
+        detail: 'No partial candle set was returned. Only a strictly ascending or strictly descending timestamp sequence is accepted.'
+      });
     }
     res.set('Cache-Control', 'no-store');
-    return res.json({ ok: true, symbol, resolution, from: rangeFrom, to: rangeTo, fetchedAt: new Date().toISOString(), data: candles });
+    return res.json({ ok: true, symbol, resolution, from: rangeFrom, to: rangeTo, fetchedAt: new Date().toISOString(), data: orderedCandles.data });
   } catch (error) {
     const status = Number(error.statusCode) || 502;
     const retryAfterSeconds = status === 429
