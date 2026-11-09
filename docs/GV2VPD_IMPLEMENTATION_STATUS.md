@@ -61,3 +61,12 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - Removed the new App Login module and its OTP-only unit tests; the existing FYERS OAuth + Dashboard Session flow remains the single login/connect mechanism.
 - Updated structural checks to fail if a duplicate OTP login gate returns and to assert the original Dashboard Session bearer flow remains.
 - No Render environment variables, PostgreSQL tables, FYERS tokens, production deployment, or live order permissions were changed.
+
+
+## Paper Mode foundation — 2026-11-09
+
+- Added `backend/src/paper-trading-store.js`, a PostgreSQL-backed durable ledger foundation with idempotency keys, transaction/advisory locking, maximum-two-open-position enforcement, ₹5,000 daily loss lock, fresh exchange-timestamp validation, fixed immutable entry/SL/T1/T2, paper SL/T2 quote processing, T1 milestone recording, and confirmed manual exit.
+- Added regression tests for stale/future/missing exchange timestamps, non-FYERS sources, contract identity, risk/reward, and lot quantity.
+- **Not yet integrated into Express routes or the Position UI.** No Paper BUY control is exposed until route-level authentication, verified candidate-to-plan binding, quote-stream fan-out, restart reconciliation and integration tests are completed.
+- The paper ledger is simulation-only and never calls a FYERS order endpoint. Existing `/api/orders/*` HTTP 403 protection remains unchanged.
+- No production deployment, Render restart, environment/database mutation, FYERS token change, or broker order was performed.
