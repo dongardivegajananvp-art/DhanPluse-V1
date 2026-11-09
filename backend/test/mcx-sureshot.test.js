@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist } from "../src/mcx-sureshot.js";
+import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit } from "../src/mcx-sureshot.js";
 
 const now = Date.parse("2026-11-05T14:00:00.000Z");
 const expiry = Math.floor(Date.parse("2026-11-19T00:00:00.000Z") / 1000);
@@ -122,4 +122,59 @@ test("MCX shortlist fails closed when no fresh quotes are available and rejects 
       { n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8441, chp: 1.3, tt: Math.floor(now / 1000) } }
     ]
   }), /mcx_quote_coverage_mismatch/);
+});
+
+test("MCX full-universe audit reports every official future and ranks only a complete fresh snapshot", () => {
+  const universe = [
+    ...buildMcxFuturesUniverse(master, now),
+    { symbol: "MCX:NATURALGAS26NOVFUT", underlying: "NATURALGAS" }
+  ];
+  const quoteRows = [
+    { n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, tt: Math.floor(now / 1000) } },
+    { n: "MCX:NATURALGAS26NOVFUT", v: { lp: 320, chp: -0.5, tt: Math.floor(now / 1000) } }
+  ];
+  const audit = buildVerifiedMcxAudit({ universe, quoteRows, now });
+  assert.equal(audit.complete, true);
+  assert.equal(audit.audit.length, 2);
+  assert.equal(audit.freshQuoteCount, 2);
+  assert.equal(audit.data[0].symbol, "MCX:CRUDEOIL26NOVFUT");
+  assert.equal(audit.data[1].symbol, "MCX:NATURALGAS26NOVFUT");
+});
+
+test("MCX full-universe audit keeps stale and missing rows visible but blocks ranking", () => {
+  const universe = [
+    ...buildMcxFuturesUniverse(master, now),
+    { symbol: "MCX:NATURALGAS26NOVFUT", underlying: "NATURALGAS" }
+  ];
+  const audit = buildVerifiedMcxAudit({
+    universe, now, quoteRows: [{
+      n: "MCX:CRUDEOIL26NOVFUT",
+      v: { lp: 8440, chp: 1.25, tt: Math.floor(now / 1000) }
+    }, {
+      n: "MCX:NATURALGAS26NOVFUT",
+      v: { lp: 320, chp: -0.5, tt: Math.floor((now - 60000) / 1000) }
+    }]
+  });
+  assert.equal(audit.complete, false);
+  assert.equal(audit.data.length, 0);
+  assert.equal(audit.audit[0].status, "FRESH_QUOTE");
+  assert.equal(audit.audit[1].status, "STALE_OR_INVALID_QUOTE");
+  assert.equal(audit.excludedQuoteCount, 1);
+});
+
+test("MCX full-universe audit identifies missing quote rows without hiding contracts", () => {
+  const universe = [
+    ...buildMcxFuturesUniverse(master, now),
+    { symbol: "MCX:NATURALGAS26NOVFUT", underlying: "NATURALGAS" }
+  ];
+  const audit = buildVerifiedMcxAudit({
+    universe, now, quoteRows: [{
+      n: "MCX:CRUDEOIL26NOVFUT",
+      v: { lp: 8440, chp: 1.25, tt: Math.floor(now / 1000) }
+    }]
+  });
+  assert.equal(audit.complete, false);
+  assert.equal(audit.audit.length, 2);
+  assert.equal(audit.audit[1].status, "MISSING_QUOTE");
+  assert.equal(audit.missingQuoteCount, 1);
 });
