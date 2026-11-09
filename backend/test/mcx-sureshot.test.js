@@ -178,3 +178,47 @@ test("MCX full-universe audit identifies missing quote rows without hiding contr
   assert.equal(audit.audit[1].status, "MISSING_QUOTE");
   assert.equal(audit.missingQuoteCount, 1);
 });
+
+
+test("MCX audit prefers intraday exchange timestamps over date-only tt metadata", () => {
+  const universe = buildMcxFuturesUniverse(master, now);
+  const freshEpoch = Math.floor(now / 1000);
+  const audit = buildVerifiedMcxAudit({
+    universe, now, quoteRows: [{
+      n: "MCX:CRUDEOIL26NOVFUT",
+      v: { lp: 8440, chp: 1.25, tt: "2026-11-05", ltt: freshEpoch }
+    }]
+  });
+  assert.equal(audit.complete, true);
+  assert.equal(audit.audit[0].status, "FRESH_QUOTE");
+  assert.equal(audit.audit[0].exchangeTime, new Date(now).toISOString());
+});
+
+test("MCX audit prefers exch_feed_time and last_traded_time before tt", () => {
+  const universe = buildMcxFuturesUniverse(master, now);
+  const freshEpoch = Math.floor(now / 1000);
+  for (const fields of [
+    { tt: "2026-11-05", exch_feed_time: freshEpoch, ltt: freshEpoch - 60 },
+    { tt: "2026-11-05", last_traded_time: freshEpoch, ltt: freshEpoch - 60 }
+  ]) {
+    const audit = buildVerifiedMcxAudit({
+      universe, now, quoteRows: [{ n: "MCX:CRUDEOIL26NOVFUT", v: { lp: 8440, chp: 1.25, ...fields } }]
+    });
+    assert.equal(audit.complete, true);
+    assert.equal(audit.audit[0].exchangeTime, new Date(now).toISOString());
+  }
+});
+
+test("MCX audit rejects date-only tt when no intraday exchange timestamp exists", () => {
+  const universe = buildMcxFuturesUniverse(master, now);
+  const audit = buildVerifiedMcxAudit({
+    universe, now, quoteRows: [{
+      n: "MCX:CRUDEOIL26NOVFUT",
+      v: { lp: 8440, chp: 1.25, tt: "2026-11-05" }
+    }]
+  });
+  assert.equal(audit.complete, false);
+  assert.equal(audit.audit[0].status, "STALE_OR_INVALID_QUOTE");
+  assert.equal(audit.audit[0].exchangeTime, null);
+  assert.equal(audit.data.length, 0);
+});
