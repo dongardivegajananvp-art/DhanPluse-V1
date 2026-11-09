@@ -9,7 +9,7 @@ function fakeSocket() {
     FullMode: 2,
     mode(value) { calls.push(["mode", value]); },
     subscribe(symbols) { calls.push(["subscribe", [...symbols]]); },
-    unsubscribe(symbols) { calls.push(["unsubscribe", [...symbols]]); }
+    unsubscribe(symbols, isDepth) { calls.push(["unsubscribe", [...symbols], isDepth]); }
   };
 }
 
@@ -25,7 +25,7 @@ test("unsubscribes closed paper symbols and subscribes only newly opened symbols
   assert.deepEqual(result.added, ["NSE:GHI26NOV300CE"]);
   assert.deepEqual([...currentSymbols].sort(), ["NSE:DEF26NOV200PE", "NSE:GHI26NOV300CE"]);
   assert.deepEqual(socket.calls, [
-    ["unsubscribe", ["NSE:ABC26NOV100CE"]],
+    ["unsubscribe", ["NSE:ABC26NOV100CE"], false],
     ["mode", 2],
     ["subscribe", ["NSE:GHI26NOV300CE"]]
   ]);
@@ -53,7 +53,7 @@ test("reapplies only currently open paper symbols after a reconnect", () => {
   assert.deepEqual(result.removed, ["NSE:OLD26NOV100PE"]);
   assert.deepEqual(result.added, ["NSE:ABC26NOV100CE"]);
   assert.deepEqual(socket.calls, [
-    ["unsubscribe", ["NSE:OLD26NOV100PE"]],
+    ["unsubscribe", ["NSE:OLD26NOV100PE"], false],
     ["mode", 2],
     ["subscribe", ["NSE:ABC26NOV100CE"]]
   ]);
