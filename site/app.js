@@ -2125,12 +2125,16 @@ async function loadMcxSureshotUniverseShortlist() {
     const rows = Array.isArray(audit) ? audit : [];
     if (!rows.length) return '<div class="chart-empty">No complete MCX audit rows returned. Scan remains NO TRADE.</div>';
     return '<div class="console-section-head"><div><h4>MCX FULL UNIVERSE AUDIT RESULTS</h4><p>' + rows.length + ' official MCX futures audited · fresh ' + Number(coverage?.fresh || 0) + ' · stale/invalid ' + Number(coverage?.excluded || 0) + ' · missing ' + Number(coverage?.missing || 0) + ' · each quote checked against its own exchange timestamp.</p></div></div>' +
-      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Underlying / Contract</th><th>FYERS LTP</th><th>Change %</th><th>Exchange timestamp / Age</th><th>Quote audit</th><th>Setup verification</th></tr></thead><tbody>' +
+      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Underlying / Future</th><th>FYERS LTP</th><th>Change %</th><th>Exchange time / Age</th><th>Futures quote</th><th>Option contract</th><th>Fresh premium</th><th>Candles / Risk</th><th>Audit / Rejection</th></tr></thead><tbody>' +
       rows.map(row => '<tr><td><b>' + escapeHtml(row.underlying || 'MCX') + '</b><small>' + escapeHtml(row.symbol || '') + '</small></td>' +
         '<td>' + (Number.isFinite(Number(row.price)) ? formatPrice(row.price) : '—') + '</td>' +
         '<td>' + (Number.isFinite(Number(row.changePct)) ? Number(row.changePct).toFixed(2) + '%' : '—') + '</td>' +
         '<td>' + escapeHtml(row.exchangeTime || '—') + '<small>' + (Number.isFinite(Number(row.quoteAgeSeconds)) ? Number(row.quoteAgeSeconds).toFixed(1) + 's' : '—') + '</small></td>' +
         '<td>' + escapeHtml(row.status || 'PENDING') + '</td>' +
+        '<td>' + (row.contract ? '<b>' + escapeHtml(row.contract.side || '') + '</b> ' + escapeHtml(row.contract.symbol || '') + '<small>Expiry ' + escapeHtml(row.contract.expiryDate || '—') + ' · Strike ' + displayNumber(row.contract.strike, 2) + '</small>' : '—') + '</td>' +
+        '<td>' + (Number.isFinite(Number(row.optionPremium)) ? '₹' + formatPrice(row.optionPremium) : '—') + '<small>' + escapeHtml(row.optionQuoteTime || row.optionQuoteStatus || '—') + '</small></td>' +
+        '<td>' + escapeHtml(row.underlyingCandleStatus || '—') + '<small>Option candles ' + (Number.isFinite(Number(row.completedOptionCandleCount)) ? Number(row.completedOptionCandleCount) : '—') + '</small>' +
+          (Number.isFinite(Number(row.entry)) ? '<small>Entry ' + displayNumber(row.entry, 2) + ' · SL ' + displayNumber(row.stopLoss, 2) + ' · Target ' + displayNumber(row.target, 2) + ' · RR 1:' + displayNumber(row.rr, 2) + '</small>' : '') + '</td>' +
         '<td>' + escapeHtml(row.candidateStatus || 'NOT_YET_SELECTED') + (row.rejectionReason ? '<small>' + escapeHtml(row.rejectionReason) + '</small>' : '') + '</td></tr>').join('') +
       '</tbody></table></div>';
   };
