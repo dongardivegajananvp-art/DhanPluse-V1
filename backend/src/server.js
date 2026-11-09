@@ -28,7 +28,7 @@ import { summarizeFyersUpstreamFailure } from './fyers-upstream-diagnostics.js';
 import { buildMarketSocketSubscriptionSymbols, getMarketSocketReconnectDelay } from './market-socket-recovery.js';
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
 import { getMcxWatchdogRetryDelay } from './mcx-watchdog.js';
-import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist } from './mcx-sureshot.js';
+import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit } from './mcx-sureshot.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 import { createPaperTradingStore } from './paper-trading-store.js';
@@ -2273,8 +2273,10 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
     stage = "VERIFY_MCX_FUTURES_QUOTES";
     const quoteRows = [];
     for (let offset = 0; offset < universe.data.length; offset += 50) {
-      const currentMcxTickAge = mcxDiagnosticTick ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
-      if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(currentMcxTickAge) || currentMcxTickAge < 0 || currentMcxTickAge > MCX_TICK_FRESHNESS_SECONDS) { const error = new Error('MCX feed became stale during quote scan; partial results discarded.'); error.statusCode = 409; throw error; }
+      // The socket diagnostic is a single watchdog instrument, not the 72-contract
+      // scan clock. Requiring that one instrument to tick between REST batches
+      // falsely aborts a live MCX scan. Every requested future is instead checked
+      // against its own FYERS exchange timestamp in the complete quote audit.
       if (!mcxSessionOpen()) { const error = new Error("MCX session closed during quote scan; partial results discarded."); error.statusCode = 409; throw error; }
       const batch = universe.data.slice(offset, offset + 50).map(item => item.symbol);
       const url = new URL("https://api-t1.fyers.in/data/quotes");
@@ -2302,8 +2304,15 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
       }));
       quoteRows.push(...rows);
     }
+    const mcxAudit = buildVerifiedMcxAudit({ universe: universe.data, quoteRows, now: Date.now(), limit: 5 });
+    console.info("FYERS MCX Sureshot futures quote coverage:", JSON.stringify(mcxAudit.coverage));
+    if (!mcxAudit.complete) {
+      const error = new Error("MCX full-universe quote audit is incomplete; no candidates or plans may be published.");
+      error.statusCode = 409;
+      error.mcxAudit = mcxAudit;
+      throw error;
+    }
     const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: 5 });
-    console.info("FYERS MCX Sureshot futures quote coverage:", JSON.stringify(ranked.coverage));
     const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
     const today = indiaNow.toISOString().slice(0, 10);
     const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 10)).toISOString().slice(0, 10);
@@ -2412,14 +2421,26 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
       }
     }
     const verified = results.filter(item => item.status === "VERIFIED SETUP").sort((a, b) => a.rank - b.rank);
+    const topThreeSetups = verified.slice(0, 3);
+    const resultBySymbol = new Map(results.map(item => [item.underlyingSymbol, item]));
+    const auditResults = mcxAudit.audit.map(row => {
+      const candidateResult = resultBySymbol.get(row.symbol);
+      return candidateResult
+        ? { ...row, candidateRank: candidateResult.rank, candidateStatus: candidateResult.status,
+            rejectionReason: candidateResult.reason || null }
+        : { ...row, candidateStatus: "NOT_SELECTED_FOR_OPTION_VERIFICATION",
+            rejectionReason: "Outside the five highest-ranked fresh futures candidates." };
+    });
     return res.json({
-      ok: true, scanComplete: true, signalsAllowed: verified.length > 0,
+      ok: true, scanComplete: true, signalsAllowed: topThreeSetups.length > 0,
       orderPlacement: "disabled", readOnly: true, source: "FYERS MCX_COM master + FYERS market data",
-      universeCount: universe.count, rankedCandidateCount: ranked.candidateCount,
+      universeCount: universe.count, eligibleUniverseCount: universe.count,
+      rankedCandidateCount: ranked.candidateCount,
       quoteCoverage: ranked.coverage, freshFutureQuoteCount: ranked.freshQuoteCount,
       excludedFutureQuoteCount: ranked.excludedQuoteCount, missingFutureQuoteCount: ranked.missingQuoteCount,
+      fullUniverseAudit: auditResults, fullUniverseAuditCount: auditResults.length,
       selectedCandidateCount: ranked.data.length, scannedCandidateCount: results.length,
-      verifiedSetupCount: verified.length, bestSetup: verified[0] || null, results,
+      verifiedSetupCount: topThreeSetups.length, topThreeSetups, bestSetup: topThreeSetups[0] || null, results,
       notice: "All active MCX futures were requested from the official master. Only contracts with fresh exchange-timestamped futures quotes were ranked; stale, invalid or missing quotes were excluded and never used. Selected candidates were checked for completed underlying candles, official MCX option identity, fresh option premium, completed option candles and >=1:2 risk/reward. No OI/volume is used and no orders are placed."
     });
   } catch (error) {
@@ -2433,8 +2454,12 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
       ok: false, scanComplete: false, signalsAllowed: false, orderPlacement: "disabled", stage,
       error: status === 401 ? "FYERS session expired; reconnect and rerun the MCX scan."
         : status === 409 ? String(error.message || "MCX session closed; scan blocked.")
-        : "MCX full-universe scan could not verify all required data.",
-      detail: String(error.message || "MCX scan failed.").slice(0, 180), partialPlansDiscarded: true
+  : "MCX full-universe scan could not verify all required data.",
+      detail: String(error.message || "MCX scan failed.").slice(0, 180),
+      fullUniverseAudit: Array.isArray(error.mcxAudit?.audit) ? error.mcxAudit.audit : [],
+      fullUniverseAuditCount: Number(error.mcxAudit?.universeCount) || 0,
+      quoteCoverage: error.mcxAudit?.coverage || null,
+      partialPlansDiscarded: true
     });
   } finally {
     mcxSureshotAutoPlansInFlight = false;
