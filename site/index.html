@@ -3152,7 +3152,7 @@ async function loadPaperLedger() {
     }
     host.innerHTML = '<div style="overflow:auto"><table class="data-table"><thead><tr><th>Contract</th><th>Qty</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>Last</th><th>Realised P&amp;L</th><th>State</th><th>Action</th></tr></thead><tbody>' +
       rows.map(row => {
-        const money = value => Number.isFinite(Number(value)) ? '₹' + Number(value).toFixed(2) : '—';
+        const money = value => value == null || value === '' || !Number.isFinite(Number(value)) ? '—' : '₹' + Number(value).toFixed(2);
         const open = row.state === 'OPEN';
         return '<tr><td>' + escapeHtml(row.symbol || '—') + '<small>' + escapeHtml(row.expiry || '') + ' · ' + escapeHtml(String(row.strike || '')) + '</small></td>' +
           '<td>' + escapeHtml(String(row.quantity ?? '—')) + '</td><td>' + money(row.entry_price) + '</td><td>' + money(row.stop_loss) +
