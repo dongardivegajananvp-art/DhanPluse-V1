@@ -2254,14 +2254,21 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
 
 // MCX Sureshot uses its own official MCX_COM master and MCX session gate.
 // It shares the existing authenticated FYERS Data API budget and never touches NSE state.
-app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_req, res) => {
+app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (req, res) => {
   res.set("Cache-Control", "no-store");
   const mcxSessionOpen = () => getExchangeSessionWindows().MCX?.session === "SCHEDULED_OPEN";
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
   if (!mcxSessionOpen()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "MCX session is closed; actionable option plans are withheld." });
-  const mcxSocketAgeSeconds = mcxDiagnosticTick ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
-  if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(mcxSocketAgeSeconds) || mcxSocketAgeSeconds < 0 || mcxSocketAgeSeconds > MCX_TICK_FRESHNESS_SECONDS) {
-    return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "MCX WebSocket feed is not fresh; reconnect or wait for a verified MCX exchange tick before scanning." });
+  if (sureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Another Sureshot universe scan is already running." });
+  const scanId = String(req.query.scanId || "");
+  const offset = Math.max(0, Number.parseInt(String(req.query.offset || "0"), 10) || 0);
+  if (!scanId) {
+    const mcxSocketAgeSeconds = mcxDiagnosticTick ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
+    if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(mcxSocketAgeSeconds) ||
+        mcxSocketAgeSeconds < 0 || mcxSocketAgeSeconds > MCX_TICK_FRESHNESS_SECONDS) {
+      return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false,
+        error: "MCX WebSocket feed is not fresh; reconnect or wait for a verified MCX exchange tick before starting the full scan." });
+    }
   }
   if (mcxSureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "An MCX Sureshot scan is already running." });
   mcxSureshotAutoPlansInFlight = true;
@@ -2269,60 +2276,54 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
   let stage = "LOAD_MCX_MASTER";
   let quoteRowsReceived = 0;
   try {
-    const universe = await getMcxFnoUniverse();
-    if (!universe.count) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "No MCX futures with active CE/PE contracts are currently inside their official trading sessions." });
-    stage = "VERIFY_MCX_FUTURES_QUOTES";
-    const quoteRows = [];
-    for (let offset = 0; offset < universe.data.length; offset += 50) {
-      // The socket diagnostic is a single watchdog instrument, not the 72-contract
-      // scan clock. Requiring that one instrument to tick between REST batches
-      // falsely aborts a live MCX scan. Every requested future is instead checked
-      // against its own FYERS exchange timestamp in the complete quote audit.
-      if (!mcxSessionOpen()) { const error = new Error("MCX session closed during quote scan; partial results discarded."); error.statusCode = 409; throw error; }
-      const batch = universe.data.slice(offset, offset + 50).map(item => item.symbol);
-      const url = new URL("https://api-t1.fyers.in/data/quotes");
-      url.searchParams.set("symbols", batch.join(","));
-      const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
-      const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
-      quoteRowsReceived += rows.length;
-      const sample = rows[0] || null;
-      const sampleQuote = sample?.v || sample || {};
-      console.info("FYERS MCX futures quote batch received:", JSON.stringify({
-        batchIndex: Math.floor(offset / 50) + 1,
-        requestedCount: batch.length,
-        receivedCount: rows.length,
-        apiStatus: result?.s || "missing",
-        apiCode: result?.code ?? null,
-        sampleSymbol: sample?.n || sample?.symbol || null,
-        sampleRowStatus: sample?.s || null,
-        sampleQuoteKeys: Object.keys(sampleQuote).slice(0, 24),
-        sampleTimestampFields: {
-          tt: sampleQuote?.tt ?? null,
-          ltt: sampleQuote?.ltt ?? null,
-          exch_feed_time: sampleQuote?.exch_feed_time ?? null,
-          timestamp: sampleQuote?.timestamp ?? null
-        }
-      }));
-      quoteRows.push(...rows);
+    if (!scanId) {
+      const universe = await getMcxFnoUniverse();
+      if (!universe.count) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "No MCX futures with active CE/PE contracts are currently inside their official trading sessions." });
+      stage = "VERIFY_MCX_FUTURES_QUOTES";
+      const quoteRows = [];
+      for (let quoteOffset = 0; quoteOffset < universe.data.length; quoteOffset += 50) {
+        if (!mcxSessionOpen()) { const error = new Error("MCX session closed during quote audit; partial results discarded."); error.statusCode = 409; throw error; }
+        const batchSymbols = universe.data.slice(quoteOffset, quoteOffset + 50).map(item => item.symbol);
+        const url = new URL("https://api-t1.fyers.in/data/quotes");
+        url.searchParams.set("symbols", batchSymbols.join(","));
+        const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
+        const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
+        quoteRowsReceived += rows.length;
+        quoteRows.push(...rows);
+        console.info("FYERS MCX futures quote batch received:", JSON.stringify({
+          batchIndex: Math.floor(quoteOffset / 50) + 1, requestedCount: batchSymbols.length,
+          receivedCount: rows.length, apiStatus: result?.s || "missing", apiCode: result?.code ?? null
+        }));
+      }
+      const mcxAudit = buildVerifiedMcxAudit({ universe: universe.data, quoteRows, now: Date.now(), limit: universe.data.length });
+      console.info("FYERS MCX full-universe quote audit:", JSON.stringify(mcxAudit.coverage));
+      if (!mcxAudit.complete) {
+        const error = new Error("MCX full-universe quote audit is incomplete; no candidates or plans may be published.");
+        error.statusCode = 409;
+        error.mcxAudit = mcxAudit;
+        throw error;
+      }
+      const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: universe.data.length });
+      mcxSureshotScanState = {
+        id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
+        universeCount: universe.count, audit: mcxAudit.audit,
+        candidates: ranked.data.map((row, index) => ({ ...row, rank: index + 1 })),
+        rankedCandidateCount: ranked.candidateCount, nextOffset: 0, results: []
+      };
     }
-    const mcxAudit = buildVerifiedMcxAudit({ universe: universe.data, quoteRows, now: Date.now(), limit: 5 });
-    console.info("FYERS MCX Sureshot futures quote coverage:", JSON.stringify(mcxAudit.coverage));
-    if (!mcxAudit.complete) {
-      const error = new Error("MCX full-universe quote audit is incomplete; no candidates or plans may be published.");
-      error.statusCode = 409;
-      error.mcxAudit = mcxAudit;
-      throw error;
+    const state = mcxSureshotScanState;
+    if (!state || state.id !== scanId && scanId || Date.now() - state.createdAt > SURESHOT_SCAN_TTL_MS || state.nextOffset !== offset) {
+      mcxSureshotScanState = null;
+      return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "MCX scan cursor expired or mismatched. Start a fresh full-universe scan." });
     }
-    const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: 5 });
-    const indiaNow = new Date(Date.now() + 330 * 60 * 1000);
+    const indiaNow = new Date(Date.now() + 330 * 60_000);
     const today = indiaNow.toISOString().slice(0, 10);
     const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 10)).toISOString().slice(0, 10);
-    const results = [];
+    const batch = state.candidates.slice(offset, offset + SURESHOT_BATCH_SIZE);
+    const resultBySymbol = new Map();
     const prepared = [];
-    for (const candidate of ranked.data) {
-      // The complete futures quote snapshot was already exchange-timestamp
-      // validated for every contract. Do not let a quiet watchdog-only symbol
-      // invalidate the independently timestamped REST snapshot mid-scan.
+
+    for (const candidate of batch) {
       if (!mcxSessionOpen()) { const error = new Error("MCX session closed during scan; partial plans discarded."); error.statusCode = 409; throw error; }
       const base = { rank: candidate.rank, underlyingSymbol: candidate.symbol, underlying: candidate.underlying,
         changePct: candidate.changePct, ltp: candidate.price, quoteAgeSeconds: candidate.quoteAgeSeconds };
@@ -2335,7 +2336,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
         const history = await fyersReadOnlyGet(historyUrl, { priority: "sureshot" });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now(), { strictTrend: true });
         if (!direction.ok || !direction.side) {
-          results.push({ ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
+          resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
           continue;
         }
         const expiryMap = new Map();
@@ -2351,32 +2352,32 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
           expiryData: [...expiryMap.values()].sort((a, b) => Number(a.expiry) - Number(b.expiry)),
           optionsChain: candidate.optionContracts.map(option => {
             const value = Number(option.expiryDate);
-            const expiryMs = Number.isFinite(value) && value > 0
-              ? (value > 1e12 ? value : value * 1000) : Date.parse(String(option.expiryDate || ""));
+            const expiryMs = Number.isFinite(value) && value > 0 ? (value > 1e12 ? value : value * 1000) : Date.parse(String(option.expiryDate || ""));
             return { symbol: option.symbol, strike_price: option.strike, option_type: option.side,
               expiry: Number.isFinite(expiryMs) ? String(Math.floor(expiryMs / 1000)) : "" };
           }).filter(option => option.expiry)
         };
         stage = "SELECT_MCX_OPTION_CONTRACT";
         const selected = selectNearestVerifiedOptionContract({
-          discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(),
-          strikeMode: "one-otm"
+          discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot,
+          now: Date.now(), strikeMode: "one-otm"
         });
         if (!selected.ok) {
-          results.push({ ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
+          resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
           continue;
         }
         const sizing = await getFyersOptionContractMetadata(selected.contract.symbol);
         if (!sizing) {
-          results.push({ ...base, status: "NO TRADE", direction: direction.side, contract: selected.contract,
-            reason: "Official MCX contract lot size or tick size is unavailable." });
+          resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side,
+            contract: selected.contract, reason: "Official MCX contract lot size or tick size is unavailable." });
           continue;
         }
         prepared.push({ candidate, base, direction,
           contract: { ...selected.contract, lotSize: sizing.lotSize, tickSize: sizing.tickSize }, sizing });
       } catch (error) {
         if ([401, 429].includes(Number(error.statusCode))) throw error;
-        results.push({ ...base, status: "NO TRADE", reason: String(error.message || "MCX candidate verification failed.").slice(0, 180) });
+        resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE",
+          reason: String(error.message || "MCX candidate verification failed.").slice(0, 180) });
       }
     }
 
@@ -2396,8 +2397,8 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
       if (!mcxSessionOpen()) { const error = new Error("MCX session closed during option verification; partial plans discarded."); error.statusCode = 409; throw error; }
       const quote = quoteBySymbol.get(item.contract.symbol);
       if (!quote) {
-        results.push({ ...item.base, status: "NO TRADE", direction: item.direction.side, contract: item.contract,
-          reason: "FYERS returned no quote for the selected MCX option contract." });
+        resultBySymbol.set(item.candidate.symbol, { ...item.base, status: "NO TRADE", direction: item.direction.side,
+          contract: item.contract, reason: "FYERS returned no quote for the selected MCX option contract." });
         continue;
       }
       try {
@@ -2411,57 +2412,176 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (_
         const plan = buildVerifiedSureshotTradePlan({
           underlyingSymbol: item.candidate.symbol, direction: item.direction, contract: item.contract,
           quote, optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
-          resolution: "5", lotSize: item.sizing.lotSize, tickSize: item.sizing.tickSize, riskModel: "fixed", requirePremiumRange: true, now: Date.now()
+          resolution: "5", lotSize: item.sizing.lotSize, tickSize: item.sizing.tickSize,
+          riskModel: "fixed", requirePremiumRange: true, now: Date.now()
         });
-        results.push(plan.ok
-          ? { ...item.base, status: "VERIFIED SETUP", plan }
+        resultBySymbol.set(item.candidate.symbol, plan.ok
+          ? { ...item.base, status: "VERIFIED SETUP", initiallyVerified: true,
+              direction: item.direction.side, contract: item.contract, plan }
           : { ...item.base, status: "NO TRADE", direction: item.direction.side, contract: item.contract, reason: plan.reason });
       } catch (error) {
         if ([401, 429].includes(Number(error.statusCode))) throw error;
-        results.push({ ...item.base, status: "NO TRADE", direction: item.direction.side, contract: item.contract,
+        resultBySymbol.set(item.candidate.symbol, { ...item.base, status: "NO TRADE",
+          direction: item.direction.side, contract: item.contract,
           reason: String(error.message || "MCX option verification failed.").slice(0, 180) });
+      }
+    }
+
+    const batchResults = batch.map(candidate => resultBySymbol.get(candidate.symbol) ||
+      { rank: candidate.rank, underlyingSymbol: candidate.symbol, underlying: candidate.underlying,
+        status: "NO TRADE", reason: "Candidate verification did not produce a complete result." });
+    state.results.push(...batchResults);
+    state.nextOffset += batchResults.length;
+    if (state.nextOffset < state.candidates.length) {
+      return res.json({ ok: true, scanComplete: false, batchComplete: true, orderPlacement: "disabled",
+        scanId: state.id, nextOffset: state.nextOffset, totalCandidateCount: state.candidates.length,
+        scannedCandidateCount: state.results.length, rankedCandidateCount: state.rankedCandidateCount,
+        universeCount: state.universeCount, quoteCoverage: { requested: state.universeCount, received: state.universeCount,
+          fresh: state.universeCount, excluded: 0, missing: 0 },
+        fullUniverseAuditCount: state.audit.length, scannedCandidates: state.results.map(item => ({
+          rank: item.rank, underlyingSymbol: item.underlyingSymbol, status: item.status, reason: item.reason || null
+        })) });
+    }
+
+    const results = state.results;
+    const initiallyVerifiedCandidateCount = results.filter(item => item.initiallyVerified === true).length;
+    const finalCheckCandidates = results.filter(item => item.initiallyVerified === true && item.status === "VERIFIED SETUP").slice(0, 10);
+    const finalDirections = new Map();
+    for (const item of finalCheckCandidates) {
+      if (!mcxSessionOpen()) { const error = new Error("MCX session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
+      try {
+        const url = new URL("https://api-t1.fyers.in/data/history");
+        url.searchParams.set("symbol", item.underlyingSymbol); url.searchParams.set("resolution", "5");
+        url.searchParams.set("date_format", "1"); url.searchParams.set("range_from", from);
+        url.searchParams.set("range_to", today); url.searchParams.set("cont_flag", "1");
+        stage = "FINAL_REVALIDATE_MCX_UNDERLYING";
+        const history = await fyersReadOnlyGet(url, { priority: "sureshot" });
+        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now(), { strictTrend: true });
+        if (!direction.ok || direction.side !== item.direction) {
+          item.status = "NO TRADE"; item.reason = "Final underlying-candle revalidation failed."; delete item.plan; continue;
+        }
+        finalDirections.set(item.underlyingSymbol, direction);
+      } catch (error) {
+        if ([401, 429].includes(Number(error.statusCode))) throw error;
+        item.status = "NO TRADE"; item.reason = "Final underlying-candle revalidation failed: " + String(error.message || "FYERS history unavailable.").slice(0, 140); delete item.plan;
+      }
+    }
+    const finalOptionCandles = new Map();
+    const finalCandleCandidates = finalCheckCandidates.filter(item => finalDirections.has(item.underlyingSymbol));
+    for (const item of finalCandleCandidates) {
+      if (!mcxSessionOpen()) { const error = new Error("MCX session closed during final option-candle revalidation."); error.statusCode = 409; throw error; }
+      try {
+        const url = new URL("https://api-t1.fyers.in/data/history");
+        url.searchParams.set("symbol", item.contract.symbol); url.searchParams.set("resolution", "5");
+        url.searchParams.set("date_format", "1"); url.searchParams.set("range_from", from);
+        url.searchParams.set("range_to", today); url.searchParams.set("cont_flag", "1");
+        stage = "FINAL_REVALIDATE_MCX_OPTION_CANDLES";
+        const history = await fyersReadOnlyGet(url, { priority: "sureshot" });
+        finalOptionCandles.set(item.underlyingSymbol, Array.isArray(history?.candles) ? history.candles : []);
+      } catch (error) {
+        if ([401, 429].includes(Number(error.statusCode))) throw error;
+        item.status = "NO TRADE"; item.reason = "Final option-candle revalidation failed: " + String(error.message || "FYERS history unavailable.").slice(0, 140); delete item.plan;
+      }
+    }
+    const finalQuoteCandidates = finalCandleCandidates.filter(item =>
+      item.status === "VERIFIED SETUP" && finalOptionCandles.has(item.underlyingSymbol));
+    const finalQuoteBySymbol = new Map();
+    if (finalQuoteCandidates.length) {
+      const url = new URL("https://api-t1.fyers.in/data/quotes");
+      url.searchParams.set("symbols", finalQuoteCandidates.map(item => item.contract.symbol).join(","));
+      stage = "FINAL_REVALIDATE_MCX_OPTION_QUOTES";
+      const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
+      const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
+      for (const row of rows) {
+        const symbol = row?.n || row?.symbol || row?.v?.symbol;
+        if (symbol && finalQuoteCandidates.some(item => item.contract.symbol === symbol)) finalQuoteBySymbol.set(symbol, row?.v || row);
+      }
+    }
+    for (const item of finalQuoteCandidates) {
+      const quote = finalQuoteBySymbol.get(item.contract.symbol);
+      if (!quote) { item.status = "NO TRADE"; item.reason = "Final MCX option quote revalidation returned no quote."; delete item.plan; continue; }
+      const freshPlan = buildVerifiedSureshotTradePlan({
+        underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
+        contract: item.contract, quote, optionCandles: finalOptionCandles.get(item.underlyingSymbol) || [],
+        resolution: "5", lotSize: item.contract.lotSize, tickSize: item.contract.tickSize,
+        riskModel: "fixed", requirePremiumRange: true, now: Date.now()
+      });
+      if (!freshPlan.ok) { item.status = "NO TRADE"; item.reason = "Final MCX premium/candle revalidation failed: " + freshPlan.reason; delete item.plan; continue; }
+      item.plan = freshPlan; item.finalVerifiedAt = new Date().toISOString();
+      item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
+    }
+    const finalChecked = new Set(finalCheckCandidates);
+    for (const item of results) {
+      if (item.initiallyVerified === true && item.status === "VERIFIED SETUP" && !finalChecked.has(item)) {
+        item.status = "INITIAL CHECK PASSED";
+        item.reason = "Initial scan passed; not selected for final live freshness revalidation, so this candidate is not actionable.";
+        delete item.plan;
       }
     }
     const verified = results.filter(item => item.status === "VERIFIED SETUP").sort((a, b) => a.rank - b.rank);
     const topThreeSetups = verified.slice(0, 3);
+    const sessionToken = /^Bearer ([a-f0-9]{64})$/.exec(String(req.get("authorization") || ""))?.[1] || "";
+    for (const item of topThreeSetups) {
+      const tradePlan = item.plan;
+      const issued = verifiedPlanRegistry.create(sessionToken, {
+        source: "FYERS_VERIFIED", symbol: tradePlan.contract.symbol, side: tradePlan.contract.side,
+        expiry: tradePlan.contract.expiryDate || tradePlan.contract.expiry, strike: tradePlan.contract.strike,
+        lotSize: tradePlan.contract.lotSize, tickSize: tradePlan.contract.tickSize,
+        underlyingSymbol: item.underlyingSymbol, plan: tradePlan.risk
+      });
+      item.paperPlanId = issued.planId; item.paperPlanExpiresAt = issued.expiresAt;
+    }
     const resultBySymbol = new Map(results.map(item => [item.underlyingSymbol, item]));
-    const auditResults = mcxAudit.audit.map(row => {
-      const candidateResult = resultBySymbol.get(row.symbol);
-      return candidateResult
-        ? { ...row, candidateRank: candidateResult.rank, candidateStatus: candidateResult.status,
-            rejectionReason: candidateResult.reason || null }
-        : { ...row, candidateStatus: "NOT_SELECTED_FOR_OPTION_VERIFICATION",
-            rejectionReason: "Outside the five highest-ranked fresh futures candidates." };
+    const fullUniverseAudit = state.audit.map(row => {
+      const result = resultBySymbol.get(row.symbol);
+      return result ? { ...row, candidateRank: result.rank, candidateStatus: result.status,
+        rejectionReason: result.reason || null } : { ...row, candidateStatus: "NOT_CHECKED", rejectionReason: null };
     });
-    return res.json({
-      ok: true, scanComplete: true, signalsAllowed: topThreeSetups.length > 0,
+    const payload = { ok: true, scanComplete: true, signalsAllowed: topThreeSetups.length > 0,
       orderPlacement: "disabled", readOnly: true, source: "FYERS MCX_COM master + FYERS market data",
-      universeCount: universe.count, eligibleUniverseCount: universe.count,
-      rankedCandidateCount: ranked.candidateCount,
-      quoteCoverage: ranked.coverage, freshFutureQuoteCount: ranked.freshQuoteCount,
-      excludedFutureQuoteCount: ranked.excludedQuoteCount, missingFutureQuoteCount: ranked.missingQuoteCount,
-      fullUniverseAudit: auditResults, fullUniverseAuditCount: auditResults.length,
-      selectedCandidateCount: ranked.data.length, scannedCandidateCount: results.length,
-      verifiedSetupCount: topThreeSetups.length, topThreeSetups, bestSetup: topThreeSetups[0] || null, results,
-      notice: "All active MCX futures were requested from the official master. Only contracts with fresh exchange-timestamped futures quotes were ranked; stale, invalid or missing quotes were excluded and never used. Selected candidates were checked for completed underlying candles, official MCX option identity, fresh option premium, completed option candles and >=1:2 risk/reward. No OI/volume is used and no orders are placed."
-    });
+      universeCount: state.universeCount, eligibleUniverseCount: state.universeCount,
+      rankedCandidateCount: state.rankedCandidateCount, selectedCandidateCount: state.candidates.length,
+      scannedCandidateCount: results.length, initiallyVerifiedCandidateCount,
+      quoteCoverage: { requested: state.universeCount, received: state.universeCount,
+        fresh: state.universeCount, excluded: 0, missing: 0 },
+      fullUniverseAudit, fullUniverseAuditCount: fullUniverseAudit.length,
+      verifiedSetupCount: topThreeSetups.length, topThreeSetupCount: topThreeSetups.length,
+      topThreeSetups, bestSetup: topThreeSetups[0] || null, results,
+      notice: "Every eligible official FYERS MCX_COM future was audited and ranked by absolute verified percentage move; every candidate was checked sequentially. The highest-ranked initial passes were revalidated with fresh underlying candles, fresh option premium and completed option candles. Only the current top three receive Paper Mode plan IDs. No chain OI/volume is used and no broker orders are placed." };
+    mcxSureshotScanState = null;
+    console.info("FYERS MCX Sureshot full scan completed:", JSON.stringify({
+      universeCount: payload.universeCount, scannedCandidateCount: results.length,
+      initiallyVerifiedCandidateCount, verifiedSetupCount: topThreeSetups.length,
+      stopReason: "ALL_ELIGIBLE_MCX_CANDIDATES_CHECKED"
+    }));
+    return res.json(payload);
   } catch (error) {
     const status = Number(error.statusCode) || 503;
+    const retryAfterSeconds = status === 429 ? Math.max(0, Number(error.retryAfterSeconds) || 0) : 0;
+    if (retryAfterSeconds > 0) res.set("Retry-After", String(retryAfterSeconds));
+    const resumableScan = status === 429 && Boolean(mcxSureshotScanState?.id);
+    if (!resumableScan) mcxSureshotScanState = null;
     console.warn("FYERS MCX Sureshot scan failed:", JSON.stringify({
-      stage, status, message: String(error.message || error).slice(0, 280),
-      quoteRowsReceived
+      stage, status, retryAfterSeconds: retryAfterSeconds || null,
+      message: String(error.message || error).slice(0, 280), quoteRowsReceived,
+      nextOffset: resumableScan ? mcxSureshotScanState.nextOffset : null
     }));
-    if (status === 429 && error.retryAfterSeconds) res.set("Retry-After", String(error.retryAfterSeconds));
     return res.status(status).json({
       ok: false, scanComplete: false, signalsAllowed: false, orderPlacement: "disabled", stage,
       error: status === 401 ? "FYERS session expired; reconnect and rerun the MCX scan."
+        : status === 429 ? "FYERS API cooldown paused the MCX full-universe scan; its server cursor is retained for safe resume."
         : status === 409 ? String(error.message || "MCX session closed; scan blocked.")
-  : "MCX full-universe scan could not verify all required data.",
+        : "MCX full-universe scan could not verify all required data.",
       detail: String(error.message || "MCX scan failed.").slice(0, 180),
+      retryAfterSeconds: retryAfterSeconds || null, scanPaused: resumableScan,
+      scanId: resumableScan ? mcxSureshotScanState.id : null,
+      nextOffset: resumableScan ? mcxSureshotScanState.nextOffset : null,
+      scannedCandidateCount: resumableScan ? mcxSureshotScanState.results.length : 0,
+      totalCandidateCount: resumableScan ? mcxSureshotScanState.candidates.length : 0,
       fullUniverseAudit: Array.isArray(error.mcxAudit?.audit) ? error.mcxAudit.audit : [],
       fullUniverseAuditCount: Number(error.mcxAudit?.universeCount) || 0,
       quoteCoverage: error.mcxAudit?.coverage || null,
-      partialPlansDiscarded: true
+      partialPlansDiscarded: !resumableScan
     });
   } finally {
     mcxSureshotAutoPlansInFlight = false;
