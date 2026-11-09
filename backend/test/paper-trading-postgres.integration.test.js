@@ -130,7 +130,7 @@ test('PostgreSQL Paper Mode ledger survives restart and serializes BUY/exit race
         exchangeTimestamp: new Date(at - 500).toISOString(), source: 'FYERS_VERIFIED'
       }, at);
       assert.equal(exit.updates[0].exit_reason, 'STOP_LOSS');
-      assert.equal(exit.updates[0].realized_pnl, '-1500.00');
+      assert.equal(Number(exit.updates[0].realized_pnl), -1500);
       assert.equal(position.created, true);
     }
     const blockedAt = lossDay + 4 * 20_000;
