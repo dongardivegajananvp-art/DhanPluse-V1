@@ -17,7 +17,7 @@ export function reconcilePaperSocketSubscriptions({
     if (typeof socket.unsubscribe !== "function") {
       throw new Error("fyers_socket_unsubscribe_unavailable");
     }
-    socket.unsubscribe(removed);
+    socket.unsubscribe(removed, false);
     for (const symbol of removed) currentSymbols.delete(symbol);
   }
 
