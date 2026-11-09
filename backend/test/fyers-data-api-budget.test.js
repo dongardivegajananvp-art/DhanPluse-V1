@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFyersDataApiBudget } from '../src/fyers-data-api-budget.js';
+import { createFyersDataApiBudget, canClearFyersDataApiCooldown } from '../src/fyers-data-api-budget.js';
 
 function fakeResponse(status = 200, body = '', headers = {}) {
   return new Response(body, { status, headers });
@@ -110,6 +110,76 @@ test('HTTP 429 honours Retry-After and treats Retry-After zero as a one-minute m
   const blocked = await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
   assert.equal(blocked.status, 429);
   assert.equal(sent, 1);
+});
+
+test('a late in-flight success cannot clear a newer Cloudflare 1015 cooldown', () => {
+  const blockedGeneration = 8;
+  const requestStartedBeforeBlock = 7;
+  assert.equal(canClearFyersDataApiCooldown({
+    responseOk: true,
+    blockedPathname: '/data/quotes',
+    responsePathname: '/data/history',
+    requestGeneration: requestStartedBeforeBlock,
+    currentGeneration: blockedGeneration
+  }), false);
+  assert.equal(canClearFyersDataApiCooldown({
+    responseOk: true,
+    blockedPathname: '/data/quotes',
+    responsePathname: '/data/quotes',
+    requestGeneration: requestStartedBeforeBlock,
+    currentGeneration: blockedGeneration
+  }), false);
+  assert.equal(canClearFyersDataApiCooldown({
+    responseOk: true,
+    blockedPathname: '/data/quotes',
+    responsePathname: '/data/quotes',
+    requestGeneration: blockedGeneration,
+    currentGeneration: blockedGeneration
+  }), true);
+});
+
+test('a history read already in flight is serialized before a quote 1015 and cannot reopen upstream traffic', async () => {
+  let releaseHistory;
+  let markHistoryStarted;
+  const historyGate = new Promise(resolve => { releaseHistory = resolve; });
+  const historyStarted = new Promise(resolve => { markHistoryStarted = resolve; });
+  let activeRequests = 0;
+  let maxConcurrentRequests = 0;
+  let upstreamCalls = 0;
+  const request = createFyersDataApiBudget({
+    minIntervalMs: 0,
+    fetchImpl: async url => {
+      activeRequests += 1;
+      maxConcurrentRequests = Math.max(maxConcurrentRequests, activeRequests);
+      upstreamCalls += 1;
+      if (String(url).includes('/data/history')) {
+        markHistoryStarted();
+        await historyGate;
+        activeRequests -= 1;
+        return fakeResponse(200, '{"s":"ok","candles":[]}', { 'content-type': 'application/json' });
+      }
+      activeRequests -= 1;
+      return fakeResponse(429, 'Cloudflare Error 1015', {
+        server: 'cloudflare', 'cf-ray': 'inflight-1015', 'retry-after': '0'
+      });
+    }
+  });
+
+  const historyPromise = request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ&resolution=5');
+  await historyStarted;
+  const quotePromise = request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
+  releaseHistory();
+  const [history, quotes] = await Promise.all([historyPromise, quotePromise]);
+
+  assert.equal(history.status, 200);
+  assert.equal(quotes.status, 429);
+  assert.equal(maxConcurrentRequests, 1, 'Data API upstream requests must remain serialized');
+  assert.equal(request.getStatus().cooldownActive, true);
+
+  const blocked = await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ABANKNIFTY-INDEX');
+  assert.equal(blocked.status, 429);
+  assert.equal(blocked.headers.get('x-dhanpulse-cooldown'), 'active');
+  assert.equal(upstreamCalls, 2, 'no third upstream request may be sent while the quote cooldown is active');
 });
 
 test('non-Data API endpoints are not counted against the Data API budget', async () => {
