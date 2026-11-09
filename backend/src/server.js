@@ -2858,7 +2858,7 @@ app.post('/api/paper/buy', async (req, res) => {
     if (!verifiedPlanRegistry.get(sessionToken, planId)) {
       return res.status(409).json({ ok: false, error: 'Verified Plan ID expired during quote revalidation; rerun Sureshot.' });
     }
-    const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '');
+    const idempotencyKey = 'paper:' + planId;
     paperSocketSymbols.add(snapshot.symbol);
     try {
       marketSocket.mode(marketSocket.FullMode);
@@ -2875,7 +2875,7 @@ app.post('/api/paper/buy', async (req, res) => {
       plan: { entryPrice: risk.entryPrice, stopLoss: risk.stopLoss, target1: risk.target1,
         target2: risk.target2, quantity: risk.quantity, lotSize: risk.lotSize }
     });
-    verifiedPlanRegistry.consume(sessionToken, planId);
+    // Keep the short-lived plan until TTL so a retry returns the same idempotent ledger row.
     return res.status(result.created ? 201 : 200).json({
       ok: true, created: result.created, mode: 'PAPER_SIMULATION', position: result.position,
       riskAmount: result.riskAmount ?? null, orderPlacement: 'disabled',
