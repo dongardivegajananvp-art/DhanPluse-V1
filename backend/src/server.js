@@ -2519,6 +2519,22 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
       item.plan = freshPlan; item.finalVerifiedAt = new Date().toISOString();
       item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
     }
+    // The MCX diagnostic socket is an independent live-feed gate. A fresh REST
+    // snapshot alone must not mask a disconnected/stale subscribed MCX stream.
+    const finalMcxSocketAgeSeconds = mcxDiagnosticTick
+      ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
+    if (!streamConnected || mcxSubscribedSocket !== marketSocket ||
+        !Number.isFinite(finalMcxSocketAgeSeconds) || finalMcxSocketAgeSeconds < 0 ||
+        finalMcxSocketAgeSeconds > MCX_TICK_FRESHNESS_SECONDS) {
+      const error = new Error("MCX WebSocket feed is stale or disconnected at final publication; all setups are blocked.");
+      error.statusCode = 409;
+      error.mcxAudit = { audit: state.audit, universeCount: state.universeCount,
+        coverage: { requested: state.universeCount, received: state.universeCount,
+          fresh: state.audit.filter(row => row.status === "FRESH_QUOTE").length,
+          excluded: state.audit.filter(row => row.status === "STALE_OR_INVALID_QUOTE").length,
+          missing: state.audit.filter(row => row.status === "MISSING_QUOTE").length } };
+      throw error;
+    }
     // Re-audit every MCX future immediately before publication. The initial
     // quote snapshot can age while the sequential five-symbol history/option
     // checks run; never publish rankings or plans against that old snapshot.
