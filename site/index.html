@@ -2478,8 +2478,9 @@ async function loadMcxFuturesIntoSureshotSelect() {
   }
 }
 
+let mcxSureshotUniverseScanRunning = false;
 async function loadMcxSureshotUniverseShortlist() {
-  if (currentTab !== 'Sureshot CE/PE' || sureshotUniverseScanRunning) return;
+  if (currentTab !== 'Sureshot CE/PE' || mcxSureshotUniverseScanRunning) return;
   const button = document.querySelector('#scanMcxSureshotUniverseBtn');
   const host = document.querySelector('#mcxSureshotUniverseResults');
   const status = document.querySelector('#setupStatus');
@@ -2488,7 +2489,7 @@ async function loadMcxSureshotUniverseShortlist() {
     if (status) status.textContent = 'Connect FYERS first. MCX scan requires a valid broker session and fresh MCX exchange ticks.';
     return;
   }
-  sureshotUniverseScanRunning = true;
+  mcxSureshotUniverseScanRunning = true;
   if (button) button.disabled = true;
   host.innerHTML = '<div class="chart-empty">Auditing every eligible official FYERS MCX future. Each contract needs its own fresh exchange timestamp; partial snapshots cannot create trade plans…</div>';
   const renderAudit = (audit, coverage) => {
@@ -2591,7 +2592,7 @@ async function loadMcxSureshotUniverseShortlist() {
     if (status) status.textContent = 'MCX scan blocked · no partial plans were displayed.';
     logEvent('MCX Sureshot scan blocked: ' + (error.message || 'unknown error'), 'warn');
   } finally {
-    sureshotUniverseScanRunning = false;
+    mcxSureshotUniverseScanRunning = false;
     if (button) button.disabled = false;
   }
 }

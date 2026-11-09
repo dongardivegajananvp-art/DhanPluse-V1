@@ -2259,7 +2259,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
   const mcxSessionOpen = () => getExchangeSessionWindows().MCX?.session === "SCHEDULED_OPEN";
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
   if (!mcxSessionOpen()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "MCX session is closed; actionable option plans are withheld." });
-  if (sureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Another Sureshot universe scan is already running." });
+  // NSE and MCX have independent session and scan locks; one exchange must not block the other.
   let scanId = String(req.query.scanId || "");
   let offset = Number(req.query.offset ?? 0);
   if (!Number.isInteger(offset) || offset < 0) {
