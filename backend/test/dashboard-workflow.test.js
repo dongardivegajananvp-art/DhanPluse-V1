@@ -35,6 +35,7 @@ test("Paper BUY opens Position only after the server accepts a paper ledger writ
   assert.ok(start >= 0 && end > start);
   const buy = html.slice(start, end);
   assert.match(buy, /window\.open\('about:blank', '_blank'\)/);
+  assert.doesNotMatch(buy, /window\\.confirm/);
   assert.match(buy, /\/api\/paper\/buy/);
   assert.match(buy, /searchParams\.set\('tab', 'Position'\)/);
   assert.doesNotMatch(buy, /\/api\/orders\//);
