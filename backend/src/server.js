@@ -1250,7 +1250,17 @@ app.get('/api/market/candles', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     return res.json({ ok: true, symbol, resolution, from: rangeFrom, to: rangeTo, fetchedAt: new Date().toISOString(), data: candles });
   } catch (error) {
-    return res.status(error.statusCode || 502).json({ ok: false, error: error.statusCode === 401 ? 'Connect FYERS to load historical candles.' : 'FYERS historical-candle request failed.', detail: String(error.message || 'Upstream request failed.').slice(0, 220) });
+    const status = Number(error.statusCode) || 502;
+    const retryAfterSeconds = status === 429
+      ? Math.max(1, Number(error.retryAfterSeconds) || fetchWithFyersBudget.getStatus().retryAfterSeconds || 1)
+      : 0;
+    if (retryAfterSeconds > 0) res.set('Retry-After', String(retryAfterSeconds));
+    return res.status(status).json({
+      ok: false,
+      error: status === 401 ? 'Connect FYERS to load historical candles.' : 'FYERS historical-candle request failed.',
+      detail: String(error.message || 'Upstream request failed.').slice(0, 220),
+      ...(retryAfterSeconds > 0 ? { retryAfterSeconds } : {})
+    });
   }
 });
 
