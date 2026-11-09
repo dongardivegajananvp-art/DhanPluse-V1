@@ -853,6 +853,16 @@ app.get('/api/status', (_req, res) => {
       };
     }),
     fyersDataApi: fetchWithFyersBudget.getStatus(),
+    dataSocketSubscriptionBudget: (() => {
+      const locallyTracked = new Set([...allowedSymbols, chartStreamSymbol, mcxDiagnosticInstrument?.symbol, ...paperSocketSymbols].filter(Boolean));
+      return {
+        locallyTrackedUniqueSymbols: locallyTracked.size,
+        paperPositionSymbols: paperSocketSymbols.size,
+        standardPlanLimit: 100,
+        withinLocalStandardLimit: locallyTracked.size <= 100,
+        scope: 'GV2VPD-owned socket symbols only; other FYERS apps/connections are not visible here'
+      };
+    })(),
     ...(streamError ? { marketDataMessage: streamError } : {}),
     orderPlacement: 'disabled',
     configCheck: { hasAppId: !!appId, hasSecret: !!appSecret, hasRedirect: !!redirectUri, redirectUri }
