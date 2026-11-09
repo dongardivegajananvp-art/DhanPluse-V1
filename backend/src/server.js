@@ -336,8 +336,8 @@ async function subscribeOpenPaperPositions(socket, { forceSubscribe = false } = 
       });
       for (const symbol of result.removed) latestTicks.delete(symbol);
       if (result.removed.length) {
-        console.log('FYERS closed Paper position symbols unsubscribed.', JSON.stringify({
-          removedCount: result.removed.length, activePaperPositionSymbols: paperSocketSymbols.size,
+        console.log('FYERS closed Paper position symbol unsubscribe requested.', JSON.stringify({
+          removedCount: result.removed.length, desiredPaperPositionSymbols: paperSocketSymbols.size,
           knownSocketSymbolCount: result.totalKnownSymbols
         }));
       }
@@ -857,7 +857,7 @@ app.get('/api/status', (_req, res) => {
       const locallyTracked = new Set([...allowedSymbols, chartStreamSymbol, mcxDiagnosticInstrument?.symbol, ...paperSocketSymbols].filter(Boolean));
       return {
         locallyTrackedUniqueSymbols: locallyTracked.size,
-        paperPositionSymbols: paperSocketSymbols.size,
+        desiredPaperPositionSymbols: paperSocketSymbols.size,
         standardPlanLimit: 100,
         withinLocalStandardLimit: locallyTracked.size <= 100,
         scope: 'GV2VPD-owned socket symbols only; other FYERS apps/connections are not visible here'
