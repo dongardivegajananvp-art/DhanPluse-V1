@@ -121,6 +121,10 @@ export function createPaperTradingStore({ databaseUrl }) {
         "SELECT COUNT(*)::int AS count FROM gv2vpd_paper_positions WHERE state='OPEN'"
       );
       if (open.rows[0].count >= 2) throw new Error('Maximum two open Paper positions allowed.');
+      const duplicateContract = await client.query(
+        "SELECT 1 FROM gv2vpd_paper_positions WHERE state='OPEN' AND symbol=$1 LIMIT 1", [v.symbol]
+      );
+      if (duplicateContract.rows.length) throw new Error('An open Paper position already exists for this option contract.');
       if (v.entry * v.quantity > 5000) throw new Error('Paper BUY blocked: premium outlay exceeds configured ₹5,000 test capital.');
       const id = crypto.randomUUID();
       const inserted = await client.query(
