@@ -70,3 +70,12 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - **Not yet integrated into Express routes or the Position UI.** No Paper BUY control is exposed until route-level authentication, verified candidate-to-plan binding, quote-stream fan-out, restart reconciliation and integration tests are completed.
 - The paper ledger is simulation-only and never calls a FYERS order endpoint. Existing `/api/orders/*` HTTP 403 protection remains unchanged.
 - No production deployment, Render restart, environment/database mutation, FYERS token change, or broker order was performed.
+
+
+## Production verification update — 2026-11-09
+
+- On PR head `2229af5a2165ec058af310285bbe14131fa69378`, GitHub Actions completed both validation workflows successfully. The full validation job's `Verify production backend health and CORS` step is **success**, and the backend regression job is **success**.
+- The production check confirms the original Render `/health` endpoint and configured CORS behavior were reachable from the GitHub Actions runner during this run. This supersedes the earlier 2026-11-08 in-progress/failure notes above.
+- The later Paper Mode foundation commit `03e73556bf53517e30ddaab817ba0dfee10fd1f1` has its own CI runs in progress; do not treat the earlier successful run as validation of that newer commit.
+- The Paper Mode PostgreSQL module is currently an isolated foundation only. It is not wired to authenticated routes, a server-owned verified-plan registry, the FYERS quote stream, or the Position UI. Its client-input validation is not sufficient authorization to create a trade. Do not expose Paper BUY until those gaps and race/restart tests are closed.
+- The existing Render service remains on Free and tracks `main`. No merge, PR deploy, Render restart, environment/database mutation, FYERS token change, or broker order was performed.
