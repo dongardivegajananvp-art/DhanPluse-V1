@@ -1,6 +1,6 @@
-# DhanPulse Ultimate · FYERS — Canonical Website
+# GV2VPD · FYERS — Canonical Website
 
-**There is one official DhanPulse website:** the original **DhanPulse Ultimate · FYERS** app. The separate clean-rebuild frontend is not the main app. Improvements from that work are being consolidated into this Ultimate codebase instead of maintaining two competing UIs.
+**There is one official GV2VPD website:** the original app at the existing DhanPluse-V1 `/site/` URL. The existing FYERS OAuth/session is preserved; there is no duplicate app or second SMS OTP login.
 
 ## Official links
 
@@ -13,7 +13,7 @@ Do not share the Clean Test UI or Ultimate Test UI as the official website. Test
 
 ## Canonical frontend
 
-The single frontend lives in `site/`. It retains the original Ultimate navigation and modules, including Gap-Up/Gap-Down. The separate `frontend/` clean-rebuild app is intentionally not included in the canonical site tree.
+The single frontend lives in `site/`. The current post-login workspace has exactly three tabs: **Home, Sureshot, Position**. The retired 24-tab navigation and separate `frontend/` clean-rebuild app are not part of the current production UI.
 
 ## Market-data rules
 
