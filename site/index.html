@@ -3149,7 +3149,7 @@ async function loadHomeAccountSnapshot() {
 
 async function submitPaperBuy(planId, button) {
   if (!planId || !button || button.disabled) return;
-  if (!window.confirm('Create a one-lot PAPER simulation using a fresh FYERS quote? No broker order will be sent.')) return;
+  // One tap starts a PAPER-only fill; the backend still revalidates the fresh FYERS quote before writing.
   const positionTab = window.open('about:blank', '_blank');
   button.disabled = true;
   const oldText = button.textContent;
