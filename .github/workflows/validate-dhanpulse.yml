@@ -54,6 +54,16 @@ jobs:
           grep -q 'BSE:SENSEX-INDEX' backend/src/server.js
           grep -q 'Order placement' site/index.html
           grep -q 'publish = "site"' netlify.toml
+      - name: GV2VPD PR preview desktop and mobile browser smoke
+        if: github.event_name == 'pull_request'
+        env:
+          GV2VPD_PREVIEW_URL: https://deploy-preview-${{ github.event.pull_request.number }}--spectacular-gaufre-b5c029.netlify.app/site/
+          PLAYWRIGHT_MODULE: /tmp/gv2vpd-playwright/node_modules/playwright
+        run: |
+          mkdir -p /tmp/gv2vpd-playwright
+          npm install --prefix /tmp/gv2vpd-playwright --no-audit --no-fund playwright
+          /tmp/gv2vpd-playwright/node_modules/.bin/playwright install --with-deps chromium
+          node scripts/check-gv2vpd-browser.cjs
       - name: Install backend dependencies
         working-directory: backend
         run: npm install --ignore-scripts --no-audit --no-fund
