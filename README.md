@@ -44,7 +44,7 @@ Automated syntax/unit checks are necessary but do not prove end-to-end behavior.
 1. Browser API destination and CORS response on the official UI.
 2. Exactly three tabs render: Home, Sureshot, and Position. The existing FYERS OAuth/session flow remains the connection gate; no second OTP login is added. All three tabs must pass desktop and Android-sized browser smoke tests without console errors.
 3. NIFTY, BANK NIFTY, SENSEX and F&O last-known LTPs show only when FYERS returns valid exchange-timestamped prices.
-4. Full eligible NSE F&O quote universe is ranked from a complete fresh snapshot; the current Sureshot option-level verification is bounded to the top five ranked candidates to respect FYERS' shared Data API budget. Underlying/option OHLC, contract descriptors, selected-option quotes, and risk plans must fail closed on missing, stale, partial or rate-limited data.
+4. Full eligible NSE F&O quote universe plus individually fresh NIFTY/BANKNIFTY/SENSEX ticks is ranked from a complete fresh snapshot. Every ranked candidate is option-verified sequentially in five-item batches under the shared FYERS Data API budget; the best three verified setups receive Paper Mode plan IDs. Missing/stale/partial/rate-limited data blocks that candidate or the incomplete scan.
 5. FYERS OAuth callback and WebSocket reconnect/fresh-tick recovery in a regular market session.
 6. Mobile/PWA refreshes to the current frontend without stale cached JavaScript.
 
