@@ -2867,14 +2867,21 @@ app.post('/api/paper/buy', async (req, res) => {
       paperSocketSymbols.delete(snapshot.symbol);
       return res.status(503).json({ ok: false, error: 'FYERS option WebSocket subscription failed; Paper BUY blocked.' });
     }
-    const result = await paperStore.createPaperBuy({
-      idempotencyKey,
-      source: 'FYERS_VERIFIED',
-      exchangeTimestamp: new Date(quoteTime * 1000).toISOString(),
-      symbol: snapshot.symbol, side: snapshot.side, expiry: snapshot.expiry, strike: snapshot.strike,
-      plan: { entryPrice: risk.entryPrice, stopLoss: risk.stopLoss, target1: risk.target1,
-        target2: risk.target2, quantity: risk.quantity, lotSize: risk.lotSize }
-    });
+    let result;
+    try {
+      result = await paperStore.createPaperBuy({
+        idempotencyKey,
+        source: 'FYERS_VERIFIED',
+        exchangeTimestamp: new Date(quoteTime * 1000).toISOString(),
+        symbol: snapshot.symbol, side: snapshot.side, expiry: snapshot.expiry, strike: snapshot.strike,
+        plan: { entryPrice: risk.entryPrice, stopLoss: risk.stopLoss, target1: risk.target1,
+          target2: risk.target2, quantity: risk.quantity, lotSize: risk.lotSize }
+      });
+    } catch (error) {
+      const open = await paperStore.listOpenPositions().catch(() => []);
+      if (!open.some(position => position.symbol === snapshot.symbol)) paperSocketSymbols.delete(snapshot.symbol);
+      throw error;
+    }
     // Keep the short-lived plan until TTL so a retry returns the same idempotent ledger row.
     return res.status(result.created ? 201 : 200).json({
       ok: true, created: result.created, mode: 'PAPER_SIMULATION', position: result.position,
