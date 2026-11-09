@@ -2910,7 +2910,9 @@ app.post('/api/paper/positions/:id/exit', async (req, res) => {
       price: ltp, exchangeTimestamp: new Date(quoteTime * 1000).toISOString(), source: 'FYERS_VERIFIED' });
     return res.json({ ok: true, mode: 'PAPER_SIMULATION', position: closed, orderPlacement: 'disabled' });
   } catch (error) {
-    return res.status(409).json({ ok: false, error: String(error.message || 'Manual Paper Exit failed.').slice(0, 180) });
+    const status = Number(error.statusCode) || 409;
+    if (status === 429 && error.retryAfterSeconds) res.set('Retry-After', String(error.retryAfterSeconds));
+    return res.status(status).json({ ok: false, error: String(error.message || 'Manual Paper Exit failed.').slice(0, 180) });
   }
 });
 
