@@ -2148,12 +2148,45 @@ async function loadMcxSureshotUniverseShortlist() {
       '<p class="hint">Underlying completed candle: ' + escapeHtml(plan.underlying.latestCandleAt || '—') + '</p></article>';
   };
   try {
-    const response = await fetch(BACKEND_URL + '/api/market/mcx-sureshot-auto-plans', {
-      headers: { Accept: 'application/json' }, cache: 'no-store'
-    });
-    const result = await response.json().catch(() => ({}));
+    let scanId = '';
+    let offset = 0;
+    let result = {};
+    let responseOk = false;
+    let attempts = 0;
+    while (attempts++ < 100) {
+      const url = new URL(BACKEND_URL + '/api/market/mcx-sureshot-auto-plans');
+      if (scanId) { url.searchParams.set('scanId', scanId); url.searchParams.set('offset', String(offset)); }
+      const response = await fetch(url.toString(), { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 429 && payload.scanPaused === true && payload.scanId) {
+        scanId = payload.scanId;
+        offset = Number(payload.nextOffset) || 0;
+        const waitSeconds = Math.max(5, Number(payload.retryAfterSeconds) || 30);
+        host.innerHTML = '<div class="chart-empty">MCX full-universe scan paused by FYERS cooldown. Cursor preserved at ' +
+          Number(payload.scannedCandidateCount || 0) + ' / ' + Number(payload.totalCandidateCount || 0) +
+          ' futures. Safe resume in about ' + waitSeconds + ' seconds…</div>';
+        if (status) status.textContent = 'FYERS cooldown · MCX scan cursor retained; automatic safe resume pending.';
+        await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+        continue;
+      }
+      if (response.ok && payload.ok === true && payload.scanComplete === false && payload.scanId &&
+          Number.isFinite(Number(payload.nextOffset))) {
+        scanId = payload.scanId;
+        offset = Number(payload.nextOffset);
+        host.innerHTML = '<div class="chart-empty">MCX full-universe verification in progress: ' +
+          Number(payload.scannedCandidateCount || 0) + ' / ' + Number(payload.totalCandidateCount || 0) +
+          ' eligible futures checked. Each batch is verified sequentially; partial setups are not published…</div>';
+        if (status) status.textContent = 'MCX full-universe scan in progress · ' +
+          Number(payload.scannedCandidateCount || 0) + ' / ' + Number(payload.totalCandidateCount || 0) + ' candidates checked.';
+        continue;
+      }
+      result = payload;
+      responseOk = response.ok;
+      break;
+    }
+    if (attempts > 100) throw new Error('MCX scan exceeded its safe resume limit. No partial plans were published.');
     const auditMarkup = renderAudit(result.fullUniverseAudit, result.quoteCoverage);
-    if (!response.ok || result.ok !== true || result.scanComplete !== true || result.orderPlacement !== 'disabled' || !Array.isArray(result.results)) {
+    if (!responseOk || result.ok !== true || result.scanComplete !== true || result.orderPlacement !== 'disabled' || !Array.isArray(result.results)) {
       host.innerHTML = '<div class="chart-empty"><b>MCX NO TRADE — full-universe scan blocked.</b><p>' +
         escapeHtml([result.stage, result.error, result.detail].filter(Boolean).join(' · ') || 'Full MCX quote verification incomplete.') +
         '</p><p>Partial plans are discarded. Audit findings remain visible; no candidate is promoted from incomplete data.</p></div>' + auditMarkup;
