@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const server = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
 const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8");
+const indexHtml = await readFile(new URL("../../site/index.html", import.meta.url), "utf8");
 const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
 
 test("Sureshot backend verifies every eligible F&O and individually fresh index candidate in five-item batches", () => {
@@ -27,6 +28,9 @@ test("Sureshot backend verifies every eligible F&O and individually fresh index 
   assert.match(app, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
   assert.match(app, /TOP 3 VERIFIED SETUPS/);
   assert.match(app, /FULL UNIVERSE AUDIT RESULTS/);
+  assert.match(indexHtml, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
+  assert.match(indexHtml, /TOP 3 VERIFIED SETUPS/);
+  assert.match(indexHtml, /Scan Full F&O \+ Fresh Indices/);
 });
 
 test("each selected candidate must pass underlying history, contract, live option quote, option candles and risk validation", () => {
