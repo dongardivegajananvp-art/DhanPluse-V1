@@ -24,6 +24,12 @@ test("Sureshot backend verifies every eligible F&O and individually fresh index 
   assert.match(route, /state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /rankedCandidateCount: ranked\.candidateCount/);
   assert.match(route, /topThreeSetups = verified\.slice\(0, 3\)/);
+  assert.match(route, /initiallyVerified: true/);
+  assert.match(route, /FINAL_REVALIDATE_UNDERLYING/);
+  assert.match(route, /FINAL_REVALIDATE_OPTION_QUOTES/);
+  assert.match(route, /FINAL_REVALIDATE_OPTION_CANDLES/);
+  assert.match(route, /item\.finalVerifiedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(route, /initiallyVerifiedCandidateCount/);
   assert.match(route, /ALL_ELIGIBLE_CANDIDATES_CHECKED/);
   assert.match(app, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
   assert.match(app, /TOP 3 VERIFIED SETUPS/);
