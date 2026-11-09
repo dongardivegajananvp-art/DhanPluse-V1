@@ -41,6 +41,14 @@ const asNumber = value => {
 };
 const isoDate = value => new Date(value).toISOString().slice(0, 10);
 
+export function isNewerExchangeTimestamp(nextTimestamp, previousTimestamp) {
+  const next = Date.parse(nextTimestamp || '');
+  if (!Number.isFinite(next)) return false;
+  if (previousTimestamp == null || previousTimestamp === '') return true;
+  const previous = Date.parse(previousTimestamp);
+  return Number.isFinite(previous) && next > previous;
+}
+
 export function validatePaperPlan(input, now = Date.now()) {
   const plan = input?.plan;
   const entry = asNumber(plan?.entryPrice);
@@ -161,10 +169,8 @@ export function createPaperTradingStore({ databaseUrl }) {
       for (const row of result.rows) {
         const entry = Number(row.entry_price), sl = Number(row.stop_loss);
         const t1 = Number(row.target1), t2 = Number(row.target2), qty = Number(row.quantity);
-        const lastQuoteAt = Date.parse(row.last_quote_timestamp || row.source_timestamp);
-        if (Number.isFinite(lastQuoteAt) && timestamp * 1 > lastQuoteAt) {
+        if (!isNewerExchangeTimestamp(exchangeTimestamp, row.last_quote_timestamp || row.source_timestamp)) {
           // Only strictly newer exchange ticks may advance a paper position.
-        } else {
           continue;
         }
         let state = 'OPEN', exitReason = null, exitPrice = null, t1At = row.target1_touched_at;
