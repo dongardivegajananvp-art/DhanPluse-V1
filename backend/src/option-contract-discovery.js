@@ -31,13 +31,11 @@ export function normalizeOptionContractDiscovery(payload) {
       strike_price: strike,
       option_type: optionType,
       expiry: String(expiry),
-      ...(Number.isFinite(Number(row.greeks?.delta)) ? { delta: Number(row.greeks.delta) } : {})
     };
   }).filter(Boolean);
 
   if (optionsChain.length === 0) throw new Error("no_valid_option_contract_descriptors");
-  // Deliberately omit LTP, bid/ask, OI and volume: FYERS does not document
-  // an exchange timestamp for this chain response, so those values cannot
-  // be used for liquidity ranking or signal generation.
+  // Keep only contract identity, strike, side and expiry. Greeks, premium,
+  // bid/ask, OI and volume from this response are not used for selection.
   return { expiryData, optionsChain };
 }
