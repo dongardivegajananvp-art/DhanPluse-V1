@@ -181,13 +181,24 @@ export function createPaperTradingStore({ databaseUrl }) {
         !Number.isFinite(timestamp) || timestamp > now + 5000 || now - timestamp > 10_000) {
       throw new Error('Manual exit requires a fresh verified FYERS quote.');
     }
-    const result = await pool.query(
-      `UPDATE gv2vpd_paper_positions SET state='CLOSED',last_price=$2,exit_price=$2,
-       exit_reason='MANUAL_EXIT',realized_pnl=($2-entry_price)*quantity,updated_at=NOW()
-       WHERE id=$1 AND state='OPEN' RETURNING *`, [id,ltp]
-    );
-    if (!result.rows[0]) throw new Error('Paper position is not open or was already exited.');
-    return result.rows[0];
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(716202611)');
+      const result = await client.query(
+        `UPDATE gv2vpd_paper_positions SET state='CLOSED',last_price=$2,exit_price=$2,
+         exit_reason='MANUAL_EXIT',realized_pnl=($2-entry_price)*quantity,updated_at=NOW()
+         WHERE id=$1 AND state='OPEN' RETURNING *`, [id,ltp]
+      );
+      if (!result.rows[0]) throw new Error('Paper position is not open or was already exited.');
+      await client.query('COMMIT');
+      return result.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async function close() { if (pool) await pool.end(); }
