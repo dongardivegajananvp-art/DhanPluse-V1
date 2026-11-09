@@ -688,6 +688,8 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
     connection = 'FYERS login required';
   }
   setStatus(label);
+  updateExchangeLiveSwitches(status);
+  updateMcxConnectionDiagnostics(status);
   updateSureshotExchangeCards(status);
   const cooldown = restCooldown || Boolean(status && status.fyersDataApi && status.fyersDataApi.cooldownActive);
   setConnection(connection + (cooldown ? ' · REST cooldown' : ''), nseClosed ? !mcxLive : nseFeed !== 'LIVE');
@@ -1471,6 +1473,9 @@ function dashboardMarkup() {
     : 'NIFTY 50, BANK NIFTY and SENSEX are listed now; connect FYERS to load the complete NSE F&O chart universe.';
   return '<article class="console-section" id="homeAccountSnapshot"><div class="console-section-head"><div><h4>FYERS account snapshot</h4><p id="homeAccountStatus">Waiting for verified account response…</p></div><button type="button" class="secondary" id="homeAccountRefresh">Refresh account</button></div><div class="console-grid console-grid-2"><div class="console-card"><div class="console-card-head">AVAILABLE BALANCE</div><strong class="console-price" id="homeAvailableBalance">—</strong><span class="quote-time">FYERS capital ledger</span></div><div class="console-card"><div class="console-card-head">UTILIZED MARGIN</div><strong class="console-price" id="homeUsedMargin">—</strong><span class="quote-time">FYERS capital ledger</span></div><div class="console-card"><div class="console-card-head">REALISED P&amp;L</div><strong class="console-price" id="homeRealisedPnl">—</strong><span class="quote-time">FYERS funds ledger</span></div><div class="console-card"><div class="console-card-head">UNREALISED P&amp;L</div><strong class="console-price" id="homeUnrealisedPnl">—</strong><span class="quote-time">FYERS open positions</span></div></div><p class="hint">Read-only FYERS account data. Values remain blank when the broker does not return the required field.</p></article>' +
     '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
+    '<article class="console-section" id="dashboardMcxStatus"><div class="console-section-head"><div><h4>MCX live feed</h4><p>FYERS official MCX_COM future · independently verified from NSE</p></div><span class="live-tag" id="dashboardMcxFeed">WAITING</span></div>' +
+    '<div class="console-grid console-grid-2"><div class="data-row"><span>MCX market session</span><b id="dashboardMcxSession">CHECKING</b></div><div class="data-row"><span>Official MCX contract</span><b id="dashboardMcxSymbol">Resolving FYERS master…</b></div><div class="data-row"><span>Verified LTP</span><b id="dashboardMcxLtp">—</b></div><div class="data-row"><span>Exchange timestamp</span><b id="dashboardMcxTime">Waiting for exchange tick</b></div></div>' +
+    '<p class="hint" id="dashboardMcxDetail">MCX status is independent from NSE. LIVE appears only after a fresh exchange-timestamped FYERS MCX tick; otherwise the feed remains blocked.</p></article>' +
     '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
     '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol">' + chartSymbolOptions + '</select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
     '<div id="dashboardCandleStatus" class="hint">Choose a symbol and load verified historical candles. ' + escapeHtml(chartUniverseNote) + '</div><div id="dashboardChart"><div class="chart-empty">Candlesticks have not been loaded yet.</div></div>' +
@@ -2777,6 +2782,8 @@ function updateExchangeLiveSwitches(status) {
   set('#settingsNseLiveFeed', feedLabel(nse));
   set('#settingsMcxSession', sessionLabel(mcx));
   set('#settingsMcxLiveFeed', feedLabel(mcx));
+  set('#dashboardMcxSession', sessionLabel(mcx));
+  set('#dashboardMcxFeed', feedLabel(mcx));
   updateSureshotExchangeCards(status);
   const note = document.querySelector('#settingsExchangeStatusNote');
   if (note) {
@@ -2789,27 +2796,28 @@ function updateExchangeLiveSwitches(status) {
 
 function updateMcxConnectionDiagnostics(status) {
   const diagnostic = status && status.mcxDiagnostic ? status.mcxDiagnostic : {};
-  const feed = document.querySelector('#settingsMcxFeed');
-  const symbol = document.querySelector('#settingsMcxSymbol');
-  const ltp = document.querySelector('#settingsMcxLtp');
-  const time = document.querySelector('#settingsMcxTime');
-  const detail = document.querySelector('#settingsMcxDetail');
-  if (!feed || !symbol || !ltp || !time || !detail) return;
   const state = String(diagnostic.status || 'STATUS_UNAVAILABLE');
-  feed.textContent = state === 'FRESH' ? 'LIVE · FRESH TICK' : state.replace(/_/g, ' ');
-  symbol.textContent = diagnostic.symbol || (state === 'MASTER_UNAVAILABLE'
+  const feedText = state === 'FRESH' ? 'LIVE · FRESH TICK' : state.replace(/_/g, ' ');
+  const symbolText = diagnostic.symbol || (state === 'MASTER_UNAVAILABLE'
     ? 'FYERS MCX master unavailable'
     : state === 'NO_ACTIVE_FUTURE' ? 'No active diagnostic future' : 'Resolving official MCX contract…');
-  ltp.textContent = Number.isFinite(Number(diagnostic.ltp)) && Number(diagnostic.ltp) > 0
+  const ltpText = Number.isFinite(Number(diagnostic.ltp)) && Number(diagnostic.ltp) > 0
     ? '₹' + formatPrice(Number(diagnostic.ltp)) + (diagnostic.freshness === 'FRESH' ? '' : ' · STALE')
     : '—';
-  time.textContent = diagnostic.exchangeTimestamp
+  const timeText = diagnostic.exchangeTimestamp
     ? new Date(diagnostic.exchangeTimestamp).toLocaleString('en-IN')
     : 'Waiting for exchange tick';
   const age = diagnostic.ageSeconds != null && Number.isFinite(Number(diagnostic.ageSeconds)) ? ' · age ' + diagnostic.ageSeconds + 's' : '';
-  detail.textContent = (diagnostic.note || 'MCX is diagnostic only; no signal or order is generated.') +
+  const detailText = (diagnostic.note || 'MCX is diagnostic only; no signal or order is generated.') +
     (diagnostic.expiryDate ? ' Contract expiry: ' + diagnostic.expiryDate + '.' : '') +
     (diagnostic.subscribedOnCurrentSocket ? ' Subscribed on the existing socket.' : '') + age;
+  [['#settingsMcxFeed', feedText], ['#settingsMcxSymbol', symbolText], ['#settingsMcxLtp', ltpText],
+    ['#settingsMcxTime', timeText], ['#settingsMcxDetail', detailText],
+    ['#dashboardMcxFeed', feedText], ['#dashboardMcxSymbol', symbolText], ['#dashboardMcxLtp', ltpText],
+    ['#dashboardMcxTime', timeText], ['#dashboardMcxDetail', detailText]].forEach(([selector, value]) => {
+      const element = document.querySelector(selector);
+      if (element) element.textContent = value;
+    });
 }
 
 async function refreshConnectionDiagnostics() {
