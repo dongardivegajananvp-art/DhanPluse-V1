@@ -67,7 +67,11 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 
 - Added `backend/src/paper-trading-store.js`, a PostgreSQL-backed durable ledger foundation with idempotency keys, transaction/advisory locking, maximum-two-open-position enforcement, ₹5,000 daily loss lock, fresh exchange-timestamp validation, fixed immutable entry/SL/T1/T2, paper SL/T2 quote processing, T1 milestone recording, and confirmed manual exit.
 - Added regression tests for stale/future/missing exchange timestamps, non-FYERS sources, contract identity, risk/reward, and lot quantity.
-- **Not yet integrated into Express routes or the Position UI.** No Paper BUY control is exposed until route-level authentication, verified candidate-to-plan binding, quote-stream fan-out, restart reconciliation and integration tests are completed.
+- Integrated authenticated `/api/paper/positions`, `/api/paper/buy`, and manual-exit routes behind the existing Dashboard Session middleware. The Sureshot final response now issues a 30-second opaque Plan ID bound to the current Dashboard Session; the client cannot submit its own contract, strike, expiry, entry or risk values as authority.
+- Paper BUY rechecks the FYERS official lot/tick metadata and fetches a fresh option quote server-side; it requires an exchange timestamp no older than 10 seconds, ask premium ₹30–₹150, the fixed tick-rounded SL/T1/T2 model and T2 reward/risk >=1:2. It also enforces the existing 09:15–15:15 window, idempotency, max-two-open limit, ₹5,000 daily loss lock and ₹5,000 one-lot outlay cap.
+- FYERS WebSocket quote frames are fanned out only for server-known open Paper Mode option symbols. Active paper contracts are re-subscribed after socket reconnect/startup; verified fresh ticks update last price and process SL/T2 exits. T1 is recorded as a milestone (no fractional-lot exit is fabricated). Manual Exit fetches a fresh FYERS quote and requires explicit confirmation.
+- Position UI now separates actual FYERS broker positions from the PostgreSQL Paper Mode ledger, with Paper BUY available only from a verified Best Setup response that contains a short-lived Plan ID. Paper rows are labelled simulation-only.
+- Added unit tests for the opaque plan registry: session ownership, immutability, TTL expiry and one-time consumption. Route/database integration tests, restart/exit race tests and browser UI tests are still required; Paper Mode is not yet approved for production use.
 - The paper ledger is simulation-only and never calls a FYERS order endpoint. Existing `/api/orders/*` HTTP 403 protection remains unchanged.
 - No production deployment, Render restart, environment/database mutation, FYERS token change, or broker order was performed.
 
@@ -88,3 +92,10 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - Latest head `316af1f7e92928525bed5fcf40cb1ef41d2f82c7`: backend regression workflow **success**; full validation workflow **success**, including production `/health` and CORS verification.
 - Paper Mode remains foundation-only and inactive: no authenticated paper routes, no server-owned plan registry/opaque plan ID, no server-side re-quote on BUY, no quote-stream fan-out, and no Position UI controls. The module's input validation is not a substitute for route-level authorization. Do not enable BUY until those items and DB integration/restart tests pass.
 - PR remains Draft/unmerged. No Render deploy/restart, production database initialization/migration, token change, or broker order was performed.
+
+
+## Paper Mode integration update — 2026-11-09
+
+- The current implementation branch now contains server-owned short-lived verified plan IDs, Dashboard Session-bound Paper Mode routes, fresh FYERS quote/metadata revalidation at BUY, PostgreSQL ledger integration, FYERS socket subscription/fan-out for open paper contracts, and a separate Position UI ledger.
+- This remains an unmerged proposal. Do not infer production activation from the branch code or CI. Production database initialization, route authorization/integration coverage, automatic exit/restart reconciliation under real PostgreSQL, and UI/browser testing must be verified before any merge/deploy.
+- Live `/api/orders/*` remains HTTP 403. Paper Mode never calls FYERS order endpoints. Existing FYERS OAuth and Dashboard Session login remain unchanged.
