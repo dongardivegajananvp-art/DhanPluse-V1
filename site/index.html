@@ -2172,7 +2172,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
     host.innerHTML = renderMoverBoards(result) + '<div class="console-section-head"><div><h4>' +
       'Full F&O + fresh-index universe checked' +
       '</h4><p>' + Number(result.scannedCandidateCount) + ' / ' + Number(result.selectedCandidateCount) +
-      ' candidates checked · ' + Number(result.rankedEquityCount) + ' F&O equities + ' + Math.max(0, Number(result.rankedCandidateCount) - Number(result.rankedEquityCount)) + ' fresh indices ranked · ' + Number(result.verifiedSetupCount) + ' verified plan(s) · read-only</p></div><span class="' +
+      ' candidates checked · ' + Number(result.rankedEquityCount) + ' F&O equities + ' + Math.max(0, Number(result.rankedCandidateCount) - Number(result.rankedEquityCount)) + ' fresh indices ranked · ' + Number(result.initiallyVerifiedCandidateCount) + ' initial passes · ' + Number(result.verifiedSetupCount) + ' final-fresh verified plan(s) · read-only</p></div><span class="' +
       (verified.length ? 'live-tag' : 'signal-tone neutral') + '">' + (verified.length ? 'RISK VERIFIED' : 'NO TRADE') + '</span></div>' +
       (best ? '<article class="console-section"><div class="console-section-head"><h4>#1 BEST VERIFIED SETUP</h4><span class="signal-tone positive">' +
         escapeHtml(best.plan.direction) + '</span></div><strong class="console-price">₹' + formatPrice(best.plan.risk.entryPrice) +
