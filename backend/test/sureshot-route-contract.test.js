@@ -37,6 +37,10 @@ test("Sureshot backend verifies every eligible F&O and individually fresh index 
   assert.match(indexHtml, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
   assert.match(indexHtml, /TOP 3 VERIFIED SETUPS/);
   assert.match(indexHtml, /Scan Full F&O \+ Fresh Indices/);
+  assert.match(app, /row\.finalVerifiedAt/);
+  assert.match(indexHtml, /row\.finalVerifiedAt/);
+  assert.match(app, /quoteAgeSeconds\) > 15/);
+  assert.match(indexHtml, /quoteAgeSeconds\) > 15/);
 });
 
 test("each selected candidate must pass underlying history, contract, live option quote, option candles and risk validation", () => {
