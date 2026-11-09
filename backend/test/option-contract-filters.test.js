@@ -1,0 +1,83 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { normalizeOptionContractDiscovery } from "../src/option-contract-discovery.js";
+import { selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from "../src/sureshot-auto-plans.js";
+
+const now = Date.parse("2026-11-02T07:00:00.000Z");
+const expiry = "1795651200";
+
+test("preserves only the official nested FYERS Greek delta for contract filtering", () => {
+  const result = normalizeOptionContractDiscovery({
+    expiryData: [{ expiry, date: "2026-11-26" }],
+    optionsChain: [{ symbol: "NSE:ABC26NOV105CE", strike_price: 105, option_type: "CE", expiry, greeks: { delta: 0.44 }, ltp: 77, oi: 1000, volume: 900 }]
+  });
+  assert.equal(result.optionsChain[0].delta, 0.44);
+  assert.equal("ltp" in result.optionsChain[0], false);
+  assert.equal("oi" in result.optionsChain[0], false);
+  assert.equal("volume" in result.optionsChain[0], false);
+});
+
+test("selects exactly one listed OTM strike and requires verified absolute delta 0.35–0.55", () => {
+  const expiryData = [{ expiry, date: "2026-11-26" }];
+  const rows = [
+    [90, "CE", 0.68], [95, "CE", 0.60], [100, "CE", 0.52], [105, "CE", 0.44], [110, "CE", 0.34],
+    [90, "PE", -0.34], [95, "PE", -0.44], [100, "PE", -0.52], [105, "PE", -0.60], [110, "PE", -0.68]
+  ].map(([strike, side, delta]) => ({
+    symbol: "NSE:ABC26NOV" + strike + side, strike_price: strike, option_type: side, expiry, delta
+  }));
+  const discovery = { expiryData, optionsChain: rows };
+  const call = selectNearestVerifiedOptionContract({
+    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 100, now,
+    requireDelta: true, strikeMode: "one-otm"
+  });
+  const put = selectNearestVerifiedOptionContract({
+    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "PE", spot: 100, now,
+    requireDelta: true, strikeMode: "one-otm"
+  });
+  assert.equal(call.ok, true);
+  assert.equal(call.contract.strike, 105);
+  assert.equal(call.contract.delta, 0.44);
+  assert.equal(put.ok, true);
+  assert.equal(put.contract.strike, 95);
+  assert.equal(put.contract.delta, -0.44);
+});
+
+test("does not fall back to ATM or estimated delta when the exact OTM contract fails the delta gate", () => {
+  const discovery = {
+    expiryData: [{ expiry, date: "2026-11-26" }],
+    optionsChain: [
+      { symbol: "NSE:ABC26NOV100CE", strike_price: 100, option_type: "CE", expiry, delta: 0.5 },
+      { symbol: "NSE:ABC26NOV105CE", strike_price: 105, option_type: "CE", expiry }
+    ]
+  };
+  const result = selectNearestVerifiedOptionContract({
+    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 100, now,
+    requireDelta: true, strikeMode: "one-otm"
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /exact ATM \+ 1 OTM/i);
+});
+
+test("blocks premiums outside ₹30–₹150 when the fixed risk model is active", () => {
+  const direction = {
+    ok: true, side: "CE", spot: 104,
+    latestCandleAt: new Date(now - 300000).toISOString(),
+    candleAgeSeconds: 0, completedCandleCount: 15
+  };
+  const contract = { symbol: "NSE:ABC26NOV105CE", strike: 105, side: "CE", expiry };
+  const candles = Array.from({ length: 12 }, (_, index) => [
+    Math.floor((now - (12 - index) * 5 * 60_000) / 1000), 100, 101, 99, 100, 1000
+  ]);
+  const base = { underlyingSymbol: "NSE:ABC-EQ", direction, contract, optionCandles: candles,
+    lotSize: 25, tickSize: 0.05, riskModel: "fixed", requirePremiumRange: true, now };
+  const low = buildVerifiedSureshotTradePlan({ ...base, quote: { bid: 29.9, ask: 29.95, lp: 29.9, tt: Math.floor((now - 1000) / 1000) } });
+  const high = buildVerifiedSureshotTradePlan({ ...base, quote: { bid: 150, ask: 150.05, lp: 150, tt: Math.floor((now - 1000) / 1000) } });
+  const valid = buildVerifiedSureshotTradePlan({ ...base, quote: { bid: 99.95, ask: 100, lp: 100, tt: Math.floor((now - 1000) / 1000) } });
+  assert.equal(low.ok, false);
+  assert.match(low.reason, /premium/i);
+  assert.equal(high.ok, false);
+  assert.equal(valid.ok, true);
+  assert.equal(valid.risk.stopLoss, 70);
+  assert.equal(valid.risk.target1, 150);
+  assert.equal(valid.risk.target2, 250);
+});

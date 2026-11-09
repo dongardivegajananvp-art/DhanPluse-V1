@@ -35,6 +35,8 @@ jobs:
           node --check scripts/check-oauth-offline.mjs
           node --check scripts/check-deployed-cors.mjs
           node --check site/sw.js
+          echo "Checking embedded JavaScript in the original /site/ app shell."
+          node scripts/check-inline-scripts.mjs
       - name: Validate PWA manifest and required assets
         run: |
           node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('./site/manifest.webmanifest','utf8')); if(!m.name || !m.start_url || !m.icons?.length) process.exit(1); console.log('PWA manifest valid')"
@@ -52,6 +54,16 @@ jobs:
           grep -q 'BSE:SENSEX-INDEX' backend/src/server.js
           grep -q 'Order placement' site/index.html
           grep -q 'publish = "site"' netlify.toml
+      - name: GV2VPD PR preview desktop and mobile browser smoke
+        if: github.event_name == 'pull_request'
+        env:
+          GV2VPD_PREVIEW_URL: https://deploy-preview-${{ github.event.pull_request.number }}--spectacular-gaufre-b5c029.netlify.app/site/
+          PLAYWRIGHT_MODULE: /tmp/gv2vpd-playwright/node_modules/playwright
+        run: |
+          mkdir -p /tmp/gv2vpd-playwright
+          npm install --prefix /tmp/gv2vpd-playwright --no-audit --no-fund playwright
+          /tmp/gv2vpd-playwright/node_modules/.bin/playwright install --with-deps chromium
+          node scripts/check-gv2vpd-browser.cjs
       - name: Install backend dependencies
         working-directory: backend
         run: npm install --ignore-scripts --no-audit --no-fund

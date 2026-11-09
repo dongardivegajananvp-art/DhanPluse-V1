@@ -1,4 +1,6 @@
 import { buildOptionRiskPlan } from "./option-risk-plan.js";
+import { buildFixedOptionRiskPlan, validateCompletedOptionCandles } from "./fixed-option-risk-plan.js";
+import { validateSureshotTrend } from "./sureshot-trend-validation.js";
 
 function epochSeconds(value) {
   if (typeof value === "number" || (typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value))) {
@@ -25,7 +27,7 @@ function expiryTime(value) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now = Date.now()) {
+export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now = Date.now(), { strictTrend = false } = {}) {
   const minutes = Number(resolution);
   if (![5, 15, 30, 60].includes(minutes) || !Array.isArray(candles)) {
     return { ok: false, reason: "Unsupported or missing underlying candles." };
@@ -72,16 +74,25 @@ export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now
     side = "PE";
     reason = "Latest completed FYERS candle closed below the demand zone and prior close.";
   }
+  let trend = null;
+  if (strictTrend) {
+    trend = validateSureshotTrend({ candles, resolution: "5", now, minAdx: 20, minVolumeRatio: 1.5, minTrendScore: 70 });
+    if (!trend.ok) return { ok: false, reason: trend.reason };
+    side = trend.side;
+    reason = "Verified " + side + " trend: ADX, EMA(20), session VWAP, same-time five-session volume and Trend Score gates passed.";
+  }
   return {
     ok: true, side, reason, spot: latest.close,
     latestCandleAt: new Date(latest.time * 1000).toISOString(),
     candleAgeSeconds: Number((ageMs / 1000).toFixed(1)),
-    completedCandleCount: valid.length, supply, demand
+    completedCandleCount: valid.length, supply, demand,
+    ...(trend ? { trendScore: trend.trendScore, trendMetrics: trend } : {})
   };
 }
 
 export function selectNearestVerifiedOptionContract({
-  discovery, underlyingSymbol, side, spot, now = Date.now()
+  discovery, underlyingSymbol, side, spot, now = Date.now(),
+  requireDelta = false, deltaMin = 0.35, deltaMax = 0.55, strikeMode = "nearest"
 }) {
   if (!discovery || !Array.isArray(discovery.expiryData) ||
       !Array.isArray(discovery.optionsChain) || !["CE", "PE"].includes(side) ||
@@ -96,14 +107,38 @@ export function selectNearestVerifiedOptionContract({
     .sort((a, b) => a.expiryMs - b.expiryMs);
   if (!expiries.length) return { ok: false, reason: "No current or future listed expiry was returned by FYERS." };
   const expiry = expiries[0];
-  const eligible = discovery.optionsChain.filter(row =>
+  let eligible = discovery.optionsChain.filter(row =>
     String(row.symbol || "").startsWith(exchange + ":") &&
     row.option_type === side && String(row.expiry) === expiry.expiry &&
     Number.isFinite(Number(row.strike_price)) && Number(row.strike_price) > 0
   );
-  if (!eligible.length) return { ok: false, reason: "No matching " + side + " contract exists for the nearest listed expiry on this exchange." };
-  eligible.sort((a, b) => Math.abs(Number(a.strike_price) - spot) - Math.abs(Number(b.strike_price) - spot));
-  const chosen = eligible[0];
+  if (requireDelta) {
+    eligible = eligible.filter(row => Number.isFinite(Number(row.delta)) &&
+      Math.abs(Number(row.delta)) >= deltaMin && Math.abs(Number(row.delta)) <= deltaMax);
+  }
+  if (!eligible.length) return { ok: false, reason: requireDelta
+    ? "No " + side + " contract has a verified FYERS delta inside the configured range for the nearest expiry."
+    : "No matching " + side + " contract exists for the nearest listed expiry on this exchange." };
+  let chosen;
+  if (strikeMode === "one-otm") {
+    const strikes = [...new Set(discovery.optionsChain
+      .filter(row => String(row.symbol || "").startsWith(exchange + ":") && String(row.expiry) === expiry.expiry &&
+        Number.isFinite(Number(row.strike_price)) && Number(row.strike_price) > 0)
+      .map(row => Number(row.strike_price)))].sort((a, b) => a - b);
+    const atm = strikes.reduce((best, strike) =>
+      Math.abs(strike - Number(spot)) < Math.abs(best - Number(spot)) ? strike : best, strikes[0]);
+    const steps = strikes.slice(1).map((strike, index) => strike - strikes[index]).filter(step => step > 0);
+    const step = Math.min(...steps);
+    if (!Number.isFinite(step)) return { ok: false, reason: "Listed strike interval is unavailable for ATM + 1 OTM selection." };
+    const targetStrike = Number((atm + (side === "CE" ? step : -step)).toFixed(4));
+    chosen = eligible.find(row => Math.abs(Number(row.strike_price) - targetStrike) < 0.0001);
+    if (!chosen) return { ok: false, reason: "The exact ATM + 1 OTM " + side + " strike is not listed with the required verified delta." };
+  } else if (strikeMode === "nearest") {
+    eligible.sort((a, b) => Math.abs(Number(a.strike_price) - spot) - Math.abs(Number(b.strike_price) - spot));
+    chosen = eligible[0];
+  } else {
+    return { ok: false, reason: "Unsupported option strike selection mode." };
+  }
   return {
     ok: true,
     contract: {
@@ -111,14 +146,15 @@ export function selectNearestVerifiedOptionContract({
       strike: Number(chosen.strike_price),
       side,
       expiry: expiry.expiry,
-      expiryDate: expiry.date || indiaDateKey(expiry.expiryMs)
+      expiryDate: expiry.date || indiaDateKey(expiry.expiryMs),
+      ...(Number.isFinite(Number(chosen.delta)) ? { delta: Number(chosen.delta) } : {})
     }
   };
 }
 
 export function buildVerifiedSureshotTradePlan({
   underlyingSymbol, direction, contract, quote, optionCandles,
-  resolution = "5", now = Date.now(), maxSpreadPct = 5, lotSize, tickSize = 0.05
+  resolution = "5", now = Date.now(), maxSpreadPct = 5, lotSize, tickSize = 0.05, riskModel = "swing-low", requirePremiumRange = false, premiumMin = 30, premiumMax = 150
 }) {
   if (!direction?.ok || !["CE", "PE"].includes(direction.side) ||
       !underlyingSymbol || !contract?.symbol || !quote || !Array.isArray(optionCandles)) {
@@ -159,14 +195,30 @@ export function buildVerifiedSureshotTradePlan({
       !Number.isFinite(ageMs) || ageMs < 0 || ageMs > 15_000) {
     return { ok: false, reason: "Option bid/ask/LTP quote is missing, invalid or older than 15 seconds." };
   }
+  if (requirePremiumRange && (ask < premiumMin || ask > premiumMax)) {
+    return { ok: false, reason: "Verified option ask premium is outside the ₹" + premiumMin + "–₹" + premiumMax + " eligibility range." };
+  }
   const spreadPct = ((ask - bid) / ((ask + bid) / 2)) * 100;
   if (!Number.isFinite(spreadPct) || spreadPct > maxSpreadPct) {
     return { ok: false, reason: "Option bid/ask spread exceeds the configured " + maxSpreadPct + "% limit; trade blocked." };
   }
-  const risk = buildOptionRiskPlan({
-    candles: optionCandles, entryPrice: ask, lotSize, tickSize, resolution, now, lookback: 12
-  });
-  if (!risk.ok || risk.rr < 2) return { ok: false, reason: risk.reason || "Minimum 1:2 risk/reward was not met." };
+  let risk;
+  if (riskModel === "fixed") {
+    const candleCheck = validateCompletedOptionCandles({ candles: optionCandles, resolution, now, lookback: 12 });
+    if (!candleCheck.ok) return { ok: false, reason: candleCheck.reason };
+    risk = buildFixedOptionRiskPlan({ entryPrice: ask, lotSize, tickSize });
+    if (risk.ok) {
+      risk.completedCandleCount = candleCheck.completedCandleCount;
+      risk.latestCompletedCandleAt = candleCheck.latestCompletedCandleAt;
+    }
+  } else if (riskModel === "swing-low") {
+    risk = buildOptionRiskPlan({
+      candles: optionCandles, entryPrice: ask, lotSize, tickSize, resolution, now, lookback: 12
+    });
+  } else {
+    return { ok: false, reason: "Unknown option risk model." };
+  }
+  if (!risk.ok) return { ok: false, reason: risk.reason || "Option risk plan validation failed." };
   return {
     ok: true,
     underlyingSymbol,
@@ -175,7 +227,8 @@ export function buildVerifiedSureshotTradePlan({
       spot: direction.spot,
       latestCandleAt: direction.latestCandleAt,
       candleAgeSeconds: direction.candleAgeSeconds,
-      completedCandleCount: direction.completedCandleCount
+      completedCandleCount: direction.completedCandleCount,
+      ...(Number.isFinite(Number(direction.trendScore)) ? { trendScore: Number(direction.trendScore), trendMetrics: direction.trendMetrics } : {})
     },
     contract,
     quote: {

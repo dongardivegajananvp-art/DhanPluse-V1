@@ -67,6 +67,7 @@ test("SDK handles transport reconnects while the 10-second NSE heartbeat restore
   assert.match(source, /NSE_TICK_HEARTBEAT_MS = 10_000/);
   assert.match(heartbeat, /marketSocket\.subscribe\(nseIndexSymbols\)/);
   assert.match(heartbeat, /no_fresh_nse_tick_within_10_seconds/);
+  assert.match(heartbeat, /getMarketSocketReconnectDelay\(nseResubscribeCount, 10_000, 120_000\)/);
   assert.doesNotMatch(heartbeat, /marketSocket\.close\(/);
   assert.match(heartbeat, /setInterval\([\s\S]*?,\s*1_000\)/);
 });
@@ -143,4 +144,13 @@ test("NSE status exposes RECONNECTING while a fresh-tick recovery is pending and
   assert.match(mcxWatchdog, /getExchangeSessionWindows\(\)\.MCX\?\.session !== 'SCHEDULED_OPEN'/);
   assert.match(mcxWatchdog, /marketSocket\.subscribe\(\[mcxDiagnosticInstrument\.symbol\]\)/);
   assert.doesNotMatch(mcxWatchdog, /marketSocket\.close\(|subscribe\(nseIndexSymbols\)/);
+});
+
+
+test("NSE silent-feed recovery uses exponential resubscribe backoff", () => {
+  assert.equal(getMarketSocketReconnectDelay(0, 10_000, 120_000), 10_000);
+  assert.equal(getMarketSocketReconnectDelay(1, 10_000, 120_000), 20_000);
+  assert.equal(getMarketSocketReconnectDelay(2, 10_000, 120_000), 40_000);
+  assert.equal(getMarketSocketReconnectDelay(3, 10_000, 120_000), 80_000);
+  assert.equal(getMarketSocketReconnectDelay(4, 10_000, 120_000), 120_000);
 });

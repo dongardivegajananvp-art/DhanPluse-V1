@@ -1,3 +1,13 @@
+export function canClearFyersDataApiCooldown({
+  responseOk, blockedPathname, responsePathname, requestGeneration, currentGeneration
+}) {
+  return Boolean(
+    responseOk &&
+    blockedPathname === responsePathname &&
+    requestGeneration === currentGeneration
+  );
+}
+
 // FYERS Data API calls share upstream/IP-level throttling. Serialize requests,
 // coalesce identical in-flight reads, and briefly cache successful market-data
 // snapshots so UI refreshes do not create duplicate provider traffic.
@@ -13,7 +23,7 @@ export function createFyersDataApiBudget({
   historyCacheMs = 5 * 60_000,
   optionChainCacheMs = 60_000,
   maxCacheEntries = 100,
-  cloudflareCooldownMs = [5 * 60_000, 15 * 60_000, 30 * 60_000, 60 * 60_000],
+  cloudflareCooldownMs = [15 * 60_000, 30 * 60_000, 60 * 60_000],
   rateLimitCooldownMs = [60_000, 2 * 60_000, 5 * 60_000],
   maxCooldownMs = 60 * 60_000
 } = {}) {
@@ -24,6 +34,11 @@ export function createFyersDataApiBudget({
   let consecutiveRateLimitBlocks = 0;
   let cooldownUntil = 0;
   let cooldownReason = null;
+  // A success from a different FYERS endpoint does not prove that the
+  // Cloudflare-blocked endpoint/IP path has recovered. The generation also
+  // prevents a request that began before a 1015 from clearing that newer block.
+  let cooldownPathname = null;
+  let cooldownGeneration = 0;
   let queuedRequests = 0;
   const responseCache = new Map();
   const inFlight = new Map();
@@ -68,7 +83,7 @@ export function createFyersDataApiBudget({
     });
   }
 
-  function activateCooldown(response, body) {
+  function activateCooldown(response, body, pathname) {
     const server = String(response.headers?.get?.('server') || '');
     const cfRay = String(response.headers?.get?.('cf-ray') || '');
     const cloudflare1015 =
@@ -89,6 +104,8 @@ export function createFyersDataApiBudget({
     }
     // Retry-After: 0 is not a meaningful clearance signal. Use a conservative
     // local backoff and never let a provider header shorten it.
+    cooldownPathname = pathname;
+    cooldownGeneration += 1;
     cooldownUntil = Math.max(cooldownUntil, now() + Math.min(maxCooldownMs, Math.max(backoffMs, retryMs)));
   }
 
@@ -153,13 +170,23 @@ export function createFyersDataApiBudget({
         time = now();
         requestTimes.push(time);
         lastRequestAt = time;
+        const requestCooldownGeneration = cooldownGeneration;
         const response = await fetchImpl(url, init);
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
-          activateCooldown(response, body);
-        } else if (response.ok) {
+          activateCooldown(response, body, target.pathname);
+        } else if (canClearFyersDataApiCooldown({
+          responseOk: response.ok,
+          blockedPathname: cooldownPathname,
+          responsePathname: target.pathname,
+          requestGeneration: requestCooldownGeneration,
+          currentGeneration: cooldownGeneration
+        })) {
+          // Only a successful probe to the blocked endpoint, started after
+          // the latest 1015, is allowed to clear that endpoint's circuit.
           consecutiveCloudflareBlocks = 0;
           consecutiveRateLimitBlocks = 0;
+          cooldownPathname = null;
           cooldownUntil = 0;
           cooldownReason = null;
         }

@@ -25,6 +25,11 @@ test("ranks the complete fresh F&O universe and includes individually fresh indi
   assert.equal(result.data[0].symbol, "NSE:NIFTY50-INDEX");
   assert.equal(result.data[0].rank, 1);
   assert.equal(result.signalsAllowed, false);
+  assert.equal(result.topGainers.length, 10);
+  assert.equal(result.topLosers.length, 10);
+  assert.equal(result.topGainers[0].changePct, 117);
+  assert.equal(result.topLosers[0].changePct, -100);
+  assert.equal(result.moverBoardsComplete, true);
   assert.equal(result.data.find(row => row.symbol === "NSE:STOCK217-EQ").lotSize, 25, "official stock lot size is preserved in the ranked rows");
   assert.deepEqual(result.data.slice(0, 5).map(row => row.symbol), ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX", "BSE:SENSEX-INDEX", "NSE:STOCK217-EQ", "NSE:STOCK216-EQ"]);
   assert.equal(result.data.at(-1).rank, 221);

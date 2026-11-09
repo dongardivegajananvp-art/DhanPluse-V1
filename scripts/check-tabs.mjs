@@ -6,81 +6,89 @@ if (!inlineApp) throw new Error('Inline production app bundle is missing.');
 const app = inlineApp[1];
 const navBlock = html.match(/<nav id="nav">([\s\S]*?)<\/nav>/);
 if (!navBlock) throw new Error('Navigation block #nav is missing.');
-const navTabs = [...navBlock[1].matchAll(/data-tab="([^"]+)"/g)]
-  .map(match => match[1].replace(/&amp;/g, '&'));
-if (navTabs.length !== 2 || navTabs[0] !== 'Sureshot CE/PE' || navTabs[1] !== 'FYERS Connection') {
-  throw new Error('Expected the two existing trading app tabs; found: ' + navTabs.join(', '));
+const navTabs = [...navBlock[1].matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]);
+if (navTabs.length !== 3 || navTabs.join('|') !== 'Home|Sureshot|Position') {
+  throw new Error('Expected exactly Home, Sureshot and Position; found: ' + navTabs.join(', '));
 }
-if (html.includes('id="publicNav"') || /data-tab="(?:Home|About|Features|Contact|Login|Signup|App)"/.test(html)) {
-  throw new Error('Removed public pages are still exposed in navigation.');
+if (html.includes('id="publicNav"') || /data-tab="(?:Dashboard|FYERS Connection|Stock Explorer|About|Features|Contact|Login|Signup)"/.test(html)) {
+  throw new Error('Legacy or public navigation remains exposed.');
 }
-if (app.includes('sureshotFyersConnectBtn')) throw new Error('FYERS connect button must not be rendered on the Sureshot tab.');
-if (!app.includes("else if (tab === 'FYERS Connection') featureContent.innerHTML = settingsMarkup();")) {
-  throw new Error('Dedicated FYERS Connection tab renderer is missing.');
+if (html.includes('gv2vpdAuthGate') ||
+    html.includes('gv2vpd-app-session-v1') ||
+    html.includes('X-GV2VPD-Session') ||
+    html.includes('/api/app-auth/')) {
+  throw new Error('A duplicate GV2VPD OTP App Login must not replace the existing FYERS login.');
 }
-if (!app.includes("render('Sureshot CE/PE');")) throw new Error('Sureshot must be the initial landing page.');
-if (!app.includes("if (!['Sureshot CE/PE','FYERS Connection'].includes(tab)) tab = 'Sureshot CE/PE';")) throw new Error('Only Sureshot and FYERS Connection may be rendered.');
-if (!app.includes('sureshotExchangeStatus') || !app.includes('sureshotNseTitle') || !app.includes('sureshotMcxTitle')) throw new Error('Separate NSE and MCX Sureshot status cards are required.');
-if (html.includes('id="marketStatus"') || html.includes('<footer>') || html.includes('id="sideFeedStatus"')) throw new Error('A single global stale banner/footer must not replace the separate exchange cards.');
-if (!app.includes("label = mcxLive ? 'MCX LIVE · NSE CLOSED' : 'NSE MARKET CLOSED';") || !app.includes('updateSureshotExchangeCards(status);')) throw new Error('NSE-closed status must not globally mark an independently live MCX feed stale.');
-if (!app.includes('let nseSureshotScanRunning = false;') || !app.includes('let mcxSureshotScanRunning = false;')) throw new Error('NSE and MCX Sureshot scans must have independent state.');
-const renderStart = app.indexOf('function render(tab) {');
-const renderEnd = app.indexOf('\nfunction bindTabActions', renderStart);
-if (renderStart < 0 || renderEnd < 0) throw new Error('Workspace render function could not be located.');
-const renderBlock = app.slice(renderStart, renderEnd);
-if (!renderBlock.includes("tab === 'Sureshot CE/PE') featureContent.innerHTML = advancedScannerMarkup(tab)")) {
-  throw new Error('Sureshot CE/PE renderer is missing.');
+if (!app.includes("localStorage.getItem(DASHBOARD_SESSION_KEY)") ||
+    !app.includes("headers.set('Authorization', 'Bearer ' + requestSession)") ||
+    !app.includes('Dashboard session missing or expired')) {
+  throw new Error('The existing FYERS dashboard-session authentication flow must remain intact.');
 }
-if (!app.includes('async function loadSureshotUniverseShortlist(options = {})')) throw new Error('Sureshot full-universe shortlist loader is missing.');
-if (!app.includes('startAutomaticTopFiveScan();') || !app.includes('SURESHOT_AUTO_SCAN_DAY_KEY') || !app.includes("localStorage.getItem(DASHBOARD_SESSION_KEY)")) {
-  throw new Error('Authenticated automatic full-universe Top 5 scan trigger is missing.');
+if (!app.includes("render('Home');") ||
+    !app.includes("if (tab === 'Home') tab = 'Dashboard';") ||
+    !app.includes("else if (tab === 'Sureshot') tab = 'Sureshot CE/PE';")) {
+  throw new Error('Home must be the landing page and Sureshot must map to the existing verified scanner.');
 }
-if (!app.includes("startAutomaticTopFiveScan();") || !app.includes("startAutomaticMcxTopFiveScan();") || !app.includes("}, 30000);")) throw new Error('Sureshot must detect NSE and MCX session starts while its tab is active.');
-if (!app.includes("localStorage.getItem('dhanpulse-dashboard-session-v1')") ||
-    app.includes('FYERS_COOLDOWN_KEY') ||
-    app.includes('getFyersCooldownRemaining') ||
-    app.includes('FYERS Data API cooldown active; request suppressed locally.')) {
-  throw new Error('FYERS shared session must remain intact and obsolete browser-local cooldown blocking must be absent.');
+const backend = fs.readFileSync(new URL('../backend/src/server.js', import.meta.url), 'utf8');
+if (!app.includes("BACKEND_URL + '/api/fyers/funds'") || !app.includes('homeAccountSnapshot') || !backend.includes('normalizeFyersFunds')) {
+  throw new Error('Home must show verified FYERS funds and position P&L fields.');
 }
-const dashboardCandleStart = app.indexOf('async function loadDashboardCandles()');
-const dashboardCandleEnd = app.indexOf('\nfunction quoteCardsMarkup()', dashboardCandleStart);
-if (dashboardCandleStart < 0 || dashboardCandleEnd < 0) {
-  throw new Error('Dashboard candle request handler could not be located.');
-}
-const dashboardCandleHandler = app.slice(dashboardCandleStart, dashboardCandleEnd);
-if (!dashboardCandleHandler.includes("const requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';") ||
-    !dashboardCandleHandler.includes("currentSession && currentSession !== requestSession") ||
-    !dashboardCandleHandler.includes("if (requestSession && currentSession === requestSession) localStorage.removeItem(DASHBOARD_SESSION_KEY)")) {
-  throw new Error('Dashboard candle 401 handler must preserve a newer FYERS session.');
-}
-if (dashboardCandleHandler.includes("localStorage.removeItem('dhanpulse-dashboard-session-v1')")) {
-  throw new Error('Unconditional dashboard-session deletion remains in the candle handler.');
-}
-console.log('PASS: exactly two tabs remain; Sureshot is the landing page; NSE and MCX status/scans are independent.');
-console.log('PASS: shared FYERS session is preserved and obsolete browser-local cooldown blocking is absent.');
-const scanTriggerStart = app.indexOf('const startAutomaticTopFiveScan');
-const scanTriggerEnd = app.indexOf('sureshotAutoScanTimer = window.setInterval', scanTriggerStart);
-if (scanTriggerStart < 0 || scanTriggerEnd < 0 || app.slice(scanTriggerStart, scanTriggerEnd).includes('sureshotRequestRunning')) {
-  throw new Error('Automatic Sureshot scan must not wait for a lower-priority chart/history request.');
-}
-if (!app.includes('function applyAuthoritativeFyersStatus(status, restCooldown = false)') ||
-    !app.includes("label = 'FYERS SOCKET DISCONNECTED'") ||
-    !app.includes("label = 'FYERS FEED PARTIAL'")) {
-  throw new Error('Dashboard connection labels must follow the authoritative backend NSE feed state.');
+if (!app.includes("if (tab === 'Position')") ||
+    !app.includes("BACKEND_URL + '/api/fyers/positions'") ||
+    !app.includes('Broker-confirmed positions')) {
+  throw new Error('Position must display the broker-confirmed FYERS position response.');
 }
 
-const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
-if (!app.includes('SURESHOT_AUTO_SCAN_ATTEMPT_KEY') ||
-    !app.includes('refreshAuthoritativeFyersStatus') ||
-    !app.includes("window.setInterval(() => { void refreshAuthoritativeFyersStatus(); }, 5000)") ||
-    !app.includes("document.addEventListener('visibilitychange'") ||
-    !app.includes("window.addEventListener('pageshow'") ||
-    !html.includes('app.js?v=20261106-authoritative-status-v2') ||
-    !html.includes('sw.js?v=20261106-authoritative-status-v2') ||
-    !sw.includes('dhanpulse-shell-v134-public-pages-v1') ||
-    !sw.includes('app.js?v=20261106-authoritative-status-v2') ||
-    !sw.includes("fetch(request, { cache: 'no-store' })")) {
-  throw new Error('PWA cache and bounded Sureshot automatic-attempt guard must be present in the published shell.');
+const paperStore = fs.readFileSync(new URL('../backend/src/paper-trading-store.js', import.meta.url), 'utf8');
+const planRegistry = fs.readFileSync(new URL('../backend/src/verified-plan-registry.js', import.meta.url), 'utf8');
+if (!backend.includes("app.use('/api/paper', requireDashboardSession)") ||
+    !backend.includes("app.post('/api/paper/buy'") ||
+    !backend.includes("verifiedPlanRegistry.create(sessionToken") ||
+    !backend.includes("verifiedPlanRegistry.get(sessionToken, planId)") ||
+    !backend.includes("quoteTimestampStatus(quoteTime, Date.now(), 10)") ||
+    !backend.includes("buildFixedOptionRiskPlan({ entryPrice: ask") ||
+    !backend.includes("const idempotencyKey = 'paper:' + planId;") ||
+    !backend.includes("void paperStore.processVerifiedQuote") ||
+    !backend.includes("void reconcileOpenPaperPositions(symbols)") ||
+    !planRegistry.includes("crypto.randomBytes(32).toString(\"base64url\")") ||
+    !planRegistry.includes("entry.owner !== String(sessionBinding || \"\")")) {
+  throw new Error('Paper BUY must require an authenticated, short-lived server-owned plan and fresh FYERS quote; exits must use verified socket/restart quotes.');
 }
-if (!app.includes('settingsMcxFeed') || !app.includes('refreshConnectionDiagnostics') || !app.includes('updateMcxConnectionDiagnostics') || !app.includes('settingsNseSession') || !app.includes('settingsNseLiveFeed') || !app.includes('settingsMcxSession') || !app.includes('settingsMcxLiveFeed') || !app.includes('updateExchangeLiveSwitches')) throw new Error('MCX diagnostics must be visible in the existing FYERS Connection tab.');
-console.log('PASS: PWA shell v134 loads the bounded Sureshot scan-attempt guard, MCX diagnostics, and independent NSE/MCX live switches in the existing FYERS Connection tab.');
+if (!paperStore.includes("pg_advisory_xact_lock(716202611)") ||
+    !paperStore.includes("last_quote_timestamp") ||
+    !paperStore.includes("Maximum two open Paper positions allowed.") ||
+    !paperStore.includes("An open Paper position already exists for this option contract.") ||
+    !paperStore.includes("Daily paper loss limit of ₹5,000")) {
+  throw new Error('Paper ledger persistence, concurrency, out-of-order quote, max-position and daily-loss guards are required.');
+}
+const paperBuyRoute = backend.slice(backend.indexOf("app.post('/api/paper/buy'"), backend.indexOf("app.all('/api/orders/*'"));
+if (!paperBuyRoute || paperBuyRoute.includes('/api/v3/orders') || !backend.includes("app.all('/api/orders/*', (_req, res) => {\n  res.status(403)")) {
+  throw new Error('Paper Mode must never call FYERS order endpoints and live order routes must remain blocked.');
+}
+if (!app.includes("BACKEND_URL + '/api/paper/buy'") ||
+    !app.includes("BACKEND_URL + '/api/paper/positions'") ||
+    !app.includes('Paper Mode ledger · simulation only')) {
+  throw new Error('Position must show a separate durable Paper Mode ledger and Paper BUY must use the verified plan ID.');
+}
+if (!app.includes("tab === 'Sureshot CE/PE') featureContent.innerHTML = advancedScannerMarkup(tab)") ||
+    !app.includes('async function loadSureshotUniverseShortlist(options = {})')) {
+  throw new Error('Existing FYERS-verified Sureshot scanner must be preserved.');
+}
+if (!app.includes('refreshAuthoritativeFyersStatus') ||
+    !app.includes("window.setInterval(() => { void refreshAuthoritativeFyersStatus(); }, 5000)") ||
+    !app.includes('SURESHOT_AUTO_SCAN_ATTEMPT_KEY')) {
+  throw new Error('Authoritative FYERS status refresh and bounded Sureshot auto-scan guard must remain.');
+}
+if (!html.includes('GV2VPD — FYERS') ||
+    !html.includes('sw.js?v=20261108-gv2vpd-three-tab-v1')) {
+  throw new Error('GV2VPD identity and versioned PWA shell must be published together.');
+}
+const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
+if (!sw.includes('gv2vpd-shell-v3-three-tab-app') ||
+    !sw.includes('gv2vpd-icon.svg') ||
+    !sw.includes("fetch(request, { cache: 'no-store' })")) {
+  throw new Error('GV2VPD service-worker cache shell is incomplete.');
+}
+console.log('PASS: exactly three tabs; Home is default; Sureshot scanner preserved; broker and Paper positions are separated.');
+console.log('PASS: Paper BUY is Dashboard-Session-bound, server-plan-bound and fresh-FYERS-quote-verified; automatic exits are quote-monitored.');
+console.log('PASS: existing FYERS OAuth/dashboard-session login is retained; no duplicate OTP login gate exists.');
