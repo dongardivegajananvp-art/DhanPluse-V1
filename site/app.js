@@ -86,6 +86,8 @@ let quotePollDelay = QUOTE_POLL_MS;
 let quotePollingPausedForRateLimit = false;
 let quoteRequestRunning = false;
 let dashboardCandleRequestRunning = false;
+let dashboardCandleCooldownUntil = 0;
+let dashboardCandleCooldownTimer = null;
 let backendHealthState = 'CHECKING';
 let fyersAuthState = 'NOT CONNECTED';
 let authInProgress = false;
@@ -582,6 +584,12 @@ async function loadDashboardCandles() {
   const count=document.querySelector('#chartSampleCount');
   const button=document.querySelector('#dashboardCandlesBtn');
   if(!symbol||!resolution||!chart||!status||dashboardCandleRequestRunning)return;
+  const cooldownRemaining = Math.ceil((dashboardCandleCooldownUntil - Date.now()) / 1000);
+  if (cooldownRemaining > 0) {
+    status.textContent = 'FYERS REST cooldown active · wait ' + cooldownRemaining + ' seconds. No request was sent.';
+    if (button) button.disabled = true;
+    return;
+  }
   if (!localStorage.getItem('dhanpulse-dashboard-session-v1')) {
     status.textContent='Connect FYERS to load verified historical candles.';
     chart.innerHTML='<div class="chart-empty"><strong>FYERS connection required.</strong><p>Connect FYERS to load verified historical candles. No candle values are fabricated.</p><button type="button" class="primary dashboardReconnectBtn">Connect FYERS</button></div>';
@@ -592,11 +600,14 @@ async function loadDashboardCandles() {
   dashboardCandleRequestRunning=true;
   const requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
   if(button)button.disabled=true;
-  status.textContent='Requesting verified FYERS historical candles…';
-  chart.innerHTML='<div class="chart-empty">Loading verified OHLC candles…</div>';
+  status.textContent='Requesting one verified FYERS historical-candle snapshot…';
+  chart.innerHTML='<div class="chart-empty">Loading one verified OHLC response…</div>';
+  let retryAfterSeconds = 0;
   try {
     const response=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:symbol.value,resolution:resolution.value}),{headers:{Accept:'application/json'},cache:'no-store'});
+    retryAfterSeconds = Math.max(0, Number(response.headers.get('Retry-After')) || 0);
     const result=await response.json().catch(()=>({}));
+    retryAfterSeconds = Math.max(retryAfterSeconds, Number(result.retryAfterSeconds) || 0);
     if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.detail||result.error||'Historical candles unavailable.');
     if(!result.data.length)throw new Error('FYERS returned no historical candles for this symbol and timeframe.');
     const candleError=validateOhlcCandles(result.data,resolution.value);
@@ -613,6 +624,18 @@ async function loadDashboardCandles() {
     logEvent('Dashboard candlestick chart loaded ('+result.data.length+' verified candles for '+symbol.value+').','info');
   } catch(error) {
     const message=error.message||'Historical candles unavailable.';
+    if (retryAfterSeconds > 0) {
+      dashboardCandleCooldownUntil = Date.now() + retryAfterSeconds * 1000;
+      if (button) button.disabled = true;
+      if (dashboardCandleCooldownTimer) clearTimeout(dashboardCandleCooldownTimer);
+      dashboardCandleCooldownTimer = setTimeout(() => {
+        dashboardCandleCooldownUntil = 0;
+        const currentButton = document.querySelector('#dashboardCandlesBtn');
+        const currentStatus = document.querySelector('#dashboardCandleStatus');
+        if (currentButton) currentButton.disabled = false;
+        if (currentStatus && currentTab === 'Dashboard') currentStatus.textContent = 'FYERS cooldown elapsed. Press Load candlesticks once to request a fresh OHLC snapshot.';
+      }, retryAfterSeconds * 1000);
+    }
     const sessionExpired=/Dashboard session missing or expired|FYERS session expired|Reconnect FYERS/i.test(message);
     const mainChart=document.querySelector('#mainTabChart');
     const mainNote=document.querySelector('#mainViewNote');
@@ -638,7 +661,7 @@ async function loadDashboardCandles() {
       chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
       if(mainChart)mainChart.innerHTML='<div class="chart-empty">Candlestick chart unavailable: '+escapeHtml(message)+'. No candle values were fabricated.</div>';
       if(mainNote)mainNote.textContent='Verified OHLC candles are unavailable right now; no substitute line chart or fabricated candle values are shown.';
-      status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
+      status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.' + (retryAfterSeconds > 0 ? ' Automatic retry disabled; wait ' + retryAfterSeconds + ' seconds before one manual retry.' : '');
     }
     logEvent('Dashboard candlestick chart failed: '+message,'warn');
   } finally {
@@ -2838,7 +2861,7 @@ function bindTabActions() {
   const dashSymbol=document.querySelector('#dashboardCandleSymbol');
   const dashResolution=document.querySelector('#dashboardCandleResolution');
   if(dashSymbol) dashSymbol.addEventListener('change',()=>{const st=document.querySelector('#dashboardCandleStatus');if(st)st.textContent='Selection changed. Load candles to refresh the chart.';});
-  if(currentTab==='Dashboard') loadDashboardCandles();
+  // Historical candles are requested only by the explicit button; never on dashboard render.
   const test = document.querySelector('#testBackendBtn');
   if (test) test.addEventListener('click', testBackend);
   const connect = document.querySelector('#connectFyersBtn');
