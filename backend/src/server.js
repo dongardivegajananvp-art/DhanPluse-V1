@@ -1874,6 +1874,7 @@ let sureshotAutoPlansInFlight = false;
 let nseSureshotAutoPlansInFlight = false;
 let mcxSureshotAutoPlansInFlight = false;
 let sureshotScanState = null;
+let mcxSureshotScanState = null;
 app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, res) => {
   res.set("Cache-Control", "no-store");
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
