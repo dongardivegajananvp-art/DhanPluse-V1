@@ -1,3 +1,13 @@
+export function canClearFyersDataApiCooldown({
+  responseOk, blockedPathname, responsePathname, requestGeneration, currentGeneration
+}) {
+  return Boolean(
+    responseOk &&
+    blockedPathname === responsePathname &&
+    requestGeneration === currentGeneration
+  );
+}
+
 // FYERS Data API calls share upstream/IP-level throttling. Serialize requests,
 // coalesce identical in-flight reads, and briefly cache successful market-data
 // snapshots so UI refreshes do not create duplicate provider traffic.
@@ -165,9 +175,13 @@ export function createFyersDataApiBudget({
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
           activateCooldown(response, body, target.pathname);
-        } else if (response.ok &&
-            cooldownPathname === target.pathname &&
-            requestCooldownGeneration === cooldownGeneration) {
+        } else if (canClearFyersDataApiCooldown({
+          responseOk: response.ok,
+          blockedPathname: cooldownPathname,
+          responsePathname: target.pathname,
+          requestGeneration: requestCooldownGeneration,
+          currentGeneration: cooldownGeneration
+        })) {
           // Only a successful probe to the blocked endpoint, started after
           // the latest 1015, is allowed to clear that endpoint's circuit.
           consecutiveCloudflareBlocks = 0;
