@@ -4,10 +4,11 @@ import { readFile } from "node:fs/promises";
 
 const server = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
 const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8");
+const indexHtml = await readFile(new URL("../../site/index.html", import.meta.url), "utf8");
 const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
 
-test("Sureshot backend scans exactly five ranked candidates from a complete fresh universe", () => {
-  assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 5/);
+test("Sureshot backend verifies every eligible F&O and individually fresh index candidate in five-item batches", () => {
+  assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 250/);
   assert.match(server, /const SURESHOT_BATCH_SIZE = 5/);
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
@@ -17,7 +18,29 @@ test("Sureshot backend scans exactly five ranked candidates from a complete fres
   assert.match(route, /isCompleteFreshFnoQuoteSnapshot\(stockQuoteCache\.data, expectedQuoteSymbols/);
   assert.match(route, /loadVerifiedFnoStockQuotes\(\{ priority: "sureshot" \}\)/);
   assert.match(route, /buildVerifiedSureshotShortlist\(/);
+  assert.match(route, /limit: SURESHOT_UNIVERSE_SCAN_LIMIT/);
+  assert.match(route, /const moverCandidates = ranked\.data\.map/);
+  assert.match(route, /const batch = state\.candidates\.slice\(offset, offset \+ SURESHOT_BATCH_SIZE\)/);
+  assert.match(route, /state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /rankedCandidateCount: ranked\.candidateCount/);
+  assert.match(route, /topThreeSetups = verified\.slice\(0, 3\)/);
+  assert.match(route, /initiallyVerified: true/);
+  assert.match(route, /FINAL_REVALIDATE_UNDERLYING/);
+  assert.match(route, /FINAL_REVALIDATE_OPTION_QUOTES/);
+  assert.match(route, /FINAL_REVALIDATE_OPTION_CANDLES/);
+  assert.match(route, /item\.finalVerifiedAt = new Date\(\)\.toISOString\(\)/);
+  assert.match(route, /initiallyVerifiedCandidateCount/);
+  assert.match(route, /ALL_ELIGIBLE_CANDIDATES_CHECKED/);
+  assert.match(app, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
+  assert.match(app, /TOP 3 VERIFIED SETUPS/);
+  assert.match(app, /FULL UNIVERSE AUDIT RESULTS/);
+  assert.match(indexHtml, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
+  assert.match(indexHtml, /TOP 3 VERIFIED SETUPS/);
+  assert.match(indexHtml, /Scan Full F&O \+ Fresh Indices/);
+  assert.match(app, /row\.finalVerifiedAt/);
+  assert.match(indexHtml, /row\.finalVerifiedAt/);
+  assert.match(app, /quoteAgeSeconds\) > 15/);
+  assert.match(indexHtml, /quoteAgeSeconds\) > 15/);
 });
 
 test("each selected candidate must pass underlying history, contract, live option quote, option candles and risk validation", () => {
@@ -41,8 +64,8 @@ test("Sureshot publishes only after all selected candidates finish and discards 
   const route = server.slice(start, end);
   assert.match(route, /const selectedCandidatesComplete = state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /selectedCandidatesComplete,/);
-  assert.match(route, /stopReason: "TOP_FIVE_CANDIDATES_CHECKED"/);
-  assert.match(route, /bestSetup: verified\[0\] \|\| null/);
+  assert.match(route, /stopReason: "ALL_ELIGIBLE_CANDIDATES_CHECKED"/);
+  assert.match(route, /bestSetup: topThreeSetups\[0\] \|\| null/);
   assert.match(route, /sureshotScanState = null;[\s\S]*partialPlansDiscarded: true/);
   assert.match(route, /orderPlacement: "disabled"/);
 });
@@ -70,7 +93,7 @@ test("frontend automatic scan requires active Sureshot tab, open session and sha
   assert.match(trigger, /loadSureshotUniverseShortlist\(\{ automatic: true \}\)/);
 });
 
-test("frontend records one automatic attempt per session day and still marks completion only after all five pass", () => {
+test("frontend records one automatic attempt per session day and marks completion only after every eligible candidate passes", () => {
   const start = app.indexOf("async function loadSureshotUniverseShortlist");
   const end = app.indexOf("async function performSureshotSetup", start);
   assert.ok(start >= 0 && end > start);
@@ -85,7 +108,7 @@ test("frontend records one automatic attempt per session day and still marks com
   const attempt = loader.indexOf("localStorage.setItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY");
   const firstFetch = loader.indexOf("fetch(BACKEND_URL + '/api/market/sureshot-auto-plans'");
   assert.ok(attempt >= 0 && attempt < firstFetch, "attempt marker must be written before any FYERS scan request");
-  assert.match(loader.slice(0, catchAt), /TOP_FIVE_CANDIDATES_CHECKED/);
+  assert.match(loader.slice(0, catchAt), /ALL_ELIGIBLE_CANDIDATES_CHECKED/);
   assert.match(loader.slice(catchAt), /All partial plans are discarded/);
   assert.match(loader.slice(catchAt), /SURESHOT_AUTO_SCAN_RETRY_KEY/);
   assert.match(loader.slice(catchAt), /retryAfterSeconds/);
