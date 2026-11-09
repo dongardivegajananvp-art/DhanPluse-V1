@@ -98,6 +98,7 @@ let sureshotRefreshPending = false;
 let sureshotAutoScanTimer = null;
 let connectionDiagnosticsTimer = null;
 let sureshotUniverseScanRunning = false;
+let mcxSureshotUniverseScanRunning = false;
 const SURESHOT_AUTO_SCAN_DAY_KEY = 'dhanpulse-sureshot-auto-scan-day-v1';
 const SURESHOT_AUTO_SCAN_ATTEMPT_KEY = 'dhanpulse-sureshot-auto-scan-attempt-v1';
 const SURESHOT_AUTO_SCAN_RETRY_KEY = 'dhanpulse-sureshot-auto-scan-retry-at-v1';
@@ -2109,7 +2110,7 @@ async function loadMcxFuturesIntoSureshotSelect() {
 }
 
 async function loadMcxSureshotUniverseShortlist() {
-  if (currentTab !== 'Sureshot CE/PE' || sureshotUniverseScanRunning) return;
+  if (currentTab !== 'Sureshot CE/PE' || mcxSureshotUniverseScanRunning) return;
   const button = document.querySelector('#scanMcxSureshotUniverseBtn');
   const host = document.querySelector('#mcxSureshotUniverseResults');
   const status = document.querySelector('#setupStatus');
@@ -2118,7 +2119,7 @@ async function loadMcxSureshotUniverseShortlist() {
     if (status) status.textContent = 'Connect FYERS first. MCX scan requires a valid broker session and fresh MCX exchange ticks.';
     return;
   }
-  sureshotUniverseScanRunning = true;
+  mcxSureshotUniverseScanRunning = true;
   if (button) button.disabled = true;
   host.innerHTML = '<div class="chart-empty">Auditing every eligible official FYERS MCX future. Each contract needs its own fresh exchange timestamp; partial snapshots cannot create trade plans…</div>';
   const renderAudit = (audit, coverage) => {
@@ -2221,7 +2222,7 @@ async function loadMcxSureshotUniverseShortlist() {
     if (status) status.textContent = 'MCX scan blocked · no partial plans were displayed.';
     logEvent('MCX Sureshot scan blocked: ' + (error.message || 'unknown error'), 'warn');
   } finally {
-    sureshotUniverseScanRunning = false;
+    mcxSureshotUniverseScanRunning = false;
     if (button) button.disabled = false;
   }
 }
@@ -2865,14 +2866,14 @@ function render(tab) {
       // MCX is the evening alternative: do not compete with the NSE daytime scan.
       // Refresh the independent switch from the backend before deciding to scan.
       if (currentTab !== 'Sureshot CE/PE' || isRegularMarketSession() ||
-          sureshotUniverseScanRunning || mcxAutoScanStatusCheckInFlight) return;
+          mcxSureshotUniverseScanRunning || mcxAutoScanStatusCheckInFlight) return;
       mcxAutoScanStatusCheckInFlight = true;
       try {
         const response = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
         const status = await response.json().catch(() => ({}));
         if (!response.ok) return;
         updateExchangeLiveSwitches(status);
-        if (currentTab !== 'Sureshot CE/PE' || sureshotUniverseScanRunning || !isMcxMarketSessionOpen()) return;
+        if (currentTab !== 'Sureshot CE/PE' || mcxSureshotUniverseScanRunning || !isMcxMarketSessionOpen()) return;
         const today = indiaTradingDateKey();
         let attempted = '';
         try { attempted = localStorage.getItem('dhanpulse_mcx_sureshot_scan_attempt_day') || ''; } catch {}
