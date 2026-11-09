@@ -137,3 +137,20 @@ test("builds a verified MCX option risk plan without crossing exchange symbols",
   assert.ok(result.risk.rr >= 2);
   assert.equal(result.risk.lotSize, 100);
 });
+test("one-OTM contract selection ignores option-chain Greeks and uses only listed identity fields", () => {
+  const expiry = String(Math.floor((now + 10 * 86400_000) / 1000));
+  const discovery = {
+    expiryData: [{ expiry, date: "2026-11-12" }],
+    optionsChain: [
+      { symbol: "NSE:ABC26NOV100CE", strike_price: 100, option_type: "CE", expiry, delta: 0.02 },
+      { symbol: "NSE:ABC26NOV105CE", strike_price: 105, option_type: "CE", expiry, delta: 0.95 },
+      { symbol: "NSE:ABC26NOV110CE", strike_price: 110, option_type: "CE", expiry }
+    ]
+  };
+  const selected = selectNearestVerifiedOptionContract({
+    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 102, now, strikeMode: "one-otm"
+  });
+  assert.equal(selected.ok, true);
+  assert.equal(selected.contract.symbol, "NSE:ABC26NOV105CE");
+  assert.equal("delta" in selected.contract, false);
+});
