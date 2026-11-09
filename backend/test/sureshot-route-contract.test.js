@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const server = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
 const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8");
+const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
 
 test("Sureshot backend scans exactly five ranked candidates from a complete fresh universe", () => {
   assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 5/);
@@ -93,4 +94,11 @@ test("frontend records one automatic attempt per session day and still marks com
   const authStart = app.indexOf("localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken)");
   const authEnd = app.indexOf("authExchangeInProgress = false", authStart);
   assert.match(app.slice(authStart, authEnd), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY\)/);
+});
+
+
+test("option-chain Greeks are not requested or used for Sureshot strike selection", () => {
+  assert.doesNotMatch(server, /searchParams\.set\(["']greeks["']/);
+  assert.doesNotMatch(server, /requireDelta\s*:\s*true/);
+  assert.doesNotMatch(discovery, /row\.greeks\?\.delta|delta:\s*Number/);
 });
