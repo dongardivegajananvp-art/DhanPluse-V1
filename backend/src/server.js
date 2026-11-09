@@ -31,6 +31,8 @@ import { getMcxWatchdogRetryDelay } from './mcx-watchdog.js';
 import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist } from './mcx-sureshot.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
+import { createPaperTradingStore } from './paper-trading-store.js';
+import { createVerifiedPlanRegistry } from './verified-plan-registry.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -50,6 +52,10 @@ const fyersTokenStore = createFyersTokenStore({
   encryptionKey: process.env.FYERS_TOKEN_ENCRYPTION_KEY
 });
 let fyersTokenStoreReady = false;
+const paperStore = createPaperTradingStore({ databaseUrl: process.env.DATABASE_URL });
+const verifiedPlanRegistry = createVerifiedPlanRegistry({ ttlMs: 30_000 });
+let paperStoreReady = false;
+const paperSocketSymbols = new Set();
 const allowedSymbols = ['NSE:NIFTY50-INDEX', 'NSE:NIFTYBANK-INDEX', 'BSE:SENSEX-INDEX'];
 let chartStreamSymbol = null;
 
@@ -223,7 +229,8 @@ function parseTick(raw) {
     const symbol = item.symbol || item.n;
     const ltp = Number(item.ltp ?? item.lp ?? item.v?.lp);
     const isMcxDiagnostic = Boolean(mcxDiagnosticInstrument && symbol === mcxDiagnosticInstrument.symbol);
-    if (!(allowedSymbols.includes(symbol) || symbol === chartStreamSymbol || isMcxDiagnostic) || !Number.isFinite(ltp) || ltp <= 0) continue;
+    const isPaperOption = paperSocketSymbols.has(symbol);
+    if (!(allowedSymbols.includes(symbol) || symbol === chartStreamSymbol || isMcxDiagnostic || isPaperOption) || !Number.isFinite(ltp) || ltp <= 0) continue;
     const exchangeTime = epochSeconds(
       item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt ?? item.v?.exch_feed_time ?? item.v?.last_traded_time ?? item.v?.ltt ?? item.v?.tt
     );
@@ -241,6 +248,11 @@ function parseTick(raw) {
       receivedAt: new Date().toISOString()
     };
     latestTicks.set(symbol, tick);
+    if (isPaperOption && paperStoreReady) {
+      void paperStore.processVerifiedQuote({
+        symbol, price: ltp, exchangeTimestamp: tick.updatedAt, source: 'FYERS_VERIFIED'
+      }).catch(error => console.error('Paper position quote processing failed:', String(error?.message || error).slice(0, 180)));
+    }
     if (isMcxDiagnostic) {
       mcxDiagnosticTick = tick;
       // Only a fresh exchange-stamped tick proves recovery; stale frames do not
@@ -273,6 +285,22 @@ function parseTick(raw) {
     acceptedCount += 1;
   }
   return acceptedCount;
+}
+
+async function subscribeOpenPaperPositions(socket) {
+  if (!paperStoreReady || !socket || marketSocket !== socket || !streamConnected) return;
+  try {
+    const positions = await paperStore.listOpenPositions();
+    const symbols = [...new Set(positions.map(row => String(row.symbol || '')).filter(isSupportedOptionContractSymbol))];
+    for (const symbol of symbols) paperSocketSymbols.add(symbol);
+    if (symbols.length && marketSocket === socket && streamConnected) {
+      socket.mode(socket.FullMode);
+      socket.subscribe(symbols);
+      console.log('FYERS paper-position subscriptions restored.', JSON.stringify({ openPositionCount: symbols.length }));
+    }
+  } catch (error) {
+    console.error('Could not restore FYERS paper-position subscriptions:', String(error?.message || error).slice(0, 180));
+  }
 }
 
 function startMarketDataStream(token, startReason = 'unspecified') {
@@ -387,6 +415,7 @@ function startMarketDataStream(token, startReason = 'unspecified') {
             console.error('FYERS MCX subscription restore failed independently of NSE:', String(mcxSubscriptionError?.message || mcxSubscriptionError).slice(0, 200));
           }
         }
+        void subscribeOpenPaperPositions(socket);
       } catch (error) {
         streamConnected = false;
         streamError = 'Could not subscribe to FYERS index symbols; controlled recovery is pending.';
@@ -814,6 +843,7 @@ app.use('/api/fyers/option-risk-plan', requireDashboardSession);
 app.use('/api/fyers/funds', requireDashboardSession);
 app.use('/api/fyers/holdings', requireDashboardSession);
 app.use('/api/fyers/positions', requireDashboardSession);
+app.use('/api/paper', requireDashboardSession);
 
 app.get('/api/fyers/auth/start', (_req, res) => {
   if (!appId || !redirectUri) {
@@ -1965,6 +1995,23 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       })) });
     const results = state.results;
     const verified = results.filter(item => item.status === "VERIFIED SETUP");
+    const sessionToken = /^Bearer ([a-f0-9]{64})$/.exec(String(req.get('authorization') || ''))?.[1] || '';
+    for (const item of verified) {
+      const tradePlan = item.plan;
+      const issued = verifiedPlanRegistry.create(sessionToken, {
+        source: 'FYERS_VERIFIED',
+        symbol: tradePlan.contract.symbol,
+        side: tradePlan.contract.side,
+        expiry: tradePlan.contract.expiryDate || tradePlan.contract.expiry,
+        strike: tradePlan.contract.strike,
+        lotSize: tradePlan.contract.lotSize,
+        tickSize: tradePlan.contract.tickSize,
+        underlyingSymbol: item.underlyingSymbol,
+        plan: tradePlan.risk
+      });
+      item.paperPlanId = issued.planId;
+      item.paperPlanExpiresAt = issued.expiresAt;
+    }
     console.info("Sureshot scan completed:", JSON.stringify({ scannedCandidateCount: results.length, rankedCandidateCount: state.rankedCandidateCount, verifiedSetupCount: verified.length, stopReason: "TOP_FIVE_CANDIDATES_CHECKED" }));
     const payload = { ok: true, scanComplete: true, selectedCandidatesComplete,
       stopReason: "TOP_FIVE_CANDIDATES_CHECKED",
@@ -2714,6 +2761,115 @@ app.get('/api/fyers/positions', async (_req, res) => {
   }
 });
 
+
+app.get('/api/paper/positions', async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!paperStoreReady) return res.status(503).json({ ok: false, error: 'Durable Paper Mode database is not ready.' });
+  try {
+    const [positions, openPositions] = await Promise.all([paperStore.listPositions(), paperStore.listOpenPositions()]);
+    return res.json({ ok: true, mode: 'PAPER_SIMULATION', positions, openPositionCount: openPositions.length,
+      orderPlacement: 'disabled', source: 'GV2VPD PostgreSQL paper ledger; not FYERS broker positions' });
+  } catch (error) {
+    return res.status(503).json({ ok: false, error: 'Paper positions are unavailable.', detail: String(error.message || error).slice(0, 160) });
+  }
+});
+
+app.post('/api/paper/buy', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!paperStoreReady) return res.status(503).json({ ok: false, error: 'Durable Paper Mode database is not ready; Paper BUY blocked.' });
+  if (!accessToken || !nseRegularSessionNow()) return res.status(409).json({ ok: false, error: 'NSE market is not open; Paper BUY blocked.' });
+  const indiaNow = new Date(Date.now() + 330 * 60_000);
+  const indiaMinutes = indiaNow.getUTCHours() * 60 + indiaNow.getUTCMinutes();
+  if (indiaMinutes < 9 * 60 + 15 || indiaMinutes >= 15 * 60 + 15) {
+    return res.status(409).json({ ok: false, error: 'Paper BUY is allowed only from 09:15 until 15:15 Asia/Kolkata.' });
+  }
+  const sessionToken = /^Bearer ([a-f0-9]{64})$/.exec(String(req.get('authorization') || ''))?.[1] || '';
+  const planId = String(req.body?.planId || '');
+  const issued = verifiedPlanRegistry.get(sessionToken, planId);
+  if (!issued) return res.status(409).json({ ok: false, error: 'Verified Sureshot plan ID is invalid, expired, or belongs to another Dashboard Session.' });
+  const snapshot = issued.snapshot;
+  if (snapshot.source !== 'FYERS_VERIFIED' || !isSupportedOptionContractSymbol(snapshot.symbol)) {
+    return res.status(422).json({ ok: false, error: 'Server-owned verified FYERS option contract is invalid.' });
+  }
+  if (!streamConnected || !marketSocket) {
+    return res.status(409).json({ ok: false, error: 'FYERS market WebSocket is not connected; Paper BUY blocked.' });
+  }
+  try {
+    const metadata = await getFyersOptionContractMetadata(snapshot.symbol);
+    if (!metadata || Number(metadata.lotSize) !== Number(snapshot.lotSize) ||
+        Number(metadata.tickSize) !== Number(snapshot.tickSize)) {
+      return res.status(409).json({ ok: false, error: 'FYERS official lot/tick metadata changed or is unavailable; rescan required.' });
+    }
+    const quoteUrl = new URL('https://api-t1.fyers.in/data/quotes');
+    quoteUrl.searchParams.set('symbols', snapshot.symbol);
+    const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: 'sureshot' });
+    const rows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
+    const row = rows.find(item => (item?.n || item?.symbol || item?.v?.symbol) === snapshot.symbol);
+    const quote = row?.v || row;
+    const ask = Number(quote?.ask ?? quote?.ask_price);
+    const quoteTime = epochSeconds(quote?.ltt ?? quote?.tt ?? quote?.exch_feed_time);
+    if (!Number.isFinite(ask) || ask < 30 || ask > 150 ||
+        quoteTimestampStatus(quoteTime, Date.now(), 10) !== 'FRESH') {
+      return res.status(409).json({ ok: false, error: 'Fresh FYERS option ask (₹30–₹150) with exchange timestamp <=10 seconds is required; Paper BUY blocked.' });
+    }
+    const risk = buildFixedOptionRiskPlan({ entryPrice: ask, lotSize: metadata.lotSize, tickSize: metadata.tickSize });
+    if (!risk.ok || risk.rr < 2) return res.status(422).json({ ok: false, error: risk.reason || 'Fresh quote fails the minimum 1:2 risk/reward gate.' });
+    const idempotencyKey = String(req.get('Idempotency-Key') || req.body?.idempotencyKey || '');
+    paperSocketSymbols.add(snapshot.symbol);
+    try {
+      marketSocket.mode(marketSocket.FullMode);
+      marketSocket.subscribe([snapshot.symbol]);
+    } catch (subscriptionError) {
+      paperSocketSymbols.delete(snapshot.symbol);
+      return res.status(503).json({ ok: false, error: 'FYERS option WebSocket subscription failed; Paper BUY blocked.' });
+    }
+    const result = await paperStore.createPaperBuy({
+      idempotencyKey,
+      source: 'FYERS_VERIFIED',
+      exchangeTimestamp: new Date(quoteTime * 1000).toISOString(),
+      symbol: snapshot.symbol, side: snapshot.side, expiry: snapshot.expiry, strike: snapshot.strike,
+      plan: { entryPrice: risk.entryPrice, stopLoss: risk.stopLoss, target1: risk.target1,
+        target2: risk.target2, quantity: risk.quantity, lotSize: risk.lotSize }
+    });
+    verifiedPlanRegistry.consume(sessionToken, planId);
+    return res.status(result.created ? 201 : 200).json({
+      ok: true, created: result.created, mode: 'PAPER_SIMULATION', position: result.position,
+      riskAmount: result.riskAmount ?? null, orderPlacement: 'disabled',
+      note: 'Simulation ledger only. No FYERS order endpoint was called.'
+    });
+  } catch (error) {
+    const status = Number(error.statusCode) || 422;
+    return res.status(status).json({ ok: false, error: String(error.message || 'Paper BUY rejected.').slice(0, 200), orderPlacement: 'disabled' });
+  }
+});
+
+app.post('/api/paper/positions/:id/exit', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!paperStoreReady) return res.status(503).json({ ok: false, error: 'Durable Paper Mode database is not ready.' });
+  if (!accessToken) return res.status(401).json({ ok: false, error: 'Reconnect FYERS before manual Paper Exit.' });
+  try {
+    const open = await paperStore.listOpenPositions();
+    const position = open.find(row => String(row.id) === String(req.params.id));
+    if (!position) return res.status(404).json({ ok: false, error: 'Open Paper position not found.' });
+    const quoteUrl = new URL('https://api-t1.fyers.in/data/quotes');
+    quoteUrl.searchParams.set('symbols', position.symbol);
+    const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: 'sureshot' });
+    const rows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
+    const row = rows.find(item => (item?.n || item?.symbol || item?.v?.symbol) === position.symbol);
+    const quote = row?.v || row;
+    const ltp = Number(quote?.lp ?? quote?.ltp);
+    const quoteTime = epochSeconds(quote?.ltt ?? quote?.tt ?? quote?.exch_feed_time);
+    if (!Number.isFinite(ltp) || quoteTimestampStatus(quoteTime, Date.now(), 10) !== 'FRESH') {
+      return res.status(409).json({ ok: false, error: 'Fresh FYERS exchange-timestamped option quote required for manual Paper Exit.' });
+    }
+    const closed = await paperStore.manualExit({ id: position.id, confirmed: req.body?.confirmed === true,
+      price: ltp, exchangeTimestamp: new Date(quoteTime * 1000).toISOString(), source: 'FYERS_VERIFIED' });
+    return res.json({ ok: true, mode: 'PAPER_SIMULATION', position: closed, orderPlacement: 'disabled' });
+  } catch (error) {
+    return res.status(409).json({ ok: false, error: String(error.message || 'Manual Paper Exit failed.').slice(0, 180) });
+  }
+});
+
 app.all('/api/orders/*', (_req, res) => {
   res.status(403).json({ error: 'Order placement is disabled during testing.' });
 });
@@ -2726,6 +2882,22 @@ app.use((err, _req, res, _next) => {
 });
 
 const port = Number(process.env.PORT || 8080);
+
+async function initializePaperStore() {
+  if (!paperStore.configured) {
+    console.warn('Paper Mode disabled: DATABASE_URL is not configured; no in-memory substitute will be used.');
+    return;
+  }
+  try {
+    await paperStore.initialize();
+    paperStoreReady = true;
+    await subscribeOpenPaperPositions(marketSocket);
+    console.log('GV2VPD durable Paper Mode ledger initialized; existing open positions loaded for FYERS quote monitoring.');
+  } catch (error) {
+    paperStoreReady = false;
+    console.error('GV2VPD Paper Mode initialization failed closed:', String(error?.message || error).slice(0, 200));
+  }
+}
 
 async function initializeFyersTokenStore() {
   if (fyersTokenStore.configured) {
@@ -2758,6 +2930,7 @@ function startServer() {
   // fyersTokenStoreReady until initialization completes.
   const server = app.listen(port, () => {
     console.log(`DhanPulse backend listening on ${port}`);
+    void initializePaperStore();
     void initializeFyersTokenStore();
   });
   server.on('error', error => {
