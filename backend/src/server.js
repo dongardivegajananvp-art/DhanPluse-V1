@@ -28,7 +28,7 @@ import { summarizeFyersUpstreamFailure } from './fyers-upstream-diagnostics.js';
 import { buildMarketSocketSubscriptionSymbols, getMarketSocketReconnectDelay } from './market-socket-recovery.js';
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
 import { getMcxWatchdogRetryDelay } from './mcx-watchdog.js';
-import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit } from './mcx-sureshot.js';
+import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit, summarizeMcxQuoteTimestampFields } from './mcx-sureshot.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 import { createPaperTradingStore } from './paper-trading-store.js';
@@ -2303,6 +2303,9 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
           batchIndex: Math.floor(quoteOffset / 50) + 1, requestedCount: batchSymbols.length,
           receivedCount: rows.length, apiStatus: result?.s || "missing", apiCode: result?.code ?? null
         }));
+        console.info("FYERS MCX quote timestamp field diagnostics:", JSON.stringify(
+          summarizeMcxQuoteTimestampFields(rows, 3)
+        ));
       }
       const mcxAudit = buildVerifiedMcxAudit({ universe: universe.data, quoteRows, now: Date.now(), limit: universe.data.length });
       console.info("FYERS MCX full-universe quote audit:", JSON.stringify(mcxAudit.coverage));

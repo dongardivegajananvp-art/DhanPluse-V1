@@ -198,3 +198,38 @@ export function buildVerifiedMcxShortlist({ universe, quoteRows, now = Date.now(
     rankingIsSignal: false, coverage: audit.coverage, data: audit.data
   };
 }
+
+
+/**
+ * Return a tightly allow-listed diagnostic view of timestamp-like quote fields.
+ * Prices, tokens, credentials, and arbitrary quote payload values are never logged.
+ */
+export function summarizeMcxQuoteTimestampFields(rows, limit = 3) {
+  if (!Array.isArray(rows) || !Number.isInteger(limit) || limit < 0 || limit > 10) return [];
+  const explicitFields = [
+    "exch_feed_time", "last_traded_time", "ltt", "tt",
+    "exchange_timestamp", "exchange_time", "last_traded_at", "feed_time"
+  ];
+  return rows.slice(0, limit).map(row => {
+    const quote = row?.v && typeof row.v === "object" ? row.v : row;
+    const keys = [...new Set([...Object.keys(row || {}), ...Object.keys(quote || {})])];
+    const timestampKeys = [...new Set([
+      ...explicitFields.filter(key => Object.hasOwn(quote || {}, key) || Object.hasOwn(row || {}, key)),
+      ...keys.filter(key => /(time|timestamp|_at)$/i.test(key))
+    ])];
+    const fields = {};
+    for (const key of timestampKeys) {
+      const value = Object.hasOwn(quote || {}, key) ? quote[key] : row[key];
+      if (typeof value === "number") fields[key] = { type: "number", value };
+      else if (typeof value === "string") fields[key] = { type: "string", value: value.slice(0, 80) };
+      else if (value == null) fields[key] = { type: value === null ? "null" : "undefined", value: null };
+      else fields[key] = { type: Array.isArray(value) ? "array" : typeof value, value: "[omitted]" };
+    }
+    return {
+      symbol: String(row?.n || row?.symbol || "").slice(0, 80) || null,
+      rowKeys: Object.keys(row || {}).slice(0, 40),
+      quoteKeys: Object.keys(quote || {}).slice(0, 60),
+      timestampFields: fields
+    };
+  });
+}
