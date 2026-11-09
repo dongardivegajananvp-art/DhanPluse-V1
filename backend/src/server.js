@@ -2315,7 +2315,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
       const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: universe.data.length });
       mcxSureshotScanState = {
         id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
-        universeCount: universe.count, audit: mcxAudit.audit,
+        universeCount: universe.count, universe: universe.data, audit: mcxAudit.audit,
         candidates: ranked.data.map((row, index) => ({ ...row, rank: index + 1 })),
         rankedCandidateCount: ranked.candidateCount, nextOffset: 0, results: []
       };
@@ -2519,6 +2519,54 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
       item.plan = freshPlan; item.finalVerifiedAt = new Date().toISOString();
       item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
     }
+    // Re-audit every MCX future immediately before publication. The initial
+    // quote snapshot can age while the sequential five-symbol history/option
+    // checks run; never publish rankings or plans against that old snapshot.
+    stage = "FINAL_REVALIDATE_MCX_FUTURES_QUOTES";
+    const finalFuturesQuoteRows = [];
+    for (let quoteOffset = 0; quoteOffset < state.universe.length; quoteOffset += 50) {
+      if (!mcxSessionOpen()) {
+        const error = new Error("MCX session closed during final futures quote revalidation; all plans blocked.");
+        error.statusCode = 409; throw error;
+      }
+      const symbols = state.universe.slice(quoteOffset, quoteOffset + 50).map(item => item.symbol);
+      const url = new URL("https://api-t1.fyers.in/data/quotes");
+      url.searchParams.set("symbols", symbols.join(","));
+      const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
+      const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
+      finalFuturesQuoteRows.push(...rows);
+    }
+    const finalFuturesAudit = buildVerifiedMcxAudit({
+      universe: state.universe, quoteRows: finalFuturesQuoteRows, now: Date.now(),
+      limit: state.universe.length, maxAgeMs: 30_000
+    });
+    console.info("FYERS MCX final full-universe futures quote revalidation:", JSON.stringify(finalFuturesAudit.coverage));
+    if (!finalFuturesAudit.complete) {
+      const error = new Error("Final MCX full-universe futures quote revalidation is incomplete or stale; no setup may be published.");
+      error.statusCode = 409;
+      error.mcxAudit = finalFuturesAudit;
+      throw error;
+    }
+    // Replace the initial quote snapshot with the final exchange-stamped audit,
+    // and rank every scanned candidate using the final verified move.
+    state.audit = finalFuturesAudit.audit;
+    const finalFutureBySymbol = new Map(finalFuturesAudit.data.map(row => [row.symbol, row]));
+    results.sort((a, b) => {
+      const qa = finalFutureBySymbol.get(a.underlyingSymbol);
+      const qb = finalFutureBySymbol.get(b.underlyingSymbol);
+      return Math.abs(Number(qb?.changePct) || 0) - Math.abs(Number(qa?.changePct) || 0) ||
+        a.underlyingSymbol.localeCompare(b.underlyingSymbol);
+    });
+    results.forEach((item, index) => {
+      const quote = finalFutureBySymbol.get(item.underlyingSymbol);
+      item.rank = index + 1;
+      if (!quote) {
+        item.status = "NO TRADE"; item.reason = "Final full-universe futures quote was not verified.";
+        delete item.plan; return;
+      }
+      item.ltp = quote.price; item.changePct = quote.changePct;
+      item.exchangeTime = quote.exchangeTime; item.quoteAgeSeconds = quote.quoteAgeSeconds;
+    });
     const finalChecked = new Set(finalCheckCandidates);
     for (const item of results) {
       if (item.initiallyVerified === true && item.status === "VERIFIED SETUP" && !finalChecked.has(item)) {
@@ -2528,7 +2576,9 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         delete item.plan;
       }
     }
-    const verified = results.filter(item => item.status === "VERIFIED SETUP").sort((a, b) => a.rank - b.rank);
+    const verified = results.filter(item => item.status === "VERIFIED SETUP" && item.plan &&
+      Number(item.plan.risk?.rr) >= 2 && item.plan.quote?.quoteAgeSeconds >= 0 &&
+      item.plan.quote?.quoteAgeSeconds <= 30).sort((a, b) => a.rank - b.rank);
     const topThreeSetups = verified.slice(0, 3);
     const sessionToken = /^Bearer ([a-f0-9]{64})$/.exec(String(req.get("authorization") || ""))?.[1] || "";
     for (const item of topThreeSetups) {
