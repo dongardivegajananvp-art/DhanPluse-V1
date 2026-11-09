@@ -2162,14 +2162,16 @@ async function loadMcxSureshotUniverseShortlist() {
       if (scanId) { url.searchParams.set('scanId', scanId); url.searchParams.set('offset', String(offset)); }
       const response = await fetch(url.toString(), { headers: { Accept: 'application/json' }, cache: 'no-store' });
       const payload = await response.json().catch(() => ({}));
-      if (response.status === 429 && payload.scanPaused === true && payload.scanId) {
-        scanId = payload.scanId;
-        offset = Number(payload.nextOffset) || 0;
+      if (response.status === 429) {
+        if (payload.scanPaused === true && payload.scanId) {
+          scanId = payload.scanId;
+          offset = Number(payload.nextOffset) || 0;
+        }
         const waitSeconds = Math.max(5, Number(payload.retryAfterSeconds) || 30);
-        host.innerHTML = '<div class="chart-empty">MCX full-universe scan paused by FYERS cooldown. Cursor preserved at ' +
-          Number(payload.scannedCandidateCount || 0) + ' / ' + Number(payload.totalCandidateCount || 0) +
-          ' futures. Safe resume in about ' + waitSeconds + ' seconds…</div>';
-        if (status) status.textContent = 'FYERS cooldown · MCX scan cursor retained; automatic safe resume pending.';
+        host.innerHTML = '<div class="chart-empty">MCX full-universe scan paused by FYERS cooldown. ' +
+          (payload.scanPaused ? 'Cursor preserved at ' + Number(payload.scannedCandidateCount || 0) + ' / ' + Number(payload.totalCandidateCount || 0) + ' futures. ' : 'Initial quote audit will safely retry. ') +
+          'Resume in about ' + waitSeconds + ' seconds…</div>';
+        if (status) status.textContent = 'FYERS cooldown · MCX scan will safely resume after the broker retry window.';
         await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
         continue;
       }
