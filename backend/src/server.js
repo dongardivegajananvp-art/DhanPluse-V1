@@ -2531,9 +2531,9 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
       });
       item.paperPlanId = issued.planId; item.paperPlanExpiresAt = issued.expiresAt;
     }
-    const resultBySymbol = new Map(results.map(item => [item.underlyingSymbol, item]));
+    const auditResultBySymbol = new Map(results.map(item => [item.underlyingSymbol, item]));
     const fullUniverseAudit = state.audit.map(row => {
-      const result = resultBySymbol.get(row.symbol);
+      const result = auditResultBySymbol.get(row.symbol);
       return result ? { ...row, candidateRank: result.rank, candidateStatus: result.status,
         rejectionReason: result.reason || null } : { ...row, candidateStatus: "NOT_CHECKED", rejectionReason: null };
     });
