@@ -42,6 +42,7 @@ if (!app.includes("if (tab === 'Position')") ||
 
 const paperStore = fs.readFileSync(new URL('../backend/src/paper-trading-store.js', import.meta.url), 'utf8');
 const planRegistry = fs.readFileSync(new URL('../backend/src/verified-plan-registry.js', import.meta.url), 'utf8');
+const paperSubscriptions = fs.readFileSync(new URL('../backend/src/paper-socket-subscriptions.js', import.meta.url), 'utf8');
 if (!backend.includes("app.use('/api/paper', requireDashboardSession)") ||
     !backend.includes("app.post('/api/paper/buy'") ||
     !backend.includes("verifiedPlanRegistry.create(sessionToken") ||
@@ -50,7 +51,9 @@ if (!backend.includes("app.use('/api/paper', requireDashboardSession)") ||
     !backend.includes("buildFixedOptionRiskPlan({ entryPrice: ask") ||
     !backend.includes("const idempotencyKey = 'paper:' + planId;") ||
     !backend.includes("void paperStore.processVerifiedQuote") ||
-    !backend.includes("void reconcileOpenPaperPositions(symbols)") ||
+    !backend.includes("void reconcileOpenPaperPositions(result.added)") ||
+    !backend.includes("result?.updates?.some(position => position.state === 'CLOSED')") ||
+    !paperSubscriptions.includes("socket.unsubscribe(removed, false)") ||
     !planRegistry.includes("crypto.randomBytes(32).toString(\"base64url\")") ||
     !planRegistry.includes("entry.owner !== String(sessionBinding || \"\")")) {
   throw new Error('Paper BUY must require an authenticated, short-lived server-owned plan and fresh FYERS quote; exits must use verified socket/restart quotes.');

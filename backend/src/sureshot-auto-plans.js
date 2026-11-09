@@ -92,7 +92,7 @@ export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now
 
 export function selectNearestVerifiedOptionContract({
   discovery, underlyingSymbol, side, spot, now = Date.now(),
-  requireDelta = false, deltaMin = 0.35, deltaMax = 0.55, strikeMode = "nearest"
+  strikeMode = "nearest"
 }) {
   if (!discovery || !Array.isArray(discovery.expiryData) ||
       !Array.isArray(discovery.optionsChain) || !["CE", "PE"].includes(side) ||
@@ -112,13 +112,7 @@ export function selectNearestVerifiedOptionContract({
     row.option_type === side && String(row.expiry) === expiry.expiry &&
     Number.isFinite(Number(row.strike_price)) && Number(row.strike_price) > 0
   );
-  if (requireDelta) {
-    eligible = eligible.filter(row => Number.isFinite(Number(row.delta)) &&
-      Math.abs(Number(row.delta)) >= deltaMin && Math.abs(Number(row.delta)) <= deltaMax);
-  }
-  if (!eligible.length) return { ok: false, reason: requireDelta
-    ? "No " + side + " contract has a verified FYERS delta inside the configured range for the nearest expiry."
-    : "No matching " + side + " contract exists for the nearest listed expiry on this exchange." };
+  if (!eligible.length) return { ok: false, reason: "No matching " + side + " contract exists for the nearest listed expiry on this exchange." };
   let chosen;
   if (strikeMode === "one-otm") {
     const strikes = [...new Set(discovery.optionsChain
@@ -146,8 +140,7 @@ export function selectNearestVerifiedOptionContract({
       strike: Number(chosen.strike_price),
       side,
       expiry: expiry.expiry,
-      expiryDate: expiry.date || indiaDateKey(expiry.expiryMs),
-      ...(Number.isFinite(Number(chosen.delta)) ? { delta: Number(chosen.delta) } : {})
+      expiryDate: expiry.date || indiaDateKey(expiry.expiryMs)
     }
   };
 }

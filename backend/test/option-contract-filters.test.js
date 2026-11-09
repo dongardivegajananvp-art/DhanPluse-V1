@@ -6,53 +6,50 @@ import { selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } f
 const now = Date.parse("2026-11-02T07:00:00.000Z");
 const expiry = "1795651200";
 
-test("preserves only the official nested FYERS Greek delta for contract filtering", () => {
+test("option-chain normalization preserves only listed contract identity and omits Greeks and market fields", () => {
   const result = normalizeOptionContractDiscovery({
     expiryData: [{ expiry, date: "2026-11-26" }],
-    optionsChain: [{ symbol: "NSE:ABC26NOV105CE", strike_price: 105, option_type: "CE", expiry, greeks: { delta: 0.44 }, ltp: 77, oi: 1000, volume: 900 }]
+    optionsChain: [{ symbol: "NSE:ABC26NOV105CE", strike_price: 105, option_type: "CE", expiry,
+      greeks: { delta: 0.44 }, ltp: 77, bid: 76, ask: 78, oi: 1000, volume: 900 }]
   });
-  assert.equal(result.optionsChain[0].delta, 0.44);
-  assert.equal("ltp" in result.optionsChain[0], false);
-  assert.equal("oi" in result.optionsChain[0], false);
-  assert.equal("volume" in result.optionsChain[0], false);
+  assert.deepEqual(result.optionsChain, [{
+    symbol: "NSE:ABC26NOV105CE", strike_price: 105, option_type: "CE", expiry
+  }]);
 });
 
-test("selects exactly one listed OTM strike and requires verified absolute delta 0.35–0.55", () => {
+test("selects exactly one listed ATM+1 OTM strike for CE and PE without consulting delta", () => {
   const expiryData = [{ expiry, date: "2026-11-26" }];
   const rows = [
-    [90, "CE", 0.68], [95, "CE", 0.60], [100, "CE", 0.52], [105, "CE", 0.44], [110, "CE", 0.34],
-    [90, "PE", -0.34], [95, "PE", -0.44], [100, "PE", -0.52], [105, "PE", -0.60], [110, "PE", -0.68]
+    [90, "CE", 0.02], [95, "CE", 0.99], [100, "CE", 0.50], [105, "CE", 0.01], [110, "CE", 0.34],
+    [90, "PE", -0.34], [95, "PE", -0.01], [100, "PE", -0.50], [105, "PE", -0.99], [110, "PE", -0.02]
   ].map(([strike, side, delta]) => ({
     symbol: "NSE:ABC26NOV" + strike + side, strike_price: strike, option_type: side, expiry, delta
   }));
   const discovery = { expiryData, optionsChain: rows };
   const call = selectNearestVerifiedOptionContract({
-    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 100, now,
-    requireDelta: true, strikeMode: "one-otm"
+    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 100, now, strikeMode: "one-otm"
   });
   const put = selectNearestVerifiedOptionContract({
-    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "PE", spot: 100, now,
-    requireDelta: true, strikeMode: "one-otm"
+    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "PE", spot: 100, now, strikeMode: "one-otm"
   });
   assert.equal(call.ok, true);
   assert.equal(call.contract.strike, 105);
-  assert.equal(call.contract.delta, 0.44);
+  assert.equal("delta" in call.contract, false);
   assert.equal(put.ok, true);
   assert.equal(put.contract.strike, 95);
-  assert.equal(put.contract.delta, -0.44);
+  assert.equal("delta" in put.contract, false);
 });
 
-test("does not fall back to ATM or estimated delta when the exact OTM contract fails the delta gate", () => {
+test("blocks when no listed OTM contract exists; does not substitute ATM", () => {
   const discovery = {
     expiryData: [{ expiry, date: "2026-11-26" }],
     optionsChain: [
-      { symbol: "NSE:ABC26NOV100CE", strike_price: 100, option_type: "CE", expiry, delta: 0.5 },
-      { symbol: "NSE:ABC26NOV105CE", strike_price: 105, option_type: "CE", expiry }
+      { symbol: "NSE:ABC26NOV95CE", strike_price: 95, option_type: "CE", expiry },
+      { symbol: "NSE:ABC26NOV100CE", strike_price: 100, option_type: "CE", expiry }
     ]
   };
   const result = selectNearestVerifiedOptionContract({
-    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 100, now,
-    requireDelta: true, strikeMode: "one-otm"
+    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 100, now, strikeMode: "one-otm"
   });
   assert.equal(result.ok, false);
   assert.match(result.reason, /exact ATM \+ 1 OTM/i);
