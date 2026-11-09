@@ -171,3 +171,19 @@ test("MCX Sureshot audits and verifies every eligible future in resumable batche
   assert.match(indexHtml, /MCX FULL UNIVERSE AUDIT RESULTS/);
   assert.match(indexHtml, /MCX TOP 3 VERIFIED SETUPS/);
 });
+
+test("NSE and MCX Sureshot scan gates are independent", () => {
+  const start = server.indexOf('app.get("/api/market/mcx-sureshot-auto-plans"');
+  const end = server.indexOf("// Last-known F&O equity quotes", start);
+  const route = server.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(route, /const mcxSessionOpen = \(\) => getExchangeSessionWindows\(\)\.MCX\?\.session === "SCHEDULED_OPEN"/);
+  assert.match(route, /if \(mcxSureshotAutoPlansInFlight\)/);
+  assert.doesNotMatch(route, /if \(sureshotAutoPlansInFlight\)/);
+  assert.match(route, /mcxSureshotAutoPlansInFlight = true/);
+  assert.match(route, /sureshotAutoPlansInFlight = nseSureshotAutoPlansInFlight/);
+  const mcxFrontend = app.slice(app.indexOf("async function loadMcxSureshotUniverseShortlist"), app.indexOf("async function loadAdvancedScanner"));
+  assert.match(mcxFrontend, /mcxSureshotUniverseScanRunning/);
+  assert.doesNotMatch(mcxFrontend, /sureshotUniverseScanRunning/);
+  assert.match(app, /mcxSureshotUniverseScanRunning \|\| mcxAutoScanStatusCheckInFlight/);
+});
