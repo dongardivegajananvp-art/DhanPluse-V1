@@ -35,6 +35,7 @@ jobs:
           node --check scripts/check-oauth-offline.mjs
           node --check scripts/check-deployed-cors.mjs
           node --check site/sw.js
+          echo "Checking embedded JavaScript in the original /site/ app shell."
           node scripts/check-inline-scripts.mjs
       - name: Validate PWA manifest and required assets
         run: |
