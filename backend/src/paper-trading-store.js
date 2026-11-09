@@ -38,7 +38,7 @@ const asNumber = value => {
 };
 const isoDate = value => new Date(value).toISOString().slice(0, 10);
 
-function validatePlan(input, now) {
+export function validatePaperPlan(input, now = Date.now()) {
   const plan = input?.plan;
   const entry = asNumber(plan?.entryPrice);
   const sl = asNumber(plan?.stopLoss);
@@ -84,7 +84,7 @@ export function createPaperTradingStore({ databaseUrl }) {
 
   async function createPaperBuy(input, now = Date.now()) {
     if (!pool) throw new Error('Durable Paper Mode is unavailable: DATABASE_URL is not configured.');
-    const v = validatePlan(input, now);
+    const v = validatePaperPlan(input, now);
     const idempotencyKey = String(input.idempotencyKey || '').trim();
     if (!/^[A-Za-z0-9:_-]{16,128}$/.test(idempotencyKey)) throw new Error('A valid idempotency key is required.');
     const client = await pool.connect();
