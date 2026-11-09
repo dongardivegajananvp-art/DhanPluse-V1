@@ -79,3 +79,12 @@ This branch is a code implementation proposal for the existing DhanPluse-V1 repo
 - The later Paper Mode foundation commit `03e73556bf53517e30ddaab817ba0dfee10fd1f1` has its own CI runs in progress; do not treat the earlier successful run as validation of that newer commit.
 - The Paper Mode PostgreSQL module is currently an isolated foundation only. It is not wired to authenticated routes, a server-owned verified-plan registry, the FYERS quote stream, or the Position UI. Its client-input validation is not sufficient authorization to create a trade. Do not expose Paper BUY until those gaps and race/restart tests are closed.
 - The existing Render service remains on Free and tracks `main`. No merge, PR deploy, Render restart, environment/database mutation, FYERS token change, or broker order was performed.
+
+
+## Paper Mode foundation follow-up — 2026-11-09
+
+- The first CI run on the paper-ledger foundation found one test-fixture issue: its T2 value was below T1, so validation correctly rejected the malformed ordering before reaching the intended RR assertion. The fixture was corrected to use T2=155 (still above T1=150 but below the required 2:1 reward/risk threshold).
+- Serialized manual-exit database updates with the same PostgreSQL advisory transaction lock used by quote processing, preventing a manual-exit/automatic-exit race on the same ledger.
+- Latest head `316af1f7e92928525bed5fcf40cb1ef41d2f82c7`: backend regression workflow **success**; full validation workflow **success**, including production `/health` and CORS verification.
+- Paper Mode remains foundation-only and inactive: no authenticated paper routes, no server-owned plan registry/opaque plan ID, no server-side re-quote on BUY, no quote-stream fan-out, and no Position UI controls. The module's input validation is not a substitute for route-level authorization. Do not enable BUY until those items and DB integration/restart tests pass.
+- PR remains Draft/unmerged. No Render deploy/restart, production database initialization/migration, token change, or broker order was performed.
