@@ -25,8 +25,10 @@ export function createFyersDataApiBudget({
   let cooldownUntil = 0;
   let cooldownReason = null;
   // A success from a different FYERS endpoint does not prove that the
-  // Cloudflare-blocked endpoint/IP path has recovered.
+  // Cloudflare-blocked endpoint/IP path has recovered. The generation also
+  // prevents a request that began before a 1015 from clearing that newer block.
   let cooldownPathname = null;
+  let cooldownGeneration = 0;
   let queuedRequests = 0;
   const responseCache = new Map();
   const inFlight = new Map();
@@ -93,6 +95,7 @@ export function createFyersDataApiBudget({
     // Retry-After: 0 is not a meaningful clearance signal. Use a conservative
     // local backoff and never let a provider header shorten it.
     cooldownPathname = pathname;
+    cooldownGeneration += 1;
     cooldownUntil = Math.max(cooldownUntil, now() + Math.min(maxCooldownMs, Math.max(backoffMs, retryMs)));
   }
 
@@ -157,16 +160,19 @@ export function createFyersDataApiBudget({
         time = now();
         requestTimes.push(time);
         lastRequestAt = time;
+        const requestCooldownGeneration = cooldownGeneration;
         const response = await fetchImpl(url, init);
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
           activateCooldown(response, body, target.pathname);
-        } else if (response.ok) {
-          if (cooldownPathname === target.pathname) {
-            consecutiveCloudflareBlocks = 0;
-            consecutiveRateLimitBlocks = 0;
-            cooldownPathname = null;
-          }
+        } else if (response.ok &&
+            cooldownPathname === target.pathname &&
+            requestCooldownGeneration === cooldownGeneration) {
+          // Only a successful probe to the blocked endpoint, started after
+          // the latest 1015, is allowed to clear that endpoint's circuit.
+          consecutiveCloudflareBlocks = 0;
+          consecutiveRateLimitBlocks = 0;
+          cooldownPathname = null;
           cooldownUntil = 0;
           cooldownReason = null;
         }
