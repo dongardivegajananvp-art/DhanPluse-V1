@@ -346,6 +346,9 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
   setStatus(label);
   const cooldown = restCooldown || Boolean(status && status.fyersDataApi && status.fyersDataApi.cooldownActive);
   setConnection(connection + (cooldown ? ' · REST cooldown' : ''), nseFeed !== 'LIVE');
+  // Keep the Dashboard's MCX panel on the same authoritative 5-second status poll.
+  updateExchangeLiveSwitches(status);
+  updateMcxConnectionDiagnostics(status);
 }
 
 async function refreshAuthoritativeFyersStatus() {
@@ -1146,7 +1149,10 @@ function dashboardMarkup() {
     ? 'Symbol list includes ' + fnoChartSymbols.length + ' equities from the verified FYERS NSE F&O symbol master, plus NIFTY, BANK NIFTY and SENSEX.'
     : 'NIFTY 50, BANK NIFTY and SENSEX are listed now; connect FYERS to load the complete NSE F&O chart universe.';
   return '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
-    '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
+    '<article class="console-section" id="dashboardMcxStatus"><div class="console-section-head"><div><h4>MCX live feed</h4><p>FYERS official MCX_COM future · independently verified from NSE</p></div><span class="live-tag" id="dashboardMcxFeed">WAITING</span></div>' +
+    '<div class="console-grid console-grid-2"><div class="data-row"><span>MCX market session</span><b id="dashboardMcxSession">CHECKING</b></div><div class="data-row"><span>Official MCX contract</span><b id="dashboardMcxSymbol">Resolving FYERS master…</b></div><div class="data-row"><span>Verified LTP</span><b id="dashboardMcxLtp">—</b></div><div class="data-row"><span>Exchange timestamp</span><b id="dashboardMcxTime">Waiting for exchange tick</b></div></div>' +
+    '<p class="hint" id="dashboardMcxDetail">MCX status is independent from NSE. LIVE appears only after a fresh exchange-timestamped FYERS MCX tick; otherwise the feed remains blocked.</p></article>' +
+    '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>'
     '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol">' + chartSymbolOptions + '</select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
     '<div id="dashboardCandleStatus" class="hint">Choose a symbol and load verified historical candles. ' + escapeHtml(chartUniverseNote) + '</div><div id="dashboardChart"><div class="chart-empty">Candlesticks have not been loaded yet.</div></div>' +
     '<div class="chart-foot"><span id="chartSampleCount">Historical FYERS candles</span><span>OHLC · READ ONLY</span></div></article>' +
@@ -2401,6 +2407,8 @@ function updateExchangeLiveSwitches(status) {
   set('#settingsNseLiveFeed', feedLabel(nse));
   set('#settingsMcxSession', sessionLabel(mcx));
   set('#settingsMcxLiveFeed', feedLabel(mcx));
+  set('#dashboardMcxSession', sessionLabel(mcx));
+  set('#dashboardMcxFeed', feedLabel(mcx));
   const note = document.querySelector('#settingsExchangeStatusNote');
   if (note) {
     const nseHours = nse.sessionHours || 'session hours unavailable';
@@ -2412,27 +2420,28 @@ function updateExchangeLiveSwitches(status) {
 
 function updateMcxConnectionDiagnostics(status) {
   const diagnostic = status && status.mcxDiagnostic ? status.mcxDiagnostic : {};
-  const feed = document.querySelector('#settingsMcxFeed');
-  const symbol = document.querySelector('#settingsMcxSymbol');
-  const ltp = document.querySelector('#settingsMcxLtp');
-  const time = document.querySelector('#settingsMcxTime');
-  const detail = document.querySelector('#settingsMcxDetail');
-  if (!feed || !symbol || !ltp || !time || !detail) return;
   const state = String(diagnostic.status || 'STATUS_UNAVAILABLE');
-  feed.textContent = state === 'FRESH' ? 'LIVE · FRESH TICK' : state.replace(/_/g, ' ');
-  symbol.textContent = diagnostic.symbol || (state === 'MASTER_UNAVAILABLE'
+  const feedText = state === 'FRESH' ? 'LIVE · FRESH TICK' : state.replace(/_/g, ' ');
+  const symbolText = diagnostic.symbol || (state === 'MASTER_UNAVAILABLE'
     ? 'FYERS MCX master unavailable'
     : state === 'NO_ACTIVE_FUTURE' ? 'No active diagnostic future' : 'Resolving official MCX contract…');
-  ltp.textContent = Number.isFinite(Number(diagnostic.ltp)) && Number(diagnostic.ltp) > 0
+  const ltpText = Number.isFinite(Number(diagnostic.ltp)) && Number(diagnostic.ltp) > 0
     ? '₹' + formatPrice(Number(diagnostic.ltp)) + (diagnostic.freshness === 'FRESH' ? '' : ' · STALE')
     : '—';
-  time.textContent = diagnostic.exchangeTimestamp
+  const timeText = diagnostic.exchangeTimestamp
     ? new Date(diagnostic.exchangeTimestamp).toLocaleString('en-IN')
     : 'Waiting for exchange tick';
   const age = diagnostic.ageSeconds != null && Number.isFinite(Number(diagnostic.ageSeconds)) ? ' · age ' + diagnostic.ageSeconds + 's' : '';
-  detail.textContent = (diagnostic.note || 'MCX freshness is verified independently from NSE; subscription recovery never closes the shared transport.') +
+  const detailText = (diagnostic.note || 'MCX freshness is verified independently from NSE; subscription recovery never closes the shared transport.') +
     (diagnostic.expiryDate ? ' Contract expiry: ' + diagnostic.expiryDate + '.' : '') +
     (diagnostic.subscribedOnCurrentSocket ? ' MCX subscribed on the FYERS Data Socket.' : '') + age;
+  [['#settingsMcxFeed', feedText], ['#settingsMcxSymbol', symbolText], ['#settingsMcxLtp', ltpText],
+    ['#settingsMcxTime', timeText], ['#settingsMcxDetail', detailText],
+    ['#dashboardMcxFeed', feedText], ['#dashboardMcxSymbol', symbolText], ['#dashboardMcxLtp', ltpText],
+    ['#dashboardMcxTime', timeText], ['#dashboardMcxDetail', detailText]].forEach(([selector, value]) => {
+      const element = document.querySelector(selector);
+      if (element) element.textContent = value;
+    });
 }
 
 async function refreshConnectionDiagnostics() {
