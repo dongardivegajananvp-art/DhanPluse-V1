@@ -2882,6 +2882,8 @@ app.post('/api/paper/buy', async (req, res) => {
       if (!open.some(position => position.symbol === snapshot.symbol)) paperSocketSymbols.delete(snapshot.symbol);
       throw error;
     }
+    // Re-read the durable open-position set after commit to close a socket reconnect race.
+    void subscribeOpenPaperPositions(marketSocket);
     // Keep the short-lived plan until TTL so a retry returns the same idempotent ledger row.
     return res.status(result.created ? 201 : 200).json({
       ok: true, created: result.created, mode: 'PAPER_SIMULATION', position: result.position,
