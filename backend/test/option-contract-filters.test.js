@@ -40,12 +40,12 @@ test("selects exactly one listed ATM+1 OTM strike for CE and PE without consulti
   assert.equal("delta" in put.contract, false);
 });
 
-test("blocks when the exact listed OTM contract is absent; does not substitute ATM", () => {
+test("blocks when no listed OTM contract exists; does not substitute ATM", () => {
   const discovery = {
     expiryData: [{ expiry, date: "2026-11-26" }],
     optionsChain: [
-      { symbol: "NSE:ABC26NOV100CE", strike_price: 100, option_type: "CE", expiry, delta: 0.5 },
-      { symbol: "NSE:ABC26NOV110CE", strike_price: 110, option_type: "CE", expiry }
+      { symbol: "NSE:ABC26NOV95CE", strike_price: 95, option_type: "CE", expiry },
+      { symbol: "NSE:ABC26NOV100CE", strike_price: 100, option_type: "CE", expiry }
     ]
   };
   const result = selectNearestVerifiedOptionContract({
