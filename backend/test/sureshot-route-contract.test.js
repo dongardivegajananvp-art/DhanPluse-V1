@@ -6,8 +6,8 @@ const server = await readFile(new URL("../src/server.js", import.meta.url), "utf
 const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8");
 const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
 
-test("Sureshot backend scans exactly five ranked candidates from a complete fresh universe", () => {
-  assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 5/);
+test("Sureshot backend verifies every eligible F&O and individually fresh index candidate in five-item batches", () => {
+  assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 250/);
   assert.match(server, /const SURESHOT_BATCH_SIZE = 5/);
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
@@ -17,7 +17,16 @@ test("Sureshot backend scans exactly five ranked candidates from a complete fres
   assert.match(route, /isCompleteFreshFnoQuoteSnapshot\(stockQuoteCache\.data, expectedQuoteSymbols/);
   assert.match(route, /loadVerifiedFnoStockQuotes\(\{ priority: "sureshot" \}\)/);
   assert.match(route, /buildVerifiedSureshotShortlist\(/);
+  assert.match(route, /limit: SURESHOT_UNIVERSE_SCAN_LIMIT/);
+  assert.match(route, /const moverCandidates = ranked\.data\.map/);
+  assert.match(route, /const batch = state\.candidates\.slice\(offset, offset \+ SURESHOT_BATCH_SIZE\)/);
+  assert.match(route, /state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /rankedCandidateCount: ranked\.candidateCount/);
+  assert.match(route, /topThreeSetups = verified\.slice\(0, 3\)/);
+  assert.match(route, /ALL_ELIGIBLE_CANDIDATES_CHECKED/);
+  assert.match(app, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
+  assert.match(app, /TOP 3 VERIFIED SETUPS/);
+  assert.match(app, /FULL UNIVERSE AUDIT RESULTS/);
 });
 
 test("each selected candidate must pass underlying history, contract, live option quote, option candles and risk validation", () => {
