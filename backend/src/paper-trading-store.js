@@ -135,6 +135,12 @@ export function createPaperTradingStore({ databaseUrl }) {
     return result.rows;
   }
 
+  async function listOpenPositions() {
+    if (!pool) throw new Error('Durable Paper Mode is unavailable.');
+    const result = await pool.query("SELECT * FROM gv2vpd_paper_positions WHERE state='OPEN' ORDER BY created_at ASC");
+    return result.rows;
+  }
+
   async function processVerifiedQuote({ symbol, price, exchangeTimestamp, source }, now = Date.now()) {
     if (!pool) throw new Error('Durable Paper Mode is unavailable.');
     const ltp = asNumber(price);
@@ -202,5 +208,5 @@ export function createPaperTradingStore({ databaseUrl }) {
   }
 
   async function close() { if (pool) await pool.end(); }
-  return { configured, initialize, createPaperBuy, listPositions, processVerifiedQuote, manualExit, close };
+  return { configured, initialize, createPaperBuy, listPositions, listOpenPositions, processVerifiedQuote, manualExit, close };
 }
