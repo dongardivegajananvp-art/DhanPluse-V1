@@ -35,6 +35,7 @@ jobs:
           node --check scripts/check-oauth-offline.mjs
           node --check scripts/check-deployed-cors.mjs
           node --check site/sw.js
+          node scripts/check-inline-scripts.mjs
       - name: Validate PWA manifest and required assets
         run: |
           node -e "const fs=require('node:fs'); const m=JSON.parse(fs.readFileSync('./site/manifest.webmanifest','utf8')); if(!m.name || !m.start_url || !m.icons?.length) process.exit(1); console.log('PWA manifest valid')"
