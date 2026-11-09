@@ -24,10 +24,11 @@ if (!app.includes("localStorage.getItem(DASHBOARD_SESSION_KEY)") ||
     !app.includes('Dashboard session missing or expired')) {
   throw new Error('The existing FYERS dashboard-session authentication flow must remain intact.');
 }
-if (!app.includes("render('Home');") ||
+if (!app.includes("const initialTab = new URLSearchParams(window.location.search).get('tab');") ||
+    !app.includes("render(initialTab === 'Position' ? 'Position' : 'Home');") ||
     !app.includes("if (tab === 'Home') tab = 'Dashboard';") ||
     !app.includes("else if (tab === 'Sureshot') tab = 'Sureshot CE/PE';")) {
-  throw new Error('Home must be the landing page and Sureshot must map to the existing verified scanner.');
+  throw new Error('Home must remain the default landing page, direct Position links must work, and Sureshot must map to the existing verified scanner.');
 }
 const backend = fs.readFileSync(new URL('../backend/src/server.js', import.meta.url), 'utf8');
 if (!app.includes("BACKEND_URL + '/api/fyers/funds'") || !app.includes('homeAccountSnapshot') || !backend.includes('normalizeFyersFunds')) {
