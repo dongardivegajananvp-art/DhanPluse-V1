@@ -3109,7 +3109,7 @@ async function loadHomeAccountSnapshot() {
 }
 
 
-async async function submitPaperBuy(planId, button) {
+async function submitPaperBuy(planId, button) {
   if (!planId || !button || button.disabled) return;
   if (!window.confirm('Create a one-lot PAPER simulation using a fresh FYERS quote? No broker order will be sent.')) return;
   button.disabled = true;
