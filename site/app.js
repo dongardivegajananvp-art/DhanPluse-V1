@@ -86,6 +86,8 @@ let quotePollDelay = QUOTE_POLL_MS;
 let quotePollingPausedForRateLimit = false;
 let quoteRequestRunning = false;
 let dashboardCandleRequestRunning = false;
+let dashboardCandleCooldownUntil = 0;
+let dashboardCandleCooldownTimer = null;
 let backendHealthState = 'CHECKING';
 let fyersAuthState = 'NOT CONNECTED';
 let authInProgress = false;
@@ -344,6 +346,9 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
   setStatus(label);
   const cooldown = restCooldown || Boolean(status && status.fyersDataApi && status.fyersDataApi.cooldownActive);
   setConnection(connection + (cooldown ? ' · REST cooldown' : ''), nseFeed !== 'LIVE');
+  // Keep the Dashboard's MCX panel on the same authoritative 5-second status poll.
+  updateExchangeLiveSwitches(status);
+  updateMcxConnectionDiagnostics(status);
 }
 
 async function refreshAuthoritativeFyersStatus() {
@@ -582,6 +587,12 @@ async function loadDashboardCandles() {
   const count=document.querySelector('#chartSampleCount');
   const button=document.querySelector('#dashboardCandlesBtn');
   if(!symbol||!resolution||!chart||!status||dashboardCandleRequestRunning)return;
+  const cooldownRemaining = Math.ceil((dashboardCandleCooldownUntil - Date.now()) / 1000);
+  if (cooldownRemaining > 0) {
+    status.textContent = 'FYERS REST cooldown active · wait ' + cooldownRemaining + ' seconds. No request was sent.';
+    if (button) button.disabled = true;
+    return;
+  }
   if (!localStorage.getItem('dhanpulse-dashboard-session-v1')) {
     status.textContent='Connect FYERS to load verified historical candles.';
     chart.innerHTML='<div class="chart-empty"><strong>FYERS connection required.</strong><p>Connect FYERS to load verified historical candles. No candle values are fabricated.</p><button type="button" class="primary dashboardReconnectBtn">Connect FYERS</button></div>';
@@ -592,11 +603,14 @@ async function loadDashboardCandles() {
   dashboardCandleRequestRunning=true;
   const requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
   if(button)button.disabled=true;
-  status.textContent='Requesting verified FYERS historical candles…';
-  chart.innerHTML='<div class="chart-empty">Loading verified OHLC candles…</div>';
+  status.textContent='Requesting one verified FYERS historical-candle snapshot…';
+  chart.innerHTML='<div class="chart-empty">Loading one verified OHLC response…</div>';
+  let retryAfterSeconds = 0;
   try {
     const response=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:symbol.value,resolution:resolution.value}),{headers:{Accept:'application/json'},cache:'no-store'});
+    retryAfterSeconds = Math.max(0, Number(response.headers.get('Retry-After')) || 0);
     const result=await response.json().catch(()=>({}));
+    retryAfterSeconds = Math.max(retryAfterSeconds, Number(result.retryAfterSeconds) || 0);
     if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.detail||result.error||'Historical candles unavailable.');
     if(!result.data.length)throw new Error('FYERS returned no historical candles for this symbol and timeframe.');
     const candleError=validateOhlcCandles(result.data,resolution.value);
@@ -613,6 +627,18 @@ async function loadDashboardCandles() {
     logEvent('Dashboard candlestick chart loaded ('+result.data.length+' verified candles for '+symbol.value+').','info');
   } catch(error) {
     const message=error.message||'Historical candles unavailable.';
+    if (retryAfterSeconds > 0) {
+      dashboardCandleCooldownUntil = Date.now() + retryAfterSeconds * 1000;
+      if (button) button.disabled = true;
+      if (dashboardCandleCooldownTimer) clearTimeout(dashboardCandleCooldownTimer);
+      dashboardCandleCooldownTimer = setTimeout(() => {
+        dashboardCandleCooldownUntil = 0;
+        const currentButton = document.querySelector('#dashboardCandlesBtn');
+        const currentStatus = document.querySelector('#dashboardCandleStatus');
+        if (currentButton) currentButton.disabled = false;
+        if (currentStatus && currentTab === 'Dashboard') currentStatus.textContent = 'FYERS cooldown elapsed. Press Load candlesticks once to request a fresh OHLC snapshot.';
+      }, retryAfterSeconds * 1000);
+    }
     const sessionExpired=/Dashboard session missing or expired|FYERS session expired|Reconnect FYERS/i.test(message);
     const mainChart=document.querySelector('#mainTabChart');
     const mainNote=document.querySelector('#mainViewNote');
@@ -638,12 +664,12 @@ async function loadDashboardCandles() {
       chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
       if(mainChart)mainChart.innerHTML='<div class="chart-empty">Candlestick chart unavailable: '+escapeHtml(message)+'. No candle values were fabricated.</div>';
       if(mainNote)mainNote.textContent='Verified OHLC candles are unavailable right now; no substitute line chart or fabricated candle values are shown.';
-      status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
+      status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.' + (retryAfterSeconds > 0 ? ' Automatic retry disabled; wait ' + retryAfterSeconds + ' seconds before one manual retry.' : '');
     }
     logEvent('Dashboard candlestick chart failed: '+message,'warn');
   } finally {
     dashboardCandleRequestRunning=false;
-    if(button)button.disabled=false;
+    if(button)button.disabled = Date.now() < dashboardCandleCooldownUntil;
   }
 }
 
@@ -1123,7 +1149,10 @@ function dashboardMarkup() {
     ? 'Symbol list includes ' + fnoChartSymbols.length + ' equities from the verified FYERS NSE F&O symbol master, plus NIFTY, BANK NIFTY and SENSEX.'
     : 'NIFTY 50, BANK NIFTY and SENSEX are listed now; connect FYERS to load the complete NSE F&O chart universe.';
   return '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
-    '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
+    '<article class="console-section" id="dashboardMcxStatus"><div class="console-section-head"><div><h4>MCX live feed</h4><p>FYERS official MCX_COM future · independently verified from NSE</p></div><span class="live-tag" id="dashboardMcxFeed">WAITING</span></div>' +
+    '<div class="console-grid console-grid-2"><div class="data-row"><span>MCX market session</span><b id="dashboardMcxSession">CHECKING</b></div><div class="data-row"><span>Official MCX contract</span><b id="dashboardMcxSymbol">Resolving FYERS master…</b></div><div class="data-row"><span>Verified LTP</span><b id="dashboardMcxLtp">—</b></div><div class="data-row"><span>Exchange timestamp</span><b id="dashboardMcxTime">Waiting for exchange tick</b></div></div>' +
+    '<p class="hint" id="dashboardMcxDetail">MCX status is independent from NSE. LIVE appears only after a fresh exchange-timestamped FYERS MCX tick; otherwise the feed remains blocked.</p></article>' +
+    '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>'
     '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol">' + chartSymbolOptions + '</select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
     '<div id="dashboardCandleStatus" class="hint">Choose a symbol and load verified historical candles. ' + escapeHtml(chartUniverseNote) + '</div><div id="dashboardChart"><div class="chart-empty">Candlesticks have not been loaded yet.</div></div>' +
     '<div class="chart-foot"><span id="chartSampleCount">Historical FYERS candles</span><span>OHLC · READ ONLY</span></div></article>' +
@@ -2378,6 +2407,8 @@ function updateExchangeLiveSwitches(status) {
   set('#settingsNseLiveFeed', feedLabel(nse));
   set('#settingsMcxSession', sessionLabel(mcx));
   set('#settingsMcxLiveFeed', feedLabel(mcx));
+  set('#dashboardMcxSession', sessionLabel(mcx));
+  set('#dashboardMcxFeed', feedLabel(mcx));
   const note = document.querySelector('#settingsExchangeStatusNote');
   if (note) {
     const nseHours = nse.sessionHours || 'session hours unavailable';
@@ -2389,27 +2420,28 @@ function updateExchangeLiveSwitches(status) {
 
 function updateMcxConnectionDiagnostics(status) {
   const diagnostic = status && status.mcxDiagnostic ? status.mcxDiagnostic : {};
-  const feed = document.querySelector('#settingsMcxFeed');
-  const symbol = document.querySelector('#settingsMcxSymbol');
-  const ltp = document.querySelector('#settingsMcxLtp');
-  const time = document.querySelector('#settingsMcxTime');
-  const detail = document.querySelector('#settingsMcxDetail');
-  if (!feed || !symbol || !ltp || !time || !detail) return;
   const state = String(diagnostic.status || 'STATUS_UNAVAILABLE');
-  feed.textContent = state === 'FRESH' ? 'LIVE · FRESH TICK' : state.replace(/_/g, ' ');
-  symbol.textContent = diagnostic.symbol || (state === 'MASTER_UNAVAILABLE'
+  const feedText = state === 'FRESH' ? 'LIVE · FRESH TICK' : state.replace(/_/g, ' ');
+  const symbolText = diagnostic.symbol || (state === 'MASTER_UNAVAILABLE'
     ? 'FYERS MCX master unavailable'
     : state === 'NO_ACTIVE_FUTURE' ? 'No active diagnostic future' : 'Resolving official MCX contract…');
-  ltp.textContent = Number.isFinite(Number(diagnostic.ltp)) && Number(diagnostic.ltp) > 0
+  const ltpText = Number.isFinite(Number(diagnostic.ltp)) && Number(diagnostic.ltp) > 0
     ? '₹' + formatPrice(Number(diagnostic.ltp)) + (diagnostic.freshness === 'FRESH' ? '' : ' · STALE')
     : '—';
-  time.textContent = diagnostic.exchangeTimestamp
+  const timeText = diagnostic.exchangeTimestamp
     ? new Date(diagnostic.exchangeTimestamp).toLocaleString('en-IN')
     : 'Waiting for exchange tick';
   const age = diagnostic.ageSeconds != null && Number.isFinite(Number(diagnostic.ageSeconds)) ? ' · age ' + diagnostic.ageSeconds + 's' : '';
-  detail.textContent = (diagnostic.note || 'MCX freshness is verified independently from NSE; subscription recovery never closes the shared transport.') +
+  const detailText = (diagnostic.note || 'MCX freshness is verified independently from NSE; subscription recovery never closes the shared transport.') +
     (diagnostic.expiryDate ? ' Contract expiry: ' + diagnostic.expiryDate + '.' : '') +
     (diagnostic.subscribedOnCurrentSocket ? ' MCX subscribed on the FYERS Data Socket.' : '') + age;
+  [['#settingsMcxFeed', feedText], ['#settingsMcxSymbol', symbolText], ['#settingsMcxLtp', ltpText],
+    ['#settingsMcxTime', timeText], ['#settingsMcxDetail', detailText],
+    ['#dashboardMcxFeed', feedText], ['#dashboardMcxSymbol', symbolText], ['#dashboardMcxLtp', ltpText],
+    ['#dashboardMcxTime', timeText], ['#dashboardMcxDetail', detailText]].forEach(([selector, value]) => {
+      const element = document.querySelector(selector);
+      if (element) element.textContent = value;
+    });
 }
 
 async function refreshConnectionDiagnostics() {
@@ -2838,7 +2870,7 @@ function bindTabActions() {
   const dashSymbol=document.querySelector('#dashboardCandleSymbol');
   const dashResolution=document.querySelector('#dashboardCandleResolution');
   if(dashSymbol) dashSymbol.addEventListener('change',()=>{const st=document.querySelector('#dashboardCandleStatus');if(st)st.textContent='Selection changed. Load candles to refresh the chart.';});
-  if(currentTab==='Dashboard') loadDashboardCandles();
+  // Historical candles are requested only by the explicit button; never on dashboard render.
   const test = document.querySelector('#testBackendBtn');
   if (test) test.addEventListener('click', testBackend);
   const connect = document.querySelector('#connectFyersBtn');

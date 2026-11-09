@@ -144,9 +144,11 @@ export function createPaperTradingStore({ databaseUrl }) {
     }
   }
 
-  async function listPositions({ date = isoDate(Date.now()) } = {}) {
+  async function listPositions() {
     if (!pool) throw new Error('Durable Paper Mode is unavailable.');
-    const result = await pool.query('SELECT * FROM gv2vpd_paper_positions WHERE trade_date=$1 ORDER BY created_at DESC', [date]);
+    // Position must retain all CLOSED history as well as every OPEN row across
+    // trading dates; never hide an overnight position or a previous-day exit.
+    const result = await pool.query('SELECT * FROM gv2vpd_paper_positions ORDER BY created_at DESC');
     return result.rows;
   }
 

@@ -84,6 +84,18 @@ test('PostgreSQL Paper Mode ledger survives restart and serializes BUY/exit race
     const closed = rows.find(row => String(row.id) === String(first.position.id));
     assert.equal(closed.state, 'CLOSED');
     assert.ok(['TARGET_2', 'MANUAL_EXIT'].includes(closed.exit_reason));
+
+    const laterDay = now + 10 * 24 * 60 * 60 * 1000;
+    const olderHistory = await store.createPaperBuy(
+      makeInput('history-closed-0001', 'NSE:WIPRO26NOV500CE', laterDay), laterDay
+    );
+    await store.manualExit({
+      id: olderHistory.position.id, confirmed: true, price: 110,
+      exchangeTimestamp: new Date(laterDay + 500).toISOString(), source: 'FYERS_VERIFIED'
+    }, laterDay + 1000);
+    const completeHistory = await store.listPositions({ date: new Date(now).toISOString().slice(0, 10) });
+    assert.ok(completeHistory.some(row => String(row.id) === String(olderHistory.position.id) && row.state === 'CLOSED'),
+      'Position API must include closed history from prior trading dates');
   });
 
   await t.test('concurrent BUYs cannot create two open rows for the same contract', async () => {

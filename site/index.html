@@ -424,6 +424,8 @@ let quotePollDelay = QUOTE_POLL_MS;
 let quotePollingPausedForRateLimit = false;
 let quoteRequestRunning = false;
 let dashboardCandleRequestRunning = false;
+let dashboardCandleCooldownUntil = 0;
+let dashboardCandleCooldownTimer = null;
 let backendHealthState = 'CHECKING';
 let fyersAuthState = 'NOT CONNECTED';
 let authInProgress = false;
@@ -688,6 +690,8 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
     connection = 'FYERS login required';
   }
   setStatus(label);
+  updateExchangeLiveSwitches(status);
+  updateMcxConnectionDiagnostics(status);
   updateSureshotExchangeCards(status);
   const cooldown = restCooldown || Boolean(status && status.fyersDataApi && status.fyersDataApi.cooldownActive);
   setConnection(connection + (cooldown ? ' · REST cooldown' : ''), nseClosed ? !mcxLive : nseFeed !== 'LIVE');
@@ -929,6 +933,12 @@ async function loadDashboardCandles() {
   const count=document.querySelector('#chartSampleCount');
   const button=document.querySelector('#dashboardCandlesBtn');
   if(!symbol||!resolution||!chart||!status||dashboardCandleRequestRunning)return;
+  const cooldownRemaining = Math.ceil((dashboardCandleCooldownUntil - Date.now()) / 1000);
+  if (cooldownRemaining > 0) {
+    status.textContent = 'FYERS REST cooldown active · wait ' + cooldownRemaining + ' seconds. No request was sent.';
+    if (button) button.disabled = true;
+    return;
+  }
   if (!localStorage.getItem('dhanpulse-dashboard-session-v1')) {
     status.textContent='Connect FYERS to load verified historical candles.';
     chart.innerHTML='<div class="chart-empty"><strong>FYERS connection required.</strong><p>Connect FYERS to load verified historical candles. No candle values are fabricated.</p><button type="button" class="primary dashboardReconnectBtn">Connect FYERS</button></div>';
@@ -939,11 +949,14 @@ async function loadDashboardCandles() {
   dashboardCandleRequestRunning=true;
   const requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
   if(button)button.disabled=true;
-  status.textContent='Requesting verified FYERS historical candles…';
-  chart.innerHTML='<div class="chart-empty">Loading verified OHLC candles…</div>';
+  status.textContent='Requesting one verified FYERS historical-candle snapshot…';
+  chart.innerHTML='<div class="chart-empty">Loading one verified OHLC response…</div>';
+  let retryAfterSeconds = 0;
   try {
     const response=await fetch(BACKEND_URL+'/api/market/candles?'+new URLSearchParams({symbol:symbol.value,resolution:resolution.value}),{headers:{Accept:'application/json'},cache:'no-store'});
+    retryAfterSeconds = Math.max(0, Number(response.headers.get('Retry-After')) || 0);
     const result=await response.json().catch(()=>({}));
+    retryAfterSeconds = Math.max(retryAfterSeconds, Number(result.retryAfterSeconds) || 0);
     if(!response.ok||result.ok!==true||!Array.isArray(result.data))throw new Error(result.detail||result.error||'Historical candles unavailable.');
     if(!result.data.length)throw new Error('FYERS returned no historical candles for this symbol and timeframe.');
     const candleError=validateOhlcCandles(result.data,resolution.value);
@@ -960,6 +973,18 @@ async function loadDashboardCandles() {
     logEvent('Dashboard candlestick chart loaded ('+result.data.length+' verified candles for '+symbol.value+').','info');
   } catch(error) {
     const message=error.message||'Historical candles unavailable.';
+    if (retryAfterSeconds > 0) {
+      dashboardCandleCooldownUntil = Date.now() + retryAfterSeconds * 1000;
+      if (button) button.disabled = true;
+      if (dashboardCandleCooldownTimer) clearTimeout(dashboardCandleCooldownTimer);
+      dashboardCandleCooldownTimer = setTimeout(() => {
+        dashboardCandleCooldownUntil = 0;
+        const currentButton = document.querySelector('#dashboardCandlesBtn');
+        const currentStatus = document.querySelector('#dashboardCandleStatus');
+        if (currentButton) currentButton.disabled = false;
+        if (currentStatus && currentTab === 'Dashboard') currentStatus.textContent = 'FYERS cooldown elapsed. Press Load candlesticks once to request a fresh OHLC snapshot.';
+      }, retryAfterSeconds * 1000);
+    }
     const sessionExpired=/Dashboard session missing or expired|FYERS session expired|Reconnect FYERS/i.test(message);
     const mainChart=document.querySelector('#mainTabChart');
     const mainNote=document.querySelector('#mainViewNote');
@@ -985,12 +1010,12 @@ async function loadDashboardCandles() {
       chart.innerHTML='<div class="chart-empty">'+escapeHtml(message)+'</div>';
       if(mainChart)mainChart.innerHTML='<div class="chart-empty">Candlestick chart unavailable: '+escapeHtml(message)+'. No candle values were fabricated.</div>';
       if(mainNote)mainNote.textContent='Verified OHLC candles are unavailable right now; no substitute line chart or fabricated candle values are shown.';
-      status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.';
+      status.textContent='Candlestick chart unavailable: '+message+'. No candle values were fabricated.' + (retryAfterSeconds > 0 ? ' Automatic retry disabled; wait ' + retryAfterSeconds + ' seconds before one manual retry.' : '');
     }
     logEvent('Dashboard candlestick chart failed: '+message,'warn');
   } finally {
     dashboardCandleRequestRunning=false;
-    if(button)button.disabled=false;
+    if(button)button.disabled = Date.now() < dashboardCandleCooldownUntil;
   }
 }
 
@@ -1471,6 +1496,9 @@ function dashboardMarkup() {
     : 'NIFTY 50, BANK NIFTY and SENSEX are listed now; connect FYERS to load the complete NSE F&O chart universe.';
   return '<article class="console-section" id="homeAccountSnapshot"><div class="console-section-head"><div><h4>FYERS account snapshot</h4><p id="homeAccountStatus">Waiting for verified account response…</p></div><button type="button" class="secondary" id="homeAccountRefresh">Refresh account</button></div><div class="console-grid console-grid-2"><div class="console-card"><div class="console-card-head">AVAILABLE BALANCE</div><strong class="console-price" id="homeAvailableBalance">—</strong><span class="quote-time">FYERS capital ledger</span></div><div class="console-card"><div class="console-card-head">UTILIZED MARGIN</div><strong class="console-price" id="homeUsedMargin">—</strong><span class="quote-time">FYERS capital ledger</span></div><div class="console-card"><div class="console-card-head">REALISED P&amp;L</div><strong class="console-price" id="homeRealisedPnl">—</strong><span class="quote-time">FYERS funds ledger</span></div><div class="console-card"><div class="console-card-head">UNREALISED P&amp;L</div><strong class="console-price" id="homeUnrealisedPnl">—</strong><span class="quote-time">FYERS open positions</span></div></div><p class="hint">Read-only FYERS account data. Values remain blank when the broker does not return the required field.</p></article>' +
     '<div class="console-grid">' + quoteCardsMarkup() + '</div>' +
+    '<article class="console-section" id="dashboardMcxStatus"><div class="console-section-head"><div><h4>MCX live feed</h4><p>FYERS official MCX_COM future · independently verified from NSE</p></div><span class="live-tag" id="dashboardMcxFeed">WAITING</span></div>' +
+    '<div class="console-grid console-grid-2"><div class="data-row"><span>MCX market session</span><b id="dashboardMcxSession">CHECKING</b></div><div class="data-row"><span>Official MCX contract</span><b id="dashboardMcxSymbol">Resolving FYERS master…</b></div><div class="data-row"><span>Verified LTP</span><b id="dashboardMcxLtp">—</b></div><div class="data-row"><span>Exchange timestamp</span><b id="dashboardMcxTime">Waiting for exchange tick</b></div></div>' +
+    '<p class="hint" id="dashboardMcxDetail">MCX status is independent from NSE. LIVE appears only after a fresh exchange-timestamped FYERS MCX tick; otherwise the feed remains blocked.</p></article>' +
     '<article class="console-section"><div class="console-section-head"><div><h4>Market candlestick chart</h4><p>Historical OHLC candles from FYERS · no synthetic candles</p></div><span class="live-tag">VERIFIED OHLC</span></div>' +
     '<div class="option-controls"><label>Symbol<select id="dashboardCandleSymbol">' + chartSymbolOptions + '</select></label><label>Timeframe<select id="dashboardCandleResolution"><option value="5">5 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">1 hour</option><option value="D">1 day</option></select></label><button class="primary" id="dashboardCandlesBtn">Load candlesticks</button></div>' +
     '<div id="dashboardCandleStatus" class="hint">Choose a symbol and load verified historical candles. ' + escapeHtml(chartUniverseNote) + '</div><div id="dashboardChart"><div class="chart-empty">Candlesticks have not been loaded yet.</div></div>' +
@@ -1747,7 +1775,7 @@ function advancedScannerMarkup(tab) {
       '<p><a href="https://www.nseindia.com/all-reports" target="_blank" rel="noopener noreferrer">NSE All Reports ↗</a></p></div>';
   }
   if (tab === 'Sureshot CE/PE') {
-    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>NSE + MCX F&O CE/PE · OHLC zones + contract discovery; fresh premium checked separately</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="exchange-status-grid" id="sureshotExchangeStatus"><article class="exchange-status-card nse-card"><div class="exchange-card-top"><span>NSE</span><b id="sureshotNseTitle">NSE - MARKET CLOSED - 9:15 pe khulega</b></div><div class="exchange-card-state" id="sureshotNseFeed">MARKET CLOSED</div><div class="exchange-card-meta"><span>Last Tick</span><strong id="sureshotNseTick">—</strong></div><div class="exchange-card-meta"><span>Scan</span><strong id="sureshotNseScan">MARKET CLOSED</strong></div></article><article class="exchange-status-card mcx-card"><div class="exchange-card-top"><span>MCX</span><b id="sureshotMcxTitle">MCX - LIVE - Raat 11:30 tak chalega</b></div><div class="exchange-card-state" id="sureshotMcxFeed">WAITING FOR VERIFIED TICK</div><div class="exchange-card-meta"><span>Last Tick</span><strong id="sureshotMcxTick">—</strong></div><div class="exchange-card-meta"><span>Scan</span><strong id="sureshotMcxScan">WAITING FOR LIVE FEED</strong></div></article></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX" selected>NIFTY 50 · Index options (default)</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="BSE:SENSEX-INDEX">SENSEX · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse selected setup</button><button class="secondary" id="scanSureshotUniverseBtn">Scan Top 10 Movers → Top 5</button><button class="secondary" id="scanMcxSureshotUniverseBtn">Scan MCX F&O Top 5</button></div><div id="sureshotUniverseResults" class="console-section"><div class="chart-empty">Automatic scan ranks a complete verified F&O snapshot, shows Top 10 Gainers and Top 10 Losers, then checks up to five strongest candidates. Final selection is after 09:30 and requires every trend, contract, quote and risk gate.</div></div><div id="mcxSureshotUniverseResults" class="console-section"><div class="chart-empty">MCX Sureshot uses the official MCX_COM master and the independent MCX live session. Run the MCX Top 5 scan while MCX is open.</div></div><div id="setupStatus" class="hint">A setup is shown only after verified underlying OHLC candles, contract descriptors, a fresh timestamped option quote and completed option candles. Chain OI/volume are not used. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum T1 RR: <b>1:1.5</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:1.5 T1 reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
+    return '<div class="console-section"><div class="console-section-head"><div><h4>Sureshot · Supply/Demand setup desk</h4><p>NSE + MCX F&O CE/PE · OHLC zones + contract discovery; fresh premium checked separately</p></div><span class="live-tag">RULE-BASED · READ ONLY</span></div><div class="exchange-status-grid" id="sureshotExchangeStatus"><article class="exchange-status-card nse-card"><div class="exchange-card-top"><span>NSE</span><b id="sureshotNseTitle">NSE - MARKET CLOSED - 9:15 pe khulega</b></div><div class="exchange-card-state" id="sureshotNseFeed">MARKET CLOSED</div><div class="exchange-card-meta"><span>Last Tick</span><strong id="sureshotNseTick">—</strong></div><div class="exchange-card-meta"><span>Scan</span><strong id="sureshotNseScan">MARKET CLOSED</strong></div></article><article class="exchange-status-card mcx-card"><div class="exchange-card-top"><span>MCX</span><b id="sureshotMcxTitle">MCX - LIVE - Raat 11:30 tak chalega</b></div><div class="exchange-card-state" id="sureshotMcxFeed">WAITING FOR VERIFIED TICK</div><div class="exchange-card-meta"><span>Last Tick</span><strong id="sureshotMcxTick">—</strong></div><div class="exchange-card-meta"><span>Scan</span><strong id="sureshotMcxScan">WAITING FOR LIVE FEED</strong></div></article></div><div class="option-controls"><label>Underlying<select id="setupSymbol"><option value="NSE:NIFTY50-INDEX" selected>NIFTY 50 · Index options (default)</option><option value="NSE:NIFTYBANK-INDEX">BANK NIFTY · Index options</option><option value="BSE:SENSEX-INDEX">SENSEX · Index options</option><option value="NSE:RELIANCE-EQ">RELIANCE · Stock</option><option value="NSE:HDFCBANK-EQ">HDFC BANK · Stock</option><option value="NSE:INFY-EQ">INFOSYS · Stock</option><option value="NSE:TCS-EQ">TCS · Stock</option><option value="NSE:ICICIBANK-EQ">ICICI BANK · Stock</option><option value="NSE:SBIN-EQ">SBI · Stock</option></select></label><label>Chart interval<select id="setupResolution"><option value="5" selected>5 min</option></select></label><label>Option side<select id="setupOptionType"><option value="AUTO">Auto from verified setup</option><option value="CE">Call (CE)</option><option value="PE">Put (PE)</option></select></label><label>Expiry<select id="setupExpiry"><option value="">Nearest expiry</option></select></label><label>Strike<select id="setupStrike"><option value="">Auto nearest eligible strike</option></select></label><button class="primary" id="refreshSetupBtn">Analyse selected setup</button><button class="secondary" id="scanSureshotUniverseBtn">Scan Top 10 Movers → Top 5</button><button class="secondary" id="scanMcxSureshotUniverseBtn">Scan MCX F&O Top 5</button></div><div id="sureshotUniverseResults" class="console-section"><div class="chart-empty">Automatic scan ranks a complete verified F&O snapshot, shows Top 10 Gainers and Top 10 Losers, then checks up to five strongest candidates. Final selection is after 09:30 and requires every trend, contract, quote and risk gate.</div><div class="chart-empty">Five strike slots remain visible. A real contract is filled only after the live FYERS scan verifies it.</div><div class="table-wrap"><table class="console-table"><thead><tr><th>Slot</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry / SL / Target / RR</th><th>Paper BUY</th></tr></thead><tbody><tr><td>#1</td><td>Awaiting ranked scan</td><td>—</td><td>NO VERIFIED STRIKE</td><td>BLOCKED</td><td>DISABLED</td></tr><tr><td>#2</td><td>Awaiting ranked scan</td><td>—</td><td>NO VERIFIED STRIKE</td><td>BLOCKED</td><td>DISABLED</td></tr><tr><td>#3</td><td>Awaiting ranked scan</td><td>—</td><td>NO VERIFIED STRIKE</td><td>BLOCKED</td><td>DISABLED</td></tr><tr><td>#4</td><td>Awaiting ranked scan</td><td>—</td><td>NO VERIFIED STRIKE</td><td>BLOCKED</td><td>DISABLED</td></tr><tr><td>#5</td><td>Awaiting ranked scan</td><td>—</td><td>NO VERIFIED STRIKE</td><td>BLOCKED</td><td>DISABLED</td></tr></tbody></table></div></div><div id="mcxSureshotUniverseResults" class="console-section"><div class="chart-empty">MCX Sureshot uses the official MCX_COM master and the independent MCX live session. Run the MCX Top 5 scan while MCX is open.</div></div><div id="setupStatus" class="hint">A setup is shown only after verified underlying OHLC candles, contract descriptors, a fresh timestamped option quote and completed option candles. Chain OI/volume are not used. Weak setups are marked NO TRADE.</div><div class="zone-legend"><span><i class="zone-swatch supply"></i> Supply zone</span><span><i class="zone-swatch demand"></i> Buyer / demand zone</span><span>Minimum T1 RR: <b>1:1.5</b></span></div><div id="setupZoneChart" class="pattern-chart"><div class="chart-empty">Load verified candles to draw zones.</div></div><div id="setupZoneSummary" class="hint">Zones will be calculated from returned OHLC candles, not fabricated values.</div><div id="setupCards" class="console-grid console-grid-2"><div class="chart-empty">Waiting for analysis.</div></div></div><p class="hint">Supply/demand zones and risk levels are heuristic, not guarantees. A valid plan needs a confirmed directional setup, verified option premium, and at least 1:1.5 T1 reward-to-risk. No trade is generated when data or conditions are insufficient. No orders are placed.</p>';
   }
   if (tab === 'FII/DII Flow') {
     return '<div class="console-section"><div class="console-section-head"><h4>Institutional activity</h4><span class="live-tag">SOURCE CHECK</span></div><div class="chart-empty">FII/DII data is not currently connected to a verified source in this project. No institutional figures are fabricated. This module will show data only after a source and timestamp can be verified.</div><p class="hint">FYERS index quotes and option-chain OI are not the same as official FII/DII cash-market flows.</p></div>';
@@ -2146,7 +2174,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
         Number(best.plan.risk.completedCandleCount) + ' · 5 min</b></div>' +
         (best.paperPlanId ? '<button type="button" class="primary" id="gvPaperBuyBest" data-plan-id="' + escapeHtml(best.paperPlanId) + '">Paper BUY · 1 lot</button><p class="hint">Plan ID expires at ' + escapeHtml(best.paperPlanExpiresAt || 'shortly') + '. BUY rechecks a fresh FYERS option ask before saving a simulation.</p>' : '<p class="hint">Paper BUY unavailable: this backend response did not issue a short-lived verified plan ID.</p>') +
         '</article>' : '') +
-      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR</th></tr></thead><tbody>' +
+      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR</th><th>Paper BUY</th></tr></thead><tbody>' +
       result.results.map(row => {
         const plan = row.plan, move = Number(row.changePct);
         const moveText = (move > 0 ? '+' : '') + move.toFixed(2) + '%';
@@ -2157,16 +2185,20 @@ async function loadSureshotUniverseShortlist(options = {}) {
           '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td>₹' + formatPrice(row.ltp) + '</td><td>' + moveText + '</td><td>' + lotText + '</td><td>' +
           (plan ? '<span class="signal-tone positive">VERIFIED</span>' : '<span class="signal-tone neutral">NO TRADE</span>') +
           '</td><td>' + (plan ? escapeHtml(plan.direction) : '—') + '</td><td>' +
-          (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '—') +
+          (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '<span class="signal-tone neutral">NO VERIFIED STRIKE</span>') +
           '</td><td>' + (plan ? '₹' + formatPrice(plan.risk.entryPrice) : '—') + '</td><td>' +
           (plan ? '₹' + formatPrice(plan.risk.stopLoss) : '—') + '</td><td>' +
           (plan ? '₹' + formatPrice(plan.risk.target1) : '—') + '</td><td>' +
           (plan ? '₹' + formatPrice(plan.risk.target2) : '—') + '</td><td>' +
-          (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
+          (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td><td>' +
+          (plan && row.paperPlanId ? '<button type="button" class="primary gvPaperBuyRow" data-plan-id="' + escapeHtml(row.paperPlanId) + '">Paper BUY</button>' : '<span class="signal-tone neutral">BLOCKED</span>') +
+          '</td></tr>' +
           (plan ? '' : '<tr><td colspan="14" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
       }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 30% below entry; T1 = 1.5x entry; T2 = 2.5x entry. One-lot rupee risk uses official FYERS lot size; fees and slippage are excluded. No orders are placed.</p>';
     const paperBuyButton = host.querySelector('#gvPaperBuyBest');
     if (paperBuyButton) paperBuyButton.addEventListener('click', () => submitPaperBuy(paperBuyButton.dataset.planId, paperBuyButton));
+    host.querySelectorAll('.gvPaperBuyRow').forEach(rowButton =>
+      rowButton.addEventListener('click', () => submitPaperBuy(rowButton.dataset.planId, rowButton)));
     if (status) status.textContent = verified.length
       ? (result.selectedCandidatesComplete
         ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s). Best valid setup is ranked first.'
@@ -2188,7 +2220,10 @@ async function loadSureshotUniverseShortlist(options = {}) {
     }
     host.innerHTML = '<div class="console-section"><div class="console-section-head"><h4>NO TRADE · FULL-UNIVERSE SCAN BLOCKED</h4><span class="signal-tone neutral">FYERS VERIFICATION</span></div><p>' +
       escapeHtml(error.message || 'Complete verified full-universe scan unavailable.') +
-      '</p><p class="hint">All partial plans are discarded. No stale fallback, sample price or partial ranking is shown as actionable.</p></div>';
+      '</p><p class="hint">All partial plans are discarded. No stale fallback, sample price or partial ranking is shown as actionable.</p>' +
+      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Slot</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry / SL / Target / RR</th><th>Paper BUY</th></tr></thead><tbody>' +
+      [1,2,3,4,5].map(slot => '<tr><td>#' + slot + '</td><td>Awaiting verified scan</td><td>—</td><td>NO VERIFIED STRIKE</td><td>BLOCKED</td><td>DISABLED</td></tr>').join('') +
+      '</tbody></table></div></div>';
     if (automatic && Number(error.statusCode) !== 401) {
       // Honour FYERS/our circuit-breaker Retry-After. For other transient
       // failures, wait five minutes; never let the 30-second UI timer hammer it.
@@ -2777,6 +2812,8 @@ function updateExchangeLiveSwitches(status) {
   set('#settingsNseLiveFeed', feedLabel(nse));
   set('#settingsMcxSession', sessionLabel(mcx));
   set('#settingsMcxLiveFeed', feedLabel(mcx));
+  set('#dashboardMcxSession', sessionLabel(mcx));
+  set('#dashboardMcxFeed', feedLabel(mcx));
   updateSureshotExchangeCards(status);
   const note = document.querySelector('#settingsExchangeStatusNote');
   if (note) {
@@ -2789,27 +2826,28 @@ function updateExchangeLiveSwitches(status) {
 
 function updateMcxConnectionDiagnostics(status) {
   const diagnostic = status && status.mcxDiagnostic ? status.mcxDiagnostic : {};
-  const feed = document.querySelector('#settingsMcxFeed');
-  const symbol = document.querySelector('#settingsMcxSymbol');
-  const ltp = document.querySelector('#settingsMcxLtp');
-  const time = document.querySelector('#settingsMcxTime');
-  const detail = document.querySelector('#settingsMcxDetail');
-  if (!feed || !symbol || !ltp || !time || !detail) return;
   const state = String(diagnostic.status || 'STATUS_UNAVAILABLE');
-  feed.textContent = state === 'FRESH' ? 'LIVE · FRESH TICK' : state.replace(/_/g, ' ');
-  symbol.textContent = diagnostic.symbol || (state === 'MASTER_UNAVAILABLE'
+  const feedText = state === 'FRESH' ? 'LIVE · FRESH TICK' : state.replace(/_/g, ' ');
+  const symbolText = diagnostic.symbol || (state === 'MASTER_UNAVAILABLE'
     ? 'FYERS MCX master unavailable'
     : state === 'NO_ACTIVE_FUTURE' ? 'No active diagnostic future' : 'Resolving official MCX contract…');
-  ltp.textContent = Number.isFinite(Number(diagnostic.ltp)) && Number(diagnostic.ltp) > 0
+  const ltpText = Number.isFinite(Number(diagnostic.ltp)) && Number(diagnostic.ltp) > 0
     ? '₹' + formatPrice(Number(diagnostic.ltp)) + (diagnostic.freshness === 'FRESH' ? '' : ' · STALE')
     : '—';
-  time.textContent = diagnostic.exchangeTimestamp
+  const timeText = diagnostic.exchangeTimestamp
     ? new Date(diagnostic.exchangeTimestamp).toLocaleString('en-IN')
     : 'Waiting for exchange tick';
   const age = diagnostic.ageSeconds != null && Number.isFinite(Number(diagnostic.ageSeconds)) ? ' · age ' + diagnostic.ageSeconds + 's' : '';
-  detail.textContent = (diagnostic.note || 'MCX is diagnostic only; no signal or order is generated.') +
+  const detailText = (diagnostic.note || 'MCX is diagnostic only; no signal or order is generated.') +
     (diagnostic.expiryDate ? ' Contract expiry: ' + diagnostic.expiryDate + '.' : '') +
     (diagnostic.subscribedOnCurrentSocket ? ' Subscribed on the existing socket.' : '') + age;
+  [['#settingsMcxFeed', feedText], ['#settingsMcxSymbol', symbolText], ['#settingsMcxLtp', ltpText],
+    ['#settingsMcxTime', timeText], ['#settingsMcxDetail', detailText],
+    ['#dashboardMcxFeed', feedText], ['#dashboardMcxSymbol', symbolText], ['#dashboardMcxLtp', ltpText],
+    ['#dashboardMcxTime', timeText], ['#dashboardMcxDetail', detailText]].forEach(([selector, value]) => {
+      const element = document.querySelector(selector);
+      if (element) element.textContent = value;
+    });
 }
 
 async function refreshConnectionDiagnostics() {
@@ -3111,7 +3149,8 @@ async function loadHomeAccountSnapshot() {
 
 async function submitPaperBuy(planId, button) {
   if (!planId || !button || button.disabled) return;
-  if (!window.confirm('Create a one-lot PAPER simulation using a fresh FYERS quote? No broker order will be sent.')) return;
+  // One tap starts a PAPER-only fill; the backend still revalidates the fresh FYERS quote before writing.
+  const positionTab = window.open('about:blank', '_blank');
   button.disabled = true;
   const oldText = button.textContent;
   button.textContent = 'Verifying fresh FYERS quote…';
@@ -3123,10 +3162,16 @@ async function submitPaperBuy(planId, button) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.ok !== true) throw new Error(payload.error || 'Paper BUY was rejected.');
     button.textContent = payload.created ? 'Paper position created' : 'Existing paper position';
+    const positionUrl = new URL(window.location.href);
+    positionUrl.searchParams.set('tab', 'Position');
+    positionUrl.hash = '';
+    if (positionTab) positionTab.location.replace(positionUrl.href);
+    else render('Position');
     const status = document.querySelector('#sureshotAutoStatus');
     if (status) status.textContent = 'Paper simulation saved · fresh FYERS quote revalidated · no broker order sent.';
     logEvent('One-lot Paper Mode position saved for ' + String(payload.position?.symbol || 'verified option') + '.', 'info');
   } catch (error) {
+    if (positionTab && !positionTab.closed) positionTab.close();
     button.disabled = false;
     button.textContent = oldText;
     const status = document.querySelector('#sureshotAutoStatus');
@@ -3413,7 +3458,7 @@ function bindTabActions() {
   const dashSymbol=document.querySelector('#dashboardCandleSymbol');
   const dashResolution=document.querySelector('#dashboardCandleResolution');
   if(dashSymbol) dashSymbol.addEventListener('change',()=>{const st=document.querySelector('#dashboardCandleStatus');if(st)st.textContent='Selection changed. Load candles to refresh the chart.';});
-  if(currentTab==='Dashboard') loadDashboardCandles();
+  // Chart history is requested only by the user's explicit Load candlesticks action.
   const test = document.querySelector('#testBackendBtn');
   if (test) test.addEventListener('click', testBackend);
   const connect = document.querySelector('#connectFyersBtn');
@@ -4120,7 +4165,8 @@ document.querySelector('#settingsBtn')?.addEventListener('click', () => render('
 document.querySelector('#gv2vpdFyersConnect')?.addEventListener('click', () => startFyersLogin());
 
 // Preserve user-created watchlists, alerts and journal entries across reloads.
-render('Home');
+const initialTab = new URLSearchParams(window.location.search).get('tab');
+render(initialTab === 'Position' ? 'Position' : 'Home');
 restoreLastKnownIndexQuotes();
 testBackend();
 void refreshAuthoritativeFyersStatus();
