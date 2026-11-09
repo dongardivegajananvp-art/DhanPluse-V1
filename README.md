@@ -40,7 +40,7 @@ The single frontend lives in `site/`. It retains the original Ultimate navigatio
 
 Automated syntax/unit checks are necessary but do not prove end-to-end behavior. Before calling the consolidation complete, verify:
 1. Browser API destination and CORS response on the official UI.
-2. Exactly two tabs render: Sureshot CE/PE and FYERS Connection. Both must pass desktop and Android-sized browser smoke tests without console errors.
+2. Exactly three tabs render: Home, Sureshot, and Position. The existing FYERS OAuth/session flow remains the connection gate; no second OTP login is added. All three tabs must pass desktop and Android-sized browser smoke tests without console errors.
 3. NIFTY, BANK NIFTY, SENSEX and F&O last-known LTPs show only when FYERS returns valid exchange-timestamped prices.
 4. Full eligible NSE F&O and official MCX futures scans, underlying/option OHLC, contract descriptors, selected-option quotes, and risk plans fail closed on missing, stale, partial or rate-limited data.
 5. FYERS OAuth callback and WebSocket reconnect/fresh-tick recovery in a regular market session.
