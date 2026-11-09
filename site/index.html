@@ -2154,17 +2154,17 @@ async function loadSureshotUniverseShortlist(options = {}) {
     }
     const verified = result.results.filter(row => row.status === 'VERIFIED SETUP');
     const topThree = Array.isArray(result.topThreeSetups) ? result.topThreeSetups.slice(0, 3) : [];
-    if (topThree.length > 3 || topThree.some(row => row.status !== 'VERIFIED SETUP' || !row.plan?.risk)) {
+    if (topThree.length > 3 || topThree.some(row => row.status !== 'VERIFIED SETUP' || !row.finalVerifiedAt || !row.plan?.risk || !Number.isFinite(Number(row.plan?.quote?.quoteAgeSeconds)) || Number(row.plan.quote.quoteAgeSeconds) > 15 || !Number.isFinite(Number(row.plan?.risk?.rrTarget2 ?? row.plan?.risk?.rr)) || Number(row.plan.risk.rrTarget2 ?? row.plan.risk.rr) < 2)) {
       throw new Error('The backend did not return a valid top-three verified setup list.');
     }
     const best = result.bestSetup;
     const topThreeHtml = topThree.length
-      ? '<article class="console-section"><div class="console-section-head"><h4>TOP 3 VERIFIED SETUPS</h4><span class="live-tag">' + topThree.length + ' / 3</span></div><div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Fresh premium</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR (T2)</th></tr></thead><tbody>' +
+      ? '<article class="console-section"><div class="console-section-head"><h4>TOP 3 VERIFIED SETUPS</h4><span class="live-tag">' + topThree.length + ' / 3</span></div><div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Fresh premium</th><th>Quote age</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR (T2)</th></tr></thead><tbody>' +
         topThree.map((row, index) => {
           const plan = row.plan;
           return '<tr><td><b>#' + (index + 1) + '</b></td><td><b>' + escapeHtml(row.underlyingSymbol) + '</b></td><td>' + escapeHtml(plan.direction) +
             '</td><td>' + escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) +
-            '</td><td>₹' + formatPrice(plan.quote.ask) + '</td><td>₹' + formatPrice(plan.risk.entryPrice) + '</td><td>₹' +
+            '</td><td>₹' + formatPrice(plan.quote.ask) + '</td><td>' + Number(plan.quote.quoteAgeSeconds).toFixed(1) + ' sec</td><td>₹' + formatPrice(plan.risk.entryPrice) + '</td><td>₹' +
             formatPrice(plan.risk.stopLoss) + '</td><td>₹' + formatPrice(plan.risk.target1) + '</td><td>₹' +
             formatPrice(plan.risk.target2) + '</td><td>1 : ' + Number(plan.risk.rrTarget2 ?? plan.risk.rr).toFixed(2) + '</td></tr>';
         }).join('') + '</tbody></table></div></article>'
