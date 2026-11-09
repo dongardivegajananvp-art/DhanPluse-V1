@@ -66,7 +66,7 @@ test("Sureshot publishes only after all selected candidates finish and discards 
   assert.match(route, /selectedCandidatesComplete,/);
   assert.match(route, /stopReason: "ALL_ELIGIBLE_CANDIDATES_CHECKED"/);
   assert.match(route, /bestSetup: topThreeSetups\[0\] \|\| null/);
-  assert.match(route, /sureshotScanState = null;[\s\S]*partialPlansDiscarded: true/);
+  assert.match(route, /sureshotScanState = null;[\s\S]*partialPlansDiscarded: !resumableScan/);
   assert.match(route, /orderPlacement: "disabled"/);
 });
 
