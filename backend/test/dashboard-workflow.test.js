@@ -45,11 +45,12 @@ test("Paper BUY opens Position only after the server accepts a paper ledger writ
 
 test("Paper ledger and broker order placement remain explicitly separate and read-only", async () => {
   const server = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  const paperStore = await readFile(new URL("../src/paper-trading-store.js", import.meta.url), "utf8");
   assert.match(server, /orderPlacementEnabled:\s*false/);
   assert.match(server, /\/api\/orders\//);
   assert.match(server, /403/);
   assert.match(server, /target2/);
-  assert.match(server, /stop_loss/);
+  assert.match(paperStore, /stop_loss/);
 });
 
 test("Sureshot scan retains its server cursor across HTTP 429 and waits for provider cooldown", async () => {
