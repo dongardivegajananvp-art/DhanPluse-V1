@@ -40,5 +40,5 @@ test('rejects a risk plan below the minimum T2 1:2 reward/risk', () => {
 test('rejects non-positive or non-integer lot quantity', () => {
   assert.throws(() => validatePaperPlan({
     ...valid, plan: { ...valid.plan, quantity: 0 }
-  }, now), /lot quantity/);
+  }, now), /Immutable entry/);
 });
