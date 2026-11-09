@@ -31,13 +31,11 @@ export function createVerifiedPlanRegistry({ ttlMs = 30_000, now = () => Date.no
       throw new Error("Secure opaque plan ID generation failed.");
     }
     prune();
+    const createdAt = now();
+    const expiresAt = createdAt + ttlMs;
     const immutableSnapshot = structuredClone(snapshot);
-    entries.set(id, {
-      owner,
-      expiresAt: now() + ttlMs,
-      snapshot: immutableSnapshot
-    });
-    return { planId: id, expiresAt: new Date(now() + ttlMs).toISOString() };
+    entries.set(id, { owner, expiresAt, snapshot: immutableSnapshot });
+    return { planId: id, expiresAt: new Date(expiresAt).toISOString() };
   }
 
   function get(sessionBinding, planId) {
