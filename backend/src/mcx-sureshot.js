@@ -98,7 +98,7 @@ export function buildMcxFuturesUniverse(master, now = Date.now()) {
  */
 export function buildVerifiedMcxAudit({ universe, quoteRows, now = Date.now(), limit = 5, maxAgeMs = 30000 }) {
   if (!Array.isArray(universe) || !universe.length || !Array.isArray(quoteRows) ||
-      !Number.isInteger(limit) || limit < 1 || limit > 100) {
+      !Number.isInteger(limit) || limit < 1 || limit > 250) {
     throw new Error("complete_mcx_quote_snapshot_required");
   }
   const expected = new Map(universe.map(row => [row.symbol, row]));
