@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import {
   canScheduleMarketSocketFallback,
   getMarketSocketReconnectDelay,
-  buildMarketSocketSubscriptionSymbols,
-  getMarketSocketReconnectDelay
+  buildMarketSocketSubscriptionSymbols
 } from "../src/market-socket-recovery.js";
 
 test("socket fallback is scheduled only during market hours with a disconnected authenticated socket", () => {
