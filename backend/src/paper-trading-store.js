@@ -102,7 +102,7 @@ export function createPaperTradingStore({ databaseUrl }) {
         `SELECT
           COALESCE(SUM(CASE WHEN state='CLOSED' THEN realized_pnl ELSE 0 END),0) AS realized,
           COALESCE(SUM(CASE WHEN state='OPEN' THEN (COALESCE(last_price,entry_price)-entry_price)*quantity ELSE 0 END),0) AS unrealized
-         FROM gv2vpd_paper_positions WHERE trade_date=$1`, [tradeDate]
+         FROM gv2vpd_paper_positions WHERE trade_date=$1 OR state='OPEN'`, [tradeDate]
       );
       const dailyPnl = Number(day.rows[0].realized) + Number(day.rows[0].unrealized);
       if (dailyPnl <= -5000) throw new Error('Daily paper loss limit of ₹5,000 reached. BUY locked for today.');
