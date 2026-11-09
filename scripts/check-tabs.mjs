@@ -38,6 +38,36 @@ if (!app.includes("if (tab === 'Position')") ||
     !app.includes('Broker-confirmed positions')) {
   throw new Error('Position must display the broker-confirmed FYERS position response.');
 }
+
+const paperStore = fs.readFileSync(new URL('../backend/src/paper-trading-store.js', import.meta.url), 'utf8');
+const planRegistry = fs.readFileSync(new URL('../backend/src/verified-plan-registry.js', import.meta.url), 'utf8');
+if (!backend.includes("app.use('/api/paper', requireDashboardSession)") ||
+    !backend.includes("app.post('/api/paper/buy'") ||
+    !backend.includes("verifiedPlanRegistry.create(sessionToken") ||
+    !backend.includes("verifiedPlanRegistry.get(sessionToken, planId)") ||
+    !backend.includes("quoteTimestampStatus(quoteTime, Date.now(), 10)") ||
+    !backend.includes("buildFixedOptionRiskPlan({ entryPrice: ask") ||
+    !backend.includes("void paperStore.processVerifiedQuote") ||
+    !backend.includes("void reconcileOpenPaperPositions(symbols)") ||
+    !planRegistry.includes("crypto.randomBytes(32).toString(\"base64url\")") ||
+    !planRegistry.includes("entry.owner !== String(sessionBinding || \"\")")) {
+  throw new Error('Paper BUY must require an authenticated, short-lived server-owned plan and fresh FYERS quote; exits must use verified socket/restart quotes.');
+}
+if (!paperStore.includes("pg_advisory_xact_lock(716202611)") ||
+    !paperStore.includes("last_quote_timestamp") ||
+    !paperStore.includes("Maximum two open Paper positions allowed.") ||
+    !paperStore.includes("Daily paper loss limit of ₹5,000")) {
+  throw new Error('Paper ledger persistence, concurrency, out-of-order quote, max-position and daily-loss guards are required.');
+}
+const paperBuyRoute = backend.slice(backend.indexOf("app.post('/api/paper/buy'"), backend.indexOf("app.all('/api/orders/*'"));
+if (!paperBuyRoute || paperBuyRoute.includes('/api/v3/orders') || !backend.includes("app.all('/api/orders/*', (_req, res) => {\n  res.status(403)")) {
+  throw new Error('Paper Mode must never call FYERS order endpoints and live order routes must remain blocked.');
+}
+if (!app.includes("BACKEND_URL + '/api/paper/buy'") ||
+    !app.includes("BACKEND_URL + '/api/paper/positions'") ||
+    !app.includes('Paper Mode ledger · simulation only')) {
+  throw new Error('Position must show a separate durable Paper Mode ledger and Paper BUY must use the verified plan ID.');
+}
 if (!app.includes("tab === 'Sureshot CE/PE') featureContent.innerHTML = advancedScannerMarkup(tab)") ||
     !app.includes('async function loadSureshotUniverseShortlist(options = {})')) {
   throw new Error('Existing FYERS-verified Sureshot scanner must be preserved.');
@@ -57,5 +87,6 @@ if (!sw.includes('gv2vpd-shell-v3-three-tab-app') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('GV2VPD service-worker cache shell is incomplete.');
 }
-console.log('PASS: exactly three tabs; Home is default; Sureshot scanner preserved; Position reads FYERS positions.');
+console.log('PASS: exactly three tabs; Home is default; Sureshot scanner preserved; broker and Paper positions are separated.');
+console.log('PASS: Paper BUY is Dashboard-Session-bound, server-plan-bound and fresh-FYERS-quote-verified; automatic exits are quote-monitored.');
 console.log('PASS: existing FYERS OAuth/dashboard-session login is retained; no duplicate OTP login gate exists.');
