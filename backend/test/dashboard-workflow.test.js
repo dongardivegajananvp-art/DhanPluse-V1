@@ -52,7 +52,7 @@ test("Paper ledger and broker order placement remain explicitly separate and rea
   assert.match(server, /403/);
   assert.match(server, /target2/);
   assert.match(paperStore, /stop_loss/);
-  assert.match(paperStore, /SELECT \\* FROM gv2vpd_paper_positions ORDER BY created_at DESC/);
+  assert.match(paperStore, /SELECT \* FROM gv2vpd_paper_positions ORDER BY created_at DESC/);
 });
 
 test("Sureshot scan retains its server cursor across HTTP 429 and waits for provider cooldown", async () => {
