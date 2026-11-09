@@ -151,6 +151,14 @@ test("MCX Sureshot audits and verifies every eligible future in resumable batche
   assert.match(route, /FINAL_REVALIDATE_MCX_UNDERLYING/);
   assert.match(route, /FINAL_REVALIDATE_MCX_OPTION_CANDLES/);
   assert.match(route, /FINAL_REVALIDATE_MCX_OPTION_QUOTES/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_FUTURES_QUOTES/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_FUTURES_QUOTES/);
+  assert.match(route, /finalMcxSocketAgeSeconds/);
+  assert.match(route, /mcxSubscribedSocket !== marketSocket/);
+  assert.match(route, /buildVerifiedMcxAudit\(\{[\s\S]*?quoteRows: finalFuturesQuoteRows/);
+  assert.match(route, /finalFuturesAudit\.complete/);
+  assert.match(route, /state\.audit = finalFuturesAudit\.audit/);
+  assert.match(route, /item\.exchangeTime = quote\.exchangeTime/);
   assert.match(route, /topThreeSetups = verified\.slice\(0, 3\)/);
   assert.match(route, /ALL_ELIGIBLE_MCX_CANDIDATES_CHECKED/);
   assert.match(route, /fullUniverseAuditCount: fullUniverseAudit\.length/);
