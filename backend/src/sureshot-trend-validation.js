@@ -62,6 +62,9 @@ function calculateAdx(rows, period = 14) {
 export function validateSureshotTrend({ candles, resolution = "5", now = Date.now(), minAdx = 20, minVolumeRatio = 1.5, minTrendScore = 70 }) {
   const minutes = Number(resolution);
   if (minutes !== 5 || !Array.isArray(candles)) return { ok: false, reason: "Sureshot trend validation requires FYERS 5-minute candles." };
+  const ordered = normalizeFyersCandleOrder(candles);
+  if (!ordered.ok) return { ok: false, reason: "Underlying candle timestamps are invalid, duplicated or inconsistently ordered." };
+  candles = ordered.data;
   const completed = [];
   let previousTime = -Infinity;
   for (const row of candles) {
