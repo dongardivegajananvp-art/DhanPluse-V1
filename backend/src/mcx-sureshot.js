@@ -1,3 +1,5 @@
+import { parseFyersQuoteTimestamp } from "./fyers-quote-timestamp.js";
+
 function expiryMillis(value) {
   const n = Number(value);
   if (Number.isFinite(n) && n > 0) return n > 1e12 ? n : n * 1000;
@@ -92,15 +94,6 @@ export function buildMcxFuturesUniverse(master, now = Date.now()) {
   return [...unique.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 
-function parseMcxExchangeTimestamp(value) {
-  if (value === null || value === undefined || value === "") return NaN;
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return NaN;
-  const numeric = Number(value);
-  if (Number.isFinite(numeric) && numeric > 0) return numeric > 1e12 ? numeric : numeric * 1000;
-  const parsed = Date.parse(String(value));
-  return Number.isFinite(parsed) ? parsed : NaN;
-}
-
 /**
  * Build a row-by-row audit for every official MCX future. Partial, stale or
  * malformed snapshots remain visible as audit findings but are never ranked.
@@ -133,8 +126,8 @@ export function buildVerifiedMcxAudit({ universe, quoteRows, now = Date.now(), l
     // Prefer actual exchange/last-traded timestamps. FYERS `tt` may be
     // date-only metadata (e.g. YYYY-MM-DD), which parses as midnight UTC and
     // must never override a valid intraday exchange timestamp.
-    const rawTime = quote?.exch_feed_time ?? quote?.last_traded_time ?? quote?.ltt ?? quote?.tt;
-    const timestamp = parseMcxExchangeTimestamp(rawTime);
+    const parsedTimestamp = parseFyersQuoteTimestamp(row);
+    const timestamp = parsedTimestamp?.timestampMs ?? NaN;
     const age = now - timestamp;
     const rowStatus = String(row?.s || "ok").toLowerCase();
     if (rowStatus !== "ok" || !Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct) ||
