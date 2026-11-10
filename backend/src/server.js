@@ -258,10 +258,13 @@ async function subscribeMcxFuturesUniverse(socket, { force = false } = {}) {
       : [...desired].filter(symbol => !previous.has(symbol));
     mcxFuturesSocketSymbols = desired;
     try {
-      // FYERS Data Socket counts unique symbols across the whole socket.
-      // The Standard plan allows 100; send this 72-symbol MCX set in one
-      // request to avoid burst/duplicate subscribe calls and provider 429s.
-      if (symbolsToSubscribe.length) socket.subscribe(symbolsToSubscribe);
+      // Keep each subscribe message within FYERS' commonly documented
+      // 50-symbol request size. The Standard plan's total socket cap is 100.
+      // Space the two MCX batches by one second to avoid burst 429 responses.
+      for (let offset = 0; offset < symbolsToSubscribe.length; offset += 50) {
+        if (offset > 0) await new Promise(resolve => setTimeout(resolve, 1_000));
+        socket.subscribe(symbolsToSubscribe.slice(offset, offset + 50));
+      }
     } catch (error) {
       mcxFuturesSocketSymbols = previous;
       mcxUniverseSubscribedSocket = null;
@@ -281,7 +284,7 @@ async function subscribeMcxFuturesUniverse(socket, { force = false } = {}) {
     console.info('FYERS MCX full-universe WebSocket subscriptions applied.', JSON.stringify({
       officialFutureCount: universe.count, subscribedSymbolCount: desired.size,
       addedOrReappliedCount: symbolsToSubscribe.length,
-      subscriptionRequests: symbolsToSubscribe.length ? 1 : 0,
+      subscriptionRequests: Math.ceil(symbolsToSubscribe.length / 50),
       removedCount: removed.length, socketGeneration: marketSocketGeneration,
       source: 'FYERS official MCX_COM symbol master'
     }));
