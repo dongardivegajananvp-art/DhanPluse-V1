@@ -29,6 +29,12 @@ test("rejects date-only tt and malformed or absent timestamps", () => {
   assert.equal(parseFyersQuoteTimestamp(null), null);
 });
 
+test("rejects undocumented timestamp aliases instead of treating them as exchange time", () => {
+  for (const field of ["exchange_timestamp", "exchange_time", "last_traded_at", "feed_time"]) {
+    assert.equal(parseFyersQuoteTimestamp({ [field]: Math.floor(now / 1000) }), null, field);
+  }
+});
+
 test("timestamp diagnostics use a nested non-null value when the top-level field is null", () => {
   const summary = summarizeFyersQuoteTimestampFields([{
     n: "MCX:TESTFUT", exch_feed_time: null,
