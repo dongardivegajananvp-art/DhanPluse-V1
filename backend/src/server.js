@@ -30,6 +30,7 @@ import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
 import { getMcxWatchdogRetryDelay } from './mcx-watchdog.js';
 import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit, summarizeMcxQuoteTimestampFields } from './mcx-sureshot.js';
 import { normalizeFyersCandleOrder } from './candle-order.js';
+import { parseFyersQuoteTimestamp, summarizeFyersQuoteTimestampFields } from './fyers-quote-timestamp.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 import { createPaperTradingStore } from './paper-trading-store.js';
@@ -311,7 +312,8 @@ async function reconcileOpenPaperPositions(symbols) {
       if (!needsRestCheck.includes(symbol)) continue;
       const quote = row?.v || row;
       const price = Number(quote?.lp ?? quote?.ltp);
-      const timestamp = epochSeconds(quote?.ltt ?? quote?.tt ?? quote?.exch_feed_time);
+      const parsedTimestamp = parseFyersQuoteTimestamp(row);
+      const timestamp = parsedTimestamp ? Math.floor(parsedTimestamp.timestampMs / 1000) : null;
       if (Number.isFinite(price) && price > 0 && quoteTimestampStatus(timestamp, Date.now(), 10) === 'FRESH') {
         await paperStore.processVerifiedQuote({
           symbol, price, exchangeTimestamp: new Date(timestamp * 1000).toISOString(), source: 'FYERS_VERIFIED'
@@ -1729,17 +1731,44 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal' } = {}) {
       throw error;
     }
     const returned = new Set();
+    const duplicateSymbols = new Set();
+    const unexpectedSymbols = new Set();
+    let malformedRowCount = 0;
     for (const item of body.d) {
-      if (!item || !batch.includes(item.n) || !item.v) continue;
+      if (!item || typeof item.n !== "string") { malformedRowCount += 1; continue; }
+      if (!batch.includes(item.n)) { unexpectedSymbols.add(item.n); continue; }
+      if (returned.has(item.n)) { duplicateSymbols.add(item.n); continue; }
       returned.add(item.n);
+      if (!item.v || typeof item.v !== "object") continue;
       const v = item.v;
-      const lp = Number(v.lp), tt = Number(v.tt), ch = Number(v.ch), chp = Number(v.chp);
-      const stamp = tt > 0 ? tt * 1000 : 0;
-      if (Number.isFinite(lp) && lp > 0 && Number.isFinite(chp) && stamp > 0 && Math.abs(now - stamp) <= 30000) {
-        data.push({ n: item.n, v: { lp, ch: Number.isFinite(ch) ? ch : null, chp, tt }, verified: true });
+      const lp = Number(v.lp), ch = Number(v.ch), chp = Number(v.chp);
+      const parsedTimestamp = parseFyersQuoteTimestamp(item);
+      const stamp = parsedTimestamp?.timestampMs ?? 0;
+      if (Number.isFinite(lp) && lp > 0 && Number.isFinite(chp) &&
+          stamp > 0 && stamp <= now + 5000 && now - stamp <= 30000) {
+        data.push({ n: item.n, v: { lp, ch: Number.isFinite(ch) ? ch : null, chp, tt: Math.floor(stamp / 1000) }, verified: true });
       }
     }
-    for (const symbol of batch) if (!returned.has(symbol) || !data.some(item => item.n === symbol)) missingSymbols.push(symbol);
+    for (const symbol of batch) if (!data.some(item => item.n === symbol)) missingSymbols.push(symbol);
+    console.info("FYERS NSE F&O quote batch audit:", JSON.stringify({
+      batchNumber: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1,
+      requestedCount: batch.length,
+      receivedRowCount: body.d.length,
+      uniqueRequestedSymbolsReturned: returned.size,
+      freshQuoteCount: data.filter(item => batch.includes(item.n)).length,
+      missingOrInvalidCount: missingSymbols.filter(symbol => batch.includes(symbol)).length,
+      duplicateSymbolCount: duplicateSymbols.size,
+      unexpectedSymbolCount: unexpectedSymbols.size,
+      malformedRowCount
+    }));
+    console.info("FYERS NSE quote timestamp field diagnostics:", JSON.stringify(
+      summarizeFyersQuoteTimestampFields(body.d, 3)
+    ));
+    if (duplicateSymbols.size || unexpectedSymbols.size || malformedRowCount) {
+      const error = new Error("FYERS quote batch contains duplicate, unexpected or malformed rows; complete F&O coverage is blocked.");
+      error.statusCode = 502;
+      throw error;
+    }
   }
   if (missingSymbols.length > 0) {
     const error = new Error(`Incomplete verified F&O quote coverage (${data.length}/${symbols.length}); partial rankings discarded.`);

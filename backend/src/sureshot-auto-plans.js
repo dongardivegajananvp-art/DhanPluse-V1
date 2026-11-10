@@ -1,4 +1,5 @@
 import { normalizeFyersCandleOrder } from "./candle-order.js";
+import { parseFyersQuoteTimestamp } from "./fyers-quote-timestamp.js";
 import { buildOptionRiskPlan } from "./option-risk-plan.js";
 import { buildFixedOptionRiskPlan, validateCompletedOptionCandles } from "./fixed-option-risk-plan.js";
 import { validateSureshotTrend } from "./sureshot-trend-validation.js";
@@ -183,7 +184,8 @@ export function buildVerifiedSureshotTradePlan({
   if (!Number.isFinite(maxSpreadPct) || maxSpreadPct <= 0) {
     return { ok: false, reason: "Maximum option spread threshold is invalid." };
   }
-  const quoteTime = epochSeconds(quote.ltt ?? quote.tt ?? quote.exch_feed_time);
+  const parsedQuoteTimestamp = parseFyersQuoteTimestamp(quote);
+  const quoteTime = parsedQuoteTimestamp ? Math.floor(parsedQuoteTimestamp.timestampMs / 1000) : null;
   const ageMs = quoteTime ? now - quoteTime * 1000 : Infinity;
   const bid = Number(quote.bid ?? quote.bid_price);
   const ask = Number(quote.ask ?? quote.ask_price);
