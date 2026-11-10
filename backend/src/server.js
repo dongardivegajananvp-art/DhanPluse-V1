@@ -35,6 +35,7 @@ import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract,
 import { createPaperTradingStore } from './paper-trading-store.js';
 import { reconcilePaperSocketSubscriptions } from './paper-socket-subscriptions.js';
 import { createVerifiedPlanRegistry } from './verified-plan-registry.js';
+import { decodeFyersSocketMessage, summarizeFyersSocketMessage } from './fyers-socket-message.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -421,6 +422,7 @@ function startMarketDataStream(token, startReason = 'unspecified') {
       method: typeof socket.autoreconnect === 'function' ? 'autoreconnect' : 'autoReconnect'
     }));
     let socketConnectCount = 0;
+    let socketPayloadDiagnostics = 0;
     socket.on('connect', () => {
       if (marketSocket !== socket) return;
       streamConnected = true;
@@ -479,9 +481,16 @@ function startMarketDataStream(token, startReason = 'unspecified') {
     });
     socket.on('message', message => {
       if (marketSocket !== socket) return;
-      const parsedMessage = typeof message === 'string'
-        ? (() => { try { return JSON.parse(message); } catch { return null; } })()
-        : message;
+      const parsedMessage = decodeFyersSocketMessage(message);
+      // Capture only a small, redacted sample of transport/payload shape. This
+      // distinguishes an idle provider stream from Buffer/ArrayBuffer decoding
+      // problems without logging prices, tokens, or raw market payloads.
+      if (socketPayloadDiagnostics < 5) {
+        console.log('FYERS socket payload shape diagnostic:', JSON.stringify(
+          summarizeFyersSocketMessage(message, parsedMessage)
+        ));
+        socketPayloadDiagnostics += 1;
+      }
       const frames = Array.isArray(parsedMessage) ? parsedMessage : [parsedMessage];
       const controlFrames = frames
         .filter(x => x && typeof x === 'object' && (x.type || x.s || x.code != null))
