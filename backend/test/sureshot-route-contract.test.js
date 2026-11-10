@@ -156,7 +156,7 @@ test("MCX Sureshot audits and verifies every eligible future in resumable batche
   assert.match(route, /FINAL_REVALIDATE_MCX_FUTURES_WEBSOCKET_TICKS/);
   assert.match(route, /FINAL_REVALIDATE_MCX_FUTURES_WEBSOCKET_TICKS/);
   assert.match(route, /mcxUniverseSubscribedSocket !== marketSocket/);
-  assert.match(route, /mcxSubscribedSocket !== marketSocket/);
+  assert.match(route, /mcxUniverseSubscribedSocket !== marketSocket/);
   assert.match(route, /buildVerifiedMcxAudit\(\{[\s\S]*?quoteRows: finalFuturesQuoteRows/);
   assert.match(route, /FINAL_REVALIDATE_MCX_FUTURES_WEBSOCKET_TICKS/);
   assert.match(route, /mcxUniverseSubscribedSocket !== marketSocket/);
