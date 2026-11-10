@@ -135,7 +135,7 @@ test("NSE status exposes RECONNECTING while a fresh-tick recovery is pending and
   assert.match(source, /const mcxFeed = !accessToken \? 'NOT_CONNECTED'[\s\S]*?mcxSubscribedSocket !== marketSocket/);
   assert.match(source, /NSE socket disconnected, reconnecting\.\.\./);
   assert.match(source, /NSE live feed restored after automatic recovery/);
-  assert.match(source, /MCX_TICK_HEARTBEAT_MS = 10_000/);
+  assert.match(source, /MCX_TICK_HEARTBEAT_MS = 30_000/);
   assert.match(source, /MCX_TICK_FRESHNESS_SECONDS = 10/);
   const mcxWatchdogStart = source.indexOf("const mcxMarketSocketWatchdog = setInterval");
   const mcxWatchdogEnd = source.indexOf("mcxMarketSocketWatchdog.unref", mcxWatchdogStart);
