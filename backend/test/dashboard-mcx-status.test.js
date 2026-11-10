@@ -25,8 +25,8 @@ test("Dashboard renders independent MCX feed status, contract, LTP and exchange 
 
 test("Dashboard MCX LIVE label is driven by backend exchange-timestamp freshness, never by socket connection alone", async () => {
   const server = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
-  assert.match(server, /mcxSocketAudit\\?\\.complete \\? 'LIVE'/);
-  assert.match(server, /mcxUniverseSubscribedSocket !== marketSocket \\? 'SUBSCRIPTION_PENDING'/);
+  assert.match(server, /mcxSocketAudit\?\.complete \? 'LIVE'/);
+  assert.match(server, /mcxUniverseSubscribedSocket !== marketSocket \? 'SUBSCRIPTION_PENDING'/);
   assert.match(server, /exchangeTimestamp: tick\?\.updatedAt \|\| null/);
   assert.match(server, /freshTickCount: mcxFreshTickCount, requiredTickCount: mcxRequiredTickCount/);
   assert.match(server, /buildMcxSocketQuoteRows/);
