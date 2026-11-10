@@ -260,6 +260,8 @@ async function subscribeMcxFuturesUniverse(socket, { force = false } = {}) {
     try {
       // Keep each subscribe message within FYERS' commonly documented
       // 50-symbol request size. The Standard plan's total socket cap is 100.
+      // Let the baseline NSE subscription settle before sending MCX updates.
+      if (force && symbolsToSubscribe.length) await new Promise(resolve => setTimeout(resolve, 1_000));
       // Space the two MCX batches by one second to avoid burst 429 responses.
       for (let offset = 0; offset < symbolsToSubscribe.length; offset += 50) {
         if (offset > 0) await new Promise(resolve => setTimeout(resolve, 1_000));
