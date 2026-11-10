@@ -44,6 +44,14 @@ test("confirms a strong CE trend only when ADX, EMA, VWAP and same-time volume a
   assert.equal(result.scoreParts.sameTimeVolume, 25);
 });
 
+test("normalizes a strictly descending FYERS trend response before validation", () => {
+  const ascending = validateSureshotTrend({ candles: trendCandles("UP"), resolution: "5", now });
+  const descending = validateSureshotTrend({ candles: trendCandles("UP").reverse(), resolution: "5", now });
+  assert.equal(descending.ok, true, descending.reason);
+  assert.equal(descending.side, ascending.side);
+  assert.equal(descending.trendScore, ascending.trendScore);
+});
+
 test("confirms a strong PE trend with the inverse EMA and VWAP alignment", () => {
   const result = validateSureshotTrend({ candles: trendCandles("DOWN"), resolution: "5", now });
   assert.equal(result.ok, true, result.reason);

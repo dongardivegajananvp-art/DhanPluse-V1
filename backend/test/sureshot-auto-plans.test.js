@@ -22,6 +22,14 @@ test("requires completed candles and blocks neutral/stale direction", () => {
   assert.equal(stale.ok, false);
 });
 
+test("normalizes a strictly descending underlying candle response before direction analysis", () => {
+  const ascending = deriveVerifiedUnderlyingDirection(candleRows, "5", now);
+  const descending = deriveVerifiedUnderlyingDirection(candleRows.slice().reverse(), "5", now);
+  assert.equal(descending.ok, ascending.ok);
+  assert.equal(descending.side, ascending.side);
+  assert.equal(descending.latestCandleAt, ascending.latestCandleAt);
+});
+
 test("blocks a contract whose exchange, side, symbol suffix or strike does not match", () => {
   const direction = { ok: true, side: "CE", spot: 104, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
   const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now - 1000) / 1000) };

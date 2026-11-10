@@ -1,3 +1,4 @@
+import { normalizeFyersCandleOrder } from "./candle-order.js";
 function roundToTick(value, tickSize, direction) {
   const scaled = value / tickSize;
   const rounded = direction === "down" ? Math.floor(scaled + 1e-9)
@@ -13,6 +14,9 @@ export function validateCompletedOptionCandles({ candles, resolution = "5", now 
   if (!Number.isInteger(lookback) || lookback < 12) {
     return { ok: false, reason: "At least 12 completed option candles are required." };
   }
+  const ordered = normalizeFyersCandleOrder(candles);
+  if (!ordered.ok) return { ok: false, reason: "Option candle timestamps are invalid, duplicated or inconsistently ordered." };
+  candles = ordered.data;
   let previous = -Infinity;
   const completed = [];
   for (const row of candles) {

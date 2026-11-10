@@ -1,3 +1,4 @@
+import { normalizeFyersCandleOrder } from "./candle-order.js";
 /**
  * Build a long-option risk plan from completed, validated FYERS option candles.
  * The premium entry is the independently verified ask price. The stop is the
@@ -12,6 +13,9 @@ export function buildOptionRiskPlan({ candles, entryPrice, lotSize, tickSize = 0
   if (!Array.isArray(candles) || !Number.isInteger(lookback) || lookback < 12 || candles.length < lookback) {
     return { ok: false, reason: "At least 12 option candles are required for a risk plan." };
   }
+  const ordered = normalizeFyersCandleOrder(candles);
+  if (!ordered.ok) return { ok: false, reason: "Option candle timestamps are invalid, duplicated or inconsistently ordered." };
+  candles = ordered.data;
   const entry = Number(entryPrice);
   const lots = Number(lotSize);
   const tick = Number(tickSize);

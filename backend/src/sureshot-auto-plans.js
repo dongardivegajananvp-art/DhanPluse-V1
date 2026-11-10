@@ -1,3 +1,4 @@
+import { normalizeFyersCandleOrder } from "./candle-order.js";
 import { buildOptionRiskPlan } from "./option-risk-plan.js";
 import { buildFixedOptionRiskPlan, validateCompletedOptionCandles } from "./fixed-option-risk-plan.js";
 import { validateSureshotTrend } from "./sureshot-trend-validation.js";
@@ -32,6 +33,9 @@ export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now
   if (![5, 15, 30, 60].includes(minutes) || !Array.isArray(candles)) {
     return { ok: false, reason: "Unsupported or missing underlying candles." };
   }
+  const ordered = normalizeFyersCandleOrder(candles);
+  if (!ordered.ok) return { ok: false, reason: "Underlying candle timestamps are invalid, duplicated or inconsistently ordered." };
+  candles = ordered.data;
   let previous = -Infinity;
   const valid = [];
   for (const row of candles) {
