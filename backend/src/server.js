@@ -236,6 +236,12 @@ async function subscribeMcxFuturesUniverse(socket, { force = false } = {}) {
   if (mcxUniverseSubscriptionPromise) return mcxUniverseSubscriptionPromise;
   if (!force && mcxUniverseSubscribedSocket === socket &&
       Date.now() - mcxUniverseSubscriptionCheckedAt < MCX_UNIVERSE_SUBSCRIPTION_REFRESH_MS) return true;
+  if (!force && lastMcxUniverseResubscribeAt) {
+    const retryDelayMs = getMcxWatchdogRetryDelay(mcxUniverseResubscribeCount);
+    if (Date.now() - lastMcxUniverseResubscribeAt < retryDelayMs) return false;
+  }
+  lastMcxUniverseResubscribeAt = Date.now();
+  mcxUniverseResubscribeCount += 1;
   mcxUniverseSubscriptionPromise = (async () => {
     const universe = await getMcxFnoUniverse();
     if (marketSocket !== socket || !streamConnected) return false;
@@ -267,6 +273,8 @@ async function subscribeMcxFuturesUniverse(socket, { force = false } = {}) {
     }
     mcxUniverseSubscribedSocket = socket;
     mcxUniverseSubscriptionCheckedAt = Date.now();
+    mcxUniverseResubscribeCount = 0;
+    lastMcxUniverseResubscribeAt = 0;
     console.info('FYERS MCX full-universe WebSocket subscriptions applied.', JSON.stringify({
       officialFutureCount: universe.count, subscribedSymbolCount: desired.size,
       addedOrReappliedCount: symbolsToSubscribe.length,
@@ -408,7 +416,7 @@ async function subscribeOpenPaperPositions(socket, { forceSubscribe = false } = 
     try {
       const positions = await paperStore.listOpenPositions();
       const symbols = [...new Set(positions.map(row => String(row.symbol || '')).filter(isSupportedOptionContractSymbol))];
-      const reservedSymbols = [...allowedSymbols, chartStreamSymbol, mcxDiagnosticInstrument?.symbol].filter(Boolean);
+      const reservedSymbols = [...allowedSymbols, chartStreamSymbol, ...mcxFuturesSocketSymbols, mcxDiagnosticInstrument?.symbol].filter(Boolean);
       const result = reconcilePaperSocketSubscriptions({
         socket, currentSymbols: paperSocketSymbols, desiredSymbols: symbols,
         reservedSymbols, maxSymbols: 100, forceSubscribe
