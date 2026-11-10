@@ -135,7 +135,8 @@ let mcxUniverseSubscriptionCheckedAt = 0;
 let mcxUniverseResubscribeCount = 0;
 let lastMcxUniverseResubscribeAt = 0;
 const MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS = 30_000;
-const MCX_UNIVERSE_SUBSCRIPTION_REFRESH_MS = 30_000;
+// Full-universe subscriptions are applied once per socket generation. Recovery
+// for a silent diagnostic contract must never replay all 72 symbols.
 // Both the connection diagnostic and Sureshot must share one authoritative
 // official master download. Separate fetches caused duplicate slow requests
 // and could leave the diagnostic and scanner with conflicting availability.
@@ -235,8 +236,7 @@ async function subscribeMcxFuturesUniverse(socket, { force = false } = {}) {
   if (!socket || marketSocket !== socket || !streamConnected || typeof socket.subscribe !== 'function') return false;
   if (mcxUniverseSubscriptionPromise) return mcxUniverseSubscriptionPromise;
   const diagnosticCovered = !mcxDiagnosticInstrument?.symbol || mcxFuturesSocketSymbols.has(mcxDiagnosticInstrument.symbol);
-  if (!force && mcxUniverseSubscribedSocket === socket && diagnosticCovered &&
-      Date.now() - mcxUniverseSubscriptionCheckedAt < MCX_UNIVERSE_SUBSCRIPTION_REFRESH_MS) return true;
+  if (!force && mcxUniverseSubscribedSocket === socket && diagnosticCovered) return true;
   if (!force && lastMcxUniverseResubscribeAt) {
     const retryDelayMs = getMcxWatchdogRetryDelay(mcxUniverseResubscribeCount);
     if (Date.now() - lastMcxUniverseResubscribeAt < retryDelayMs) return false;
@@ -774,9 +774,8 @@ const mcxMarketSocketWatchdog = setInterval(() => {
   if (!accessToken || !marketSocket || getExchangeSessionWindows().MCX?.session !== 'SCHEDULED_OPEN') return;
   const now = Date.now();
   if (!streamConnected || typeof marketSocket.subscribe !== 'function') return;
-  if (mcxUniverseSubscribedSocket !== marketSocket ||
-      now - mcxUniverseSubscriptionCheckedAt >= MCX_UNIVERSE_SUBSCRIPTION_REFRESH_MS) {
-    void subscribeMcxFuturesUniverse(marketSocket, { force: mcxUniverseSubscribedSocket !== marketSocket }).catch(error => {
+  if (mcxUniverseSubscribedSocket !== marketSocket) {
+    void subscribeMcxFuturesUniverse(marketSocket, { force: true }).catch(error => {
       console.error('MCX full-universe subscription refresh failed; all MCX plans remain blocked:', String(error?.message || error).slice(0, 200));
     });
   }
@@ -789,20 +788,15 @@ const mcxMarketSocketWatchdog = setInterval(() => {
   mcxResubscribeCount += 1;
   try {
     marketSocket.mode(marketSocket.FullMode);
-    if (mcxFuturesSocketSymbols.has(mcxDiagnosticInstrument.symbol)) {
-      void subscribeMcxFuturesUniverse(marketSocket, { force: true }).catch(error => {
-        console.error('MCX full-universe subscription recovery failed; retry remains scheduled:', String(error?.message || error).slice(0, 200));
-      });
-      mcxSubscribedSocket = marketSocket;
-    } else {
-      marketSocket.subscribe([mcxDiagnosticInstrument.symbol]);
-      mcxSubscribedSocket = marketSocket;
-    }
+    // Reapply only the diagnostic contract. Replaying the full 72-symbol
+    // universe because one diagnostic tick is quiet caused avoidable FYERS
+    // subscription bursts and 429s on an otherwise connected socket.
+    marketSocket.subscribe([mcxDiagnosticInstrument.symbol]);
+    mcxSubscribedSocket = marketSocket;
     console.warn('MCX feed watchdog re-applied the active MCX subscription set after 10 seconds without a fresh exchange tick.', JSON.stringify({
       reason: 'no_fresh_mcx_tick_within_10_seconds', silentForMs,
       retry: mcxResubscribeCount, nextRetryDelayMs: getMcxWatchdogRetryDelay(mcxResubscribeCount),
-      recovery: mcxFuturesSocketSymbols.has(mcxDiagnosticInstrument.symbol)
-        ? 'single_full_universe_request_on_existing_transport' : 'single_diagnostic_symbol_request',
+      recovery: 'single_diagnostic_symbol_request_on_existing_transport',
       transportConnected: true, symbol: mcxDiagnosticInstrument.symbol
     }));
   } catch (error) {
