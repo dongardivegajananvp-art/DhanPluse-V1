@@ -139,6 +139,8 @@ test("MCX Sureshot audits and verifies every eligible future in resumable batche
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   assert.ok(start >= 0 && end > start);
   const route = server.slice(start, end);
+  assert.match(route, /buildMcxSocketQuoteRows\(universe\.data, latestTicks\)/);
+  assert.match(route, /VERIFY_MCX_FUTURES_WEBSOCKET_TICKS/);
   assert.match(route, /buildVerifiedMcxAudit\(/);
   assert.match(route, /limit: universe\.data\.length/);
   assert.match(route, /const batch = state\.candidates\.slice\(offset, offset \+ SURESHOT_BATCH_SIZE\)/);
@@ -151,11 +153,13 @@ test("MCX Sureshot audits and verifies every eligible future in resumable batche
   assert.match(route, /FINAL_REVALIDATE_MCX_UNDERLYING/);
   assert.match(route, /FINAL_REVALIDATE_MCX_OPTION_CANDLES/);
   assert.match(route, /FINAL_REVALIDATE_MCX_OPTION_QUOTES/);
-  assert.match(route, /FINAL_REVALIDATE_MCX_FUTURES_QUOTES/);
-  assert.match(route, /FINAL_REVALIDATE_MCX_FUTURES_QUOTES/);
-  assert.match(route, /finalMcxSocketAgeSeconds/);
-  assert.match(route, /mcxSubscribedSocket !== marketSocket/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_FUTURES_WEBSOCKET_TICKS/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_FUTURES_WEBSOCKET_TICKS/);
+  assert.match(route, /mcxUniverseSubscribedSocket !== marketSocket/);
+  assert.match(route, /mcxUniverseSubscribedSocket !== marketSocket/);
   assert.match(route, /buildVerifiedMcxAudit\(\{[\s\S]*?quoteRows: finalFuturesQuoteRows/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_FUTURES_WEBSOCKET_TICKS/);
+  assert.match(route, /mcxUniverseSubscribedSocket !== marketSocket/);
   assert.match(route, /finalFuturesAudit\.complete/);
   assert.match(route, /state\.audit = finalFuturesAudit\.audit/);
   assert.match(route, /item\.exchangeTime = quote\.exchangeTime/);

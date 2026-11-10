@@ -6,7 +6,7 @@ import { buildVerifiedMcxAudit } from "../src/mcx-sureshot.js";
 const now = Date.parse("2026-11-10T12:00:00.000Z");
 const universe = [
   { symbol: "MCX:CRUDEOIL26NOVFUT", underlying: "CRUDEOIL" },
-  { symbol: "MCX:GOLD26DEC FUT", underlying: "GOLD" }
+  { symbol: "MCX:GOLD26DECFUT", underlying: "GOLD" }
 ];
 
 test("MCX socket audit uses exchange-stamped ticks for every requested future", () => {
@@ -46,4 +46,15 @@ test("local WebSocket receive time cannot replace a missing exchange timestamp",
   assert.equal(audit.complete, false);
   assert.equal(audit.audit[0].status, "STALE_OR_INVALID_QUOTE");
   assert.equal(audit.audit[0].exchangeTime, null);
+});
+
+test("MCX socket audit rejects ticks without a verified percentage change", () => {
+  const ticks = new Map([
+    [universe[0].symbol, { ltp: 6500, chp: null, updatedAt: new Date(now).toISOString() }]
+  ]);
+  const audit = buildVerifiedMcxAudit({
+    universe: [universe[0]], quoteRows: buildMcxSocketQuoteRows([universe[0]], ticks), now
+  });
+  assert.equal(audit.complete, false);
+  assert.equal(audit.audit[0].status, "STALE_OR_INVALID_QUOTE");
 });
