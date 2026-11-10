@@ -8,6 +8,12 @@ const completed = Array.from({ length: 12 }, (_, index) => {
   return [time, 100, 101, 99, 100, 1000];
 });
 
+test("accepts only a strictly descending option candle sequence by reversing it chronologically", () => {
+  const result = validateCompletedOptionCandles({ candles: completed.slice().reverse(), resolution: "5", now, lookback: 12 });
+  assert.equal(result.ok, true);
+  assert.equal(result.completedCandleCount, 12);
+});
+
 test("fixed risk plan uses 30 percent stop, 1.5x target and 2.5x target", () => {
   const result = buildFixedOptionRiskPlan({ entryPrice: 100, lotSize: 25, tickSize: 0.05 });
   assert.equal(result.ok, true);
