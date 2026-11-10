@@ -27,9 +27,9 @@ jobs:
           for attempt in 1 2 3 4; do
             response="$(curl --silent --show-error --location \
               --connect-timeout 10 --max-time 20 "$url" 2>/dev/null || true)"
-            if grep -q '"serviceHealth":"HEALTHY"' <<< "$response"; then
+            if [[ -n "$response" ]] && node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1)' "$response"; then
               printf '%s\n' "$response"
-              echo "PASS: original Render backend returned a healthy HTTP response."
+              echo "PASS: original Render backend is healthy, FYERS is configured, and order placement remains disabled."
               exit 0
             fi
             echo "Backend is waking up or did not return its health JSON (attempt $attempt/4)."
