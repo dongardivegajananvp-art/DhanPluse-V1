@@ -182,7 +182,7 @@ const NSE_TICK_HEARTBEAT_MS = 10_000;
 const NSE_TICK_FRESHNESS_SECONDS = 10;
 // MCX has its own freshness gate and subscription retry on the shared FYERS
 // Data Socket. NSE silence must never trigger this controller, or vice versa.
-const MCX_TICK_HEARTBEAT_MS = 10_000;
+const MCX_TICK_HEARTBEAT_MS = 30_000;
 const MCX_TICK_FRESHNESS_SECONDS = 10;
 const nseIndexSymbols = allowedSymbols.filter(symbol => symbol.startsWith('NSE:'));
 let nseReconnectPending = false;
