@@ -234,7 +234,8 @@ async function loadMcxDiagnosticInstrument() {
 async function subscribeMcxFuturesUniverse(socket, { force = false } = {}) {
   if (!socket || marketSocket !== socket || !streamConnected || typeof socket.subscribe !== 'function') return false;
   if (mcxUniverseSubscriptionPromise) return mcxUniverseSubscriptionPromise;
-  if (!force && mcxUniverseSubscribedSocket === socket &&
+  const diagnosticCovered = !mcxDiagnosticInstrument?.symbol || mcxFuturesSocketSymbols.has(mcxDiagnosticInstrument.symbol);
+  if (!force && mcxUniverseSubscribedSocket === socket && diagnosticCovered &&
       Date.now() - mcxUniverseSubscriptionCheckedAt < MCX_UNIVERSE_SUBSCRIPTION_REFRESH_MS) return true;
   if (!force && lastMcxUniverseResubscribeAt) {
     const retryDelayMs = getMcxWatchdogRetryDelay(mcxUniverseResubscribeCount);
@@ -257,9 +258,10 @@ async function subscribeMcxFuturesUniverse(socket, { force = false } = {}) {
       : [...desired].filter(symbol => !previous.has(symbol));
     mcxFuturesSocketSymbols = desired;
     try {
-      for (let offset = 0; offset < symbolsToSubscribe.length; offset += 50) {
-        socket.subscribe(symbolsToSubscribe.slice(offset, offset + 50));
-      }
+      // FYERS Data Socket counts unique symbols across the whole socket.
+      // The Standard plan allows 100; send this 72-symbol MCX set in one
+      // request to avoid burst/duplicate subscribe calls and provider 429s.
+      if (symbolsToSubscribe.length) socket.subscribe(symbolsToSubscribe);
     } catch (error) {
       mcxFuturesSocketSymbols = previous;
       mcxUniverseSubscribedSocket = null;
@@ -272,13 +274,14 @@ async function subscribeMcxFuturesUniverse(socket, { force = false } = {}) {
       }
     }
     mcxUniverseSubscribedSocket = socket;
+    if (mcxDiagnosticInstrument?.symbol && desired.has(mcxDiagnosticInstrument.symbol)) mcxSubscribedSocket = socket;
     mcxUniverseSubscriptionCheckedAt = Date.now();
     mcxUniverseResubscribeCount = 0;
     lastMcxUniverseResubscribeAt = 0;
     console.info('FYERS MCX full-universe WebSocket subscriptions applied.', JSON.stringify({
       officialFutureCount: universe.count, subscribedSymbolCount: desired.size,
       addedOrReappliedCount: symbolsToSubscribe.length,
-      subscriptionBatches: Math.ceil(symbolsToSubscribe.length / 50),
+      subscriptionRequests: symbolsToSubscribe.length ? 1 : 0,
       removedCount: removed.length, socketGeneration: marketSocketGeneration,
       source: 'FYERS official MCX_COM symbol master'
     }));
@@ -551,20 +554,8 @@ function startMarketDataStream(token, startReason = 'unspecified') {
         void subscribeMcxFuturesUniverse(socket, { force: true }).catch(error => {
           console.error('FYERS MCX full-universe subscription restore failed:', String(error?.message || error).slice(0, 200));
         });
-        // Keep the single diagnostic contract separate from the full-universe audit.
-        if (mcxDiagnosticInstrument) {
-          try {
-            socket.subscribe([mcxDiagnosticInstrument.symbol]);
-            mcxSubscribedSocket = socket;
-            console.log('FYERS MCX subscription restored independently after socket connect.', JSON.stringify({
-              connectionNumber: socketConnectCount, reconnect: socketConnectCount > 1,
-              symbol: mcxDiagnosticInstrument.symbol
-            }));
-          } catch (mcxSubscriptionError) {
-            mcxSubscribedSocket = null;
-            console.error('FYERS MCX subscription restore failed independently of NSE:', String(mcxSubscriptionError?.message || mcxSubscriptionError).slice(0, 200));
-          }
-        }
+        // The diagnostic future is included in the full-universe request when
+        // present in the official master; never send a duplicate subscription.
         void subscribeOpenPaperPositions(socket, { forceSubscribe: true });
       } catch (error) {
         streamConnected = false;
@@ -675,12 +666,21 @@ function startMarketDataStream(token, startReason = 'unspecified') {
     });
     // Add one official MCX diagnostic contract to this same SDK socket.
     // MCX never enters NSE snapshots, Sureshot ranking, option logic, or orders.
-    void loadMcxDiagnosticInstrument().then(instrument => {
-      if (!instrument || marketSocket !== socket || !streamConnected || mcxSubscribedSocket === socket) return;
+    void loadMcxDiagnosticInstrument().then(async instrument => {
+      if (!instrument || marketSocket !== socket || !streamConnected) return;
       try {
+        // Ensure the diagnostic contract is covered by the same one-shot
+        // official-universe subscription. Only subscribe separately if the
+        // official active universe genuinely excludes this diagnostic symbol.
+        await subscribeMcxFuturesUniverse(socket);
+        if (mcxFuturesSocketSymbols.has(instrument.symbol)) {
+          mcxSubscribedSocket = socket;
+          return;
+        }
+        if (mcxSubscribedSocket === socket) return;
         socket.subscribe([instrument.symbol]);
         mcxSubscribedSocket = socket;
-        console.log('FYERS MCX diagnostic subscription requested on existing socket.', JSON.stringify({
+        console.log('FYERS MCX diagnostic subscription requested separately because it is outside the active futures universe.', JSON.stringify({
           symbol: instrument.symbol, exchange: 'MCX', socketInstance: 'shared-existing'
         }));
       } catch (error) {
@@ -784,16 +784,24 @@ const mcxMarketSocketWatchdog = setInterval(() => {
   mcxResubscribeCount += 1;
   try {
     marketSocket.mode(marketSocket.FullMode);
-    marketSocket.subscribe([mcxDiagnosticInstrument.symbol]);
-    mcxSubscribedSocket = marketSocket;
-    console.warn('MCX feed watchdog re-applied MCX-only subscription after 10 seconds without a fresh exchange tick.', JSON.stringify({
+    if (mcxFuturesSocketSymbols.has(mcxDiagnosticInstrument.symbol)) {
+      void subscribeMcxFuturesUniverse(marketSocket, { force: true }).catch(error => {
+        console.error('MCX full-universe subscription recovery failed; retry remains scheduled:', String(error?.message || error).slice(0, 200));
+      });
+      mcxSubscribedSocket = marketSocket;
+    } else {
+      marketSocket.subscribe([mcxDiagnosticInstrument.symbol]);
+      mcxSubscribedSocket = marketSocket;
+    }
+    console.warn('MCX feed watchdog re-applied the active MCX subscription set after 10 seconds without a fresh exchange tick.', JSON.stringify({
       reason: 'no_fresh_mcx_tick_within_10_seconds', silentForMs,
       retry: mcxResubscribeCount, nextRetryDelayMs: getMcxWatchdogRetryDelay(mcxResubscribeCount),
-      recovery: 'mcx_only_resubscribe_on_existing_transport',
+      recovery: mcxFuturesSocketSymbols.has(mcxDiagnosticInstrument.symbol)
+        ? 'single_full_universe_request_on_existing_transport' : 'single_diagnostic_symbol_request',
       transportConnected: true, symbol: mcxDiagnosticInstrument.symbol
     }));
   } catch (error) {
-    console.error('MCX-only subscription recovery failed; retry remains scheduled:', String(error?.message || error).slice(0, 200));
+    console.error('MCX subscription recovery failed; retry remains scheduled:', String(error?.message || error).slice(0, 200));
   }
 }, 1_000);
 mcxMarketSocketWatchdog.unref?.();
