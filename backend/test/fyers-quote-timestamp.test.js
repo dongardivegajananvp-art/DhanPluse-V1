@@ -29,6 +29,14 @@ test("rejects date-only tt and malformed or absent timestamps", () => {
   assert.equal(parseFyersQuoteTimestamp(null), null);
 });
 
+test("timestamp diagnostics use a nested non-null value when the top-level field is null", () => {
+  const summary = summarizeFyersQuoteTimestampFields([{
+    n: "MCX:TESTFUT", exch_feed_time: null,
+    v: { exch_feed_time: 1791602100, tt: "2026-11-10" }
+  }]);
+  assert.equal(summary[0].timestampFields.exch_feed_time.value, 1791602100);
+});
+
 test("timestamp diagnostics include timestamp fields only and never leak prices or tokens", () => {
   const summary = summarizeFyersQuoteTimestampFields([{
     n: "NSE:TEST-EQ",
