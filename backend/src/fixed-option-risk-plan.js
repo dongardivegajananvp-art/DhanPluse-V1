@@ -13,6 +13,9 @@ export function validateCompletedOptionCandles({ candles, resolution = "5", now 
   if (!Number.isInteger(lookback) || lookback < 12) {
     return { ok: false, reason: "At least 12 completed option candles are required." };
   }
+  const ordered = normalizeFyersCandleOrder(candles);
+  if (!ordered.ok) return { ok: false, reason: "Option candle timestamps are invalid, duplicated or inconsistently ordered." };
+  candles = ordered.data;
   let previous = -Infinity;
   const completed = [];
   for (const row of candles) {
