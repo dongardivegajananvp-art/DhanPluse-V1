@@ -395,10 +395,12 @@ window.fetch = function(input, init = {}) {
     requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
     if (requestSession) headers.set('Authorization', 'Bearer ' + requestSession);
   }
-  // Keep short control endpoints from leaving the UI stuck indefinitely.
+  // Render free instances can take longer than a normal request to wake from
+  // idle. Allow control endpoints enough time for a cold start; this does not
+  // mark the backend healthy and never relaxes market-data freshness checks.
   // Market data, history, and scanner requests retain their own lifetimes.
   const controlRequestTimeoutMs = isBackend &&
-    ['/health', '/api/status', '/api/fyers/auth/start'].includes(pathname) ? 12000 : 0;
+    ['/health', '/api/status', '/api/fyers/auth/start'].includes(pathname) ? 60000 : 0;
   const timeoutController = controlRequestTimeoutMs ? new AbortController() : null;
   const timeoutId = controlRequestTimeoutMs
     ? window.setTimeout(() => timeoutController.abort(), controlRequestTimeoutMs)
@@ -430,7 +432,7 @@ window.fetch = function(input, init = {}) {
     return response;
   }).catch(error => {
     if (timeoutController && timeoutController.signal.aborted) {
-      throw new Error('Backend request timed out after 12 seconds (' + pathname + '). Check the backend connection and retry.');
+      throw new Error('Backend request timed out after 60 seconds (' + pathname + '). The backend did not respond; retry the connection check.');
     }
     throw error;
   }).finally(() => {
