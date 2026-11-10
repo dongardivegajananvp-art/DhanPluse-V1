@@ -7,7 +7,7 @@ const TIMESTAMP_FIELDS = [
 
 function parseTimestampValue(value) {
   if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "string" && /^\\d{4}-\\d{2}-\\d{2}$/.test(value.trim())) return null;
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return null;
   const numeric = Number(value);
   if (Number.isFinite(numeric) && numeric > 0) {
     const timestampMs = numeric > 1e12 ? numeric : numeric * 1000;
