@@ -21,6 +21,15 @@ test("builds a 1:2-or-better option risk plan from completed candles", () => {
   assert.equal(result.candleCount, 12);
 });
 
+test("normalizes strictly descending option candles before building the risk plan", () => {
+  const ascending = buildOptionRiskPlan({ lotSize: 25, candles: candles(), entryPrice: 100, resolution: "5", now });
+  const descending = buildOptionRiskPlan({ lotSize: 25, candles: candles().reverse(), entryPrice: 100, resolution: "5", now });
+  assert.equal(descending.ok, true, descending.reason);
+  assert.equal(descending.stopLoss, ascending.stopLoss);
+  assert.equal(descending.target, ascending.target);
+  assert.equal(descending.rr, ascending.rr);
+});
+
 test("blocks a forming latest candle and insufficient completed history", () => {
   const rows = candles({ count: 12, lastStart: now });
   const result = buildOptionRiskPlan({ lotSize: 25, candles: rows, entryPrice: 100, resolution: "5", now });
