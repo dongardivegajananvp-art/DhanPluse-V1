@@ -920,6 +920,8 @@ app.get('/api/status', (_req, res) => {
       MCX: {
         ...exchangeSessions.MCX, feed: mcxFeed,
         freshTickCount: mcxFreshTickCount, requiredTickCount: mcxRequiredTickCount,
+        subscribedSymbolCount: mcxFuturesSocketSymbols.size,
+        freshnessWindowSeconds: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS / 1000,
         live: mcxFeed === 'LIVE'
       }
     },
@@ -966,6 +968,7 @@ app.get('/api/status', (_req, res) => {
       const locallyTracked = new Set([...allowedSymbols, chartStreamSymbol, ...mcxFuturesSocketSymbols, mcxDiagnosticInstrument?.symbol, ...paperSocketSymbols].filter(Boolean));
       return {
         locallyTrackedUniqueSymbols: locallyTracked.size,
+        mcxFuturesSubscribedSymbols: mcxFuturesSocketSymbols.size,
         desiredPaperPositionSymbols: paperSocketSymbols.size,
         standardPlanLimit: 100,
         withinLocalStandardLimit: locallyTracked.size <= 100,
@@ -2408,13 +2411,9 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
   } else if (!scanId && mcxSureshotScanState) {
     mcxSureshotScanState = null;
   }
-  if (!scanId) {
-    const mcxSocketAgeSeconds = mcxDiagnosticTick ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
-    if (!streamConnected || mcxSubscribedSocket !== marketSocket || !Number.isFinite(mcxSocketAgeSeconds) ||
-        mcxSocketAgeSeconds < 0 || mcxSocketAgeSeconds > MCX_TICK_FRESHNESS_SECONDS) {
-      return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false,
-        error: "MCX WebSocket feed is not fresh; reconnect or wait for a verified MCX exchange tick before starting the full scan." });
-    }
+  if (!scanId && (!streamConnected || mcxUniverseSubscribedSocket !== marketSocket)) {
+    return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false,
+      error: "Full MCX futures WebSocket subscriptions are not active on the current FYERS socket." });
   }
   if (mcxSureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "An MCX Sureshot scan is already running." });
   mcxSureshotAutoPlansInFlight = true;
@@ -2654,21 +2653,11 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
       item.plan = freshPlan; item.finalVerifiedAt = new Date().toISOString();
       item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
     }
-    // The MCX diagnostic socket is an independent live-feed gate. A fresh REST
-    // snapshot alone must not mask a disconnected/stale subscribed MCX stream.
-    const finalMcxSocketAgeSeconds = mcxDiagnosticTick
-      ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : Infinity;
-    if (!streamConnected || mcxSubscribedSocket !== marketSocket ||
-        !Number.isFinite(finalMcxSocketAgeSeconds) || finalMcxSocketAgeSeconds < 0 ||
-        finalMcxSocketAgeSeconds > MCX_TICK_FRESHNESS_SECONDS) {
-      const error = new Error("MCX WebSocket feed is stale or disconnected at final publication; all setups are blocked.");
-      error.statusCode = 409;
-      error.mcxAudit = { audit: state.audit, universeCount: state.universeCount,
-        coverage: { requested: state.universeCount, received: state.universeCount,
-          fresh: state.audit.filter(row => row.status === "FRESH_QUOTE").length,
-          excluded: state.audit.filter(row => row.status === "STALE_OR_INVALID_QUOTE").length,
-          missing: state.audit.filter(row => row.status === "MISSING_QUOTE").length } };
-      throw error;
+    // The single diagnostic contract is not a proxy for all 72 futures.
+    // Final publication is gated by the per-symbol full-universe tick audit below.
+    if (!streamConnected || mcxUniverseSubscribedSocket !== marketSocket) {
+      const error = new Error("MCX full-universe WebSocket subscription is disconnected at final publication; all setups are blocked.");
+      error.statusCode = 409; throw error;
     }
     // Re-audit every MCX future immediately before publication. The initial
     // quote snapshot can age while the sequential five-symbol history/option
