@@ -324,7 +324,7 @@ function parseTick(raw) {
     );
     if (!exchangeTime) {
       if (shouldLogSocketDiagnostic(lastRejectedDiagnosticAt, symbol)) {
-        console.warn(isMcxDiagnostic ? 'FYERS MCX update ignored: missing exchange timestamp.' : 'FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
+        console.warn(isMcx ? 'FYERS MCX update ignored: missing exchange timestamp.' : 'FYERS index update ignored: missing exchange timestamp.', JSON.stringify({ symbol, type: item.type || null }));
       }
       continue;
     }
@@ -762,9 +762,9 @@ const marketSocketWatchdog = setInterval(() => {
 }, 1_000);
 marketSocketWatchdog.unref?.();
 
-// MCX-only silence watchdog. It never closes/reconnects the transport and never
-// changes NSE subscription state. On a healthy shared transport it re-applies
-// only the official MCX diagnostic contract after 10 seconds without a fresh tick.
+// MCX-only watchdog. It never closes/reconnects the shared transport or changes
+// NSE state. It refreshes the complete official MCX futures subscription set and
+// separately recovers the single diagnostic contract when that tick goes silent.
 const mcxMarketSocketWatchdog = setInterval(() => {
   if (!accessToken || !marketSocket || getExchangeSessionWindows().MCX?.session !== 'SCHEDULED_OPEN') return;
   const now = Date.now();
