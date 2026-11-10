@@ -28,7 +28,8 @@ import { summarizeFyersUpstreamFailure } from './fyers-upstream-diagnostics.js';
 import { buildMarketSocketSubscriptionSymbols, getMarketSocketReconnectDelay } from './market-socket-recovery.js';
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
 import { getMcxWatchdogRetryDelay } from './mcx-watchdog.js';
-import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit, summarizeMcxQuoteTimestampFields } from './mcx-sureshot.js';
+import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit } from './mcx-sureshot.js';
+import { buildMcxSocketQuoteRows } from './mcx-socket-audit.js';
 import { normalizeFyersCandleOrder } from './candle-order.js';
 import { parseFyersQuoteTimestamp, summarizeFyersQuoteTimestampFields } from './fyers-quote-timestamp.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
@@ -127,6 +128,14 @@ let mcxDiagnosticTick = null;
 let mcxDiagnosticMasterStatus = 'NOT_LOADED';
 let mcxDiagnosticMasterPromise = null;
 let mcxSubscribedSocket = null;
+let mcxUniverseSubscribedSocket = null;
+let mcxFuturesSocketSymbols = new Set();
+let mcxUniverseSubscriptionPromise = null;
+let mcxUniverseSubscriptionCheckedAt = 0;
+let mcxUniverseResubscribeCount = 0;
+let lastMcxUniverseResubscribeAt = 0;
+const MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS = 30_000;
+const MCX_UNIVERSE_SUBSCRIPTION_REFRESH_MS = 30_000;
 // Both the connection diagnostic and Sureshot must share one authoritative
 // official master download. Separate fetches caused duplicate slow requests
 // and could leave the diagnostic and scanner with conflicting availability.
@@ -222,6 +231,70 @@ async function loadMcxDiagnosticInstrument() {
   return mcxDiagnosticMasterPromise;
 }
 
+async function subscribeMcxFuturesUniverse(socket, { force = false } = {}) {
+  if (!socket || marketSocket !== socket || !streamConnected || typeof socket.subscribe !== 'function') return false;
+  if (mcxUniverseSubscriptionPromise) return mcxUniverseSubscriptionPromise;
+  if (!force && mcxUniverseSubscribedSocket === socket &&
+      Date.now() - mcxUniverseSubscriptionCheckedAt < MCX_UNIVERSE_SUBSCRIPTION_REFRESH_MS) return true;
+  mcxUniverseSubscriptionPromise = (async () => {
+    const universe = await getMcxFnoUniverse();
+    if (marketSocket !== socket || !streamConnected) return false;
+    const desired = new Set(universe.data.map(item => item.symbol));
+    if (mcxDiagnosticInstrument?.symbol) desired.add(mcxDiagnosticInstrument.symbol);
+    const locallyTracked = new Set([...allowedSymbols, chartStreamSymbol, ...desired, ...paperSocketSymbols].filter(Boolean));
+    if (locallyTracked.size > 100) {
+      throw new Error(`MCX full-universe subscription would exceed the 100-symbol socket budget (${locallyTracked.size}).`);
+    }
+    const previous = mcxFuturesSocketSymbols;
+    const symbolsToSubscribe = force || mcxUniverseSubscribedSocket !== socket
+      ? [...desired]
+      : [...desired].filter(symbol => !previous.has(symbol));
+    mcxFuturesSocketSymbols = desired;
+    try {
+      for (let offset = 0; offset < symbolsToSubscribe.length; offset += 50) {
+        socket.subscribe(symbolsToSubscribe.slice(offset, offset + 50));
+      }
+    } catch (error) {
+      mcxFuturesSocketSymbols = previous;
+      mcxUniverseSubscribedSocket = null;
+      throw error;
+    }
+    const removed = [...previous].filter(symbol => !desired.has(symbol));
+    if (removed.length && typeof socket.unsubscribe === 'function') {
+      try { socket.unsubscribe(removed); } catch (error) {
+        console.warn('FYERS MCX stale-symbol unsubscribe was not acknowledged:', String(error?.message || error).slice(0, 160));
+      }
+    }
+    mcxUniverseSubscribedSocket = socket;
+    mcxUniverseSubscriptionCheckedAt = Date.now();
+    console.info('FYERS MCX full-universe WebSocket subscriptions applied.', JSON.stringify({
+      officialFutureCount: universe.count, subscribedSymbolCount: desired.size,
+      addedOrReappliedCount: symbolsToSubscribe.length,
+      subscriptionBatches: Math.ceil(symbolsToSubscribe.length / 50),
+      removedCount: removed.length, socketGeneration: marketSocketGeneration,
+      source: 'FYERS official MCX_COM symbol master'
+    }));
+    return true;
+  })().finally(() => { mcxUniverseSubscriptionPromise = null; });
+  return mcxUniverseSubscriptionPromise;
+}
+
+function getCachedMcxSocketAudit(now = Date.now()) {
+  if (!mcxFnoUniverseCache.master) return null;
+  const universe = buildCurrentMcxFnoUniverse(mcxFnoUniverseCache.master, mcxFnoUniverseCache.fetchedAt);
+  if (!universe.count) return {
+    complete: false, universeCount: 0,
+    coverage: { requested: 0, received: 0, fresh: 0, excluded: 0, missing: 0 },
+    audit: [], data: []
+  };
+  const quoteRows = buildMcxSocketQuoteRows(universe.data, latestTicks);
+  return buildVerifiedMcxAudit({
+    universe: universe.data, quoteRows, now,
+    limit: universe.count, maxAgeMs: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS
+  });
+}
+
+
 function parseTick(raw) {
   let parsed = raw;
   if (typeof raw === 'string') {
@@ -234,8 +307,10 @@ function parseTick(raw) {
     const symbol = item.symbol || item.n;
     const ltp = Number(item.ltp ?? item.lp ?? item.v?.lp);
     const isMcxDiagnostic = Boolean(mcxDiagnosticInstrument && symbol === mcxDiagnosticInstrument.symbol);
+    const isMcxFuture = mcxFuturesSocketSymbols.has(symbol);
+    const isMcx = isMcxDiagnostic || isMcxFuture;
     const isPaperOption = paperSocketSymbols.has(symbol);
-    if (!(allowedSymbols.includes(symbol) || symbol === chartStreamSymbol || isMcxDiagnostic || isPaperOption) || !Number.isFinite(ltp) || ltp <= 0) continue;
+    if (!(allowedSymbols.includes(symbol) || symbol === chartStreamSymbol || isMcx || isPaperOption) || !Number.isFinite(ltp) || ltp <= 0) continue;
     const exchangeTime = epochSeconds(
       item.exch_feed_time ?? item.last_traded_time ?? item.ltt ?? item.tt ?? item.v?.exch_feed_time ?? item.v?.last_traded_time ?? item.v?.ltt ?? item.v?.tt
     );
@@ -247,8 +322,8 @@ function parseTick(raw) {
     }
     const tick = {
       symbol, ltp,
-      ch: item.ch == null || !Number.isFinite(Number(item.ch)) ? null : Number(item.ch),
-      chp: item.chp == null || !Number.isFinite(Number(item.chp)) ? null : Number(item.chp),
+      ch: (item.ch ?? item.v?.ch) == null || !Number.isFinite(Number(item.ch ?? item.v?.ch)) ? null : Number(item.ch ?? item.v?.ch),
+      chp: (item.chp ?? item.v?.chp) == null || !Number.isFinite(Number(item.chp ?? item.v?.chp)) ? null : Number(item.chp ?? item.v?.chp),
       updatedAt: new Date(exchangeTime * 1000).toISOString(),
       receivedAt: new Date().toISOString()
     };
@@ -279,7 +354,7 @@ function parseTick(raw) {
       }
     }
     // MCX and BSE activity must never mask silence in the NSE baseline feed.
-    if (!isMcxDiagnostic) lastAnyMarketTickAt = Date.now();
+    if (!isMcx) lastAnyMarketTickAt = Date.now();
     if (symbol.startsWith('NSE:') && quoteTimestampStatus(exchangeTime, Date.now(), NSE_TICK_FRESHNESS_SECONDS) === 'FRESH') {
       if (nseReconnectPending && nseIndexSymbols.every(requiredSymbol => {
         const requiredTick = latestTicks.get(requiredSymbol);
@@ -382,6 +457,11 @@ function startMarketDataStream(token, startReason = 'unspecified') {
   latestTicks.clear();
   mcxDiagnosticTick = null;
   mcxSubscribedSocket = null;
+  mcxUniverseSubscribedSocket = null;
+  mcxFuturesSocketSymbols = new Set();
+  mcxUniverseSubscriptionCheckedAt = 0;
+  mcxUniverseResubscribeCount = 0;
+  lastMcxUniverseResubscribeAt = 0;
   let socket = null;
   try {
     if (marketSocket) {
@@ -458,8 +538,12 @@ function startMarketDataStream(token, startReason = 'unspecified') {
           nseReconnectPending = true;
           console.error('FYERS NSE subscription restore failed; MCX subscription restore will still be attempted:', String(nseSubscriptionError?.message || nseSubscriptionError).slice(0, 200));
         }
-        // Keep MCX subscription restoration independent from NSE subscription
-        // restoration even though FYERS requires one Data Socket transport.
+        // Restore the complete official MCX futures universe independently of
+        // NSE subscriptions; the diagnostic-only contract is not sufficient.
+        void subscribeMcxFuturesUniverse(socket, { force: true }).catch(error => {
+          console.error('FYERS MCX full-universe subscription restore failed:', String(error?.message || error).slice(0, 200));
+        });
+        // Keep the single diagnostic contract separate from the full-universe audit.
         if (mcxDiagnosticInstrument) {
           try {
             socket.subscribe([mcxDiagnosticInstrument.symbol]);
@@ -674,10 +758,16 @@ marketSocketWatchdog.unref?.();
 // changes NSE subscription state. On a healthy shared transport it re-applies
 // only the official MCX diagnostic contract after 10 seconds without a fresh tick.
 const mcxMarketSocketWatchdog = setInterval(() => {
-  if (!accessToken || !marketSocket || !mcxDiagnosticInstrument ||
-      getExchangeSessionWindows().MCX?.session !== 'SCHEDULED_OPEN') return;
+  if (!accessToken || !marketSocket || getExchangeSessionWindows().MCX?.session !== 'SCHEDULED_OPEN') return;
   const now = Date.now();
   if (!streamConnected || typeof marketSocket.subscribe !== 'function') return;
+  if (mcxUniverseSubscribedSocket !== marketSocket ||
+      now - mcxUniverseSubscriptionCheckedAt >= MCX_UNIVERSE_SUBSCRIPTION_REFRESH_MS) {
+    void subscribeMcxFuturesUniverse(marketSocket, { force: mcxUniverseSubscribedSocket !== marketSocket }).catch(error => {
+      console.error('MCX full-universe subscription refresh failed; all MCX plans remain blocked:', String(error?.message || error).slice(0, 200));
+    });
+  }
+  if (!mcxDiagnosticInstrument) return;
   const tickAt = mcxDiagnosticTick ? Date.parse(mcxDiagnosticTick.updatedAt) : marketSocketConnectedAt;
   const silentForMs = Number.isFinite(tickAt) && tickAt > 0 ? Math.max(0, now - tickAt) : Infinity;
   const retryDelayMs = getMcxWatchdogRetryDelay(mcxResubscribeCount);
@@ -750,9 +840,11 @@ app.get('/health', (_req, res) => {
   }).length;
   const mcxTickAgeSeconds = mcxDiagnosticTick
     ? (checkedAt - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : null;
-  const mcxFeedFresh = Boolean(streamConnected && mcxSubscribedSocket === marketSocket &&
-    Number.isFinite(mcxTickAgeSeconds) && mcxTickAgeSeconds >= 0 &&
-    mcxTickAgeSeconds <= MCX_TICK_FRESHNESS_SECONDS);
+  const mcxSocketAudit = getCachedMcxSocketAudit(checkedAt);
+  const mcxFreshTickCount = Number(mcxSocketAudit?.coverage?.fresh) || 0;
+  const mcxRequiredTickCount = Number(mcxSocketAudit?.universeCount) || 0;
+  const mcxFeedFresh = Boolean(streamConnected && mcxUniverseSubscribedSocket === marketSocket &&
+    mcxRequiredTickCount > 0 && mcxSocketAudit?.complete === true);
   const nseFeedFresh = nseFreshTickCount === nseIndexSymbols.length;
   res.json({
     ok: true,
@@ -772,11 +864,12 @@ app.get('/health', (_req, res) => {
         liveSignalsAllowed: nseRegularSessionNow() && nseFeedFresh
       },
       MCX: {
-        status: mcxFeedFresh ? 'FRESH' : 'WAITING_OR_STALE',
-        exchangeTimestamp: mcxDiagnosticTick?.updatedAt || null,
-        receivedAt: mcxDiagnosticTick?.receivedAt || null,
-        ageSeconds: Number.isFinite(mcxTickAgeSeconds) ? Number(mcxTickAgeSeconds.toFixed(1)) : null,
-        freshnessWindowSeconds: MCX_TICK_FRESHNESS_SECONDS,
+        status: mcxFeedFresh ? 'FRESH' : mcxFreshTickCount > 0 ? 'PARTIAL' : 'WAITING_OR_STALE',
+        diagnosticExchangeTimestamp: mcxDiagnosticTick?.updatedAt || null,
+        diagnosticAgeSeconds: Number.isFinite(mcxTickAgeSeconds) ? Number(mcxTickAgeSeconds.toFixed(1)) : null,
+        freshTickCount: mcxFreshTickCount, requiredTickCount: mcxRequiredTickCount,
+        freshnessWindowSeconds: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS / 1000,
+        subscribedOnCurrentSocket: mcxUniverseSubscribedSocket === marketSocket,
         liveSignalsAllowed: getExchangeSessionWindows().MCX?.session === 'SCHEDULED_OPEN' && mcxFeedFresh
       }
     },
@@ -804,11 +897,15 @@ app.get('/api/status', (_req, res) => {
     : nseHasAnyTick ? 'STALE' : 'WAITING';
   const mcxTickAgeSeconds = mcxDiagnosticTick
     ? (Date.now() - Date.parse(mcxDiagnosticTick.updatedAt)) / 1000 : null;
+  const mcxSocketAudit = getCachedMcxSocketAudit(Date.now());
+  const mcxFreshTickCount = Number(mcxSocketAudit?.coverage?.fresh) || 0;
+  const mcxRequiredTickCount = Number(mcxSocketAudit?.universeCount) || 0;
   const mcxFeed = !accessToken ? 'NOT_CONNECTED'
     : !streamConnected ? 'DISCONNECTED'
-    : mcxSubscribedSocket !== marketSocket ? 'SUBSCRIPTION_PENDING'
-    : mcxTickAgeSeconds === null ? 'WAITING'
-    : mcxTickAgeSeconds >= 0 && mcxTickAgeSeconds <= MCX_TICK_FRESHNESS_SECONDS ? 'LIVE' : 'STALE';
+    : mcxUniverseSubscribedSocket !== marketSocket ? 'SUBSCRIPTION_PENDING'
+    : mcxRequiredTickCount === 0 ? 'WAITING'
+    : mcxSocketAudit?.complete ? 'LIVE'
+    : mcxFreshTickCount > 0 ? 'PARTIAL' : 'WAITING';
   res.json({
     backend: 'online', fyers: accessToken ? 'connected' : 'not-connected',
     liveData: streamConnected && snapshot ? 'streaming' : 'waiting-for-live-ticks',
@@ -822,7 +919,7 @@ app.get('/api/status', (_req, res) => {
       },
       MCX: {
         ...exchangeSessions.MCX, feed: mcxFeed,
-        freshTickCount: mcxFeed === 'LIVE' ? 1 : 0, requiredTickCount: 1,
+        freshTickCount: mcxFreshTickCount, requiredTickCount: mcxRequiredTickCount,
         live: mcxFeed === 'LIVE'
       }
     },
@@ -849,7 +946,7 @@ app.get('/api/status', (_req, res) => {
         ltp: tick?.ltp ?? null, exchangeTimestamp: tick?.updatedAt || null,
         receivedAt: tick?.receivedAt || null, ageSeconds, freshness,
         signalsAllowed: false,
-        note: 'Connection diagnostics only; never used by NSE Sureshot or trading signals.'
+        note: 'Single-instrument connection diagnostic only; full-universe MCX freshness is reported separately in exchangeLiveStatus.'
       };
     })(),
     indexTickStatus: allowedSymbols.map(symbol => {
@@ -866,7 +963,7 @@ app.get('/api/status', (_req, res) => {
     }),
     fyersDataApi: fetchWithFyersBudget.getStatus(),
     dataSocketSubscriptionBudget: (() => {
-      const locallyTracked = new Set([...allowedSymbols, chartStreamSymbol, mcxDiagnosticInstrument?.symbol, ...paperSocketSymbols].filter(Boolean));
+      const locallyTracked = new Set([...allowedSymbols, chartStreamSymbol, ...mcxFuturesSocketSymbols, mcxDiagnosticInstrument?.symbol, ...paperSocketSymbols].filter(Boolean));
       return {
         locallyTrackedUniqueSymbols: locallyTracked.size,
         desiredPaperPositionSymbols: paperSocketSymbols.size,
@@ -2328,34 +2425,29 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
     if (!scanId) {
       const universe = await getMcxFnoUniverse();
       if (!universe.count) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "No MCX futures with active CE/PE contracts are currently inside their official trading sessions." });
-      stage = "VERIFY_MCX_FUTURES_QUOTES";
-      const quoteRows = [];
-      for (let quoteOffset = 0; quoteOffset < universe.data.length; quoteOffset += 50) {
-        if (!mcxSessionOpen()) { const error = new Error("MCX session closed during quote audit; partial results discarded."); error.statusCode = 409; throw error; }
-        const batchSymbols = universe.data.slice(quoteOffset, quoteOffset + 50).map(item => item.symbol);
-        const url = new URL("https://api-t1.fyers.in/data/quotes");
-        url.searchParams.set("symbols", batchSymbols.join(","));
-        const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
-        const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
-        quoteRowsReceived += rows.length;
-        quoteRows.push(...rows);
-        console.info("FYERS MCX futures quote batch received:", JSON.stringify({
-          batchIndex: Math.floor(quoteOffset / 50) + 1, requestedCount: batchSymbols.length,
-          receivedCount: rows.length, apiStatus: result?.s || "missing", apiCode: result?.code ?? null
-        }));
-        console.info("FYERS MCX quote timestamp field diagnostics:", JSON.stringify(
-          summarizeMcxQuoteTimestampFields(rows, 3)
-        ));
+      stage = "VERIFY_MCX_FUTURES_WEBSOCKET_TICKS";
+      const subscriptionReady = await subscribeMcxFuturesUniverse(marketSocket);
+      if (!subscriptionReady || mcxUniverseSubscribedSocket !== marketSocket || !streamConnected) {
+        const error = new Error("Full MCX futures WebSocket subscriptions are not active on the current FYERS socket.");
+        error.statusCode = 409; throw error;
       }
-      const mcxAudit = buildVerifiedMcxAudit({ universe: universe.data, quoteRows, now: Date.now(), limit: universe.data.length });
-      console.info("FYERS MCX full-universe quote audit:", JSON.stringify(mcxAudit.coverage));
+      const quoteRows = buildMcxSocketQuoteRows(universe.data, latestTicks);
+      quoteRowsReceived = quoteRows.length;
+      const mcxAudit = buildVerifiedMcxAudit({
+        universe: universe.data, quoteRows, now: Date.now(),
+        limit: universe.data.length, maxAgeMs: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS
+      });
+      console.info("FYERS MCX full-universe WebSocket tick audit:", JSON.stringify({
+        ...mcxAudit.coverage, subscribedSymbols: mcxFuturesSocketSymbols.size,
+        freshnessWindowSeconds: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS / 1000
+      }));
       if (!mcxAudit.complete) {
-        const error = new Error("MCX full-universe quote audit is incomplete; no candidates or plans may be published.");
+        const error = new Error("MCX full-universe WebSocket tick audit is incomplete or stale; wait for fresh exchange ticks on every eligible future. No candidates or plans may be published.");
         error.statusCode = 409;
         error.mcxAudit = mcxAudit;
         throw error;
       }
-      const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: universe.data.length });
+      const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: universe.data.length, maxAgeMs: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS });
       mcxSureshotScanState = {
         id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
         universeCount: universe.count, universe: universe.data, audit: mcxAudit.audit,
@@ -2581,27 +2673,21 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
     // Re-audit every MCX future immediately before publication. The initial
     // quote snapshot can age while the sequential five-symbol history/option
     // checks run; never publish rankings or plans against that old snapshot.
-    stage = "FINAL_REVALIDATE_MCX_FUTURES_QUOTES";
-    const finalFuturesQuoteRows = [];
-    for (let quoteOffset = 0; quoteOffset < state.universe.length; quoteOffset += 50) {
-      if (!mcxSessionOpen()) {
-        const error = new Error("MCX session closed during final futures quote revalidation; all plans blocked.");
-        error.statusCode = 409; throw error;
-      }
-      const symbols = state.universe.slice(quoteOffset, quoteOffset + 50).map(item => item.symbol);
-      const url = new URL("https://api-t1.fyers.in/data/quotes");
-      url.searchParams.set("symbols", symbols.join(","));
-      const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
-      const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
-      finalFuturesQuoteRows.push(...rows);
+    stage = "FINAL_REVALIDATE_MCX_FUTURES_WEBSOCKET_TICKS";
+    if (mcxUniverseSubscribedSocket !== marketSocket || !streamConnected) {
+      const error = new Error("MCX full-universe WebSocket disconnected before final publication; all plans blocked.");
+      error.statusCode = 409; throw error;
     }
+    const finalFuturesQuoteRows = buildMcxSocketQuoteRows(state.universe, latestTicks);
     const finalFuturesAudit = buildVerifiedMcxAudit({
       universe: state.universe, quoteRows: finalFuturesQuoteRows, now: Date.now(),
-      limit: state.universe.length, maxAgeMs: 30_000
+      limit: state.universe.length, maxAgeMs: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS
     });
-    console.info("FYERS MCX final full-universe futures quote revalidation:", JSON.stringify(finalFuturesAudit.coverage));
+    console.info("FYERS MCX final full-universe WebSocket tick revalidation:", JSON.stringify({
+      ...finalFuturesAudit.coverage, freshnessWindowSeconds: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS / 1000
+    }));
     if (!finalFuturesAudit.complete) {
-      const error = new Error("Final MCX full-universe futures quote revalidation is incomplete or stale; no setup may be published.");
+      const error = new Error("Final MCX full-universe WebSocket tick revalidation is incomplete or stale; no setup may be published.");
       error.statusCode = 409;
       error.mcxAudit = finalFuturesAudit;
       throw error;
