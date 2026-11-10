@@ -45,9 +45,13 @@ export function summarizeFyersQuoteTimestampFields(rows, limit = 3) {
       for (const container of containers) {
         if (!(field in container)) continue;
         const value = container[field];
+        if (value === null || value === undefined || value === "") {
+          if (!(field in timestampFields)) timestampFields[field] = { type: value === null ? "null" : typeof value, value };
+          continue;
+        }
         timestampFields[field] = {
-          type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value,
-          value: value == null || ["string", "number", "boolean"].includes(typeof value) ? value : "[non-scalar]"
+          type: Array.isArray(value) ? "array" : typeof value,
+          value: ["string", "number", "boolean"].includes(typeof value) ? value : "[non-scalar]"
         };
         break;
       }
