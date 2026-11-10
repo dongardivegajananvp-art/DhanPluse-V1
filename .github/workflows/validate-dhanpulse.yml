@@ -87,16 +87,34 @@ jobs:
         run: |
           set -euo pipefail
           health=""
+          health_http_code="000"
+          health_probe_meta="not-run"
+          health_curl_exit="0"
           for attempt in $(seq 1 6); do
-            health="$(curl --fail --silent --show-error --max-time 60 "${BACKEND_URL}/health" 2>/dev/null || true)"
-            if [[ -n "$health" ]] && node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1)' "$health"; then
+            health_stderr="$(mktemp)"
+            health_file="$(mktemp)"
+            health_curl_exit=0
+            health_probe_meta="$(curl --silent --show-error --max-time 60 --output "$health_file" --write-out 'http=%{http_code} dns_s=%{time_namelookup} connect_s=%{time_connect} tls_s=%{time_appconnect} total_s=%{time_total} remote_ip=%{remote_ip}' "${BACKEND_URL}/health" 2>"$health_stderr")" || health_curl_exit=$?
+            health_http_code="${health_probe_meta#http=}"
+            health_http_code="${health_http_code%% *}"
+            health="$(cat "$health_file")"
+            if [[ "$health_curl_exit" -eq 0 && "$health_http_code" =~ ^2[0-9][0-9]$ ]] && node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1)' "$health" 2>/dev/null; then
+              rm -f "$health_stderr" "$health_file"
               break
             fi
-            echo "Waiting for the original production backend (attempt $attempt/6)."
-            sleep 10
+            echo "::warning::Production /health probe attempt $attempt/6 failed: curl_exit=$health_curl_exit $health_probe_meta"
+            if [[ -s "$health_stderr" ]]; then
+              sed -E 's#(https?://)[^/@ ]+:[^/@ ]+@#\1[redacted]@#g' "$health_stderr"
+            fi
+            if [[ -n "$health" ]]; then
+              node -e 'try { const h=JSON.parse(process.argv[1]); console.log("Health response fields:", JSON.stringify({ok:h.ok,serviceHealth:h.serviceHealth,fyersConfigured:h.fyersConfigured,orderPlacementEnabled:h.orderPlacementEnabled})); } catch { console.log("Health response was non-JSON; body omitted."); }' "$health"
+            fi
+            rm -f "$health_stderr" "$health_file"
+            health=""
+            if [[ "$attempt" -lt 6 ]]; then sleep 10; fi
           done
           if [[ -z "$health" ]]; then
-            echo "::error::Production backend /health did not return a valid response."
+            echo "::error::Production backend /health did not pass. Last probe: curl_exit=$health_curl_exit $health_probe_meta. See preceding diagnostics; health gate remains enforced."
             exit 1
           fi
           node -e 'const h=JSON.parse(process.argv[1]); if(h.ok!==true || h.fyersConfigured!==true || h.orderPlacementEnabled!==false) process.exit(1); console.log("PASS: original backend healthy, FYERS configured, order placement disabled. Live tick fields: connected="+h.liveDataConnected+", socket="+h.marketSocketConnected+", lastTickAt="+h.lastTickAt)' "$health"
