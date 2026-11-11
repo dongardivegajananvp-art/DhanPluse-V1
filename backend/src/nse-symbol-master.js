@@ -49,7 +49,7 @@ export function createNseSymbolMasterLoader({
         const persisted = await loadPersistedSnapshot({ maxAgeMs: cacheMs });
         if (persisted && typeof persisted === 'object' && persisted.snapshot && typeof persisted.snapshot === 'object' && !Array.isArray(persisted.snapshot)) {
           cachedSnapshot = persisted.snapshot;
-          cachedAt = now();
+          cachedAt = now() - Math.max(0, Number(persisted.ageMs) || 0);
           report('persisted_cache_hit', {
             ageMs: Math.max(0, Number(persisted.ageMs) || 0),
             universeCount: Array.isArray(cachedSnapshot.universe) ? cachedSnapshot.universe.length : null,
