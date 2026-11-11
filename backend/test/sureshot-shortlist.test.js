@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildVerifiedSureshotShortlist } from "../src/sureshot-shortlist.js";
+import { buildVerifiedSureshotShortlist, selectSureshotOptionVerificationCandidates } from "../src/sureshot-shortlist.js";
 
 const now = Date.parse("2026-11-02T07:00:00.000Z");
 const universe = { data: Array.from({ length: 218 }, (_, i) => ({ symbol: `NSE:STOCK${i}-EQ`, lotSize: 25 })) };
@@ -69,4 +69,22 @@ test("default shortlist is exactly five from the complete 218-equity universe", 
   assert.equal(result.data.length, 5);
   assert.equal(result.candidateCount, 221);
   assert.deepEqual(result.data.map(row => row.rank), [1, 2, 3, 4, 5]);
+});
+
+
+test("option verification is bounded to Top 10 gainers, Top 10 losers and fresh index ticks", () => {
+  const ranked = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now, limit: 250 });
+  const selected = selectSureshotOptionVerificationCandidates(ranked);
+  assert.equal(selected.length, 23);
+  assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY" && row.changePct > 0).length, 10);
+  assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY" && row.changePct < 0).length, 10);
+  assert.equal(selected.filter(row => row.underlyingType === "INDEX").length, 3);
+  assert.equal(new Set(selected.map(row => row.symbol)).size, selected.length);
+  assert.deepEqual(selected.map(row => row.rank), Array.from({ length: 23 }, (_, i) => i + 1));
+});
+
+test("blocks option verification when either complete Top 10 mover board is unavailable", () => {
+  const ranked = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now, limit: 250 });
+  assert.throws(() => selectSureshotOptionVerificationCandidates({ ...ranked, moverBoardsComplete: false }),
+    /complete_verified_top_mover_boards_required/);
 });
