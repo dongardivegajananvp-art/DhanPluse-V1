@@ -7,7 +7,12 @@ const backendOrigin = new URL(backendUrl).origin;
 if (!previewUrl) throw new Error('GV2VPD_PREVIEW_URL is required.');
 
 async function mockTestBackend(page) {
-  await page.route(backendOrigin + '/**', async route => {
+  const backendOrigins = new Set([
+    backendOrigin,
+    'https://dhanpluse-v1.onrender.com',
+    'https://dhanpulse-clean-test.onrender.com'
+  ]);
+  for (const origin of backendOrigins) await page.route(origin + '/**', async route => {
     const url = new URL(route.request().url());
     const json = (status, body) => route.fulfill({
       status,
