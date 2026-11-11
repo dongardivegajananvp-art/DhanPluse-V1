@@ -339,3 +339,28 @@ test('success from a different FYERS endpoint does not reset Cloudflare backoff 
   assert.equal(request.getStatus().retryAfterSeconds, 1800);
   assert.equal(quoteAttempts, 2);
 });
+
+test('default FYERS budget stays at or below 15 requests per minute with a four-second minimum gap', async () => {
+  let clock = 700_000;
+  const sentAt = [];
+  const request = createFyersDataApiBudget({
+    now: () => clock,
+    sleep: async ms => { clock += ms; },
+    fetchImpl: async () => { sentAt.push(clock); return fakeResponse(); }
+  });
+
+  for (let index = 0; index < 16; index += 1) {
+    await request('https://api-t1.fyers.in/api/v3/quotes?request=' + index);
+    // This endpoint is outside /data/ and intentionally does not use the budget.
+  }
+  sentAt.length = 0;
+  for (let index = 0; index < 16; index += 1) {
+    await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ&resolution=5&request=' + index);
+  }
+
+  assert.equal(sentAt.length, 16);
+  for (let index = 1; index < sentAt.length; index += 1) {
+    assert.ok(sentAt[index] - sentAt[index - 1] >= 4_000, 'requests must be at least four seconds apart');
+  }
+  assert.ok(sentAt[15] - sentAt[0] >= 60_000, 'the sixteenth request must wait for the rolling-minute budget');
+});
