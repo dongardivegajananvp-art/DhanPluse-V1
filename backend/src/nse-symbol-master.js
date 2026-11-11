@@ -10,8 +10,10 @@ export function createNseSymbolMasterLoader({
   fetchImpl = globalThis.fetch,
   build,
   cacheMs = 24 * 60 * 60 * 1000,
-  timeoutMs = 45_000,
+  timeoutMs = 120_000,
   now = Date.now,
+  loadPersistedSnapshot = async () => null,
+  savePersistedSnapshot = async () => {},
   onDiagnostic = () => {}
 } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl must be a function');
@@ -40,9 +42,29 @@ export function createNseSymbolMasterLoader({
 
     inFlight = (async () => {
       const startedAt = now();
+      // A validated symbol snapshot is reference metadata, not market data. A
+      // bounded-age PostgreSQL copy survives Render restarts and avoids pulling
+      // the large public masters on every cold start.
+      try {
+        const persisted = await loadPersistedSnapshot({ maxAgeMs: cacheMs });
+        if (persisted && typeof persisted === 'object' && persisted.snapshot && typeof persisted.snapshot === 'object' && !Array.isArray(persisted.snapshot)) {
+          cachedSnapshot = persisted.snapshot;
+          cachedAt = now() - Math.max(0, Number(persisted.ageMs) || 0);
+          report('persisted_cache_hit', {
+            ageMs: Math.max(0, Number(persisted.ageMs) || 0),
+            universeCount: Array.isArray(cachedSnapshot.universe) ? cachedSnapshot.universe.length : null,
+            moversCount: Array.isArray(cachedSnapshot.moversSymbols) ? cachedSnapshot.moversSymbols.length : null
+          });
+          return cachedSnapshot;
+        }
+      } catch (error) {
+        report('persisted_cache_read_failed', { message: String(error?.message || error).slice(0, 160) });
+      }
       let stage = 'FETCH_NSE_SYMBOL_MASTERS';
       let foResponse;
       let cmResponse;
+      let foMaster = null;
+      let cmMaster = null;
       try {
         // Fetch both files together to bound network wait, then parse them
         // sequentially so two large JSON.parse operations never overlap.
@@ -71,35 +93,51 @@ export function createNseSymbolMasterLoader({
         }
 
         stage = 'PARSE_NSE_FO_MASTER';
-        const foMaster = await foResponse.json();
+        foMaster = await foResponse.json();
         if (!foMaster || typeof foMaster !== 'object' || Array.isArray(foMaster)) {
           throw new Error('FYERS NSE_FO symbol master format is invalid.');
         }
 
         stage = 'PARSE_NSE_CM_MASTER';
-        const cmMaster = await cmResponse.json();
+        cmMaster = await cmResponse.json();
         if (!cmMaster || typeof cmMaster !== 'object' || Array.isArray(cmMaster)) {
           throw new Error('FYERS NSE_CM symbol master format is invalid.');
         }
 
         stage = 'BUILD_VALIDATED_NSE_SNAPSHOT';
+        const foHttpStatus = foResponse.status;
+        const cmHttpStatus = cmResponse.status;
+        const foEntries = Object.keys(foMaster).length;
+        const cmEntries = Object.keys(cmMaster).length;
         const snapshot = build(foMaster, cmMaster);
+        // Drop the large raw masters before serializing the compact snapshot
+        // to PostgreSQL; otherwise the cache write can overlap their memory.
+        foMaster = null;
+        cmMaster = null;
+        foResponse = null;
+        cmResponse = null;
         if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
           throw new Error('FYERS NSE symbol master builder returned an invalid snapshot.');
         }
 
         cachedSnapshot = snapshot;
         cachedAt = now();
+        try {
+          await savePersistedSnapshot(snapshot, { fetchedAt: new Date(cachedAt).toISOString() });
+          report('persisted_cache_saved', { universeCount: Array.isArray(snapshot.universe) ? snapshot.universe.length : null });
+        } catch (error) {
+          report('persisted_cache_save_failed', { message: String(error?.message || error).slice(0, 160) });
+        }
         failureCount = 0;
         retryAt = 0;
         lastFailureMessage = '';
         report('loaded', {
           stage,
           elapsedMs: Math.max(0, now() - startedAt),
-          foHttpStatus: foResponse.status,
-          cmHttpStatus: cmResponse.status,
-          foEntries: Object.keys(foMaster).length,
-          cmEntries: Object.keys(cmMaster).length,
+          foHttpStatus,
+          cmHttpStatus,
+          foEntries,
+          cmEntries,
           universeCount: Array.isArray(snapshot.universe) ? snapshot.universe.length : null,
           moversCount: Array.isArray(snapshot.moversSymbols) ? snapshot.moversSymbols.length : null
         });

@@ -13,6 +13,7 @@ import { getExchangeSessionWindows } from './exchange-session-status.js';
 
 import { buildFnoEquityUniverse } from './fno-universe.js';
 import { createNseSymbolMasterLoader } from './nse-symbol-master.js';
+import { createNseSymbolMasterCache } from './nse-symbol-master-cache.js';
 import { normalizeFyersFunds } from './fyers-funds.js';
 import { getReferenceDataRetryDelay } from './reference-data-backoff.js';
 import { isAllowedChartSymbol } from './chart-symbol-validation.js';
@@ -59,6 +60,7 @@ const fyersTokenStore = createFyersTokenStore({
 });
 let fyersTokenStoreReady = false;
 const paperStore = createPaperTradingStore({ databaseUrl: process.env.DATABASE_URL });
+const nseSymbolMasterCache = createNseSymbolMasterCache({ databaseUrl: process.env.DATABASE_URL });
 const verifiedPlanRegistry = createVerifiedPlanRegistry({ ttlMs: 30_000 });
 let paperStoreReady = false;
 const paperSocketSymbols = new Set();
@@ -1570,6 +1572,8 @@ function buildNseSymbolMasterSnapshot(foMaster, cmMaster) {
 
 const loadNseSymbolMasterSnapshot = createNseSymbolMasterLoader({
   build: buildNseSymbolMasterSnapshot,
+  loadPersistedSnapshot: options => nseSymbolMasterCache.load(options),
+  savePersistedSnapshot: (snapshot, metadata) => nseSymbolMasterCache.save(snapshot, metadata),
   onDiagnostic(event, detail) {
     const message = JSON.stringify(detail);
     if (event === 'loaded') console.log('FYERS shared NSE symbol master load completed:', message);

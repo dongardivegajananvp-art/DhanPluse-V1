@@ -11,6 +11,70 @@ function response(payload, status = 200) {
   };
 }
 
+
+test('persisted validated NSE snapshot avoids large cold-start master downloads', async () => {
+  let networkCalls = 0;
+  let persistedReads = 0;
+  const snapshot = {
+    universe: [{ symbol: 'NSE:ABC-EQ' }],
+    moversSymbols: ['NSE:ABC-EQ'],
+    optionContractMaster: new Map([['NSE:ABC26NOV100CE', { optType: 'CE' }]])
+  };
+  const load = createNseSymbolMasterLoader({
+    fetchImpl: async () => { networkCalls += 1; throw new Error('network must not be called'); },
+    build: () => { throw new Error('builder must not run'); },
+    loadPersistedSnapshot: async ({ maxAgeMs }) => {
+      persistedReads += 1;
+      assert.equal(maxAgeMs, 24 * 60 * 60 * 1000);
+      return { snapshot, ageMs: 1000 };
+    }
+  });
+  const result = await load();
+  assert.equal(result, snapshot);
+  assert.equal(persistedReads, 1);
+  assert.equal(networkCalls, 0);
+});
+
+test('freshly validated NSE snapshot is persisted after successful build', async () => {
+  let saved = null;
+  const snapshot = {
+    universe: [{ symbol: 'NSE:ABC-EQ' }],
+    moversSymbols: ['NSE:ABC-EQ'],
+    optionContractMaster: new Map()
+  };
+  const load = createNseSymbolMasterLoader({
+    fetchImpl: async () => response({}),
+    build: () => snapshot,
+    savePersistedSnapshot: async (value, metadata) => { saved = { value, metadata }; }
+  });
+  const result = await load();
+  assert.equal(result, snapshot);
+  assert.equal(saved.value, snapshot);
+  assert.equal(Number.isNaN(Date.parse(saved.metadata.fetchedAt)), false);
+});
+
+
+test('persisted snapshot keeps its original age when applying the in-memory TTL', async () => {
+  let clock = 2_000_000;
+  const start = clock;
+  let fetchCalls = 0;
+  const cached = { universe: [], moversSymbols: [], optionContractMaster: new Map() };
+  const fresh = { universe: [{ symbol: 'NSE:NEW-EQ' }], moversSymbols: ['NSE:NEW-EQ'], optionContractMaster: new Map() };
+  const load = createNseSymbolMasterLoader({
+    now: () => clock,
+    loadPersistedSnapshot: async () => {
+      const ageMs = 23 * 60 * 60 * 1000 + (clock - start);
+      return ageMs <= 24 * 60 * 60 * 1000 ? { snapshot: cached, ageMs } : null;
+    },
+    fetchImpl: async () => { fetchCalls += 1; return response({}); },
+    build: () => fresh
+  });
+  assert.equal(await load(), cached);
+  clock += 61 * 60 * 1000;
+  assert.equal(await load(), fresh);
+  assert.equal(fetchCalls, 2);
+});
+
 test('concurrent NSE consumers share one pair of official master downloads', async () => {
   let calls = 0;
   let builds = 0;
@@ -75,7 +139,8 @@ test('failed or invalid NSE master loads are not cached and expose diagnostics',
   assert.equal(diagnostics[0].event, 'failed');
   assert.equal(diagnostics[0].detail.stage, 'VALIDATE_NSE_FO_RESPONSE');
   assert.equal(diagnostics[0].detail.httpStatus, 503);
-  assert.equal(diagnostics[1].event, 'loaded');
+  assert.equal(diagnostics.some(item => item.event === 'persisted_cache_saved'), true);
+  assert.equal(diagnostics.some(item => item.event === 'loaded'), true);
 });
 
 test('NSE loader rejects invalid master payloads without caching them', async () => {
