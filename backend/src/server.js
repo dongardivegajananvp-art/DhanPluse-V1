@@ -1741,8 +1741,38 @@ async function getMcxOptionContractMetadata(symbol) {
 }
 let stockQuoteCache = { fetchedAt: 0, data: null };
 let stockQuotePromise = null;
+let fnoQuoteSnapshotStoreInitPromise = null;
+let fnoQuoteSnapshotStoreFailureCount = 0;
+let fnoQuoteSnapshotStoreRetryAt = 0;
+async function ensureFnoQuoteSnapshotStoreReady() {
+  if (fnoQuoteSnapshotStoreReady) return true;
+  if (!fnoQuoteSnapshotStore.configured || Date.now() < fnoQuoteSnapshotStoreRetryAt) return false;
+  if (fnoQuoteSnapshotStoreInitPromise) return fnoQuoteSnapshotStoreInitPromise;
+  fnoQuoteSnapshotStoreInitPromise = (async () => {
+    try {
+      await fnoQuoteSnapshotStore.initialize();
+      fnoQuoteSnapshotStoreReady = true;
+      fnoQuoteSnapshotStoreFailureCount = 0;
+      fnoQuoteSnapshotStoreRetryAt = 0;
+      console.log('Durable PostgreSQL F&O snapshot store initialized; closed-session recovery enabled.');
+      return true;
+    } catch (error) {
+      fnoQuoteSnapshotStoreReady = false;
+      fnoQuoteSnapshotStoreFailureCount += 1;
+      const retryDelayMs = Math.min(5 * 60_000, 5_000 * (2 ** Math.min(6, fnoQuoteSnapshotStoreFailureCount - 1)));
+      fnoQuoteSnapshotStoreRetryAt = Date.now() + retryDelayMs;
+      console.error('Durable F&O snapshot store initialization failed; retry backoff activated:', JSON.stringify({
+        failureCount: fnoQuoteSnapshotStoreFailureCount,
+        retryAfterSeconds: Math.ceil(retryDelayMs / 1000),
+        reason: String(error?.message || error).slice(0, 160)
+      }));
+      return false;
+    }
+  })().finally(() => { fnoQuoteSnapshotStoreInitPromise = null; });
+  return fnoQuoteSnapshotStoreInitPromise;
+}
 async function persistVerifiedFnoQuoteSnapshot(snapshot, symbols) {
-  if (!fnoQuoteSnapshotStoreReady) return;
+  if (!await ensureFnoQuoteSnapshotStoreReady()) return;
   try {
     const result = await fnoQuoteSnapshotStore.save(snapshot, symbols, Date.now());
     if (result.saved) console.info('Complete verified FYERS F&O snapshot persisted for closed-session preparation.', JSON.stringify({ universeCount: symbols.length, snapshotFetchedAt: snapshot.fetchedAt }));
@@ -2072,6 +2102,7 @@ app.get("/api/market/sureshot-preparation", requireDashboardSession, async (_req
   try {
     const universe = await getNseFnoEquityUniverse();
     const expectedSymbols = universe.data.map(item => item.symbol);
+    if (!fnoQuoteSnapshotStoreReady) await ensureFnoQuoteSnapshotStoreReady();
     if (!stockQuoteCache.data && fnoQuoteSnapshotStoreReady) {
       const restored = await fnoQuoteSnapshotStore.load(expectedSymbols, Date.now(), 24 * 60 * 60 * 1000);
       if (restored) {
@@ -3655,14 +3686,7 @@ async function initializeFnoQuoteSnapshotStore() {
     console.warn('Closed-session Sureshot preparation persistence disabled: DATABASE_URL is not configured.');
     return;
   }
-  try {
-    await fnoQuoteSnapshotStore.initialize();
-    fnoQuoteSnapshotStoreReady = true;
-    console.log('Durable PostgreSQL F&O snapshot store initialized; closed-session recovery enabled.');
-  } catch (error) {
-    fnoQuoteSnapshotStoreReady = false;
-    console.error('Durable F&O snapshot store initialization failed closed:', String(error?.message || error).slice(0, 180));
-  }
+  await ensureFnoQuoteSnapshotStoreReady();
 }
 
 async function initializePaperStore() {
