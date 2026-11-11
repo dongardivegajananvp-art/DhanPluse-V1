@@ -11,6 +11,48 @@ function response(payload, status = 200) {
   };
 }
 
+
+test('persisted validated NSE snapshot avoids large cold-start master downloads', async () => {
+  let networkCalls = 0;
+  let persistedReads = 0;
+  const snapshot = {
+    universe: [{ symbol: 'NSE:ABC-EQ' }],
+    moversSymbols: ['NSE:ABC-EQ'],
+    optionContractMaster: new Map([['NSE:ABC26NOV100CE', { optType: 'CE' }]])
+  };
+  const load = createNseSymbolMasterLoader({
+    fetchImpl: async () => { networkCalls += 1; throw new Error('network must not be called'); },
+    build: () => { throw new Error('builder must not run'); },
+    loadPersistedSnapshot: async ({ maxAgeMs }) => {
+      persistedReads += 1;
+      assert.equal(maxAgeMs, 24 * 60 * 60 * 1000);
+      return { snapshot, ageMs: 1000 };
+    }
+  });
+  const result = await load();
+  assert.equal(result, snapshot);
+  assert.equal(persistedReads, 1);
+  assert.equal(networkCalls, 0);
+});
+
+test('freshly validated NSE snapshot is persisted after successful build', async () => {
+  let saved = null;
+  const snapshot = {
+    universe: [{ symbol: 'NSE:ABC-EQ' }],
+    moversSymbols: ['NSE:ABC-EQ'],
+    optionContractMaster: new Map()
+  };
+  const load = createNseSymbolMasterLoader({
+    fetchImpl: async () => response({}),
+    build: () => snapshot,
+    savePersistedSnapshot: async (value, metadata) => { saved = { value, metadata }; }
+  });
+  const result = await load();
+  assert.equal(result, snapshot);
+  assert.equal(saved.value, snapshot);
+  assert.match(saved.metadata.fetchedAt, /^\\d{4}-\\d{2}-\\d{2}T/);
+});
+
 test('concurrent NSE consumers share one pair of official master downloads', async () => {
   let calls = 0;
   let builds = 0;
