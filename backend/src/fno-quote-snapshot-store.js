@@ -29,6 +29,11 @@ export function createFnoQuoteSnapshotStore({ databaseUrl, PoolClass = Pool }) {
     connectionTimeoutMillis: 10000,
     application_name: 'gv2vpd-fno-quote-snapshot'
   }) : null;
+  if (pool && typeof pool.on === 'function') {
+    pool.on('error', error => {
+      console.error('PostgreSQL idle connection error in durable F&O snapshot store:', String(error?.message || error).slice(0, 160));
+    });
+  }
 
   return {
     configured,
