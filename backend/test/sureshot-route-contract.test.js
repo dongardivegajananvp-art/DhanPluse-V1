@@ -235,3 +235,16 @@ test("Sureshot FYERS request audit distinguishes upstream, cached and locally bl
   assert.ok(server.includes("endpoint: new URL(String(url)).pathname"));
   assert.ok(server.includes('loadVerifiedFnoStockQuotes({ priority: "sureshot", stage: scanStage })'));
 });
+
+test("shared FYERS request priority remains reserved between NSE and MCX scan batches", () => {
+  const readOnlyStart = server.indexOf("async function fyersReadOnlyGet");
+  const readOnlyEnd = server.indexOf("function ", readOnlyStart + 20);
+  const readOnlyRoute = server.slice(readOnlyStart, readOnlyEnd > readOnlyStart ? readOnlyEnd : undefined);
+  assert.match(readOnlyRoute, /isSureshotScanPriorityActive/);
+  assert.match(readOnlyRoute, /mcxScanState: mcxSureshotScanState/);
+  const lastKnownStart = server.indexOf('app.get("/api/market/last-known-stock-quotes"');
+  const lastKnownEnd = server.indexOf("//", lastKnownStart + 10);
+  const lastKnownRoute = server.slice(lastKnownStart, lastKnownEnd > lastKnownStart ? lastKnownEnd : undefined);
+  assert.match(lastKnownRoute, /isSureshotScanPriorityActive/);
+  assert.match(lastKnownRoute, /mcxScanState: mcxSureshotScanState/);
+});
