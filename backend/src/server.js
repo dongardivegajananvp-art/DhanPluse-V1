@@ -1552,7 +1552,20 @@ function buildNseSymbolMasterSnapshot(foMaster, cmMaster) {
   if (moversSymbols.length < 180) {
     throw new Error(`FYERS symbol master validation failed: too few NSE F&O Movers underlyings (${moversSymbols.length}).`);
   }
-  return { universe, moversSymbols };
+  const optionContractMaster = new Map();
+  for (const [ticker, item] of Object.entries(foMaster)) {
+    if (!ticker.startsWith('NSE:') || Number(item?.tradeStatus) !== 1 ||
+        !['CE', 'PE'].includes(String(item?.optType || '').toUpperCase())) continue;
+    optionContractMaster.set(ticker, {
+      tradeStatus: item.tradeStatus,
+      optType: item.optType,
+      strikePrice: item.strikePrice,
+      expiryDate: item.expiryDate,
+      minLotSize: item.minLotSize,
+      tickSize: item.tickSize
+    });
+  }
+  return { universe, moversSymbols, optionContractMaster };
 }
 
 const loadNseSymbolMasterSnapshot = createNseSymbolMasterLoader({
@@ -1699,28 +1712,41 @@ let optionContractMasterCache = { fetchedAt: 0, data: null };
 let optionContractMasterPromise = null;
 async function getFyersOptionContractMetadata(symbol) {
   if (String(symbol).startsWith('MCX:')) return getMcxOptionContractMetadata(symbol);
+  if (String(symbol).startsWith('NSE:')) {
+    const snapshot = await loadNseSymbolMasterSnapshot();
+    return resolveOptionContractMetadata(symbol, snapshot.optionContractMaster);
+  }
+  if (!String(symbol).startsWith('BSE:')) return null;
+
   if (optionContractMasterCache.data && Date.now() - optionContractMasterCache.fetchedAt < 24 * 60 * 60 * 1000) {
     return resolveOptionContractMetadata(symbol, optionContractMasterCache.data);
   }
   if (!optionContractMasterPromise) {
     optionContractMasterPromise = (async () => {
-      const [nseResponse, bseResponse] = await Promise.all([
-        fetchWithFyersBudget("https://public.fyers.in/sym_details/NSE_FO_sym_master.json", { signal: AbortSignal.timeout(45000) }),
-        fetchWithFyersBudget("https://public.fyers.in/sym_details/BSE_FO_sym_master.json", { signal: AbortSignal.timeout(45000) }).catch(() => null)
-      ]);
-      if (!nseResponse.ok) throw new Error("FYERS NSE_FO symbol master unavailable; lot-size risk is blocked.");
-      const nseMaster = await nseResponse.json();
-      if (!nseMaster || typeof nseMaster !== "object" || Array.isArray(nseMaster)) {
-        throw new Error("FYERS NSE_FO symbol master format is invalid; lot-size risk is blocked.");
+      const response = await fetch("https://public.fyers.in/sym_details/BSE_FO_sym_master.json", {
+        signal: AbortSignal.timeout(45000),
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error(`FYERS BSE_FO symbol master unavailable (HTTP ${response.status}); option sizing is blocked.`);
+      const master = await response.json();
+      if (!master || typeof master !== "object" || Array.isArray(master)) {
+        throw new Error("FYERS BSE_FO symbol master format is invalid; option sizing is blocked.");
       }
-      let bseMaster = {};
-      if (bseResponse?.ok) {
-        const candidate = await bseResponse.json().catch(() => null);
-        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) bseMaster = candidate;
+      const compactMaster = new Map();
+      for (const [ticker, item] of Object.entries(master)) {
+        if (!ticker.startsWith('BSE:') || Number(item?.tradeStatus) !== 1 ||
+            !['CE', 'PE'].includes(String(item?.optType || '').toUpperCase())) continue;
+        compactMaster.set(ticker, {
+          tradeStatus: item.tradeStatus,
+          optType: item.optType,
+          strikePrice: item.strikePrice,
+          expiryDate: item.expiryDate,
+          minLotSize: item.minLotSize,
+          tickSize: item.tickSize
+        });
       }
-      const master = { ...nseMaster, ...bseMaster };
-      optionContractMasterCache = { fetchedAt: Date.now(), data: master };
-      return master;
+      optionContractMasterCache = { fetchedAt: Date.now(), data: compactMaster };
+      return compactMaster;
     })();
   }
   try {
@@ -1730,7 +1756,6 @@ async function getFyersOptionContractMetadata(symbol) {
     optionContractMasterPromise = null;
   }
 }
-
 
 // Stock Explorer/movers and Sureshot must share one verified F&O snapshot.
 // Otherwise switching tabs can spend the same five FYERS quote calls twice.
