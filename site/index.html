@@ -406,6 +406,7 @@ window.fetch = function(input, init = {}) {
     '/api/market/mcx-sureshot-auto-plans',
     '/api/market/candles',
     '/api/fyers/option-risk-plan',
+    '/api/fyers/options-chain',
     '/api/fyers/option-chain'
   ].includes(pathname) ? 120000 : 0;
   const requestTimeoutMs = Math.max(healthRequestTimeoutMs, authRequestTimeoutMs, scanRequestTimeoutMs);
