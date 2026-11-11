@@ -1814,13 +1814,13 @@ async function loadSureshotUniverseShortlist(options = {}) {
     }
     const best = result.bestSetup;
     const topThreeHtml = topThree.length
-      ? '<article class="console-section"><div class="console-section-head"><h4>TOP 3 VERIFIED SETUPS</h4><span class="live-tag">' + topThree.length + ' / 3</span></div><div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Fresh premium</th><th>Quote age</th><th>Entry</th><th>SL</th><th>Target</th><th>RR</th></tr></thead><tbody>' +
+      ? '<article class="console-section"><div class="console-section-head"><h4>TOP 3 VERIFIED SETUPS</h4><span class="live-tag">' + topThree.length + ' / 3</span></div><div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Fresh premium</th><th>Quote age</th><th>Entry</th><th>SL</th><th>Target 2 (RR)</th><th>RR</th></tr></thead><tbody>' +
         topThree.map((row, index) => {
           const plan = row.plan;
           return '<tr><td><b>#' + (index + 1) + '</b></td><td><b>' + escapeHtml(row.underlyingSymbol) + '</b></td><td>' + escapeHtml(plan.direction) +
             '</td><td>' + escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) +
             '</td><td>₹' + formatPrice(plan.quote.ask) + '</td><td>' + Number(plan.quote.quoteAgeSeconds).toFixed(1) + ' sec</td><td>₹' + formatPrice(plan.risk.entryPrice) + '</td><td>₹' +
-            formatPrice(plan.risk.stopLoss) + '</td><td>₹' + formatPrice(plan.risk.target) + '</td><td>1 : ' +
+            formatPrice(plan.risk.stopLoss) + '</td><td>₹' + formatPrice(plan.risk.target2 ?? plan.risk.target) + '</td><td>1 : ' +
             Number(plan.risk.rr).toFixed(2) + '</td></tr>';
         }).join('') + '</tbody></table></div></article>'
       : '<article class="console-section"><h4>TOP 3 VERIFIED SETUPS</h4><p class="hint">NO TRADE — no candidate passed every FYERS direction, contract, premium, completed-candle and 1:2 risk gate.</p></article>';
@@ -1836,13 +1836,13 @@ async function loadSureshotUniverseShortlist(options = {}) {
         '</b></div><div class="data-row"><span>Expiry / Strike</span><b>' + escapeHtml(best.plan.contract.expiryDate || best.plan.contract.expiry) +
         ' · ' + formatPrice(best.plan.contract.strike) + '</b></div><div class="data-row"><span>Entry / Stop-loss / Target</span><b>₹' +
         formatPrice(best.plan.risk.entryPrice) + ' / ₹' + formatPrice(best.plan.risk.stopLoss) + ' / ₹' +
-        formatPrice(best.plan.risk.target) + '</b></div><div class="data-row"><span>Risk : Reward</span><b>1 : ' +
+        formatPrice(best.plan.risk.target2 ?? best.plan.risk.target) + '</b></div><div class="data-row"><span>Risk : Reward</span><b>1 : ' +
         Number(best.plan.risk.rr).toFixed(2) + '</b></div><div class="data-row"><span>Lot size / quantity (1 lot)</span><b>' + Number(best.plan.risk.lotSize) + ' units</b></div><div class="data-row"><span>Total risk for 1 lot</span><b>₹' + formatPrice(best.plan.risk.riskPerLot) + '</b></div><div class="data-row"><span>Potential reward for 1 lot</span><b>₹' + formatPrice(best.plan.risk.rewardPerLot) + '</b></div><div class="data-row"><span>Premium value for 1 lot</span><b>₹' + formatPrice(best.plan.risk.premiumPerLot) + '</b></div><div class="data-row"><span>Fresh option quote age / spread</span><b>' +
         Number(best.plan.quote.quoteAgeSeconds).toFixed(1) + ' sec / ' + Number(best.plan.quote.spreadPct).toFixed(2) +
         '%</b></div><div class="data-row"><span>Completed option candles</span><b>' +
         Number(best.plan.risk.candleCount) + ' · 5 min</b></div></article>' : '') + topThreeHtml +
       '<div class="console-section-head"><div><h4>FULL UNIVERSE AUDIT RESULTS</h4><p>Every ranked F&O equity and fresh index candidate, with its individual verification outcome.</p></div></div>' +
-      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>Target</th><th>RR</th></tr></thead><tbody>' +
+      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>Target 2 (RR)</th><th>RR</th></tr></thead><tbody>' +
       result.results.map(row => {
         const plan = row.plan, move = Number(row.changePct);
         const moveText = (move > 0 ? '+' : '') + move.toFixed(2) + '%';
@@ -1856,7 +1856,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
           (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '—') +
           '</td><td>' + (plan ? '₹' + formatPrice(plan.risk.entryPrice) : '—') + '</td><td>' +
           (plan ? '₹' + formatPrice(plan.risk.stopLoss) : '—') + '</td><td>' +
-          (plan ? '₹' + formatPrice(plan.risk.target) : '—') + '</td><td>' +
+          (plan ? '₹' + formatPrice(plan.risk.target2 ?? plan.risk.target) : '—') + '</td><td>' +
           (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
           (plan ? '' : '<tr><td colspan="12" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
       }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS option quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. One-lot rupee risk uses official FYERS contract sizing; brokerage, taxes and slippage are excluded. No orders are placed.</p>';
