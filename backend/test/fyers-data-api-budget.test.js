@@ -359,3 +359,38 @@ test('default FYERS budget stays at or below 15 requests per minute with a four-
   }
   assert.ok(sentAt[15] - sentAt[0] >= 60_000, 'the sixteenth request must wait for the rolling-minute budget');
 });
+
+
+test('request timeout starts after queue wait, not while waiting for shared FYERS pacing', async () => {
+  let markFirstStarted;
+  let releaseFirst;
+  const firstStarted = new Promise(resolve => { markFirstStarted = resolve; });
+  const firstGate = new Promise(resolve => { releaseFirst = resolve; });
+  let secondSignal;
+  const request = createFyersDataApiBudget({
+    minIntervalMs: 0,
+    fetchImpl: async (url, init) => {
+      if (String(url).includes('first-request')) {
+        markFirstStarted();
+        await firstGate;
+        return fakeResponse(200, '{"s":"ok"}');
+      }
+      secondSignal = init.signal;
+      assert.ok(secondSignal instanceof AbortSignal, 'the network timeout signal is created at dispatch');
+      assert.equal(secondSignal.aborted, false, 'queue waiting must not consume the network timeout');
+      await new Promise(resolve => setTimeout(resolve, 5));
+      return fakeResponse(200, '{"s":"ok"}');
+    }
+  });
+
+  const first = request('https://api-t1.fyers.in/data/quotes?first-request=1');
+  await firstStarted;
+  const second = request('https://api-t1.fyers.in/data/quotes?second-request=1', { timeoutMs: 30 });
+  setTimeout(releaseFirst, 60);
+  const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+  assert.equal(firstResponse.status, 200);
+  assert.equal(secondResponse.status, 200);
+  assert.ok(secondSignal);
+  assert.equal(secondSignal.aborted, false);
+});

@@ -112,13 +112,18 @@ export function createFyersDataApiBudget({
     cooldownUntil = Math.max(cooldownUntil, now() + Math.min(maxCooldownMs, Math.max(backoffMs, retryMs)));
   }
 
-  async function run(url, init) {
+  async function run(url, init = {}) {
     const target = url instanceof URL ? new URL(url.toString()) : new URL(String(url));
     if (target.hostname !== 'api-t1.fyers.in' || !target.pathname.startsWith('/data/')) {
       return fetchImpl(url, init);
     }
 
-    const method = String(init?.method || 'GET').toUpperCase();
+    // timeoutMs is intentionally converted to an AbortSignal only after the
+    // request has passed the shared queue, pacing and cooldown gates. Creating
+    // the timeout before queueing incorrectly spent the network timeout while
+    // waiting for the four-second gap / rolling-minute budget.
+    const { timeoutMs = 12_000, signal: callerSignal, ...fetchInit } = init;
+    const method = String(fetchInit.method || 'GET').toUpperCase();
     const ttl = method === 'GET' ? cacheTtl(target) : 0;
     const cacheKey = ttl > 0 ? target.toString() : null;
     const quoteFlightKey = method === 'GET' && target.pathname === '/data/quotes'
@@ -174,7 +179,9 @@ export function createFyersDataApiBudget({
         requestTimes.push(time);
         lastRequestAt = time;
         const requestCooldownGeneration = cooldownGeneration;
-        const response = await fetchImpl(url, init);
+        const timeoutSignal = AbortSignal.timeout(Math.max(1, Number(timeoutMs) || 12_000));
+        const signal = callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal;
+        const response = await fetchImpl(url, { ...fetchInit, signal });
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
           activateCooldown(response, body, target.pathname);
