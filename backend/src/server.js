@@ -2082,9 +2082,10 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
   }
 });
 
-// Verify the full eligible F&O + individually fresh index universe in five-candidate
-// batches. The shared FYERS Data API budget serializes requests and the server-held
-// two-hour cursor lets the browser continue without bursts or discarded progress.
+// Verify the complete F&O quote universe first, then option-check only the Top 10
+// gainers + Top 10 losers and individually fresh index ticks in five-candidate
+// batches. The shared FYERS budget serializes requests and the server-held cursor
+// lets the browser continue without bursts or discarding completed batches.
 const SURESHOT_UNIVERSE_SCAN_LIMIT = 250;
 const SURESHOT_BATCH_SIZE = 5;
 const SURESHOT_SCAN_TTL_MS = 2 * 60 * 60 * 1000;
