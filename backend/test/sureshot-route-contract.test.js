@@ -19,7 +19,7 @@ test("Sureshot verifies the complete F&O quote universe and option-checks bounde
   assert.match(route, /loadVerifiedFnoStockQuotes\(\{ priority: "sureshot" \}\)/);
   assert.match(route, /buildVerifiedSureshotShortlist\(/);
   assert.match(route, /limit: SURESHOT_UNIVERSE_SCAN_LIMIT/);
-  assert.match(route, /const moverCandidates = ranked\.data\.map/);
+  assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
   assert.match(route, /const batch = state\.candidates\.slice\(offset, offset \+ SURESHOT_BATCH_SIZE\)/);
   assert.match(route, /state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /rankedCandidateCount: ranked\.candidateCount/);
@@ -200,10 +200,10 @@ test("NSE option verification uses the complete Top 10 gainers/losers boards, no
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   const route = server.slice(start, end);
-  assert.match(route, /selectSureshotOptionVerificationCandidates\\(ranked\\)/);
-  assert.match(route, /topGainers: ranked\\.topGainers, topLosers: ranked\\.topLosers/);
-  assert.doesNotMatch(route, /const moverCandidates = ranked\\.data\\.map/);
-  assert.match(server, /export function selectSureshotOptionVerificationCandidates/);
+  assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
+  assert.ok(route.includes("topGainers: ranked.topGainers, topLosers: ranked.topLosers"));
+  assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
+  assert.ok(server.includes("export function selectSureshotOptionVerificationCandidates"));
 });
 
 
@@ -211,8 +211,8 @@ test("NSE option verification is bounded to Top 10 gainers, Top 10 losers and fr
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   const route = server.slice(start, end);
-  assert.match(route, /selectSureshotOptionVerificationCandidates\\(ranked\\)/);
-  assert.match(route, /topGainers: ranked\\.topGainers, topLosers: ranked\\.topLosers/);
-  assert.doesNotMatch(route, /const moverCandidates = ranked\\.data\\.map/);
-  assert.match(server, /export function selectSureshotOptionVerificationCandidates/);
+  assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
+  assert.ok(route.includes("topGainers: ranked.topGainers, topLosers: ranked.topLosers"));
+  assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
+  assert.ok(server.includes("export function selectSureshotOptionVerificationCandidates"));
 });
