@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { createNseSymbolMasterLoader } from '../src/nse-symbol-master.js';
 
 function response(payload, status = 200) {
@@ -70,7 +71,7 @@ test('failed or invalid NSE master loads are not cached and expose diagnostics',
   clock += 30_000;
   const result = await load();
   assert.deepEqual(result.universe, []);
-  assert.equal(calls, 3);
+  assert.equal(calls, 4);
   assert.equal(diagnostics[0].event, 'failed');
   assert.equal(diagnostics[0].detail.stage, 'VALIDATE_NSE_FO_RESPONSE');
   assert.equal(diagnostics[0].detail.httpStatus, 503);
@@ -114,4 +115,19 @@ test('NSE master failures share exponential backoff across consumers', async () 
   clock += 30_000;
   await assert.rejects(load(), error => error.statusCode === 503 && error.retryAfterSeconds === 60);
   assert.equal(calls, 4);
+});
+
+
+test('Sureshot and Movers share the same public NSE master loader', async () => {
+  const source = await readFile(new URL('../src/server.js', import.meta.url), 'utf8');
+  const moversStart = source.indexOf('async function refreshMoversUniverse()');
+  const moversEnd = source.indexOf('let institutionalFlowCache', moversStart);
+  const sureshotStart = source.indexOf('async function getNseFnoEquityUniverse()');
+  const sureshotEnd = source.indexOf('// The FYERS instrument masters are public reference data', sureshotStart);
+  assert.ok(moversStart >= 0 && moversEnd > moversStart);
+  assert.ok(sureshotStart >= 0 && sureshotEnd > sureshotStart);
+  assert.match(source, /createNseSymbolMasterLoader/);
+  assert.match(source.slice(moversStart, moversEnd), /loadNseSymbolMasterSnapshot\(\)/);
+  assert.match(source.slice(sureshotStart, sureshotEnd), /loadNseSymbolMasterSnapshot\(\)/);
+  assert.doesNotMatch(source, /fetchWithFyersBudget\(["']https:\/\/public\.fyers\.in\/sym_details\/NSE_(?:FO|CM)_sym_master\.json/);
 });
