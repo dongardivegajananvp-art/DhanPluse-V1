@@ -29,7 +29,7 @@ import { buildMarketSocketSubscriptionSymbols, getMarketSocketReconnectDelay } f
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
 import { getMcxWatchdogRetryDelay } from './mcx-watchdog.js';
 import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit } from './mcx-sureshot.js';
-import { buildMcxSocketQuoteRows } from './mcx-socket-audit.js';
+import { buildMcxSocketQuoteRows, waitForCompleteMcxSocketAudit } from './mcx-socket-audit.js';
 import { normalizeFyersCandleOrder } from './candle-order.js';
 import { parseFyersQuoteTimestamp, summarizeFyersQuoteTimestampFields } from './fyers-quote-timestamp.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
