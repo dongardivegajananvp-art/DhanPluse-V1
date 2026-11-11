@@ -26,6 +26,7 @@ import { isFyersAuthRejected, isExpiredFyersAccessTokenError } from './fyers-aut
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist, selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js';
+import { shouldPauseFyersRead, shouldPauseLastKnownStockRefresh } from './sureshot-request-priority.js';
 import { summarizeFyersUpstreamFailure } from './fyers-upstream-diagnostics.js';
 import { buildMarketSocketSubscriptionSymbols, getMarketSocketReconnectDelay } from './market-socket-recovery.js';
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
@@ -1215,9 +1216,14 @@ async function fyersReadOnlyGet(url, { priority = 'normal', stage = null } = {})
   // While a Sureshot scan is active, keep unrelated Data API traffic from
   // competing for the same account/IP budget. Existing in-flight reads finish;
   // Sureshot requests explicitly opt into the priority lane below.
-  const scanStateIsActive = sureshotScanState &&
-    Date.now() - sureshotScanState.createdAt <= SURESHOT_SCAN_TTL_MS;
-  if (priority !== 'sureshot' && (sureshotAutoPlansInFlight || scanStateIsActive)) {
+  const shouldPauseRead = shouldPauseFyersRead({ priority,
+    scanInFlight: sureshotAutoPlansInFlight,
+    nseScanState: sureshotScanState,
+    mcxScanState: mcxSureshotScanState,
+    now: Date.now(),
+    ttlMs: SURESHOT_SCAN_TTL_MS
+  });
+  if (shouldPauseRead) {
     const error = new Error('Sureshot full-universe scan has priority; other FYERS Data API reads are paused briefly.');
     error.statusCode = 503;
     error.retryAfterSeconds = 5;
@@ -2541,6 +2547,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         error.mcxAudit = mcxAudit;
         throw error;
       }
+      const quoteRows = buildMcxSocketQuoteRows(universe.data, latestTicks);
       const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: universe.data.length, maxAgeMs: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS });
       mcxSureshotScanState = {
         id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
@@ -2906,7 +2913,14 @@ app.get("/api/market/last-known-stock-quotes", requireDashboardSession, async (_
   if (lastKnownStockCache.data && Date.now() - lastKnownStockCache.fetchedAt < LAST_KNOWN_STOCK_CACHE_MS) {
     return res.json({ ...lastKnownStockCache.data, marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED", cached: true, cacheAgeSeconds: Math.floor((Date.now() - lastKnownStockCache.fetchedAt) / 1000) });
   }
-  if (sureshotAutoPlansInFlight) {
+  if (shouldPauseLastKnownStockRefresh({
+    cacheIsFresh: Boolean(lastKnownStockCache.data && Date.now() - lastKnownStockCache.fetchedAt < LAST_KNOWN_STOCK_CACHE_MS),
+    scanInFlight: sureshotAutoPlansInFlight,
+    nseScanState: sureshotScanState,
+    mcxScanState: mcxSureshotScanState,
+    now: Date.now(),
+    ttlMs: SURESHOT_SCAN_TTL_MS
+  })) {
     return res.status(503).json({
       ok: false, error: "Sureshot scan has priority; last-known stock REST refresh is paused.",
       data: [], signalsAllowed: false, retryAfterSeconds: 5

@@ -92,3 +92,21 @@ test("uses available mover rows when a side has fewer than ten movers without in
   assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY" && row.changePct < 0).length, 5);
   assert.equal(selected.filter(row => row.underlyingType === "INDEX").length, 3);
 });
+
+test("requires every expected F&O symbol exactly once with a fresh exchange timestamp", () => {
+  const missing = { ...quoteSnapshot, data: quoteSnapshot.data.slice(0, -1), quotedCount: 217 };
+  assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: missing, universe, indexTicks, now }),
+    /complete_verified_fno_quote_snapshot_required/);
+  const duplicateQuote = structuredClone(quoteSnapshot);
+  duplicateQuote.data[217].n = duplicateQuote.data[0].n;
+  assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: duplicateQuote, universe, indexTicks, now }),
+    /fno_quote_coverage_mismatch/);
+  const wrongSymbol = structuredClone(quoteSnapshot);
+  wrongSymbol.data[217].n = "NSE:NOT-IN-UNIVERSE-EQ";
+  assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: wrongSymbol, universe, indexTicks, now }),
+    /fno_quote_coverage_mismatch/);
+  const staleLast = structuredClone(quoteSnapshot);
+  staleLast.data[217].v.tt = Math.floor((now - 30001) / 1000);
+  assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: staleLast, universe, indexTicks, now }),
+    /stale_or_invalid_fno_quote_snapshot/);
+});
