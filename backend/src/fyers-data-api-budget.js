@@ -30,7 +30,8 @@ export function createFyersDataApiBudget({
   // were observed to receive another 1015 and extend the provider block.
   cloudflareCooldownMs = [60 * 60_000, 60 * 60_000, 60 * 60_000],
   rateLimitCooldownMs = [60_000, 2 * 60_000, 5 * 60_000],
-  maxCooldownMs = 60 * 60_000
+  maxCooldownMs = 60 * 60_000,
+  cooldownStore = null
 } = {}) {
   let queue = Promise.resolve();
   let requestTimes = [];
@@ -45,6 +46,39 @@ export function createFyersDataApiBudget({
   let cooldownPathname = null;
   let cooldownGeneration = 0;
   let queuedRequests = 0;
+  let restorePromise = null;
+  let persistenceError = null;
+
+  async function ensureCooldownRestored() {
+    if (!cooldownStore?.configured) return;
+    if (!restorePromise) {
+      restorePromise = cooldownStore.initialize().then(saved => {
+        if (saved && Number.isFinite(saved.cooldownUntil) && saved.cooldownUntil > now()) {
+          cooldownUntil = saved.cooldownUntil;
+          cooldownReason = saved.cooldownReason || 'PERSISTED_COOLDOWN';
+          cooldownPathname = saved.cooldownPathname || '/data/quotes';
+          consecutiveCloudflareBlocks = saved.consecutiveCloudflareBlocks || 0;
+          consecutiveRateLimitBlocks = saved.consecutiveRateLimitBlocks || 0;
+          cooldownGeneration = saved.cooldownGeneration || 0;
+        } else if (saved) {
+          return cooldownStore.clear();
+        }
+      }).catch(error => {
+        persistenceError = String(error?.message || error).slice(0, 180);
+        throw error;
+      });
+    }
+    await restorePromise;
+    if (persistenceError) throw new Error(persistenceError);
+  }
+
+  async function persistCooldown() {
+    if (!cooldownStore?.configured) return;
+    await cooldownStore.save({
+      cooldownUntil, cooldownReason, cooldownPathname,
+      consecutiveCloudflareBlocks, consecutiveRateLimitBlocks, cooldownGeneration
+    });
+  }
   const responseCache = new Map();
   const inFlight = new Map();
 
@@ -119,6 +153,14 @@ export function createFyersDataApiBudget({
     if (target.hostname !== 'api-t1.fyers.in' || !target.pathname.startsWith('/data/')) {
       return fetchImpl(url, init);
     }
+    try {
+      await ensureCooldownRestored();
+    } catch {
+      return new Response(JSON.stringify({
+        s: 'error', message: 'FYERS Data API is fail-closed: persisted cooldown state could not be verified.',
+        cooldownPersistence: 'UNAVAILABLE'
+      }), { status: 503, headers: { 'content-type': 'application/json', 'x-dhanpulse-cooldown': 'persistence-unavailable' } });
+    }
 
     const method = String(init?.method || 'GET').toUpperCase();
     const ttl = method === 'GET' ? cacheTtl(target) : 0;
@@ -180,6 +222,9 @@ export function createFyersDataApiBudget({
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
           activateCooldown(response, body, target.pathname);
+          try { await persistCooldown(); } catch (error) {
+            persistenceError = String(error?.message || error).slice(0, 180);
+          }
         } else if (canClearFyersDataApiCooldown({
           responseOk: response.ok,
           blockedPathname: cooldownPathname,
@@ -194,6 +239,15 @@ export function createFyersDataApiBudget({
           cooldownPathname = null;
           cooldownUntil = 0;
           cooldownReason = null;
+          if (cooldownStore?.configured) {
+            try { await cooldownStore.clear(); } catch (error) {
+              persistenceError = String(error?.message || error).slice(0, 180);
+              return { response: new Response(JSON.stringify({
+                s: 'error', message: 'FYERS recovery probe succeeded but cooldown persistence could not be cleared; requests remain fail-closed.',
+                cooldownPersistence: 'UNAVAILABLE'
+              }), { status: 503, headers: { 'content-type': 'application/json' } }) };
+            }
+          }
         }
 
         if ((cacheKey && response.ok) || quoteFlightKey) {
@@ -236,7 +290,9 @@ export function createFyersDataApiBudget({
       cooldownReason: remainingMs > 0 ? cooldownReason : null,
       consecutiveCloudflareBlocks,
       consecutiveRateLimitBlocks,
-      queuedRequests
+      queuedRequests,
+      cooldownPersistence: cooldownStore?.configured ? (persistenceError ? 'ERROR' : (restorePromise ? 'INITIALIZED' : 'NOT_INITIALIZED')) : 'NOT_CONFIGURED',
+      persistenceError
     };
   };
 
