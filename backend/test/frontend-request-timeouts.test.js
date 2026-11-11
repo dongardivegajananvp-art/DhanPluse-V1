@@ -5,7 +5,7 @@ import test from 'node:test';
 const html = await readFile(new URL('../../site/index.html', import.meta.url), 'utf8');
 
 test('Dashboard health and status checks have a bounded deadline and cannot stay CHECKING indefinitely', () => {
-  assert.match(html, /healthRequestTimeoutMs = isBackend && \/\['\/health', '\/api\/status'\]\.includes\(pathname\) \? 15000 : 0/);
+  assert.ok(html.includes("const healthRequestTimeoutMs = isBackend && ['/health', '/api/status'].includes(pathname) ? 15000 : 0;"));
   assert.match(html, /Backend request timed out after ' \+ Math\.round\(requestTimeoutMs \/ 1000\)/);
   assert.match(html, /setBackendStatus\('ONLINE'\)/);
   assert.match(html, /setBackendStatus\('UNREACHABLE'\)/);
