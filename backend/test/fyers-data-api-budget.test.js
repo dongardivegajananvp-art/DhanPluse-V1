@@ -359,3 +359,41 @@ test('default FYERS budget stays at or below six requests per minute with a ten-
   }
   assert.ok(sentAt[6] - sentAt[0] >= 60_000, 'the seventh request must wait for the rolling-minute budget');
 });
+
+
+test('Cloudflare cooldown is persisted and restored after a backend restart', async () => {
+  let clock = 1_000_000;
+  let persisted = null;
+  let upstreamCalls = 0;
+  const store = {
+    configured: true,
+    async initialize() { return persisted; },
+    async save(state) { persisted = structuredClone(state); },
+    async clear() { persisted = null; }
+  };
+  const options = {
+    now: () => clock,
+    minIntervalMs: 0,
+    cooldownStore: store,
+    fetchImpl: async () => {
+      upstreamCalls += 1;
+      return fakeResponse(429, 'Cloudflare Error 1015', {
+        server: 'cloudflare', 'cf-ray': 'persisted-1015', 'retry-after': '0'
+      });
+    }
+  };
+
+  const firstProcess = createFyersDataApiBudget(options);
+  const blocked = await firstProcess('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
+  assert.equal(blocked.status, 429);
+  assert.equal(persisted?.cooldownReason, 'CLOUDFLARE_1015');
+  assert.equal(persisted?.cooldownUntil, clock + 60 * 60_000);
+
+  const restartedProcess = createFyersDataApiBudget(options);
+  const afterRestart = await restartedProcess('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
+  assert.equal(afterRestart.status, 429);
+  assert.equal(afterRestart.headers.get('x-dhanpulse-cooldown'), 'active');
+  assert.equal(restartedProcess.getStatus().cooldownPersistence, 'INITIALIZED');
+  assert.equal(restartedProcess.getStatus().cooldownReason, 'CLOUDFLARE_1015');
+  assert.equal(upstreamCalls, 1, 'restart must not send another request while persisted cooldown is active');
+});
