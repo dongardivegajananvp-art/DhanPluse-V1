@@ -3003,7 +3003,45 @@ function bindTabActions() {
   if(setupRefresh) setupRefresh.addEventListener('click',loadSureshotSetup);
   const refreshSureshotStockBoardBtn=document.querySelector('#refreshSureshotStockBoardBtn');
   if(refreshSureshotStockBoardBtn) refreshSureshotStockBoardBtn.addEventListener('click',loadSureshotStockBoard);
+async function prepareSureshotClosedSession() {
+  const button = document.querySelector('#prepareSureshotClosedBtn');
+  const host = document.querySelector('#sureshotUniverseResults');
+  const status = document.querySelector('#setupStatus');
+  if (!host || (button && button.disabled)) return;
+  if (!localStorage.getItem(DASHBOARD_SESSION_KEY)) {
+    if (status) status.textContent = 'Connect FYERS first. Closed-session preparation uses only the last verified FYERS snapshot.';
+    return;
+  }
+  if (button) button.disabled = true;
+  host.innerHTML = '<div class="chart-empty">Checking the cached last-session FYERS F&O snapshot. No REST refresh or live signal will be requested.</div>';
+  try {
+    const response = await fetch(BACKEND_URL + '/api/market/sureshot-preparation', {
+      headers: { Accept: 'application/json' }, cache: 'no-store'
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok !== true || payload.preparationOnly !== true || payload.signalsAllowed !== false || payload.orderPlacement !== 'disabled') {
+      throw new Error(payload.detail || payload.error || 'Verified closed-session snapshot unavailable.');
+    }
+    const renderRows = (rows, label) => '<h4>' + label + '</h4><div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>F&O symbol</th><th>Last-session LTP</th><th>Move</th><th>Exchange timestamp</th></tr></thead><tbody>' +
+      rows.map(row => '<tr><td>#' + Number(row.rank) + '</td><td><b>' + escapeHtml(String(row.symbol || '').replace(/^NSE:/, '').replace(/-EQ$/, '')) +
+        '</b></td><td>₹' + formatPrice(row.price) + '</td><td>' + (Number(row.changePct) > 0 ? '+' : '') + Number(row.changePct).toFixed(2) +
+        '%</td><td>' + escapeHtml(row.exchangeTime || '—') + '</td></tr>').join('') + '</tbody></table></div>';
+    host.innerHTML = '<div class="console-section-head"><div><h4>NEXT SESSION PREPARATION · NOT A TRADE SIGNAL</h4><p>Cached FYERS snapshot age: ' +
+      Number(payload.cacheAgeHours).toFixed(2) + ' hours · ' + Number(payload.quotedCount) + ' / ' + Number(payload.universeCount) + ' F&O quotes</p></div><span class="signal-tone neutral">PREPARATION ONLY</span></div>' +
+      renderRows(payload.topGainers || [], 'Last-session top gainers') + renderRows(payload.topLosers || [], 'Last-session top losers') +
+      '<p class="hint">' + escapeHtml(payload.notice) + '</p>';
+    if (status) status.textContent = 'Preparation watchlist loaded from cached FYERS data. Live signals remain BLOCKED until fresh NSE-session verification.';
+  } catch (error) {
+    host.innerHTML = '<div class="chart-empty">PREPARATION UNAVAILABLE · ' + escapeHtml(error.message || 'No verified cached snapshot.') + '</div>';
+    if (status) status.textContent = 'No verified cached FYERS snapshot. No sample data or guessed setup shown.';
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
   const scanSureshotUniverseBtn=document.querySelector('#scanSureshotUniverseBtn');
+  const prepareSureshotClosedBtn=document.querySelector('#prepareSureshotClosedBtn');
+  if(prepareSureshotClosedBtn) prepareSureshotClosedBtn.addEventListener('click',prepareSureshotClosedSession);
   if(scanSureshotUniverseBtn) scanSureshotUniverseBtn.addEventListener('click',loadSureshotUniverseShortlist);
   const scanMcxSureshotUniverseBtn=document.querySelector('#scanMcxSureshotUniverseBtn');
   if(scanMcxSureshotUniverseBtn) scanMcxSureshotUniverseBtn.addEventListener('click',loadMcxSureshotUniverseShortlist);
