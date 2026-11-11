@@ -222,16 +222,16 @@ test("NSE final freshness revalidation is bounded to five candidates for up to t
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   const route = server.slice(start, end);
-  assert.match(route, /\\.slice\\(0, 5\\);/);
-  assert.match(route, /finalRevalidationCandidateCount: finalCheckCandidates\\.length/);
-  assert.match(route, /topThreeSetups = verified\\.slice\\(0, 3\\)/);
+  assert.ok(route.includes(".slice(0, 5);"));
+  assert.ok(route.includes("finalRevalidationCandidateCount: finalCheckCandidates.length"));
+  assert.ok(route.includes("topThreeSetups = verified.slice(0, 3)"));
 });
 
 test("Sureshot FYERS request audit distinguishes upstream, cached and locally blocked requests", () => {
-  assert.match(server, /priority = 'normal', stage = null/);
-  assert.match(server, /Sureshot FYERS Data API request audit:/);
-  assert.match(server, /requestSource = localCooldown \\? 'LOCAL_CIRCUIT_BREAKER'/);
-  assert.match(server, /cacheState === 'HIT' \\? 'CACHE' : 'UPSTREAM'/);
-  assert.match(server, /endpoint: new URL\\(String\\(url\\)\\)\\.pathname/);
-  assert.match(server, /loadVerifiedFnoStockQuotes\\(\\{ priority: "sureshot", stage: scanStage \\}\\)/);
+  assert.ok(server.includes("priority = 'normal', stage = null"));
+  assert.ok(server.includes("Sureshot FYERS Data API request audit:"));
+  assert.ok(server.includes("requestSource = localCooldown ? 'LOCAL_CIRCUIT_BREAKER'"));
+  assert.ok(server.includes("cacheState === 'HIT' ? 'CACHE' : 'UPSTREAM'"));
+  assert.ok(server.includes("endpoint: new URL(String(url)).pathname"));
+  assert.ok(server.includes('loadVerifiedFnoStockQuotes({ priority: "sureshot", stage: scanStage })'));
 });
