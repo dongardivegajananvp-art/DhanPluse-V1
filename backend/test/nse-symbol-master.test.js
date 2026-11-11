@@ -117,7 +117,8 @@ test('failed or invalid NSE master loads are not cached and expose diagnostics',
   assert.equal(diagnostics[0].event, 'failed');
   assert.equal(diagnostics[0].detail.stage, 'VALIDATE_NSE_FO_RESPONSE');
   assert.equal(diagnostics[0].detail.httpStatus, 503);
-  assert.equal(diagnostics[1].event, 'loaded');
+  assert.equal(diagnostics.some(item => item.event === 'persisted_cache_saved'), true);
+  assert.equal(diagnostics.some(item => item.event === 'loaded'), true);
 });
 
 test('NSE loader rejects invalid master payloads without caching them', async () => {
