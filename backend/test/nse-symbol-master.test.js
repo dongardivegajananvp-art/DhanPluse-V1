@@ -54,8 +54,10 @@ test('NSE loader caches only the compact snapshot for subsequent consumers', asy
 
 test('failed or invalid NSE master loads are not cached and expose diagnostics', async () => {
   let calls = 0;
+  let clock = 1_000;
   const diagnostics = [];
   const load = createNseSymbolMasterLoader({
+    now: () => clock,
     fetchImpl: async () => {
       calls += 1;
       return response({}, calls === 1 ? 503 : 200);
@@ -65,6 +67,7 @@ test('failed or invalid NSE master loads are not cached and expose diagnostics',
   });
 
   await assert.rejects(load(), /NSE_FO symbol master HTTP 503/);
+  clock += 30_000;
   const result = await load();
   assert.deepEqual(result.universe, []);
   assert.equal(calls, 3);
@@ -76,7 +79,9 @@ test('failed or invalid NSE master loads are not cached and expose diagnostics',
 
 test('NSE loader rejects invalid master payloads without caching them', async () => {
   let calls = 0;
+  let clock = 1_000;
   const load = createNseSymbolMasterLoader({
+    now: () => clock,
     fetchImpl: async () => {
       calls += 1;
       return response([]);
@@ -85,6 +90,7 @@ test('NSE loader rejects invalid master payloads without caching them', async ()
   });
 
   await assert.rejects(load(), /NSE_FO symbol master format is invalid/);
+  clock += 30_000;
   await assert.rejects(load(), /NSE_FO symbol master format is invalid/);
   assert.equal(calls, 4);
 });
