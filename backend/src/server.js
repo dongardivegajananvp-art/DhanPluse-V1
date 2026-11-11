@@ -2421,7 +2421,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     }
     console.info("Sureshot scan completed:", JSON.stringify({ scannedCandidateCount: results.length, rankedCandidateCount: state.rankedCandidateCount, verifiedSetupCount: verified.length, topFiveSetupCount: topFiveSetups.length, stopReason: "ALL_TOP_MOVER_CANDIDATES_CHECKED" }));
     const payload = { ok: true, scanComplete: true, selectedCandidatesComplete,
-      stopReason: "ALL_ELIGIBLE_CANDIDATES_CHECKED",
+      stopReason: "ALL_TOP_MOVER_CANDIDATES_CHECKED",
       signalsAllowed: verified.length > 0,
       orderPlacement: "disabled", readOnly: true, source: "FYERS only",
       rankedCandidateCount: state.rankedCandidateCount, rankedEquityCount: state.rankedEquityCount,
