@@ -105,6 +105,10 @@ export function createNseSymbolMasterLoader({
         }
 
         stage = 'BUILD_VALIDATED_NSE_SNAPSHOT';
+        const foHttpStatus = foResponse.status;
+        const cmHttpStatus = cmResponse.status;
+        const foEntries = Object.keys(foMaster).length;
+        const cmEntries = Object.keys(cmMaster).length;
         const snapshot = build(foMaster, cmMaster);
         // Drop the large raw masters before serializing the compact snapshot
         // to PostgreSQL; otherwise the cache write can overlap their memory.
@@ -130,10 +134,10 @@ export function createNseSymbolMasterLoader({
         report('loaded', {
           stage,
           elapsedMs: Math.max(0, now() - startedAt),
-          foHttpStatus: foResponse.status,
-          cmHttpStatus: cmResponse.status,
-          foEntries: Object.keys(foMaster).length,
-          cmEntries: Object.keys(cmMaster).length,
+          foHttpStatus,
+          cmHttpStatus,
+          foEntries,
+          cmEntries,
           universeCount: Array.isArray(snapshot.universe) ? snapshot.universe.length : null,
           moversCount: Array.isArray(snapshot.moversSymbols) ? snapshot.moversSymbols.length : null
         });
