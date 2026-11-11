@@ -6,7 +6,7 @@ export function getVerifiedOptionContractMetadata(symbol, foMaster) {
   if (typeof symbol !== "string" ||
       !/^(?:NSE|BSE|MCX):[A-Z0-9&.-]+(?:CE|PE)$/.test(symbol) ||
       !foMaster || typeof foMaster !== "object" || Array.isArray(foMaster)) return null;
-  const item = foMaster[symbol];
+  const item = foMaster instanceof Map ? foMaster.get(symbol) : foMaster[symbol];
   if (!item || Number(item.tradeStatus) !== 1 || !["CE", "PE"].includes(String(item.optType || "").toUpperCase())) return null;
   const lotSize = Number(symbol.startsWith("MCX:") ? item.qtyMultiplier : item.minLotSize);
   const tickSize = Number(item.tickSize);
