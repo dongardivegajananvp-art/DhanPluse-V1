@@ -2226,7 +2226,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
         Number(best.plan.risk.completedCandleCount) + ' · 5 min</b></div>' +
         (best.paperPlanId ? '<button type="button" class="primary" id="gvPaperBuyBest" data-plan-id="' + escapeHtml(best.paperPlanId) + '">Paper BUY · 1 lot</button><p class="hint">Plan ID expires at ' + escapeHtml(best.paperPlanExpiresAt || 'shortly') + '. BUY rechecks a fresh FYERS option ask before saving a simulation.</p>' : '<p class="hint">Paper BUY unavailable: this backend response did not issue a short-lived verified plan ID.</p>') +
         '</article>' : '') + topFiveHtml +
-      '<div class="console-section-head"><div><h4>FULL UNIVERSE AUDIT RESULTS</h4><p>Every ranked F&O equity and fresh index candidate, with its individual verification outcome.</p></div></div>' +
+      '<div class="console-section-head"><div><h4>TOP MOVER VERIFICATION RESULTS</h4><p>Every F&O equity was included in the complete fresh quote ranking. Only the top 10 gainers, top 10 losers and individually fresh indices proceed to underlying-candle checks; option-chain discovery follows confirmed direction.</p></div></div>' +
       '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR</th><th>Paper BUY</th></tr></thead><tbody>' +
       result.results.map(row => {
         const plan = row.plan, move = Number(row.changePct);
