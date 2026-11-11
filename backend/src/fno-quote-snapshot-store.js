@@ -10,8 +10,6 @@ CREATE TABLE IF NOT EXISTS gv2vpd_fno_quote_snapshots (
   snapshot_exchange_time TIMESTAMPTZ NOT NULL,
   saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS gv2vpd_fno_quote_snapshots_saved_at
-  ON gv2vpd_fno_quote_snapshots (saved_at);
 `;
 const MAX_SNAPSHOT_AGE_MS = 24 * 60 * 60 * 1000;
 
