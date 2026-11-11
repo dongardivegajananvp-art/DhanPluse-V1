@@ -111,3 +111,27 @@ export function buildVerifiedSureshotShortlist({
     data: candidates.slice(0, limit).map((row, index) => ({ rank: index + 1, ...row }))
   };
 }
+
+
+/**
+ * Limit expensive per-underlying option verification to the two complete mover
+ * boards (Top 10 gainers + Top 10 losers) and independently fresh index ticks.
+ * The full F&O quote snapshot is still required and audited before this selection.
+ */
+export function selectSureshotOptionVerificationCandidates(ranked) {
+  if (!ranked || ranked.verified !== true ||
+      !Array.isArray(ranked.topGainers) || !Array.isArray(ranked.topLosers) ||
+      !Array.isArray(ranked.data)) {
+    throw new Error("complete_verified_top_mover_boards_required");
+  }
+  const bySymbol = new Map();
+  for (const row of [...ranked.topGainers, ...ranked.topLosers,
+    ...ranked.data.filter(item => item.underlyingType === "INDEX")]) {
+    if (!row || typeof row.symbol !== "string" || !row.symbol ||
+        !Number.isFinite(Number(row.changePct))) continue;
+    bySymbol.set(row.symbol, row);
+  }
+  const selected = [...bySymbol.values()].sort((a, b) =>
+    Math.abs(b.changePct) - Math.abs(a.changePct) || a.symbol.localeCompare(b.symbol));
+  return selected.map((row, index) => ({ ...row, rank: index + 1 }));
+}

@@ -7,7 +7,7 @@ const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8"
 const indexHtml = await readFile(new URL("../../site/index.html", import.meta.url), "utf8");
 const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
 
-test("Sureshot backend verifies every eligible F&O and individually fresh index candidate in five-item batches", () => {
+test("Sureshot verifies the complete F&O quote universe and option-checks bounded mover candidates in five-item batches", () => {
   assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 250/);
   assert.match(server, /const SURESHOT_BATCH_SIZE = 5/);
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
@@ -16,10 +16,10 @@ test("Sureshot backend verifies every eligible F&O and individually fresh index 
   const route = server.slice(start, end);
   assert.match(route, /if \(!nseRegularSessionNow\(\)\)/);
   assert.match(route, /isCompleteFreshFnoQuoteSnapshot\(stockQuoteCache\.data, expectedQuoteSymbols/);
-  assert.match(route, /loadVerifiedFnoStockQuotes\(\{ priority: "sureshot" \}\)/);
+  assert.match(route, /loadVerifiedFnoStockQuotes\(\{ priority: "sureshot", stage: scanStage \}\)/);
   assert.match(route, /buildVerifiedSureshotShortlist\(/);
   assert.match(route, /limit: SURESHOT_UNIVERSE_SCAN_LIMIT/);
-  assert.match(route, /const moverCandidates = ranked\.data\.map/);
+  assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
   assert.match(route, /const batch = state\.candidates\.slice\(offset, offset \+ SURESHOT_BATCH_SIZE\)/);
   assert.match(route, /state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /rankedCandidateCount: ranked\.candidateCount/);
@@ -193,4 +193,45 @@ test("NSE and MCX Sureshot scan gates are independent", () => {
   assert.match(mcxFrontend, /mcxSureshotUniverseScanRunning/);
   assert.doesNotMatch(mcxFrontend, /sureshotUniverseScanRunning/);
   assert.match(app, /mcxSureshotUniverseScanRunning \|\| mcxAutoScanStatusCheckInFlight/);
+});
+
+
+test("NSE option verification uses the complete Top 10 gainers/losers boards, not all 218 equities", () => {
+  const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
+  const end = server.indexOf("// Last-known F&O equity quotes", start);
+  const route = server.slice(start, end);
+  assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
+  assert.ok(route.includes("topGainers: ranked.topGainers, topLosers: ranked.topLosers"));
+  assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
+  assert.ok(server.includes("selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js'"));
+});
+
+
+test("NSE option verification is bounded to Top 10 gainers, Top 10 losers and fresh indices", () => {
+  const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
+  const end = server.indexOf("// Last-known F&O equity quotes", start);
+  const route = server.slice(start, end);
+  assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
+  assert.ok(route.includes("topGainers: ranked.topGainers, topLosers: ranked.topLosers"));
+  assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
+  assert.ok(server.includes("selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js'"));
+});
+
+
+test("NSE final freshness revalidation is bounded to five candidates for up to three published setups", () => {
+  const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
+  const end = server.indexOf("// Last-known F&O equity quotes", start);
+  const route = server.slice(start, end);
+  assert.ok(route.includes(".slice(0, 5);"));
+  assert.ok(route.includes("finalRevalidationCandidateCount: finalCheckCandidates.length"));
+  assert.ok(route.includes("topThreeSetups = verified.slice(0, 3)"));
+});
+
+test("Sureshot FYERS request audit distinguishes upstream, cached and locally blocked requests", () => {
+  assert.ok(server.includes("priority = 'normal', stage = null"));
+  assert.ok(server.includes("Sureshot FYERS Data API request audit:"));
+  assert.ok(server.includes("requestSource = localCooldown ? 'LOCAL_CIRCUIT_BREAKER'"));
+  assert.ok(server.includes("cacheState === 'HIT' ? 'CACHE' : 'UPSTREAM'"));
+  assert.ok(server.includes("endpoint: new URL(String(url)).pathname"));
+  assert.ok(server.includes('loadVerifiedFnoStockQuotes({ priority: "sureshot", stage: scanStage })'));
 });
