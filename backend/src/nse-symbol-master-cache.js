@@ -64,8 +64,9 @@ export function createNseSymbolMasterCache({ databaseUrl, PoolImpl = Pool } = {}
       );
       if (!result.rows.length) return null;
       const row = result.rows[0];
-      const ageMs = Math.max(0, Number(row.age_ms) || 0);
-      if (ageMs > maxAgeMs) return null;
+      const rawAgeMs = Number(row.age_ms);
+      if (!Number.isFinite(rawAgeMs) || rawAgeMs < -5000 || rawAgeMs > maxAgeMs) return null;
+      const ageMs = Math.max(0, rawAgeMs);
       const snapshot = decode(row.payload);
       if (!snapshot || typeof snapshot !== 'object' || !Array.isArray(snapshot.universe) ||
           !Array.isArray(snapshot.moversSymbols) || !(snapshot.optionContractMaster instanceof Map)) {
