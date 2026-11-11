@@ -81,10 +81,10 @@ export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now
   }
   let trend = null;
   if (strictTrend) {
-    trend = validateSureshotTrend({ candles, resolution: "5", now, minAdx: 20, minVolumeRatio: 1.5, minTrendScore: 70 });
+    trend = validateSureshotTrend({ candles, resolution: "5", now, minTrendScore: 55 });
     if (!trend.ok) return { ok: false, reason: trend.reason };
     side = trend.side;
-    reason = "Verified " + side + " trend: ADX, EMA(20), session VWAP, same-time five-session volume and Trend Score gates passed.";
+    reason = "Verified " + side + " trend: directional EMA/VWAP majority passed the weighted Trend Score threshold.";
   }
   return {
     ok: true, side, reason, spot: latest.close,
