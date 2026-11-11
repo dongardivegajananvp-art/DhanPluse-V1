@@ -1804,45 +1804,52 @@ async function loadSureshotUniverseShortlist(options = {}) {
     }
     if (!Array.isArray(result.results) || result.scannedCandidateCount !== result.results.length ||
         result.selectedCandidatesComplete !== true ||
-        result.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED') {
-      throw new Error('The complete eligible F&O + fresh-index candidate list was not checked; partial results are withheld.');
+        result.stopReason !== 'ALL_TOP_MOVER_CANDIDATES_CHECKED') {
+      throw new Error('The full F&O quote universe was not ranked or the selected top-mover candle scan was incomplete; partial results are withheld.');
     }
     const verified = result.results.filter(row => row.status === 'VERIFIED SETUP');
-    const topThree = Array.isArray(result.topThreeSetups) ? result.topThreeSetups.slice(0, 3) : [];
-    if (topThree.length > 3 || topThree.some(row => row.status !== 'VERIFIED SETUP' || !row.finalVerifiedAt || !row.plan?.risk || !Number.isFinite(Number(row.plan?.quote?.quoteAgeSeconds)) || Number(row.plan.quote.quoteAgeSeconds) > 15 || !Number.isFinite(Number(row.plan?.risk?.rrTarget2 ?? row.plan?.risk?.rr)) || Number(row.plan.risk.rrTarget2 ?? row.plan.risk.rr) < 2)) {
-      throw new Error('The backend did not return a valid top-three verified setup list.');
+    const topFive = Array.isArray(result.topFiveSetups) ? result.topFiveSetups.slice(0, 5) : [];
+    if (topFive.length > 5 || topFive.some(row => row.status !== 'VERIFIED SETUP' || !row.finalVerifiedAt || !row.plan?.risk || !Number.isFinite(Number(row.plan?.quote?.quoteAgeSeconds)) || Number(row.plan.quote.quoteAgeSeconds) > 15 || !Number.isFinite(Number(row.plan?.risk?.rrTarget2 ?? row.plan?.risk?.rr)) || Number(row.plan.risk.rrTarget2 ?? row.plan.risk.rr) < 2)) {
+      throw new Error('The backend did not return a valid top-five verified setup list.');
     }
     const best = result.bestSetup;
-    const topThreeHtml = topThree.length
-      ? '<article class="console-section"><div class="console-section-head"><h4>TOP 3 VERIFIED SETUPS</h4><span class="live-tag">' + topThree.length + ' / 3</span></div><div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Fresh premium</th><th>Quote age</th><th>Entry</th><th>SL</th><th>Target</th><th>RR</th></tr></thead><tbody>' +
-        topThree.map((row, index) => {
-          const plan = row.plan;
-          return '<tr><td><b>#' + (index + 1) + '</b></td><td><b>' + escapeHtml(row.underlyingSymbol) + '</b></td><td>' + escapeHtml(plan.direction) +
-            '</td><td>' + escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) +
-            '</td><td>₹' + formatPrice(plan.quote.ask) + '</td><td>' + Number(plan.quote.quoteAgeSeconds).toFixed(1) + ' sec</td><td>₹' + formatPrice(plan.risk.entryPrice) + '</td><td>₹' +
-            formatPrice(plan.risk.stopLoss) + '</td><td>₹' + formatPrice(plan.risk.target) + '</td><td>1 : ' +
-            Number(plan.risk.rr).toFixed(2) + '</td></tr>';
-        }).join('') + '</tbody></table></div></article>'
-      : '<article class="console-section"><h4>TOP 3 VERIFIED SETUPS</h4><p class="hint">NO TRADE — no candidate passed every FYERS direction, contract, premium, completed-candle and 1:2 risk gate.</p></article>';
-    host.innerHTML = '<div class="console-section-head"><div><h4>' +
-      'Full F&O + fresh-index universe checked' +
-      '</h4><p>' + Number(result.scannedCandidateCount) + ' / ' + Number(result.selectedCandidateCount) +
-      ' candidates checked · ' + Number(result.rankedEquityCount) + ' F&O equities + ' + Math.max(0, Number(result.rankedCandidateCount) - Number(result.rankedEquityCount)) + ' fresh indices ranked · ' + Number(result.initiallyVerifiedCandidateCount) + ' initial passes · ' + Number(result.verifiedSetupCount) + ' final-fresh verified plan(s) · read-only</p></div><span class="' +
+    const topFiveRows = Array.from({ length: 5 }, (_, index) => topFive[index] || null);
+    const topFiveHtml = '<article class="console-section"><div class="console-section-head"><h4>TOP 5 VERIFIED SETUPS</h4><span class="live-tag">' + topFive.length + ' / 5</span></div><div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Fresh premium</th><th>Quote age</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR (T2)</th></tr></thead><tbody>' +
+      topFiveRows.map((row, index) => {
+        if (!row) return '<tr><td><b>#' + (index + 1) + '</b></td><td colspan="10"><span class="signal-tone neutral">BLOCKED · NO VERIFIED STRIKE</span> — no candidate passed every fresh FYERS direction, contract, premium, completed-candle and 1:2 T2 risk check.</td></tr>';
+        const plan = row.plan;
+        return '<tr><td><b>#' + (index + 1) + '</b></td><td><b>' + escapeHtml(row.underlyingSymbol) + '</b></td><td>' + escapeHtml(plan.direction) +
+          '</td><td>' + escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) +
+          '</td><td>₹' + formatPrice(plan.quote.ask) + '</td><td>' + Number(plan.quote.quoteAgeSeconds).toFixed(1) + ' sec</td><td>₹' + formatPrice(plan.risk.entryPrice) + '</td><td>₹' +
+          formatPrice(plan.risk.stopLoss) + '</td><td>₹' + formatPrice(plan.risk.target1) + '</td><td>₹' +
+          formatPrice(plan.risk.target2) + '</td><td>1 : ' + Number(plan.risk.rrTarget2 ?? plan.risk.rr).toFixed(2) + '</td></tr>';
+      }).join('') + '</tbody></table></div><p class="hint">Exactly five slots are always shown. Unverified slots stay BLOCKED; they never contain estimated prices or partial plans.</p></article>';
+    host.innerHTML = renderMoverBoards(result) + '<div class="console-section-head"><div><h4>Full F&O quote universe ranked · top movers candle-verified</h4><p>' +
+      Number(result.scannedCandidateCount) + ' / ' + Number(result.selectedCandidateCount) +
+      ' top mover/index candidates checked · ' + Number(result.rankedEquityCount) + ' F&O equities ranked from complete FYERS quotes · top 10 gainers + top 10 losers + ' +
+      Math.max(0, Number(result.rankedCandidateCount) - Number(result.rankedEquityCount)) + ' fresh indices · ' +
+      Number(result.initiallyVerifiedCandidateCount) + ' initial passes · ' + Number(result.verifiedSetupCount) +
+      ' final-fresh verified plan(s) · read-only</p></div><span class="' +
       (verified.length ? 'live-tag' : 'signal-tone neutral') + '">' + (verified.length ? 'RISK VERIFIED' : 'NO TRADE') + '</span></div>' +
       (best ? '<article class="console-section"><div class="console-section-head"><h4>#1 BEST VERIFIED SETUP</h4><span class="signal-tone positive">' +
         escapeHtml(best.plan.direction) + '</span></div><strong class="console-price">₹' + formatPrice(best.plan.risk.entryPrice) +
         '</strong><div class="data-row"><span>Underlying</span><b>' + escapeHtml(best.underlyingSymbol) +
         '</b></div><div class="data-row"><span>Contract</span><b>' + escapeHtml(best.plan.contract.symbol) +
         '</b></div><div class="data-row"><span>Expiry / Strike</span><b>' + escapeHtml(best.plan.contract.expiryDate || best.plan.contract.expiry) +
-        ' · ' + formatPrice(best.plan.contract.strike) + '</b></div><div class="data-row"><span>Entry / Stop-loss / Target</span><b>₹' +
+        ' · ' + formatPrice(best.plan.contract.strike) + '</b></div><div class="data-row"><span>Entry / Stop-loss / Target 1 / Target 2</span><b>₹' +
         formatPrice(best.plan.risk.entryPrice) + ' / ₹' + formatPrice(best.plan.risk.stopLoss) + ' / ₹' +
-        formatPrice(best.plan.risk.target) + '</b></div><div class="data-row"><span>Risk : Reward</span><b>1 : ' +
-        Number(best.plan.risk.rr).toFixed(2) + '</b></div><div class="data-row"><span>Lot size / quantity (1 lot)</span><b>' + Number(best.plan.risk.lotSize) + ' units</b></div><div class="data-row"><span>Total risk for 1 lot</span><b>₹' + formatPrice(best.plan.risk.riskPerLot) + '</b></div><div class="data-row"><span>Potential reward for 1 lot</span><b>₹' + formatPrice(best.plan.risk.rewardPerLot) + '</b></div><div class="data-row"><span>Premium value for 1 lot</span><b>₹' + formatPrice(best.plan.risk.premiumPerLot) + '</b></div><div class="data-row"><span>Fresh option quote age / spread</span><b>' +
+        formatPrice(best.plan.risk.target1) + ' / ₹' + formatPrice(best.plan.risk.target2) + '</b></div><div class="data-row"><span>Risk : Reward (T2)</span><b>1 : ' +
+        Number(best.plan.risk.rrTarget2 ?? best.plan.risk.rr).toFixed(2) + '</b></div><div class="data-row"><span>Lot size / quantity (1 lot)</span><b>' +
+        Number(best.plan.risk.lotSize) + ' units</b></div><div class="data-row"><span>Total risk for 1 lot</span><b>₹' +
+        formatPrice(best.plan.risk.riskPerLot) + '</b></div><div class="data-row"><span>Target 2 reward for 1 lot</span><b>₹' +
+        formatPrice(best.plan.risk.target2RewardPerLot) + '</b></div><div class="data-row"><span>Premium value for 1 lot</span><b>₹' +
+        formatPrice(best.plan.risk.premiumPerLot) + '</b></div><div class="data-row"><span>Trend Score</span><b>' +
+        Number(best.plan.underlying.trendScore || 0) + '/100</b></div><div class="data-row"><span>Fresh option quote age / spread</span><b>' +
         Number(best.plan.quote.quoteAgeSeconds).toFixed(1) + ' sec / ' + Number(best.plan.quote.spreadPct).toFixed(2) +
         '%</b></div><div class="data-row"><span>Completed option candles</span><b>' +
-        Number(best.plan.risk.candleCount) + ' · 5 min</b></div></article>' : '') + topThreeHtml +
-      '<div class="console-section-head"><div><h4>FULL UNIVERSE AUDIT RESULTS</h4><p>Every ranked F&O equity and fresh index candidate, with its individual verification outcome.</p></div></div>' +
-      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>Target</th><th>RR</th></tr></thead><tbody>' +
+        Number(best.plan.risk.completedCandleCount) + ' · 5 min</b></div></article>' : '') + topFiveHtml +
+      '<div class="console-section-head"><div><h4>TOP MOVER VERIFICATION RESULTS</h4><p>All F&O equities were included in the complete fresh quote ranking. Only the top 10 gainers, top 10 losers and individually fresh indices proceed to underlying-candle checks; option-chain discovery follows confirmed direction.</p></div></div>' +
+      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR</th></tr></thead><tbody>' +
       result.results.map(row => {
         const plan = row.plan, move = Number(row.changePct);
         const moveText = (move > 0 ? '+' : '') + move.toFixed(2) + '%';
@@ -1853,19 +1860,20 @@ async function loadSureshotUniverseShortlist(options = {}) {
           '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td>₹' + formatPrice(row.ltp) + '</td><td>' + moveText + '</td><td>' + lotText + '</td><td>' +
           (plan ? '<span class="signal-tone positive">VERIFIED</span>' : '<span class="signal-tone neutral">NO TRADE</span>') +
           '</td><td>' + (plan ? escapeHtml(plan.direction) : '—') + '</td><td>' +
-          (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '—') +
+          (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '<span class="signal-tone neutral">NO VERIFIED STRIKE</span>') +
           '</td><td>' + (plan ? '₹' + formatPrice(plan.risk.entryPrice) : '—') + '</td><td>' +
           (plan ? '₹' + formatPrice(plan.risk.stopLoss) : '—') + '</td><td>' +
-          (plan ? '₹' + formatPrice(plan.risk.target) : '—') + '</td><td>' +
-          (plan ? '1 : ' + Number(plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
-          (plan ? '' : '<tr><td colspan="12" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
-      }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS option quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 12-candle option swing low; target ≥ 2R. One-lot rupee risk uses official FYERS contract sizing; brokerage, taxes and slippage are excluded. No orders are placed.</p>';
+          (plan ? '₹' + formatPrice(plan.risk.target1) : '—') + '</td><td>' +
+          (plan ? '₹' + formatPrice(plan.risk.target2) : '—') + '</td><td>' +
+          (plan ? '1 : ' + Number(plan.risk.rrTarget2 ?? plan.risk.rr).toFixed(2) : '—') + '</td></tr>' +
+          (plan ? '' : '<tr><td colspan="13" class="hint">' + escapeHtml(row.reason || 'Required FYERS verification failed; no trade.') + '</td></tr>');
+      }).join('') + '</tbody></table></div><p class="hint">Only fresh exchange-stamped FYERS quotes and completed candles are used. Option-chain premium/OI/volume are ignored. Entry = fresh ask; SL = 30% below entry; T1 = 1.5x entry; T2 = 2.5x entry. One-lot rupee risk uses official FYERS lot size; fees and slippage are excluded. No orders are placed.</p>';
     if (status) status.textContent = verified.length
       ? (result.selectedCandidatesComplete
-        ? 'Full-universe scan complete · ' + verified.length + ' verified setup(s); top ' + topThree.length + ' displayed. Best valid setup is ranked #1.'
-        : 'Full-universe scan complete · all ' + result.scannedCandidateCount + ' eligible candidates checked.')
-      : 'Full-universe scan complete · NO TRADE. No candidate passed every direction, contract, fresh quote, candle and ≥1:2 risk check.';
-    // Mark the trading date only after every eligible F&O + fresh-index candidate was checked.
+        ? 'Full-universe quote ranking complete · ' + topFive.length + ' of 5 final-fresh setups displayed. Best valid setup is ranked #1.'
+        : 'Full-universe quote ranking complete · all ' + result.scannedCandidateCount + ' selected top-mover/index candidates checked.')
+      : 'Full-universe quote ranking complete · NO TRADE. All five slots remain BLOCKED because no candidate passed every direction, contract, fresh quote, candle and ≥1:2 risk check.';
+    // Mark the trading date only after the complete F&O quote universe was ranked and every selected top-mover/index candidate was checked.
     // Failed/incomplete scans remain eligible for the automatic session retry.
     try {
       localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY, indiaTradingDateKey());
