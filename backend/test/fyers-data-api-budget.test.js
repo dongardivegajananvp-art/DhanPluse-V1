@@ -25,7 +25,7 @@ test('FYERS Data API requests share a rolling-minute budget', async () => {
   assert.ok(sentAt[2] - sentAt[0] >= 60_000);
 });
 
-test('Cloudflare 1015 opens a shared fifteen-minute circuit breaker and suppresses later upstream calls', async () => {
+test('Cloudflare 1015 opens a shared one-hour circuit breaker and suppresses later upstream calls', async () => {
   let clock = 100_000;
   let sent = 0;
   const request = createFyersDataApiBudget({
@@ -37,7 +37,7 @@ test('Cloudflare 1015 opens a shared fifteen-minute circuit breaker and suppress
   const first = await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
   assert.equal(first.status, 429);
   assert.equal(request.getStatus().cooldownActive, true);
-  assert.equal(request.getStatus().retryAfterSeconds, 900);
+  assert.equal(request.getStatus().retryAfterSeconds, 3600);
   assert.equal(request.getStatus().cooldownReason, 'CLOUDFLARE_1015');
 
   const blocked = await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ');
@@ -81,11 +81,11 @@ test('repeated Cloudflare 1015 escalates backoff; a successful probe clears the 
   const url = 'https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ';
 
   await request(url);
-  assert.equal(request.getStatus().retryAfterSeconds, 900);
-  clock += 900_001;
+  assert.equal(request.getStatus().retryAfterSeconds, 3600);
+  clock += 3_600_001;
   await request(url);
-  assert.equal(request.getStatus().retryAfterSeconds, 1800);
-  clock += 1800_001;
+  assert.equal(request.getStatus().retryAfterSeconds, 3600);
+  clock += 3_600_001;
   const recovered = await request(url);
   assert.equal(recovered.status, 200);
   assert.equal(request.getStatus().cooldownActive, false);
@@ -330,13 +330,13 @@ test('success from a different FYERS endpoint does not reset Cloudflare backoff 
   });
   const quotes = 'https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ';
   await request(quotes);
-  assert.equal(request.getStatus().retryAfterSeconds, 900);
-  clock += 900_001;
+  assert.equal(request.getStatus().retryAfterSeconds, 3600);
+  clock += 3_600_001;
   const history = await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ');
   assert.equal(history.status, 200);
   assert.equal(request.getStatus().consecutiveCloudflareBlocks, 1);
   await request(quotes);
-  assert.equal(request.getStatus().retryAfterSeconds, 1800);
+  assert.equal(request.getStatus().retryAfterSeconds, 3600);
   assert.equal(quoteAttempts, 2);
 });
 
