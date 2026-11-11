@@ -57,10 +57,11 @@ function calculateAdx(rows, period = 14) {
 }
 
 /**
- * Strict Sureshot gate: completed 5m trend, ADX, EMA20, session VWAP,
- * and today's volume against the previous five sessions at the same elapsed time.
+ * Weighted Sureshot trend score. Data completeness/freshness stays hard-gated;
+ * ADX, relative volume, EMA slope/alignment and VWAP are scored rather than
+ * each being an independent mandatory pass condition.
  */
-export function validateSureshotTrend({ candles, resolution = "5", now = Date.now(), minAdx = 20, minVolumeRatio = 1.5, minTrendScore = 70 }) {
+export function validateSureshotTrend({ candles, resolution = "5", now = Date.now(), minTrendScore = 55 }) {
   const minutes = Number(resolution);
   if (minutes !== 5 || !Array.isArray(candles)) return { ok: false, reason: "Sureshot trend validation requires FYERS 5-minute candles." };
   const ordered = normalizeFyersCandleOrder(candles);
@@ -120,23 +121,33 @@ export function validateSureshotTrend({ candles, resolution = "5", now = Date.no
   const ema = calculateEma(completed.map(row => row.close), 20);
   const adx = calculateAdx(completed, 14);
   if (!ema || !Number.isFinite(adx)) return { ok: false, reason: "Not enough completed candles to calculate ADX(14) and EMA(20)." };
-  if (adx < minAdx) return { ok: false, reason: "Sideways trend blocked: ADX(14) is below " + minAdx + "." };
-  if (volumeRatio < minVolumeRatio) return { ok: false, reason: "Volume confirmation blocked: same-time five-session ratio is below " + minVolumeRatio + "x." };
+  const bullish = {
+    emaSlope: ema.current > ema.previous,
+    emaAlignment: latest.close > ema.current,
+    vwapAlignment: latest.close > vwap
+  };
+  const bearish = {
+    emaSlope: ema.current < ema.previous,
+    emaAlignment: latest.close < ema.current,
+    vwapAlignment: latest.close < vwap
+  };
+  const bullishVotes = Object.values(bullish).filter(Boolean).length;
+  const bearishVotes = Object.values(bearish).filter(Boolean).length;
+  const side = bullishVotes >= 2 && bullishVotes > bearishVotes ? "CE" :
+    bearishVotes >= 2 && bearishVotes > bullishVotes ? "PE" : null;
+  if (!side) return { ok: false, reason: "No directional majority: at least two of EMA slope, EMA price alignment and session VWAP must agree." };
 
-  let side = null;
-  if (latest.close > ema.current && ema.current > ema.previous && latest.close > vwap) side = "CE";
-  if (latest.close < ema.current && ema.current < ema.previous && latest.close < vwap) side = "PE";
-  if (!side) return { ok: false, reason: "Trend direction is not aligned across EMA(20), EMA slope and session VWAP." };
-
+  // Context contributes up to 35 points; directional confirmation contributes
+  // up to 65. Weak ADX/volume reduces rank but cannot alone veto a valid trend.
   const scoreParts = {
-    adx: adx >= 25 ? 35 : 25,
-    sameTimeVolume: 25,
-    emaSlope: 20,
-    emaAlignment: 10,
-    vwapAlignment: 10
+    adx: adx >= 25 ? 15 : adx >= 18 ? 10 : adx >= 14 ? 5 : 0,
+    sameTimeVolume: volumeRatio >= 1.5 ? 20 : volumeRatio >= 1 ? 12 : 5,
+    emaSlope: (side === "CE" ? bullish.emaSlope : bearish.emaSlope) ? 25 : 0,
+    emaAlignment: (side === "CE" ? bullish.emaAlignment : bearish.emaAlignment) ? 20 : 0,
+    vwapAlignment: (side === "CE" ? bullish.vwapAlignment : bearish.vwapAlignment) ? 20 : 0
   };
   const trendScore = Object.values(scoreParts).reduce((sum, value) => sum + value, 0);
-  if (trendScore < minTrendScore) return { ok: false, reason: "Transparent Trend Score is below " + minTrendScore + "." };
+  if (trendScore < minTrendScore) return { ok: false, reason: "Weighted Trend Score " + trendScore + "/100 is below the required " + minTrendScore + "." };
   return {
     ok: true, side, trendScore, scoreParts,
     adx: Number(adx.toFixed(2)), ema20: Number(ema.current.toFixed(4)),
