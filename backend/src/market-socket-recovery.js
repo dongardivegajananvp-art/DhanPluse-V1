@@ -23,3 +23,24 @@ export function buildMarketSocketSubscriptionSymbols(allowedSymbols, chartStream
   }
   return baseline;
 }
+
+
+/**
+ * Return only baseline symbols whose exchange timestamp is missing, invalid,
+ * future-dated, or older than the strict freshness window. A quiet index must
+ * not cause healthy index subscriptions to be replayed with it.
+ */
+export function getStaleNseSubscriptionSymbols({
+  symbols, ticks, now = Date.now(), connectedAt = 0, freshnessMs = 10_000
+} = {}) {
+  if (!Array.isArray(symbols) || !(ticks instanceof Map) ||
+      !Number.isFinite(now) || !Number.isFinite(connectedAt) ||
+      !Number.isFinite(freshnessMs) || freshnessMs <= 0) return [];
+  return symbols.filter((symbol) => {
+    const tick = ticks.get(symbol);
+    const timestamp = tick ? Date.parse(String(tick.updatedAt || "")) : connectedAt;
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return true;
+    const ageMs = now - timestamp;
+    return ageMs < 0 || ageMs >= freshnessMs;
+  });
+}

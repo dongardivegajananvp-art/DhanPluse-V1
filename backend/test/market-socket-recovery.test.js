@@ -65,8 +65,9 @@ test("SDK handles transport reconnects while the 10-second NSE heartbeat restore
   assert.match(lifecycle, /socket\.connect\(\)/);
   const heartbeat = source.slice(end, source.indexOf("marketSocketWatchdog.unref", end));
   assert.match(source, /NSE_TICK_HEARTBEAT_MS = 10_000/);
-  assert.match(heartbeat, /marketSocket\.subscribe\(nseIndexSymbols\)/);
-  assert.match(heartbeat, /no_fresh_nse_tick_within_10_seconds/);
+  assert.match(heartbeat, /marketSocket\.subscribe\(staleNseSymbols\)/);
+  assert.match(heartbeat, /staleSymbols: staleNseSymbols/);
+  assert.match(heartbeat, /stale_nse_symbols_only/);
   assert.match(heartbeat, /getMarketSocketReconnectDelay\(nseResubscribeCount, 10_000, 120_000\)/);
   assert.doesNotMatch(heartbeat, /marketSocket\.close\(/);
   assert.match(heartbeat, /setInterval\([\s\S]*?,\s*1_000\)/);
@@ -153,4 +154,20 @@ test("NSE silent-feed recovery uses exponential resubscribe backoff", () => {
   assert.equal(getMarketSocketReconnectDelay(2, 10_000, 120_000), 40_000);
   assert.equal(getMarketSocketReconnectDelay(3, 10_000, 120_000), 80_000);
   assert.equal(getMarketSocketReconnectDelay(4, 10_000, 120_000), 120_000);
+});
+
+
+test("NSE watchdog targets only stale symbols and preserves the strict freshness window", async () => {
+  const { getStaleNseSubscriptionSymbols } = await import("../src/market-socket-recovery.js");
+  const now = Date.parse("2026-11-11T08:00:10.000Z");
+  const symbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX"];
+  const ticks = new Map([
+    [symbols[0], { updatedAt: "2026-11-11T08:00:08.000Z" }],
+    [symbols[1], { updatedAt: "2026-11-11T08:00:00.000Z" }]
+  ]);
+  assert.deepEqual(getStaleNseSubscriptionSymbols({ symbols, ticks, now, freshnessMs: 10_000 }), [symbols[1]]);
+  assert.deepEqual(getStaleNseSubscriptionSymbols({ symbols, ticks: new Map(), now, connectedAt: now - 2_000, freshnessMs: 10_000 }), []);
+  assert.deepEqual(getStaleNseSubscriptionSymbols({ symbols, ticks: new Map(), now, connectedAt: now - 11_000, freshnessMs: 10_000 }), symbols);
+  ticks.set(symbols[0], { updatedAt: "2026-11-11T08:00:11.000Z" });
+  assert.deepEqual(getStaleNseSubscriptionSymbols({ symbols: [symbols[0]], ticks, now, freshnessMs: 10_000 }), [symbols[0]]);
 });
