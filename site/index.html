@@ -81,7 +81,7 @@
 .option-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;align-items:end;gap:10px;margin-bottom:14px}
 .option-controls label{display:block;color:#9aaac0;font-size:10px}
 .option-controls select{display:block;width:100%;margin-top:6px;background:#0a111c;color:#eaf1fb;border:1px solid #2b3b53;border-radius:8px;padding:10px;font:inherit;font-size:11px;min-width:0}
-.option-controls button{margin:0;white-space:nowrap}
+.option-controls button{margin:0;min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.3;text-align:center}
 
 /* Keep Sureshot action labels fully readable on narrow mobile screens. */
 @media(max-width:650px){
@@ -104,7 +104,7 @@
 .option-table thead tr:first-child th{text-align:center;background:#111c2b}
 .option-table td:nth-child(5){background:#111c2b;text-align:center}
 .option-table td:nth-child(1),.option-table td:nth-child(6){color:#d4e5ff}
-@media(max-width:700px){.option-controls{grid-template-columns:1fr 1fr}.option-controls button{grid-column:1/-1;justify-self:start}}
+@media(max-width:700px){.option-controls{grid-template-columns:1fr 1fr}.option-controls button{grid-column:1/-1;justify-self:stretch}}
 
 
 /* Gainers & losers module */
@@ -395,15 +395,23 @@ window.fetch = function(input, init = {}) {
     requestSession = localStorage.getItem(DASHBOARD_SESSION_KEY) || '';
     if (requestSession) headers.set('Authorization', 'Bearer ' + requestSession);
   }
-  // Render free instances can take longer than a normal request to wake from
-  // idle. Allow control endpoints enough time for a cold start; this does not
-  // mark the backend healthy and never relaxes market-data freshness checks.
-  // Market data, history, and scanner requests retain their own lifetimes.
-  const controlRequestTimeoutMs = isBackend &&
-    ['/health', '/api/status', '/api/fyers/auth/start'].includes(pathname) ? 60000 : 0;
-  const timeoutController = controlRequestTimeoutMs ? new AbortController() : null;
-  const timeoutId = controlRequestTimeoutMs
-    ? window.setTimeout(() => timeoutController.abort(), controlRequestTimeoutMs)
+  // Give Render health/status checks a bounded 15-second window so the
+  // Dashboard cannot remain on CHECKING indefinitely. OAuth start retains a
+  // longer cold-start allowance. Sureshot/history requests also get a bounded
+  // deadline: an unresponsive API must release the UI spinner and fail closed.
+  const healthRequestTimeoutMs = isBackend && ['/health', '/api/status'].includes(pathname) ? 15000 : 0;
+  const authRequestTimeoutMs = isBackend && pathname === '/api/fyers/auth/start' ? 60000 : 0;
+  const scanRequestTimeoutMs = isBackend && [
+    '/api/market/sureshot-auto-plans',
+    '/api/market/mcx-sureshot-auto-plans',
+    '/api/market/candles',
+    '/api/fyers/option-risk-plan',
+    '/api/fyers/option-chain'
+  ].includes(pathname) ? 120000 : 0;
+  const requestTimeoutMs = Math.max(healthRequestTimeoutMs, authRequestTimeoutMs, scanRequestTimeoutMs);
+  const timeoutController = requestTimeoutMs ? new AbortController() : null;
+  const timeoutId = requestTimeoutMs
+    ? window.setTimeout(() => timeoutController.abort(), requestTimeoutMs)
     : null;
   const requestInit = { ...init, headers };
   if (timeoutController) requestInit.signal = timeoutController.signal;
@@ -432,7 +440,7 @@ window.fetch = function(input, init = {}) {
     return response;
   }).catch(error => {
     if (timeoutController && timeoutController.signal.aborted) {
-      throw new Error('Backend request timed out after 60 seconds (' + pathname + '). The backend did not respond; retry the connection check.');
+      throw new Error('Backend request timed out after ' + Math.round(requestTimeoutMs / 1000) + ' seconds (' + pathname + '). No response was verified; retry the request.');
     }
     throw error;
   }).finally(() => {
