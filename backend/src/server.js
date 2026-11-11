@@ -19,6 +19,7 @@ import { getReferenceDataRetryDelay } from './reference-data-backoff.js';
 import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
+import { createFyersDataApiCooldownStore } from './fyers-data-api-cooldown-store.js';
 import { buildOptionRiskPlan } from './option-risk-plan.js';
 import { buildFixedOptionRiskPlan, validateCompletedOptionCandles } from './fixed-option-risk-plan.js';
 import { getVerifiedOptionContractMetadata as resolveOptionContractMetadata } from './option-contract-metadata.js';
@@ -43,7 +44,8 @@ import { decodeFyersSocketMessage, summarizeFyersSocketMessage } from './fyers-s
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
-const fetchWithFyersBudget = createFyersDataApiBudget();
+const fyersDataApiCooldownStore = createFyersDataApiCooldownStore({ databaseUrl: process.env.DATABASE_URL });
+const fetchWithFyersBudget = createFyersDataApiBudget({ cooldownStore: fyersDataApiCooldownStore });
 
 const app = express();
 app.disable('x-powered-by');
