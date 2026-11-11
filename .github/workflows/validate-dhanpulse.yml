@@ -57,9 +57,15 @@ jobs:
       - name: GV2VPD PR preview desktop and mobile browser smoke
         if: github.event_name == 'pull_request'
         env:
-          GV2VPD_PREVIEW_URL: https://deploy-preview-${{ github.event.pull_request.number }}--spectacular-gaufre-b5c029.netlify.app/site/
+          GV2VPD_PREVIEW_URL: http://127.0.0.1:4173/site/
           PLAYWRIGHT_MODULE: /tmp/gv2vpd-playwright/node_modules/playwright
         run: |
+          python3 -m http.server 4173 --directory . >/tmp/gv2vpd-preview.log 2>&1 &
+          for attempt in {1..15}; do
+            if curl --fail --silent http://127.0.0.1:4173/site/ >/dev/null; then break; fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/site/ >/dev/null
           mkdir -p /tmp/gv2vpd-playwright
           npm install --prefix /tmp/gv2vpd-playwright --no-audit --no-fund playwright
           /tmp/gv2vpd-playwright/node_modules/.bin/playwright install chromium
