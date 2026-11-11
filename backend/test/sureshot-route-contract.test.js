@@ -24,7 +24,7 @@ test("Sureshot ranks the full F&O quote universe then verifies top 10 gainers, t
   assert.match(route, /const batch = state\.candidates\.slice\(offset, offset \+ SURESHOT_BATCH_SIZE\)/);
   assert.match(route, /state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /rankedCandidateCount: ranked\.candidateCount/);
-  assert.match(route, /topThreeSetups = verified\.slice\(0, 3\)/);
+  assert.match(route, /topFiveSetups = verified\.slice\(0, 5\)/);
   assert.match(route, /initiallyVerified: true/);
   assert.match(route, /FINAL_REVALIDATE_UNDERLYING/);
   assert.match(route, /FINAL_REVALIDATE_OPTION_QUOTES/);
