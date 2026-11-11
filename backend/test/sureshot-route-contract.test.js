@@ -19,7 +19,8 @@ test("Sureshot ranks the full F&O quote universe then verifies top 10 gainers, t
   assert.match(route, /loadVerifiedFnoStockQuotes\(\{ priority: "sureshot" \}\)/);
   assert.match(route, /buildVerifiedSureshotShortlist\(/);
   assert.match(route, /limit: SURESHOT_UNIVERSE_SCAN_LIMIT/);
-  assert.match(route, /const moverCandidates = ranked\.data\.map/);
+  assert.match(route, /selectSureshotTopMoverCandidates\(\{ ranked \}\)/);
+  assert.match(route, /const moverCandidates = moverSelection\.data\.map/);
   assert.match(route, /const batch = state\.candidates\.slice\(offset, offset \+ SURESHOT_BATCH_SIZE\)/);
   assert.match(route, /state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /rankedCandidateCount: ranked\.candidateCount/);
@@ -65,7 +66,7 @@ test("Sureshot publishes only after all selected candidates finish and discards 
   assert.match(route, /const selectedCandidatesComplete = state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /selectedCandidatesComplete,/);
   assert.match(route, /stopReason: "ALL_TOP_MOVER_CANDIDATES_CHECKED"/);
-  assert.match(route, /bestSetup: topThreeSetups\[0\] \|\| null/);
+  assert.match(route, /bestSetup: topFiveSetups\[0\] \|\| null/);
   assert.match(route, /sureshotScanState = null;[\s\S]*partialPlansDiscarded: !resumableScan/);
   assert.match(route, /orderPlacement: "disabled"/);
 });
