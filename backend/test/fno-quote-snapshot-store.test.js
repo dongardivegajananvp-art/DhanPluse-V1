@@ -61,3 +61,37 @@ test('unconfigured snapshot store fails closed', async () => {
   assert.equal(store.configured, false);
   await assert.rejects(() => store.initialize(), /PostgreSQL is required/);
 });
+
+test('durable snapshot store persists and restores through PostgreSQL', {
+  skip: !process.env.PAPER_TEST_DATABASE_URL
+}, async () => {
+  const pg = await import('pg');
+  const cleanupPool = new pg.default.Pool({
+    connectionString: process.env.PAPER_TEST_DATABASE_URL,
+    max: 1,
+    application_name: 'gv2vpd-fno-snapshot-store-test-cleanup'
+  });
+  const store = createFnoQuoteSnapshotStore({ databaseUrl: process.env.PAPER_TEST_DATABASE_URL });
+  const testSymbols = ['NSE:GV2VPD-SNAPSHOT-TEST-A', 'NSE:GV2VPD-SNAPSHOT-TEST-B'];
+  const testNow = Date.now();
+  const testSnapshot = {
+    ok: true, verified: true, fetchedAt: new Date(testNow).toISOString(),
+    universeCount: testSymbols.length, quotedCount: testSymbols.length,
+    data: testSymbols.map((n, i) => ({
+      n, verified: true,
+      v: { lp: 200 + i, ch: 1, chp: 0.5, tt: Math.floor(testNow / 1000) }
+    }))
+  };
+  try {
+    await store.initialize();
+    await cleanupPool.query('DELETE FROM gv2vpd_fno_quote_snapshots WHERE id = 1');
+    assert.equal((await store.save(testSnapshot, testSymbols, testNow)).saved, true);
+    const restored = await store.load(testSymbols, testNow + 60_000);
+    assert.equal(restored.snapshot.data.length, 2);
+    assert.equal(restored.snapshot.data[0].n, testSymbols[0]);
+  } finally {
+    await cleanupPool.query('DELETE FROM gv2vpd_fno_quote_snapshots WHERE id = 1').catch(() => {});
+    await store.close();
+    await cleanupPool.end();
+  }
+});
