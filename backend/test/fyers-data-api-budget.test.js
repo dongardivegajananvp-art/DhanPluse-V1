@@ -296,7 +296,7 @@ test('identical concurrent quote reads share one upstream request but are not ca
   assert.equal(sent, 2);
 });
 
-test('default FYERS pacing stays below the conservative rolling-minute budget', async () => {
+test('default FYERS pacing enforces 15 requests per minute and a four-second minimum gap', async () => {
   let clock = 700_000;
   const sentAt = [];
   const request = createFyersDataApiBudget({
@@ -304,13 +304,13 @@ test('default FYERS pacing stays below the conservative rolling-minute budget', 
     sleep: async ms => { clock += ms; },
     fetchImpl: async () => { sentAt.push(clock); return fakeResponse(); }
   });
-  for (let index = 0; index < 31; index += 1) {
-    await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATEST' + index + '-EQ');
+  for (let index = 0; index < 16; index += 1) {
+    await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATEST' + index + '-EQ&resolution=5');
   }
-  assert.equal(sentAt.length, 31);
-  assert.ok(sentAt[1] - sentAt[0] >= 2000);
-  assert.ok(sentAt[29] - sentAt[0] < 60_000);
-  assert.ok(sentAt[30] - sentAt[0] >= 60_000);
+  assert.equal(sentAt.length, 16);
+  assert.ok(sentAt[1] - sentAt[0] >= 4000);
+  assert.ok(sentAt[14] - sentAt[0] < 60_000);
+  assert.ok(sentAt[15] - sentAt[0] >= 60_000);
 });
 
 
