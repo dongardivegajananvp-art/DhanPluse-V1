@@ -41,7 +41,7 @@ test("confirms a strong CE trend only when ADX, EMA, VWAP and same-time volume a
   assert.ok(result.adx >= 20);
   assert.ok(result.volumeRatio >= 1.5);
   assert.ok(result.trendScore >= 70);
-  assert.equal(result.scoreParts.sameTimeVolume, 25);
+  assert.equal(result.scoreParts.sameTimeVolume, 20);
 });
 
 test("normalizes a strictly descending FYERS trend response before validation", () => {
@@ -60,11 +60,19 @@ test("confirms a strong PE trend with the inverse EMA and VWAP alignment", () =>
   assert.ok(result.volumeRatio >= 1.5);
 });
 
-test("blocks low same-time volume and insufficient five-session history", () => {
+test("scores low same-time volume instead of treating it as an automatic veto", () => {
   const lowVolume = validateSureshotTrend({ candles: trendCandles("UP", 50), resolution: "5", now });
-  assert.equal(lowVolume.ok, false);
-  assert.match(lowVolume.reason, /volume confirmation/i);
+  assert.equal(lowVolume.ok, true, lowVolume.reason);
+  assert.equal(lowVolume.side, "CE");
+  assert.equal(lowVolume.scoreParts.sameTimeVolume, 5);
+  assert.ok(lowVolume.trendScore >= 55);
+});
+
+test("retains the hard data-history gate and configurable minimum weighted score", () => {
   const insufficient = validateSureshotTrend({ candles: trendCandles("UP").slice(-15), resolution: "5", now });
   assert.equal(insufficient.ok, false);
   assert.match(insufficient.reason, /30 completed|five previous/i);
+  const highThreshold = validateSureshotTrend({ candles: trendCandles("UP", 50), resolution: "5", now, minTrendScore: 90 });
+  assert.equal(highThreshold.ok, false);
+  assert.match(highThreshold.reason, /Weighted Trend Score/i);
 });
