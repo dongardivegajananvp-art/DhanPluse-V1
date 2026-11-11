@@ -83,8 +83,12 @@ test("option verification is bounded to Top 10 gainers, Top 10 losers and fresh 
   assert.deepEqual(selected.map(row => row.rank), Array.from({ length: 23 }, (_, i) => i + 1));
 });
 
-test("blocks option verification when either complete Top 10 mover board is unavailable", () => {
+test("uses available mover rows when a side has fewer than ten movers without inventing rows", () => {
   const ranked = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now, limit: 250 });
-  assert.throws(() => selectSureshotOptionVerificationCandidates({ ...ranked, moverBoardsComplete: false }),
-    /complete_verified_top_mover_boards_required/);
+  const partial = { ...ranked, topLosers: ranked.topLosers.slice(0, 5), moverBoardsComplete: false };
+  const selected = selectSureshotOptionVerificationCandidates(partial);
+  assert.equal(selected.length, 18);
+  assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY" && row.changePct > 0).length, 10);
+  assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY" && row.changePct < 0).length, 5);
+  assert.equal(selected.filter(row => row.underlyingType === "INDEX").length, 3);
 });
