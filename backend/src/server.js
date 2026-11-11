@@ -12,6 +12,7 @@ import { getNseSessionWindow } from './market-data.js';
 import { getExchangeSessionWindows } from './exchange-session-status.js';
 
 import { buildFnoEquityUniverse } from './fno-universe.js';
+import { createNseSymbolMasterLoader } from './nse-symbol-master.js';
 import { normalizeFyersFunds } from './fyers-funds.js';
 import { getReferenceDataRetryDelay } from './reference-data-backoff.js';
 import { isAllowedChartSymbol } from './chart-symbol-validation.js';
@@ -1522,6 +1523,47 @@ let moversMasterRefreshInFlight = null;
 const MOVERS_MASTER_REFRESH_MS = 24 * 60 * 60 * 1000;
 const MOVERS_MASTER_RETRY_MS = 5 * 60 * 1000;
 
+// Build the two compact consumers' views once, then discard both raw masters.
+// Movers keeps its historical fallback behaviour; Sureshot separately requires
+// a complete validated F&O universe and never treats fallback symbols as verified.
+function buildNseSymbolMasterSnapshot(foMaster, cmMaster) {
+  const universe = buildFnoEquityUniverse(foMaster, cmMaster);
+  if (universe.length < 180) {
+    throw new Error(`FYERS symbol master validation failed: too few NSE F&O equity underlyings (${universe.length}).`);
+  }
+
+  const cashSymbols = new Map();
+  for (const [ticker, item] of Object.entries(cmMaster)) {
+    const match = /^NSE:([A-Z0-9&-]+)-EQ$/.exec(ticker);
+    if (match && item?.tradeStatus === 1) cashSymbols.set(match[1], ticker);
+  }
+
+  const underlyingSymbols = new Set();
+  for (const [ticker, item] of Object.entries(foMaster)) {
+    if (!ticker.startsWith('NSE:') || item?.tradeStatus !== 1) continue;
+    const isOption = item?.optType === 'CE' || item?.optType === 'PE';
+    const isFuture = /FUT$/.test(ticker);
+    if (!isOption && !isFuture) continue;
+    const underlying = String(item?.underSym || '').trim().toUpperCase();
+    if (underlying && cashSymbols.has(underlying)) underlyingSymbols.add(underlying);
+  }
+
+  const moversSymbols = [...underlyingSymbols].map(symbol => cashSymbols.get(symbol)).sort();
+  if (moversSymbols.length < 180) {
+    throw new Error(`FYERS symbol master validation failed: too few NSE F&O Movers underlyings (${moversSymbols.length}).`);
+  }
+  return { universe, moversSymbols };
+}
+
+const loadNseSymbolMasterSnapshot = createNseSymbolMasterLoader({
+  build: buildNseSymbolMasterSnapshot,
+  onDiagnostic(event, detail) {
+    const message = JSON.stringify(detail);
+    if (event === 'loaded') console.log('FYERS shared NSE symbol master load completed:', message);
+    else console.warn('FYERS shared NSE symbol master load failed:', message);
+  }
+});
+
 // Refresh the stock universe from FYERS' daily symbol masters. Keep the known
 // list as a safe fallback if either master is unavailable or validation fails.
 async function refreshMoversUniverse() {
@@ -1530,35 +1572,8 @@ async function refreshMoversUniverse() {
 
   moversMasterRefreshInFlight = (async () => {
     try {
-      const [foResponse, cmResponse] = await Promise.all([
-        fetch('https://public.fyers.in/sym_details/NSE_FO_sym_master.json', { signal: AbortSignal.timeout(12000) }),
-        fetch('https://public.fyers.in/sym_details/NSE_CM_sym_master.json', { signal: AbortSignal.timeout(12000) })
-      ]);
-      if (!foResponse.ok || !cmResponse.ok) throw new Error('FYERS symbol master download failed.');
-      const [foMaster, cmMaster] = await Promise.all([foResponse.json(), cmResponse.json()]);
-      if (!foMaster || typeof foMaster !== 'object' || !cmMaster || typeof cmMaster !== 'object') {
-        throw new Error('FYERS symbol master format was invalid.');
-      }
-
-      const cashSymbols = new Map();
-      for (const [ticker, item] of Object.entries(cmMaster)) {
-        const match = /^NSE:([A-Z0-9&-]+)-EQ$/.exec(ticker);
-        if (match && item?.tradeStatus === 1) cashSymbols.set(match[1], ticker);
-      }
-
-      const underlyingSymbols = new Set();
-      for (const [ticker, item] of Object.entries(foMaster)) {
-        if (!ticker.startsWith('NSE:') || item?.tradeStatus !== 1) continue;
-        const isOption = item?.optType === 'CE' || item?.optType === 'PE';
-        const isFuture = /FUT$/.test(ticker);
-        if (!isOption && !isFuture) continue;
-        const underlying = String(item?.underSym || '').trim().toUpperCase();
-        if (underlying && cashSymbols.has(underlying)) underlyingSymbols.add(underlying);
-      }
-
-      const dynamicSymbols = [...underlyingSymbols]
-        .map(symbol => cashSymbols.get(symbol))
-        .sort();
+      const snapshot = await loadNseSymbolMasterSnapshot();
+      const dynamicSymbols = snapshot.moversSymbols;
       // A suspiciously small master should never replace the known fallback.
       if (dynamicSymbols.length < 180) {
         throw new Error('FYERS symbol master validation failed: too few NSE F&O equity underlyings.');
@@ -1746,25 +1761,23 @@ async function getNseFnoEquityUniverse() {
     throw error;
   }
   fnoUniversePromise = (async () => {
-    const [foResponse, cmResponse] = await Promise.all([
-      fetchWithFyersBudget("https://public.fyers.in/sym_details/NSE_FO_sym_master.json", { signal: AbortSignal.timeout(45000) }),
-      fetchWithFyersBudget("https://public.fyers.in/sym_details/NSE_CM_sym_master.json", { signal: AbortSignal.timeout(45000) })
-    ]);
-    if (!foResponse.ok || !cmResponse.ok) throw new Error("FYERS NSE_FO/NSE_CM symbol master download failed.");
-    const [foMaster, cmMaster] = await Promise.all([foResponse.json(), cmResponse.json()]);
-    if (!foMaster || typeof foMaster !== "object" || !cmMaster || typeof cmMaster !== "object") throw new Error("FYERS symbol master format was invalid.");
-    const symbols = buildFnoEquityUniverse(foMaster, cmMaster);
-    if (symbols.length < 180) {
-      const error = new Error("FYERS symbol master returned an unexpectedly small F&O equity universe (" + symbols.length + " matched; refusing incomplete data).");
-      error.diagnostics = { foEntries: Object.keys(foMaster).length, cmEntries: Object.keys(cmMaster).length, matchedEquities: symbols.length };
-      throw error;
-    }
-    const result = { source: "FYERS NSE_FO + NSE_CM symbol masters", fetchedAt: new Date().toISOString(), count: symbols.length, data: symbols };
+    const snapshot = await loadNseSymbolMasterSnapshot();
+    const symbols = snapshot.universe;
+    const result = {
+      source: "FYERS NSE_FO + NSE_CM symbol masters",
+      fetchedAt: new Date().toISOString(),
+      count: symbols.length,
+      data: symbols
+    };
     fnoUniverseCache = { fetchedAt: Date.now(), data: result };
     fnoUniverseFailureCount = 0;
     fnoUniverseRetryAt = 0;
     fnoUniverseLastError = '';
-    console.log("FYERS NSE F&O equity universe loaded:", JSON.stringify({ count: symbols.length, source: result.source }));
+    console.log("FYERS NSE F&O equity universe loaded:", JSON.stringify({
+      count: symbols.length,
+      source: result.source,
+      sharedMasterSnapshot: true
+    }));
     return result;
   })().catch(error => {
     fnoUniverseFailureCount += 1;
