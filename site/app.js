@@ -1916,7 +1916,7 @@ async function performSureshotSetup() {
   }
   if (symbol.startsWith('MCX:')) {
     try {
-      const exchangeStatusResponse = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const exchangeStatusResponse = await fetchBackendHealthPath('/api/status');
       const exchangeStatus = await exchangeStatusResponse.json().catch(() => ({}));
       if (exchangeStatusResponse.ok) updateExchangeLiveSwitches(exchangeStatus);
       else latestExchangeLiveStatus = {};
@@ -2545,9 +2545,7 @@ function updateMcxConnectionDiagnostics(status) {
 async function refreshConnectionDiagnostics() {
   if (currentTab !== 'FYERS Connection') return;
   try {
-    const response = await fetch(BACKEND_URL + '/api/status', {
-      headers: { Accept: 'application/json' }, cache: 'no-store'
-    });
+    const response = await fetchBackendHealthPath('/api/status');
     const status = await response.json().catch(() => ({}));
     if (!response.ok || !status || status.backend !== 'online') throw new Error('Status endpoint unavailable.');
     setBackendStatus('ONLINE');
@@ -2880,7 +2878,7 @@ function render(tab) {
           mcxSureshotUniverseScanRunning || mcxAutoScanStatusCheckInFlight) return;
       mcxAutoScanStatusCheckInFlight = true;
       try {
-        const response = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+        const response = await fetchBackendHealthPath('/api/status');
         const status = await response.json().catch(() => ({}));
         if (!response.ok) return;
         updateExchangeLiveSwitches(status);
@@ -3426,7 +3424,7 @@ async function testBackend() {
     if (!response.ok || !data.ok) throw new Error('Backend health check failed.');
     setBackendStatus('ONLINE');
     try {
-      const statusResponse = await fetch(BACKEND_URL + '/api/status', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const statusResponse = await fetchBackendHealthPath('/api/status');
       const status = await statusResponse.json().catch(() => ({}));
       if (statusResponse.ok && status && status.backend === 'online') {
         authoritativeFyersStatusUpdatedAt = Date.now();
