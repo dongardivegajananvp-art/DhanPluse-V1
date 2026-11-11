@@ -1,3 +1,5 @@
+import { getReferenceDataRetryDelay } from './reference-data-backoff.js';
+
 const NSE_FO_MASTER_URL = 'https://public.fyers.in/sym_details/NSE_FO_sym_master.json';
 const NSE_CM_MASTER_URL = 'https://public.fyers.in/sym_details/NSE_CM_sym_master.json';
 
@@ -18,6 +20,9 @@ export function createNseSymbolMasterLoader({
   let cachedSnapshot = null;
   let cachedAt = 0;
   let inFlight = null;
+  let failureCount = 0;
+  let retryAt = 0;
+  let lastFailureMessage = '';
 
   function report(event, detail) {
     try { onDiagnostic(event, detail); } catch {}
@@ -26,6 +31,12 @@ export function createNseSymbolMasterLoader({
   async function load() {
     if (cachedSnapshot && now() - cachedAt < cacheMs) return cachedSnapshot;
     if (inFlight) return inFlight;
+    if (now() < retryAt) {
+      const error = new Error(lastFailureMessage || 'FYERS NSE symbol master retry is cooling down.');
+      error.statusCode = 503;
+      error.retryAfterSeconds = Math.max(1, Math.ceil((retryAt - now()) / 1000));
+      throw error;
+    }
 
     inFlight = (async () => {
       const startedAt = now();
@@ -79,6 +90,9 @@ export function createNseSymbolMasterLoader({
 
         cachedSnapshot = snapshot;
         cachedAt = now();
+        failureCount = 0;
+        retryAt = 0;
+        lastFailureMessage = '';
         report('loaded', {
           stage,
           elapsedMs: Math.max(0, now() - startedAt),
@@ -91,10 +105,16 @@ export function createNseSymbolMasterLoader({
         });
         return cachedSnapshot;
       } catch (error) {
+        failureCount += 1;
+        const retryDelayMs = getReferenceDataRetryDelay(failureCount);
+        retryAt = now() + retryDelayMs;
+        lastFailureMessage = String(error?.message || 'FYERS NSE symbol master unavailable').slice(0, 180);
+        error.retryAfterSeconds = Math.max(1, Math.ceil(retryDelayMs / 1000));
         report('failed', {
           stage,
           elapsedMs: Math.max(0, now() - startedAt),
           httpStatus: Number.isInteger(error?.statusCode) ? error.statusCode : null,
+          retryAfterSeconds: error.retryAfterSeconds,
           errorName: String(error?.name || 'Error').slice(0, 60),
           errorCode: String(error?.cause?.code || error?.code || '').slice(0, 60) || null,
           message: String(error?.message || 'NSE symbol master unavailable').slice(0, 180)
