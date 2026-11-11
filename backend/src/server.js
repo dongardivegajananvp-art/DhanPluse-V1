@@ -25,7 +25,7 @@ import { getVerifiedOptionContractMetadata as resolveOptionContractMetadata } fr
 import { isFyersAuthRejected, isExpiredFyersAccessTokenError } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
-import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
+import { buildVerifiedSureshotShortlist, selectSureshotTopMoverCandidates } from './sureshot-shortlist.js';
 import { summarizeFyersUpstreamFailure } from './fyers-upstream-diagnostics.js';
 import { buildMarketSocketSubscriptionSymbols, getMarketSocketReconnectDelay } from './market-socket-recovery.js';
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
@@ -2126,9 +2126,20 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         quoteSnapshot: snapshot, universe, indexTicks, now: Date.now(), limit: SURESHOT_UNIVERSE_SCAN_LIMIT
       });
       console.info("Sureshot F&O shortlist verified:", JSON.stringify({ universeCount: universe.count, quotedCount: snapshot.quotedCount, rankedCandidateCount: ranked.candidateCount, selectedForOptionVerification: ranked.data.length }));
-      // ranked.data contains every eligible F&O equity plus each individually
-      // fresh index tick, already sorted by absolute FYERS % move.
-      const moverCandidates = ranked.data.map((row, index) => ({ ...row, rank: index + 1 }));
+      // Rank the complete verified F&O quote universe first. Only the top 10
+      // gainers, top 10 losers and individually fresh index ticks proceed to
+      // completed underlying-candle checks; option-chain discovery remains
+      // strictly after a confirmed CE/PE direction.
+      const moverSelection = selectSureshotTopMoverCandidates({ ranked });
+      const moverCandidates = moverSelection.data.map((row, index) => ({ ...row, rank: index + 1 }));
+      console.info("Sureshot top-mover selection:", JSON.stringify({
+        fullUniverseRankedCount: moverSelection.fullUniverseRankedCount,
+        fullUniverseEquityCount: moverSelection.fullUniverseEquityCount,
+        topGainersSelected: ranked.topGainers.length,
+        topLosersSelected: ranked.topLosers.length,
+        freshIndicesSelected: moverSelection.freshIndexCount,
+        selectedForUnderlyingVerification: moverSelection.selectedCandidateCount
+      }));
       sureshotScanState = { id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
         candidates: moverCandidates, topGainers: ranked.topGainers, topLosers: ranked.topLosers,
         moverBoardsComplete: ranked.moverBoardsComplete,
@@ -2389,9 +2400,10 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       }
     }
     const verified = results.filter(item => item.status === "VERIFIED SETUP");
-    const topThreeSetups = verified.slice(0, 3);
+    const topFiveSetups = verified.slice(0, 5);
+    const topThreeSetups = topFiveSetups.slice(0, 3); // compatibility for existing consumers
     const sessionToken = /^Bearer ([a-f0-9]{64})$/.exec(String(req.get('authorization') || ''))?.[1] || '';
-    for (const item of topThreeSetups) {
+    for (const item of topFiveSetups) {
       const tradePlan = item.plan;
       const issued = verifiedPlanRegistry.create(sessionToken, {
         source: 'FYERS_VERIFIED',
@@ -2407,7 +2419,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       item.paperPlanId = issued.planId;
       item.paperPlanExpiresAt = issued.expiresAt;
     }
-    console.info("Sureshot scan completed:", JSON.stringify({ scannedCandidateCount: results.length, rankedCandidateCount: state.rankedCandidateCount, verifiedSetupCount: verified.length, stopReason: "ALL_ELIGIBLE_CANDIDATES_CHECKED" }));
+    console.info("Sureshot scan completed:", JSON.stringify({ scannedCandidateCount: results.length, rankedCandidateCount: state.rankedCandidateCount, verifiedSetupCount: verified.length, topFiveSetupCount: topFiveSetups.length, stopReason: "ALL_TOP_MOVER_CANDIDATES_CHECKED" }));
     const payload = { ok: true, scanComplete: true, selectedCandidatesComplete,
       stopReason: "ALL_ELIGIBLE_CANDIDATES_CHECKED",
       signalsAllowed: verified.length > 0,
@@ -2417,8 +2429,9 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       topGainers: state.topGainers, topLosers: state.topLosers, moverBoardsComplete: state.moverBoardsComplete,
       scannedCandidateCount: results.length, verifiedSetupCount: verified.length, initiallyVerifiedCandidateCount,
       topThreeSetupCount: topThreeSetups.length, topThreeSetups,
-      bestSetup: topThreeSetups[0] || null, results,
-      notice: "The complete eligible FYERS NSE F&O universe plus individually fresh index ticks was ranked by absolute FYERS percentage move and every candidate was checked sequentially. The highest-ranked initial passes were revalidated at completion with fresh underlying candles, option quotes and completed option candles; only current top-three plans receive Paper Mode IDs. No orders are placed." };
+      topFiveSetupCount: topFiveSetups.length, topFiveSetups,
+      bestSetup: topFiveSetups[0] || null, results,
+      notice: "The complete eligible FYERS NSE F&O universe received a fresh quote snapshot and was ranked. The top 10 gainers, top 10 losers and individually fresh indices then received completed underlying-candle checks; option-chain discovery ran only after direction confirmation. The best five initial passes were independently revalidated with fresh underlying candles, option quotes and completed option candles. Only final-fresh plans receive Paper Mode IDs. No orders are placed." };
     sureshotScanState = null;
     return res.json(payload);
   } catch (error) {
