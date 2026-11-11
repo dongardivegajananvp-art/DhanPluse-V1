@@ -36,6 +36,7 @@ import { buildMcxSocketQuoteRows, waitForCompleteMcxSocketAudit } from './mcx-so
 import { normalizeFyersCandleOrder } from './candle-order.js';
 import { parseFyersQuoteTimestamp, summarizeFyersQuoteTimestampFields } from './fyers-quote-timestamp.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
+import { createFnoQuoteSnapshotStore } from './fno-quote-snapshot-store.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 import { createPaperTradingStore } from './paper-trading-store.js';
 import { reconcilePaperSocketSubscriptions } from './paper-socket-subscriptions.js';
@@ -61,6 +62,8 @@ const fyersTokenStore = createFyersTokenStore({
 });
 let fyersTokenStoreReady = false;
 const paperStore = createPaperTradingStore({ databaseUrl: process.env.DATABASE_URL });
+const fnoQuoteSnapshotStore = createFnoQuoteSnapshotStore({ databaseUrl: process.env.DATABASE_URL });
+let fnoQuoteSnapshotStoreReady = false;
 const nseSymbolMasterCache = createNseSymbolMasterCache({ databaseUrl: process.env.DATABASE_URL });
 const verifiedPlanRegistry = createVerifiedPlanRegistry({ ttlMs: 30_000 });
 let paperStoreReady = false;
@@ -1738,6 +1741,16 @@ async function getMcxOptionContractMetadata(symbol) {
 }
 let stockQuoteCache = { fetchedAt: 0, data: null };
 let stockQuotePromise = null;
+async function persistVerifiedFnoQuoteSnapshot(snapshot, symbols) {
+  if (!fnoQuoteSnapshotStoreReady) return;
+  try {
+    const result = await fnoQuoteSnapshotStore.save(snapshot, symbols, Date.now());
+    if (result.saved) console.info('Complete verified FYERS F&O snapshot persisted for closed-session preparation.', JSON.stringify({ universeCount: symbols.length, exchangeTime: snapshot.fetchedAt }));
+    else console.warn('FYERS F&O snapshot not persisted:', result.reason);
+  } catch (error) {
+    console.warn('FYERS F&O snapshot persistence unavailable; live in-memory verification remains active:', String(error?.message || error).slice(0, 160));
+  }
+}
 const STOCK_QUOTE_CACHE_MS = 30000;
 const STOCK_QUOTE_BATCH_SIZE = 50;
 
@@ -1809,6 +1822,7 @@ function syncFnoQuoteCacheFromMoversPayload(payload, symbols = moversSymbols) {
   const snapshot = moversPayloadToFnoQuoteSnapshot(payload, symbols, Date.now());
   if (!snapshot) return false;
   stockQuoteCache = { fetchedAt: Date.parse(snapshot.fetchedAt), data: snapshot };
+  void persistVerifiedFnoQuoteSnapshot(snapshot, symbols);
   return true;
 }
 async function getNseFnoEquityUniverse() {
@@ -1987,7 +2001,8 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
     freshnessLimitSeconds: 30, universe: "FYERS current NSE F&O equity symbol master",
     universeCount: symbols.length, quotedCount: data.length, data, missingSymbols
   };
-  stockQuoteCache = { fetchedAt: Date.now(), data: result };
+  stockQuoteCache = { fetchedAt: Date.parse(result.fetchedAt), data: result };
+  await persistVerifiedFnoQuoteSnapshot(result, symbols);
   syncMoversCacheFromFnoQuoteSnapshot(result, master.data.map(item => item.symbol));
   return result;
 }
@@ -2056,6 +2071,14 @@ app.get("/api/market/sureshot-preparation", requireDashboardSession, async (_req
   });
   try {
     const universe = await getNseFnoEquityUniverse();
+    const expectedSymbols = universe.data.map(item => item.symbol);
+    if (!stockQuoteCache.data && fnoQuoteSnapshotStoreReady) {
+      const restored = await fnoQuoteSnapshotStore.load(expectedSymbols, Date.now(), 24 * 60 * 60 * 1000);
+      if (restored) {
+        stockQuoteCache = { fetchedAt: restored.fetchedAt, data: restored.snapshot };
+        console.info('Prior-session FYERS F&O snapshot restored from PostgreSQL for preparation only.', JSON.stringify({ universeCount: expectedSymbols.length, ageHours: Number((restored.ageMs / 3600000).toFixed(2)), exchangeTime: restored.snapshot.fetchedAt }));
+      }
+    }
     const snapshot = stockQuoteCache.data;
     const cacheAgeMs = Date.now() - Number(stockQuoteCache.fetchedAt || 0);
     const maxAgeMs = 24 * 60 * 60 * 1000;
@@ -2066,7 +2089,6 @@ app.get("/api/market/sureshot-preparation", requireDashboardSession, async (_req
         cacheAgeHours: Number.isFinite(cacheAgeMs) && cacheAgeMs >= 0 ? Number((cacheAgeMs / 3600000).toFixed(2)) : null
       });
     }
-    const expectedSymbols = universe.data.map(item => item.symbol);
     const ranked = buildVerifiedSureshotShortlist({
       quoteSnapshot: snapshot, universe,
       indexTicks: new Map(),
@@ -3628,6 +3650,21 @@ app.use((err, _req, res, _next) => {
 
 const port = Number(process.env.PORT || 8080);
 
+async function initializeFnoQuoteSnapshotStore() {
+  if (!fnoQuoteSnapshotStore.configured) {
+    console.warn('Closed-session Sureshot preparation persistence disabled: DATABASE_URL is not configured.');
+    return;
+  }
+  try {
+    await fnoQuoteSnapshotStore.initialize();
+    fnoQuoteSnapshotStoreReady = true;
+    console.log('Durable PostgreSQL F&O snapshot store initialized; closed-session recovery enabled.');
+  } catch (error) {
+    fnoQuoteSnapshotStoreReady = false;
+    console.error('Durable F&O snapshot store initialization failed closed:', String(error?.message || error).slice(0, 180));
+  }
+}
+
 async function initializePaperStore() {
   if (!paperStore.configured) {
     console.warn('Paper Mode disabled: DATABASE_URL is not configured; no in-memory substitute will be used.');
@@ -3676,6 +3713,7 @@ function startServer() {
   const server = app.listen(port, () => {
     console.log(`DhanPulse backend listening on ${port}`);
     void initializePaperStore();
+    void initializeFnoQuoteSnapshotStore();
     void initializeFyersTokenStore();
   });
   server.on('error', error => {
