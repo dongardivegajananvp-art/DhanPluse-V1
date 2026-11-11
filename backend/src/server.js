@@ -2125,10 +2125,8 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       const ranked = buildVerifiedSureshotShortlist({
         quoteSnapshot: snapshot, universe, indexTicks, now: Date.now(), limit: SURESHOT_UNIVERSE_SCAN_LIMIT
       });
-      console.info("Sureshot F&O shortlist verified:", JSON.stringify({ universeCount: universe.count, quotedCount: snapshot.quotedCount, rankedCandidateCount: ranked.candidateCount, selectedForOptionVerification: ranked.data.length }));
-      // ranked.data contains every eligible F&O equity plus each individually
-      // fresh index tick, already sorted by absolute FYERS % move.
       const moverCandidates = selectSureshotOptionVerificationCandidates(ranked);
+      console.info("Sureshot F&O shortlist verified:", JSON.stringify({ universeCount: universe.count, quotedCount: snapshot.quotedCount, rankedCandidateCount: ranked.candidateCount, selectedForOptionVerification: moverCandidates.length, topGainers: ranked.topGainers.length, topLosers: ranked.topLosers.length }));
       sureshotScanState = { id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
         candidates: moverCandidates, topGainers: ranked.topGainers, topLosers: ranked.topLosers,
         moverBoardsComplete: ranked.moverBoardsComplete,
@@ -2418,7 +2416,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       scannedCandidateCount: results.length, verifiedSetupCount: verified.length, initiallyVerifiedCandidateCount,
       topThreeSetupCount: topThreeSetups.length, topThreeSetups,
       bestSetup: topThreeSetups[0] || null, results,
-      notice: "The complete eligible FYERS NSE F&O universe plus individually fresh index ticks was ranked by absolute FYERS percentage move and every candidate was checked sequentially. The highest-ranked initial passes were revalidated at completion with fresh underlying candles, option quotes and completed option candles; only current top-three plans receive Paper Mode IDs. No orders are placed." };
+      notice: "The complete eligible FYERS NSE F&O quote universe was verified and ranked. Option verification is limited to the complete Top 10 gainers + Top 10 losers boards plus individually fresh index ticks to bound FYERS Data API request volume. Selected candidates require fresh underlying candles, listed option contract identity, fresh option quotes, completed option candles and final revalidation; only current top-three plans receive Paper Mode IDs. No orders are placed." };
     sureshotScanState = null;
     return res.json(payload);
   } catch (error) {
