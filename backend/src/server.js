@@ -27,7 +27,7 @@ import { normalizeOptionContractDiscovery } from './option-contract-discovery.js
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
 import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
 import { summarizeFyersUpstreamFailure } from './fyers-upstream-diagnostics.js';
-import { buildMarketSocketSubscriptionSymbols, getMarketSocketReconnectDelay } from './market-socket-recovery.js';
+import { buildMarketSocketSubscriptionSymbols, getMarketSocketReconnectDelay, getStaleNseSubscriptionSymbols } from './market-socket-recovery.js';
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
 import { getMcxWatchdogRetryDelay } from './mcx-watchdog.js';
 import { buildMcxFuturesUniverse, buildVerifiedMcxShortlist, buildVerifiedMcxAudit } from './mcx-sureshot.js';
@@ -731,29 +731,31 @@ function startMarketDataStream(token, startReason = 'unspecified') {
 const marketSocketWatchdog = setInterval(() => {
   if (!accessToken || !marketSocket || !nseRegularSessionNow()) return;
   const now = Date.now();
-  const staleNseAgesMs = nseIndexSymbols.map(symbol => {
+  const staleNseSymbols = getStaleNseSubscriptionSymbols({
+    symbols: nseIndexSymbols, ticks: latestTicks, now,
+    connectedAt: marketSocketConnectedAt,
+    freshnessMs: NSE_TICK_HEARTBEAT_MS
+  });
+  const silentForMs = staleNseSymbols.reduce((maxAge, symbol) => {
     const tick = latestTicks.get(symbol);
     const tickAt = tick ? Date.parse(tick.updatedAt) : marketSocketConnectedAt;
-    if (!Number.isFinite(tickAt) || tickAt <= 0) return Infinity;
-    const ageMs = now - tickAt;
-    return ageMs < 0 ? Infinity : ageMs;
-  });
-  const silentForMs = staleNseAgesMs.length ? Math.max(...staleNseAgesMs) : Infinity;
+    return Math.max(maxAge, Number.isFinite(tickAt) && tickAt > 0 ? Math.max(0, now - tickAt) : Infinity);
+  }, 0);
   const retryDelayMs = getMarketSocketReconnectDelay(nseResubscribeCount, 10_000, 120_000);
-  if (silentForMs < NSE_TICK_HEARTBEAT_MS || now - lastNseResubscribeAt < retryDelayMs) return;
+  if (!staleNseSymbols.length || now - lastNseResubscribeAt < retryDelayMs) return;
   nseReconnectPending = true;
   lastNseResubscribeAt = now;
   nseResubscribeCount += 1;
   try {
     if (streamConnected && marketSocket && typeof marketSocket.subscribe === 'function') {
       marketSocket.mode(marketSocket.FullMode);
-      marketSocket.subscribe(nseIndexSymbols);
-      streamError = 'NSE feed is reconnecting after 10 seconds without a fresh exchange tick.';
-      console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
-        reason: 'no_fresh_nse_tick_within_10_seconds', silentForMs,
+      marketSocket.subscribe(staleNseSymbols);
+      streamError = 'NSE feed is recovering symbols without a fresh exchange tick.';
+      console.warn('NSE socket feed recovery requested.', JSON.stringify({
+        reason: 'stale_nse_symbols_only', silentForMs, staleSymbols: staleNseSymbols,
         retry: nseResubscribeCount, nextRetryDelayMs: getMarketSocketReconnectDelay(nseResubscribeCount, 10_000, 120_000),
-        recovery: 'reapply_nse_subscriptions_on_existing_shared_socket',
-        transportConnected: true, symbols: nseIndexSymbols
+        recovery: 'reapply_only_stale_nse_subscriptions_on_existing_shared_socket',
+        transportConnected: true, symbols: staleNseSymbols
       }));
     } else {
       streamError = 'NSE socket disconnected; FYERS SDK auto-reconnect is in progress.';
