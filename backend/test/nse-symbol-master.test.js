@@ -129,5 +129,9 @@ test('Sureshot and Movers share the same public NSE master loader', async () => 
   assert.match(source, /createNseSymbolMasterLoader/);
   assert.match(source.slice(moversStart, moversEnd), /loadNseSymbolMasterSnapshot\(\)/);
   assert.match(source.slice(sureshotStart, sureshotEnd), /loadNseSymbolMasterSnapshot\(\)/);
+  const optionMetadataStart = source.indexOf('async function getFyersOptionContractMetadata(symbol)');
+  const optionMetadataEnd = source.indexOf('// Stock Explorer/movers', optionMetadataStart);
+  assert.ok(optionMetadataStart >= 0 && optionMetadataEnd > optionMetadataStart);
+  assert.match(source.slice(optionMetadataStart, optionMetadataEnd), /loadNseSymbolMasterSnapshot\(\)/);
   assert.doesNotMatch(source, /fetchWithFyersBudget\(["']https:\/\/public\.fyers\.in\/sym_details\/NSE_(?:FO|CM)_sym_master\.json/);
 });
