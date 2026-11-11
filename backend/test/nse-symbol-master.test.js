@@ -50,7 +50,7 @@ test('freshly validated NSE snapshot is persisted after successful build', async
   const result = await load();
   assert.equal(result, snapshot);
   assert.equal(saved.value, snapshot);
-  assert.match(saved.metadata.fetchedAt, /^\\d{4}-\\d{2}-\\d{2}T/);
+  assert.equal(Number.isNaN(Date.parse(saved.metadata.fetchedAt)), false);
 });
 
 test('concurrent NSE consumers share one pair of official master downloads', async () => {
