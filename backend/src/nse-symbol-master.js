@@ -10,8 +10,10 @@ export function createNseSymbolMasterLoader({
   fetchImpl = globalThis.fetch,
   build,
   cacheMs = 24 * 60 * 60 * 1000,
-  timeoutMs = 45_000,
+  timeoutMs = 120_000,
   now = Date.now,
+  loadPersistedSnapshot = async () => null,
+  savePersistedSnapshot = async () => {},
   onDiagnostic = () => {}
 } = {}) {
   if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl must be a function');
@@ -40,6 +42,24 @@ export function createNseSymbolMasterLoader({
 
     inFlight = (async () => {
       const startedAt = now();
+      // A validated symbol snapshot is reference metadata, not market data. A
+      // bounded-age PostgreSQL copy survives Render restarts and avoids pulling
+      // the large public masters on every cold start.
+      try {
+        const persisted = await loadPersistedSnapshot({ maxAgeMs: cacheMs });
+        if (persisted && typeof persisted === 'object' && !Array.isArray(persisted.snapshot)) {
+          cachedSnapshot = persisted.snapshot;
+          cachedAt = now();
+          report('persisted_cache_hit', {
+            ageMs: Math.max(0, Number(persisted.ageMs) || 0),
+            universeCount: Array.isArray(cachedSnapshot.universe) ? cachedSnapshot.universe.length : null,
+            moversCount: Array.isArray(cachedSnapshot.moversSymbols) ? cachedSnapshot.moversSymbols.length : null
+          });
+          return cachedSnapshot;
+        }
+      } catch (error) {
+        report('persisted_cache_read_failed', { message: String(error?.message || error).slice(0, 160) });
+      }
       let stage = 'FETCH_NSE_SYMBOL_MASTERS';
       let foResponse;
       let cmResponse;
@@ -90,6 +110,12 @@ export function createNseSymbolMasterLoader({
 
         cachedSnapshot = snapshot;
         cachedAt = now();
+        try {
+          await savePersistedSnapshot(snapshot, { fetchedAt: new Date(cachedAt).toISOString() });
+          report('persisted_cache_saved', { universeCount: Array.isArray(snapshot.universe) ? snapshot.universe.length : null });
+        } catch (error) {
+          report('persisted_cache_save_failed', { message: String(error?.message || error).slice(0, 160) });
+        }
         failureCount = 0;
         retryAt = 0;
         lastFailureMessage = '';
