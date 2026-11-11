@@ -25,7 +25,7 @@ import { getVerifiedOptionContractMetadata as resolveOptionContractMetadata } fr
 import { isFyersAuthRejected, isExpiredFyersAccessTokenError } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
 import { isSupportedOptionContractSymbol } from './option-symbol-validation.js';
-import { buildVerifiedSureshotShortlist } from './sureshot-shortlist.js';
+import { buildVerifiedSureshotShortlist, selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js';
 import { summarizeFyersUpstreamFailure } from './fyers-upstream-diagnostics.js';
 import { buildMarketSocketSubscriptionSymbols, getMarketSocketReconnectDelay } from './market-socket-recovery.js';
 import { selectMcxDiagnosticInstrument } from './mcx-diagnostic.js';
@@ -2128,7 +2128,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       console.info("Sureshot F&O shortlist verified:", JSON.stringify({ universeCount: universe.count, quotedCount: snapshot.quotedCount, rankedCandidateCount: ranked.candidateCount, selectedForOptionVerification: ranked.data.length }));
       // ranked.data contains every eligible F&O equity plus each individually
       // fresh index tick, already sorted by absolute FYERS % move.
-      const moverCandidates = ranked.data.map((row, index) => ({ ...row, rank: index + 1 }));
+      const moverCandidates = selectSureshotOptionVerificationCandidates(ranked);
       sureshotScanState = { id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
         candidates: moverCandidates, topGainers: ranked.topGainers, topLosers: ranked.topLosers,
         moverBoardsComplete: ranked.moverBoardsComplete,
