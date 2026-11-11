@@ -2044,6 +2044,54 @@ app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) =
   }
 });
 
+app.get("/api/market/sureshot-preparation", requireDashboardSession, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!accessToken) return res.status(401).json({
+    ok: false, preparationOnly: true, signalsAllowed: false, orderPlacement: "disabled",
+    error: "Connect FYERS first. No cached preparation snapshot is available without an authenticated session."
+  });
+  if (nseRegularSessionNow()) return res.status(409).json({
+    ok: false, preparationOnly: true, signalsAllowed: false, orderPlacement: "disabled",
+    error: "NSE market is open. Use the live Sureshot scan; preparation snapshots are closed-session only."
+  });
+  try {
+    const universe = await getNseFnoEquityUniverse();
+    const snapshot = stockQuoteCache.data;
+    const cacheAgeMs = Date.now() - Number(stockQuoteCache.fetchedAt || 0);
+    const maxAgeMs = 24 * 60 * 60 * 1000;
+    if (!snapshot || cacheAgeMs < 0 || cacheAgeMs > maxAgeMs) {
+      return res.status(409).json({
+        ok: false, preparationOnly: true, signalsAllowed: false, orderPlacement: "disabled",
+        error: "No complete last-session FYERS F&O snapshot is cached. Preparation list withheld; no REST refresh is attempted while market is closed.",
+        cacheAgeHours: Number.isFinite(cacheAgeMs) && cacheAgeMs >= 0 ? Number((cacheAgeMs / 3600000).toFixed(2)) : null
+      });
+    }
+    const expectedSymbols = universe.data.map(item => item.symbol);
+    const ranked = buildVerifiedSureshotShortlist({
+      quoteSnapshot: snapshot, universe,
+      indexTicks: new Map(),
+      now: Date.now(), maxEquityQuoteAgeMs: maxAgeMs,
+      maxIndexTickAgeMs: maxAgeMs, limit: SURESHOT_UNIVERSE_SCAN_LIMIT
+    });
+    return res.json({
+      ok: true, preparationOnly: true, marketSession: "CLOSED",
+      signalsAllowed: false, orderPlacement: "disabled", readOnly: true,
+      source: "Cached last-known FYERS exchange-timestamped F&O snapshot only",
+      cacheAgeHours: Number((cacheAgeMs / 3600000).toFixed(2)),
+      snapshotExchangeTime: snapshot.fetchedAt || null,
+      universeCount: expectedSymbols.length, quotedCount: snapshot.quotedCount,
+      topGainers: ranked.topGainers, topLosers: ranked.topLosers,
+      notice: "Preparation watchlist only. Cached prior-session movers are not live signals or trade setups. No option premium, Entry, SL, Target, Paper BUY or order is authorized. Run the live scan during NSE hours for fresh option verification."
+    });
+  } catch (error) {
+    return res.status(Number(error.statusCode) || 503).json({
+      ok: false, preparationOnly: true, signalsAllowed: false, orderPlacement: "disabled",
+      error: "Preparation snapshot could not be verified; watchlist withheld.",
+      detail: String(error.message || "Verification failed.").slice(0, 180)
+    });
+  }
+});
+
 app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, res) => {
   res.set("Cache-Control", "no-store");
   if (!accessToken) return res.status(401).json({ ok: false, signalsAllowed: false, error: "Connect FYERS first." });
