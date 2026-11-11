@@ -1706,8 +1706,8 @@ let stockQuotePromise = null;
 const STOCK_QUOTE_CACHE_MS = 30000;
 const STOCK_QUOTE_BATCH_SIZE = 50;
 
-// Contract sizing is reference data from FYERS' official NSE_FO symbol master.
-// Cache once per day; never infer a lot size from the underlying or option chain.
+// NSE option sizing comes from the shared compact NSE master index. BSE SENSEX
+// sizing has its own compact cache; never infer lot size from another contract.
 let optionContractMasterCache = { fetchedAt: 0, data: null };
 let optionContractMasterPromise = null;
 async function getFyersOptionContractMetadata(symbol) {
