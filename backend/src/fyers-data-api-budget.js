@@ -69,6 +69,7 @@ export function createFyersDataApiBudget({
       });
     }
     await restorePromise;
+    if (persistenceError) throw new Error(persistenceError);
   }
 
   async function persistCooldown() {
