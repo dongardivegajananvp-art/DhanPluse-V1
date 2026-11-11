@@ -1745,7 +1745,7 @@ async function persistVerifiedFnoQuoteSnapshot(snapshot, symbols) {
   if (!fnoQuoteSnapshotStoreReady) return;
   try {
     const result = await fnoQuoteSnapshotStore.save(snapshot, symbols, Date.now());
-    if (result.saved) console.info('Complete verified FYERS F&O snapshot persisted for closed-session preparation.', JSON.stringify({ universeCount: symbols.length, exchangeTime: snapshot.fetchedAt }));
+    if (result.saved) console.info('Complete verified FYERS F&O snapshot persisted for closed-session preparation.', JSON.stringify({ universeCount: symbols.length, snapshotFetchedAt: snapshot.fetchedAt }));
     else console.warn('FYERS F&O snapshot not persisted:', result.reason);
   } catch (error) {
     console.warn('FYERS F&O snapshot persistence unavailable; live in-memory verification remains active:', String(error?.message || error).slice(0, 160));
@@ -2100,7 +2100,7 @@ app.get("/api/market/sureshot-preparation", requireDashboardSession, async (_req
       signalsAllowed: false, orderPlacement: "disabled", readOnly: true,
       source: "Cached last-known FYERS exchange-timestamped F&O snapshot only",
       cacheAgeHours: Number((cacheAgeMs / 3600000).toFixed(2)),
-      snapshotExchangeTime: snapshot.fetchedAt || null,
+      snapshotFetchedAt: snapshot.fetchedAt || null,
       universeCount: expectedSymbols.length, quotedCount: snapshot.quotedCount,
       topGainers: ranked.topGainers, topLosers: ranked.topLosers,
       notice: "Preparation watchlist only. Cached prior-session movers are not live signals or trade setups. No option premium, Entry, SL, Target, Paper BUY or order is authorized. Run the live scan during NSE hours for fresh option verification."
