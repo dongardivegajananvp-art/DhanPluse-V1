@@ -31,7 +31,7 @@ function decode(value) {
 // be used as a source of prices, candles, quotes, or signal freshness.
 export function createNseSymbolMasterCache({ databaseUrl, PoolImpl = Pool } = {}) {
   const configured = Boolean(String(databaseUrl || '').trim());
-  if (configured && !/^postgres(?:ql)?:\\/\\//i.test(String(databaseUrl).trim())) {
+  if (configured && !/^postgres(?:ql)?:\/\//i.test(String(databaseUrl).trim())) {
     throw new Error('DATABASE_URL must be a PostgreSQL connection URL.');
   }
   const pool = configured ? new PoolImpl({
