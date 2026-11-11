@@ -194,3 +194,14 @@ test("NSE and MCX Sureshot scan gates are independent", () => {
   assert.doesNotMatch(mcxFrontend, /sureshotUniverseScanRunning/);
   assert.match(app, /mcxSureshotUniverseScanRunning \|\| mcxAutoScanStatusCheckInFlight/);
 });
+
+
+test("NSE option verification uses the complete Top 10 gainers/losers boards, not all 218 equities", () => {
+  const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
+  const end = server.indexOf("// Last-known F&O equity quotes", start);
+  const route = server.slice(start, end);
+  assert.match(route, /selectSureshotOptionVerificationCandidates\\(ranked\\)/);
+  assert.match(route, /topGainers: ranked\\.topGainers, topLosers: ranked\\.topLosers/);
+  assert.doesNotMatch(route, /const moverCandidates = ranked\\.data\\.map/);
+  assert.match(server, /export function selectSureshotOptionVerificationCandidates/);
+});
