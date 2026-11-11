@@ -47,7 +47,7 @@ export function createNseSymbolMasterLoader({
       // the large public masters on every cold start.
       try {
         const persisted = await loadPersistedSnapshot({ maxAgeMs: cacheMs });
-        if (persisted && typeof persisted === 'object' && !Array.isArray(persisted.snapshot)) {
+        if (persisted && typeof persisted === 'object' && persisted.snapshot && typeof persisted.snapshot === 'object' && !Array.isArray(persisted.snapshot)) {
           cachedSnapshot = persisted.snapshot;
           cachedAt = now();
           report('persisted_cache_hit', {
