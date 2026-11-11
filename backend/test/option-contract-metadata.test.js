@@ -56,3 +56,14 @@ test("reads exact MCX option lot size and tick size from MCX_COM master", () => 
     symbol: mcxSymbol, side: "CE", strike: 8400, expiryDate: "1795046400", lotSize: 100, tickSize: 0.05
   });
 });
+
+
+test("resolves exact option sizing from the compact Map index used by the shared NSE loader", () => {
+  const compact = new Map([[symbol, {
+    tradeStatus: 1, optType: "CE", strikePrice: 2500,
+    expiryDate: "1795651200", minLotSize: 250, tickSize: 0.05
+  }]]);
+  assert.deepEqual(getVerifiedOptionContractMetadata(symbol, compact), {
+    symbol, side: "CE", strike: 2500, expiryDate: "1795651200", lotSize: 250, tickSize: 0.05
+  });
+});
