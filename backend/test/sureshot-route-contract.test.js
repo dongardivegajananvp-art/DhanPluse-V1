@@ -203,7 +203,7 @@ test("NSE option verification uses the complete Top 10 gainers/losers boards, no
   assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
   assert.ok(route.includes("topGainers: ranked.topGainers, topLosers: ranked.topLosers"));
   assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
-  assert.ok(server.includes("export function selectSureshotOptionVerificationCandidates"));
+  assert.ok(server.includes("selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js'"));
 });
 
 
@@ -214,5 +214,5 @@ test("NSE option verification is bounded to Top 10 gainers, Top 10 losers and fr
   assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
   assert.ok(route.includes("topGainers: ranked.topGainers, topLosers: ranked.topLosers"));
   assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
-  assert.ok(server.includes("export function selectSureshotOptionVerificationCandidates"));
+  assert.ok(server.includes("selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js'"));
 });
