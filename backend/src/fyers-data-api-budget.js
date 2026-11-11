@@ -23,7 +23,10 @@ export function createFyersDataApiBudget({
   historyCacheMs = 5 * 60_000,
   optionChainCacheMs = 60_000,
   maxCacheEntries = 100,
-  cloudflareCooldownMs = [15 * 60_000, 30 * 60_000, 60 * 60_000],
+  // Cloudflare 1015 Retry-After is often zero even while the IP-level block persists.
+  // Hold the circuit for a full hour before the next single probe; shorter retries
+  // were observed to receive another 1015 and extend the provider block.
+  cloudflareCooldownMs = [60 * 60_000, 60 * 60_000, 60 * 60_000],
   rateLimitCooldownMs = [60_000, 2 * 60_000, 5 * 60_000],
   maxCooldownMs = 60 * 60_000
 } = {}) {
