@@ -1211,7 +1211,7 @@ function invalidateFyersSession(reason) {
   });
 }
 
-async function fyersReadOnlyGet(url, { priority = 'normal' } = {}) {
+async function fyersReadOnlyGet(url, { priority = 'normal', stage = null } = {}) {
   // While a Sureshot scan is active, keep unrelated Data API traffic from
   // competing for the same account/IP budget. Existing in-flight reads finish;
   // Sureshot requests explicitly opt into the priority lane below.
@@ -1229,12 +1229,33 @@ async function fyersReadOnlyGet(url, { priority = 'normal' } = {}) {
     throw error;
   }
   const requestAccessToken = accessToken;
+  const requestStartedAt = Date.now();
   const response = await fetchWithFyersBudget(url, {
     method: 'GET',
     headers: { Authorization: appId + ':' + requestAccessToken, Accept: 'application/json' },
     cache: 'no-store',
     signal: AbortSignal.timeout(12000)
   });
+  if (priority === 'sureshot') {
+    const cacheState = response.headers.get('x-dhanpulse-cache') || 'NOT_CACHED';
+    const localCooldown = response.headers.get('x-dhanpulse-cooldown') === 'active';
+    const requestSource = localCooldown ? 'LOCAL_CIRCUIT_BREAKER'
+      : cacheState === 'HIT' ? 'CACHE' : 'UPSTREAM';
+    const budgetStatus = fetchWithFyersBudget.getStatus();
+    console.info('Sureshot FYERS Data API request audit:', JSON.stringify({
+      stage: String(stage || 'UNSPECIFIED'),
+      endpoint: new URL(String(url)).pathname,
+      requestSource,
+      cacheState,
+      cacheAgeMs: Number(response.headers.get('x-dhanpulse-cache-age-ms')) || 0,
+      status: response.status,
+      elapsedMs: Math.max(0, Date.now() - requestStartedAt),
+      retryAfterSeconds: Number(response.headers.get('retry-after')) || budgetStatus.retryAfterSeconds || 0,
+      queuedRequests: budgetStatus.queuedRequests,
+      cooldownActive: budgetStatus.cooldownActive,
+      cooldownReason: budgetStatus.cooldownReason || null
+    }));
+  }
   // Preserve non-JSON upstream error bodies too; some 429 gateways return an
   // empty body, which was hiding whether FYERS sent a retry hint or diagnostic.
   const responseText = await response.text();
@@ -1859,7 +1880,7 @@ function sendFyersDataApiCooldown(res, extra = {}) {
   });
   return true;
 }
-async function loadVerifiedFnoStockQuotes({ priority = 'normal' } = {}) {
+async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } = {}) {
   const master = await getNseFnoEquityUniverse();
   const symbols = master.data.map(item => item.symbol);
   const now = Date.now();
@@ -1874,7 +1895,7 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal' } = {}) {
     try {
       // Share the same /data/quotes cooldown with movers and other read-only quote
       // consumers. A separate raw fetch here used to bypass endpoint cooldown state.
-      body = await fyersReadOnlyGet(url, { priority });
+      body = await fyersReadOnlyGet(url, { priority, stage });
     } catch (error) {
       if (Number(error.statusCode) === 429) {
         console.warn("FYERS stock quotes rate-limited:", JSON.stringify({
@@ -2118,7 +2139,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         ? stockQuoteCache.data : null;
       if (!snapshot) {
         if (sendFyersDataApiCooldown(res, { scanComplete: false, signalsAllowed: false, stage: scanStage })) return;
-        const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes({ priority: "sureshot" }));
+        const request = stockQuotePromise || (stockQuotePromise = loadVerifiedFnoStockQuotes({ priority: "sureshot", stage: scanStage }));
         try { snapshot = await request; } finally { if (stockQuotePromise === request) stockQuotePromise = null; }
       }
       scanStage = "RANK_FNO_UNIVERSE";
@@ -2154,7 +2175,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         underlyingUrl.searchParams.set("date_format", "1"); underlyingUrl.searchParams.set("range_from", from);
         underlyingUrl.searchParams.set("range_to", today); underlyingUrl.searchParams.set("cont_flag", "1");
         scanStage = "VERIFY_UNDERLYING_CANDLES";
-        const underlyingHistory = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot" });
+        const underlyingHistory = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot", stage: scanStage });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [], "5", Date.now(), { strictTrend: true });
         if (!direction.ok || !direction.side) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
@@ -2164,7 +2185,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         scanStage = "DISCOVER_OPTION_CONTRACT";
         const chainUrl = new URL("https://api-t1.fyers.in/data/options-chain-v3");
         chainUrl.searchParams.set("symbol", candidate.symbol); chainUrl.searchParams.set("strikecount", "10");
-        const chainResult = await fyersReadOnlyGet(chainUrl, { priority: "sureshot" });
+        const chainResult = await fyersReadOnlyGet(chainUrl, { priority: "sureshot", stage: scanStage });
         const discovery = normalizeOptionContractDiscovery(chainResult?.data);
         const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(), strikeMode: "one-otm" });
         if (!selected.ok) {
@@ -2199,7 +2220,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         scanStage = "VERIFY_OPTION_QUOTE";
         const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes");
         quoteUrl.searchParams.set("symbols", prepared.map(item => item.contract.symbol).join(","));
-        const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: "sureshot" });
+        const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: "sureshot", stage: scanStage });
         const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
         for (const row of quoteRows) {
           const symbol = row?.n || row?.symbol || row?.v?.symbol;
@@ -2233,7 +2254,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         optionHistoryUrl.searchParams.set("date_format", "1"); optionHistoryUrl.searchParams.set("range_from", from);
         optionHistoryUrl.searchParams.set("range_to", today); optionHistoryUrl.searchParams.set("cont_flag", "1");
         scanStage = "VERIFY_OPTION_CANDLES";
-        const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot" });
+        const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot", stage: scanStage });
         scanStage = "BUILD_RISK_PLAN";
         const plan = buildVerifiedSureshotTradePlan({ underlyingSymbol: candidate.symbol, direction, contract, quote,
           optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5",
@@ -2272,7 +2293,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     // initial passes at completion so their underlying candles, option premium
     // and completed option candles are still fresh when Paper IDs are issued.
     const finalCheckCandidates = results.filter(item =>
-      item.initiallyVerified === true && item.status === "VERIFIED SETUP").slice(0, 10);
+      item.initiallyVerified === true && item.status === "VERIFIED SETUP").slice(0, 5);
     const finalDirections = new Map();
     for (const item of finalCheckCandidates) {
       if (!nseRegularSessionNow()) { const error = new Error("Market session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
@@ -2282,7 +2303,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         underlyingUrl.searchParams.set("date_format", "1"); underlyingUrl.searchParams.set("range_from", from);
         underlyingUrl.searchParams.set("range_to", today); underlyingUrl.searchParams.set("cont_flag", "1");
         scanStage = "FINAL_REVALIDATE_UNDERLYING";
-        const history = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot" });
+        const history = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot", stage: scanStage });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now(), { strictTrend: true });
         if (!direction.ok || direction.side !== item.direction) {
           item.status = "NO TRADE";
@@ -2312,7 +2333,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         optionHistoryUrl.searchParams.set("date_format", "1"); optionHistoryUrl.searchParams.set("range_from", from);
         optionHistoryUrl.searchParams.set("range_to", today); optionHistoryUrl.searchParams.set("cont_flag", "1");
         scanStage = "FINAL_REVALIDATE_OPTION_CANDLES";
-        const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot" });
+        const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot", stage: scanStage });
         finalOptionCandlesBySymbol.set(item.underlyingSymbol, Array.isArray(optionHistory?.candles) ? optionHistory.candles : []);
       } catch (error) {
         const status = Number(error.statusCode) || 0;
@@ -2331,7 +2352,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes");
         quoteUrl.searchParams.set("symbols", finalQuoteCandidates.map(item => item.contract.symbol).join(","));
         scanStage = "FINAL_REVALIDATE_OPTION_QUOTES";
-        const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: "sureshot" });
+        const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: "sureshot", stage: scanStage });
         const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
         for (const row of quoteRows) {
           const symbol = row?.n || row?.symbol || row?.v?.symbol;
@@ -2405,7 +2426,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       item.paperPlanId = issued.planId;
       item.paperPlanExpiresAt = issued.expiresAt;
     }
-    console.info("Sureshot scan completed:", JSON.stringify({ scannedCandidateCount: results.length, rankedCandidateCount: state.rankedCandidateCount, verifiedSetupCount: verified.length, stopReason: "ALL_ELIGIBLE_CANDIDATES_CHECKED" }));
+    console.info("Sureshot scan completed:", JSON.stringify({ scannedCandidateCount: results.length, rankedCandidateCount: state.rankedCandidateCount, finalRevalidationCandidateCount: finalCheckCandidates.length, verifiedSetupCount: verified.length, stopReason: "ALL_ELIGIBLE_CANDIDATES_CHECKED" }));
     const payload = { ok: true, scanComplete: true, selectedCandidatesComplete,
       stopReason: "ALL_ELIGIBLE_CANDIDATES_CHECKED",
       signalsAllowed: verified.length > 0,
@@ -2545,7 +2566,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         historyUrl.searchParams.set("symbol", candidate.symbol); historyUrl.searchParams.set("resolution", "5");
         historyUrl.searchParams.set("date_format", "1"); historyUrl.searchParams.set("range_from", from);
         historyUrl.searchParams.set("range_to", today); historyUrl.searchParams.set("cont_flag", "1");
-        const history = await fyersReadOnlyGet(historyUrl, { priority: "sureshot" });
+        const history = await fyersReadOnlyGet(historyUrl, { priority: "sureshot", stage: scanStage });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now(), { strictTrend: true });
         if (!direction.ok || !direction.side) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
@@ -2598,7 +2619,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
       stage = "VERIFY_MCX_OPTION_QUOTES";
       const url = new URL("https://api-t1.fyers.in/data/quotes");
       url.searchParams.set("symbols", prepared.map(item => item.contract.symbol).join(","));
-      const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
+      const result = await fyersReadOnlyGet(url, { priority: "sureshot", stage: scanStage });
       const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
       for (const row of rows) {
         const symbol = row?.n || row?.symbol || row?.v?.symbol;
@@ -2619,7 +2640,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         historyUrl.searchParams.set("symbol", item.contract.symbol); historyUrl.searchParams.set("resolution", "5");
         historyUrl.searchParams.set("date_format", "1"); historyUrl.searchParams.set("range_from", from);
         historyUrl.searchParams.set("range_to", today); historyUrl.searchParams.set("cont_flag", "1");
-        const optionHistory = await fyersReadOnlyGet(historyUrl, { priority: "sureshot" });
+        const optionHistory = await fyersReadOnlyGet(historyUrl, { priority: "sureshot", stage: scanStage });
         stage = "BUILD_MCX_RISK_PLAN";
         const plan = buildVerifiedSureshotTradePlan({
           underlyingSymbol: item.candidate.symbol, direction: item.direction, contract: item.contract,
@@ -2667,7 +2688,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         url.searchParams.set("date_format", "1"); url.searchParams.set("range_from", from);
         url.searchParams.set("range_to", today); url.searchParams.set("cont_flag", "1");
         stage = "FINAL_REVALIDATE_MCX_UNDERLYING";
-        const history = await fyersReadOnlyGet(url, { priority: "sureshot" });
+        const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage: scanStage });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now(), { strictTrend: true });
         if (!direction.ok || direction.side !== item.direction) {
           item.status = "NO TRADE"; item.reason = "Final underlying-candle revalidation failed."; delete item.plan; continue;
@@ -2688,7 +2709,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         url.searchParams.set("date_format", "1"); url.searchParams.set("range_from", from);
         url.searchParams.set("range_to", today); url.searchParams.set("cont_flag", "1");
         stage = "FINAL_REVALIDATE_MCX_OPTION_CANDLES";
-        const history = await fyersReadOnlyGet(url, { priority: "sureshot" });
+        const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage: scanStage });
         finalOptionCandles.set(item.underlyingSymbol, Array.isArray(history?.candles) ? history.candles : []);
       } catch (error) {
         if ([401, 429].includes(Number(error.statusCode))) throw error;
@@ -2702,7 +2723,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
       const url = new URL("https://api-t1.fyers.in/data/quotes");
       url.searchParams.set("symbols", finalQuoteCandidates.map(item => item.contract.symbol).join(","));
       stage = "FINAL_REVALIDATE_MCX_OPTION_QUOTES";
-      const result = await fyersReadOnlyGet(url, { priority: "sureshot" });
+      const result = await fyersReadOnlyGet(url, { priority: "sureshot", stage: scanStage });
       const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
       for (const row of rows) {
         const symbol = row?.n || row?.symbol || row?.v?.symbol;
