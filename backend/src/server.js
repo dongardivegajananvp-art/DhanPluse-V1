@@ -1230,11 +1230,15 @@ async function fyersReadOnlyGet(url, { priority = 'normal', stage = null } = {})
   }
   const requestAccessToken = accessToken;
   const requestStartedAt = Date.now();
+  const historyRequest = new URL(String(url)).pathname === '/data/history';
   const response = await fetchWithFyersBudget(url, {
     method: 'GET',
     headers: { Authorization: appId + ':' + requestAccessToken, Accept: 'application/json' },
     cache: 'no-store',
-    signal: AbortSignal.timeout(12000)
+    // Sureshot history reads get a bounded 30s network window after queueing.
+    // Other Data API reads retain the existing 12s timeout. Queue/pacing time
+    // is excluded by the budget layer; request spacing and cooldown are unchanged.
+    timeoutMs: priority === 'sureshot' && historyRequest ? 30_000 : 12_000
   });
   if (priority === 'sureshot') {
     const cacheState = response.headers.get('x-dhanpulse-cache') || 'NOT_CACHED';
