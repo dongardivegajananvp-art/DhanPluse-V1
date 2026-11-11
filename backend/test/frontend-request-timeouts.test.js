@@ -17,6 +17,7 @@ test('NSE and MCX Sureshot, candle and option-risk requests abort on a bounded t
     '/api/market/mcx-sureshot-auto-plans',
     '/api/market/candles',
     '/api/fyers/option-risk-plan',
+    '/api/fyers/options-chain',
     '/api/fyers/option-chain'
   ]) assert.ok(html.includes(path), 'Missing bounded endpoint ' + path);
   assert.match(html, /scanRequestTimeoutMs = isBackend && \[/);
