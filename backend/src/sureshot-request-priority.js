@@ -17,3 +17,14 @@ export function isSureshotScanPriorityActive({
   };
   return isActive(nseScanState) || isActive(mcxScanState);
 }
+
+
+/** Decide whether an unrelated FYERS Data API read must yield to a Sureshot scan. */
+export function shouldPauseFyersRead({ priority = "normal", ...scanState } = {}) {
+  return priority !== "sureshot" && isSureshotScanPriorityActive(scanState);
+}
+
+/** Preserve display-only last-known cache hits; pause only cache-miss REST refreshes. */
+export function shouldPauseLastKnownStockRefresh({ cacheIsFresh = false, ...scanState } = {}) {
+  return !cacheIsFresh && isSureshotScanPriorityActive(scanState);
+}
