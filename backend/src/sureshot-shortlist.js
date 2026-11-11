@@ -111,3 +111,54 @@ export function buildVerifiedSureshotShortlist({
     data: candidates.slice(0, limit).map((row, index) => ({ rank: index + 1, ...row }))
   };
 }
+
+
+/**
+ * After the complete F&O quote universe is verified and ranked, only the top
+ * ten gainers, top ten losers and individually fresh index ticks proceed to
+ * completed-candle and option-contract verification.
+ */
+export function selectSureshotTopMoverCandidates({ ranked, gainersLimit = 10, losersLimit = 10 }) {
+  if (!ranked || ranked.ok !== true || ranked.verified !== true ||
+      !Array.isArray(ranked.topGainers) || !Array.isArray(ranked.topLosers) ||
+      !Array.isArray(ranked.data) || !ranked.moverBoardsComplete ||
+      !Number.isInteger(gainersLimit) || gainersLimit !== 10 ||
+      !Number.isInteger(losersLimit) || losersLimit !== 10) {
+    throw new Error("complete_verified_top_mover_boards_required");
+  }
+  const selected = new Map();
+  for (const row of ranked.topGainers.slice(0, gainersLimit)) {
+    if (!row?.symbol || row.underlyingType !== "FNO_EQUITY" || !(Number(row.changePct) > 0) ||
+        !Number.isFinite(Number(row.price)) || Number(row.price) <= 0) {
+      throw new Error("invalid_verified_top_gainer");
+    }
+    if (selected.has(row.symbol)) throw new Error("duplicate_top_mover_symbol");
+    selected.set(row.symbol, row);
+  }
+  for (const row of ranked.topLosers.slice(0, losersLimit)) {
+    if (!row?.symbol || row.underlyingType !== "FNO_EQUITY" || !(Number(row.changePct) < 0) ||
+        !Number.isFinite(Number(row.price)) || Number(row.price) <= 0) {
+      throw new Error("invalid_verified_top_loser");
+    }
+    if (selected.has(row.symbol)) throw new Error("duplicate_top_mover_symbol");
+    selected.set(row.symbol, row);
+  }
+  for (const row of ranked.data.filter(item => item?.underlyingType === "INDEX")) {
+    if (!row.symbol || !Number.isFinite(Number(row.changePct)) ||
+        !Number.isFinite(Number(row.price)) || Number(row.price) <= 0) {
+      throw new Error("invalid_fresh_index_candidate");
+    }
+    if (!selected.has(row.symbol)) selected.set(row.symbol, row);
+  }
+  const data = [...selected.values()].sort((a, b) =>
+    Math.abs(Number(b.changePct)) - Math.abs(Number(a.changePct)) || a.symbol.localeCompare(b.symbol));
+  return {
+    ok: true,
+    fullUniverseRankedCount: Number(ranked.candidateCount) || 0,
+    fullUniverseEquityCount: Number(ranked.equityCandidates?.length) || 0,
+    moverEquityCount: Math.min(gainersLimit, ranked.topGainers.length) + Math.min(losersLimit, ranked.topLosers.length),
+    freshIndexCount: data.filter(row => row.underlyingType === "INDEX").length,
+    selectedCandidateCount: data.length,
+    data
+  };
+}

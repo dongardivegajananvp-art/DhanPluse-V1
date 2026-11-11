@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildVerifiedSureshotShortlist } from "../src/sureshot-shortlist.js";
+import { buildVerifiedSureshotShortlist, selectSureshotTopMoverCandidates } from "../src/sureshot-shortlist.js";
 
 const now = Date.parse("2026-11-02T07:00:00.000Z");
 const universe = { data: Array.from({ length: 218 }, (_, i) => ({ symbol: `NSE:STOCK${i}-EQ`, lotSize: 25 })) };
@@ -69,4 +69,31 @@ test("default shortlist is exactly five from the complete 218-equity universe", 
   assert.equal(result.data.length, 5);
   assert.equal(result.candidateCount, 221);
   assert.deepEqual(result.data.map(row => row.rank), [1, 2, 3, 4, 5]);
+});
+
+
+test("selects only the complete top 10 gainers, top 10 losers and fresh indices after full-universe ranking", () => {
+  const ranked = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now, limit: 250 });
+  const selected = selectSureshotTopMoverCandidates({ ranked });
+  assert.equal(selected.fullUniverseRankedCount, 221);
+  assert.equal(selected.fullUniverseEquityCount, 218);
+  assert.equal(selected.moverEquityCount, 20);
+  assert.equal(selected.freshIndexCount, 3);
+  assert.equal(selected.selectedCandidateCount, 23);
+  assert.equal(selected.data.filter(row => row.underlyingType === "FNO_EQUITY").length, 20);
+  assert.equal(selected.data.filter(row => row.underlyingType === "INDEX").length, 3);
+  assert.ok(selected.data.some(row => row.symbol === "NSE:STOCK217-EQ"));
+  assert.ok(selected.data.some(row => row.symbol === "NSE:STOCK0-EQ"));
+  assert.equal(selected.data.some(row => row.symbol === "NSE:STOCK100-EQ"), false);
+  assert.deepEqual(selected.data.map(row => Math.abs(row.changePct)),
+    selected.data.map(row => Math.abs(row.changePct)).slice().sort((a, b) => b - a));
+});
+
+test("refuses to select movers unless both complete verified mover boards exist", () => {
+  const ranked = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now, limit: 250 });
+  assert.throws(() => selectSureshotTopMoverCandidates({
+    ranked: { ...ranked, moverBoardsComplete: false }
+  }), /complete_verified_top_mover_boards_required/);
+  assert.throws(() => selectSureshotTopMoverCandidates({ ranked, gainersLimit: 9 }),
+    /complete_verified_top_mover_boards_required/);
 });
