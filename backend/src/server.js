@@ -2448,18 +2448,29 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         const error = new Error("Full MCX futures WebSocket subscriptions are not active on the current FYERS socket.");
         error.statusCode = 409; throw error;
       }
-      const quoteRows = buildMcxSocketQuoteRows(universe.data, latestTicks);
-      quoteRowsReceived = quoteRows.length;
-      const mcxAudit = buildVerifiedMcxAudit({
-        universe: universe.data, quoteRows, now: Date.now(),
-        limit: universe.data.length, maxAgeMs: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS
-      });
+      const { audit: mcxAudit, waitedMs: socketSettleWaitMs, timedOut: socketSettleTimedOut } =
+        await waitForCompleteMcxSocketAudit({
+          // Subscriptions are asynchronous: take a fresh snapshot repeatedly
+          // while FYERS delivers the requested symbols. Do not call REST here.
+          getAudit: () => {
+            const quoteRows = buildMcxSocketQuoteRows(universe.data, latestTicks);
+            quoteRowsReceived = quoteRows.length;
+            return buildVerifiedMcxAudit({
+              universe: universe.data, quoteRows, now: Date.now(),
+              limit: universe.data.length, maxAgeMs: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS
+            });
+          },
+          timeoutMs: 60_000,
+          pollIntervalMs: 1_000
+        });
       console.info("FYERS MCX full-universe WebSocket tick audit:", JSON.stringify({
         ...mcxAudit.coverage, subscribedSymbols: mcxFuturesSocketSymbols.size,
-        freshnessWindowSeconds: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS / 1000
+        freshnessWindowSeconds: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS / 1000,
+        socketSettleWaitSeconds: Number((socketSettleWaitMs / 1000).toFixed(1)),
+        socketSettleTimedOut
       }));
       if (!mcxAudit.complete) {
-        const error = new Error("MCX full-universe WebSocket tick audit is incomplete or stale; wait for fresh exchange ticks on every eligible future. No candidates or plans may be published.");
+        const error = new Error("MCX full-universe WebSocket tick audit remained incomplete after a 60-second subscription settle window; every eligible future must still have a fresh exchange timestamp. No candidates or plans may be published.");
         error.statusCode = 409;
         error.mcxAudit = mcxAudit;
         throw error;
