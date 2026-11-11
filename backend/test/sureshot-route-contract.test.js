@@ -139,6 +139,9 @@ test("MCX Sureshot audits and verifies every eligible future in resumable batche
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   assert.ok(start >= 0 && end > start);
   const route = server.slice(start, end);
+  assert.match(route, /if \(!scanId && !streamConnected\)/);
+  assert.doesNotMatch(route.slice(0, route.indexOf("const subscriptionReady")), /mcxUniverseSubscribedSocket !== marketSocket/);
+  assert.match(route, /const subscriptionReady = await subscribeMcxFuturesUniverse\(marketSocket\)/);
   assert.match(route, /buildMcxSocketQuoteRows\(universe\.data, latestTicks\)/);
   assert.match(route, /VERIFY_MCX_FUTURES_WEBSOCKET_TICKS/);
   assert.match(route, /buildVerifiedMcxAudit\(/);

@@ -2426,9 +2426,12 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
   } else if (!scanId && mcxSureshotScanState) {
     mcxSureshotScanState = null;
   }
-  if (!scanId && (!streamConnected || mcxUniverseSubscribedSocket !== marketSocket)) {
+  // A connected socket may be between startup/reconnect and completion of
+  // the full-universe subscription. Do not reject before the recovery helper
+  // gets a chance to apply the 72-symbol set on this exact socket.
+  if (!scanId && !streamConnected) {
     return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false,
-      error: "Full MCX futures WebSocket subscriptions are not active on the current FYERS socket." });
+      error: "FYERS market WebSocket is disconnected; MCX scan remains NO TRADE." });
   }
   if (mcxSureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "An MCX Sureshot scan is already running." });
   mcxSureshotAutoPlansInFlight = true;
