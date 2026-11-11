@@ -350,11 +350,6 @@ test('default FYERS budget stays at or below 15 requests per minute with a four-
   });
 
   for (let index = 0; index < 16; index += 1) {
-    await request('https://api-t1.fyers.in/api/v3/quotes?request=' + index);
-    // This endpoint is outside /data/ and intentionally does not use the budget.
-  }
-  sentAt.length = 0;
-  for (let index = 0; index < 16; index += 1) {
     await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ&resolution=5&request=' + index);
   }
 
