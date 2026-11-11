@@ -216,3 +216,22 @@ test("NSE option verification is bounded to Top 10 gainers, Top 10 losers and fr
   assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
   assert.ok(server.includes("selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js'"));
 });
+
+
+test("NSE final freshness revalidation is bounded to five candidates for up to three published setups", () => {
+  const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
+  const end = server.indexOf("// Last-known F&O equity quotes", start);
+  const route = server.slice(start, end);
+  assert.match(route, /\\.slice\\(0, 5\\);/);
+  assert.match(route, /finalRevalidationCandidateCount: finalCheckCandidates\\.length/);
+  assert.match(route, /topThreeSetups = verified\\.slice\\(0, 3\\)/);
+});
+
+test("Sureshot FYERS request audit distinguishes upstream, cached and locally blocked requests", () => {
+  assert.match(server, /priority = 'normal', stage = null/);
+  assert.match(server, /Sureshot FYERS Data API request audit:/);
+  assert.match(server, /requestSource = localCooldown \\? 'LOCAL_CIRCUIT_BREAKER'/);
+  assert.match(server, /cacheState === 'HIT' \\? 'CACHE' : 'UPSTREAM'/);
+  assert.match(server, /endpoint: new URL\\(String\\(url\\)\\)\\.pathname/);
+  assert.match(server, /loadVerifiedFnoStockQuotes\\(\\{ priority: "sureshot", stage: scanStage \\}\\)/);
+});
