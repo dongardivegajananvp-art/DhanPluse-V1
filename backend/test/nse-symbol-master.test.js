@@ -88,3 +88,24 @@ test('NSE loader rejects invalid master payloads without caching them', async ()
   await assert.rejects(load(), /NSE_FO symbol master format is invalid/);
   assert.equal(calls, 4);
 });
+
+
+test('NSE master failures share exponential backoff across consumers', async () => {
+  let clock = 1_000;
+  let calls = 0;
+  const load = createNseSymbolMasterLoader({
+    now: () => clock,
+    fetchImpl: async () => {
+      calls += 1;
+      return response({}, 503);
+    },
+    build: () => ({})
+  });
+
+  await assert.rejects(load(), error => error.statusCode === 503 && error.retryAfterSeconds === 30);
+  await assert.rejects(load(), error => error.statusCode === 503 && error.retryAfterSeconds === 30);
+  assert.equal(calls, 2);
+  clock += 30_000;
+  await assert.rejects(load(), error => error.statusCode === 503 && error.retryAfterSeconds === 60);
+  assert.equal(calls, 4);
+});
