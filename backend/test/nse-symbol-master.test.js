@@ -53,6 +53,28 @@ test('freshly validated NSE snapshot is persisted after successful build', async
   assert.equal(Number.isNaN(Date.parse(saved.metadata.fetchedAt)), false);
 });
 
+
+test('persisted snapshot keeps its original age when applying the in-memory TTL', async () => {
+  let clock = 2_000_000;
+  const start = clock;
+  let fetchCalls = 0;
+  const cached = { universe: [], moversSymbols: [], optionContractMaster: new Map() };
+  const fresh = { universe: [{ symbol: 'NSE:NEW-EQ' }], moversSymbols: ['NSE:NEW-EQ'], optionContractMaster: new Map() };
+  const load = createNseSymbolMasterLoader({
+    now: () => clock,
+    loadPersistedSnapshot: async () => {
+      const ageMs = 23 * 60 * 60 * 1000 + (clock - start);
+      return ageMs <= 24 * 60 * 60 * 1000 ? { snapshot: cached, ageMs } : null;
+    },
+    fetchImpl: async () => { fetchCalls += 1; return response({}); },
+    build: () => fresh
+  });
+  assert.equal(await load(), cached);
+  clock += 61 * 60 * 1000;
+  assert.equal(await load(), fresh);
+  assert.equal(fetchCalls, 2);
+});
+
 test('concurrent NSE consumers share one pair of official master downloads', async () => {
   let calls = 0;
   let builds = 0;
