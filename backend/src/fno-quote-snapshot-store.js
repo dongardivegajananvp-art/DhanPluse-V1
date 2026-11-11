@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS gv2vpd_fno_quote_snapshots (
   id SMALLINT PRIMARY KEY CHECK (id = 1),
   universe_symbols JSONB NOT NULL,
   snapshot JSONB NOT NULL,
-  snapshot_exchange_time TIMESTAMPTZ NOT NULL,
+  snapshot_fetched_at TIMESTAMPTZ NOT NULL,
   saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 `;
@@ -53,14 +53,14 @@ export function createFnoQuoteSnapshotStore({ databaseUrl, PoolClass = Pool }) {
       }
       const result = await pool.query(
         `INSERT INTO gv2vpd_fno_quote_snapshots
-          (id, universe_symbols, snapshot, snapshot_exchange_time, saved_at)
+          (id, universe_symbols, snapshot, snapshot_fetched_at, saved_at)
          VALUES (1, $1::jsonb, $2::jsonb, $3::timestamptz, NOW())
          ON CONFLICT (id) DO UPDATE SET
            universe_symbols = EXCLUDED.universe_symbols,
            snapshot = EXCLUDED.snapshot,
-           snapshot_exchange_time = EXCLUDED.snapshot_exchange_time,
+           snapshot_fetched_at = EXCLUDED.snapshot_fetched_at,
            saved_at = NOW()
-         WHERE gv2vpd_fno_quote_snapshots.snapshot_exchange_time <= EXCLUDED.snapshot_exchange_time
+         WHERE gv2vpd_fno_quote_snapshots.snapshot_fetched_at <= EXCLUDED.snapshot_fetched_at
          RETURNING id`,
         [JSON.stringify(expected), JSON.stringify(snapshot), new Date(exchangeTime).toISOString()]
       );
@@ -71,7 +71,7 @@ export function createFnoQuoteSnapshotStore({ databaseUrl, PoolClass = Pool }) {
       const expected = normalizeSymbols(symbols);
       if (!expected || !Number.isFinite(maxAgeMs) || maxAgeMs <= 0) return null;
       const result = await pool.query(
-        'SELECT universe_symbols, snapshot, snapshot_exchange_time FROM gv2vpd_fno_quote_snapshots WHERE id = 1'
+        'SELECT universe_symbols, snapshot, snapshot_fetched_at FROM gv2vpd_fno_quote_snapshots WHERE id = 1'
       );
       const row = result.rows?.[0];
       if (!row) return null;
@@ -83,7 +83,7 @@ export function createFnoQuoteSnapshotStore({ databaseUrl, PoolClass = Pool }) {
       } catch { return null; }
       if (!Array.isArray(storedSymbols) || storedSymbols.length !== expected.length ||
           storedSymbols.some((symbol, index) => symbol !== expected[index])) return null;
-      const exchangeTime = Date.parse(row.snapshot_exchange_time || snapshot?.fetchedAt || '');
+      const exchangeTime = Date.parse(row.snapshot_fetched_at || snapshot?.fetchedAt || '');
       if (!Number.isFinite(exchangeTime) || exchangeTime > now + 5000 ||
           now - exchangeTime < 0 || now - exchangeTime > maxAgeMs) return null;
       if (!isCompleteFreshFnoQuoteSnapshot(snapshot, expected, now, maxAgeMs)) return null;
