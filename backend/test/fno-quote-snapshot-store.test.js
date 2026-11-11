@@ -56,6 +56,30 @@ test('durable snapshot recovery requires exact universe and permits prior-sessio
   assert.equal(await store.load(symbols, now + 24 * 60 * 60 * 1000 + 60_000), null);
 });
 
+test('older snapshots cannot overwrite a newer persisted FYERS snapshot', async () => {
+  const { FakePool } = fakePoolClass();
+  const store = createFnoQuoteSnapshotStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
+  await store.initialize();
+  const newer = structuredClone(snapshot);
+  newer.fetchedAt = new Date(now).toISOString();
+  newer.data.forEach(row => { row.v.tt = Math.floor(now / 1000); });
+  assert.equal((await store.save(newer, symbols, now)).saved, true);
+  const older = structuredClone(snapshot);
+  assert.equal((await store.save(older, symbols, now + 1000)).saved, false);
+  const restored = await store.load(symbols, now + 2000);
+  assert.equal(restored.snapshot.fetchedAt, newer.fetchedAt);
+});
+
+test('stale exchange timestamps are never persisted even when the snapshot is complete', async () => {
+  const { FakePool, state } = fakePoolClass();
+  const store = createFnoQuoteSnapshotStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
+  await store.initialize();
+  const stale = structuredClone(snapshot);
+  stale.data[0].v.tt = Math.floor((now - 31_000) / 1000);
+  assert.equal((await store.save(stale, symbols, now)).saved, false);
+  assert.equal(state.row, null);
+});
+
 test('unconfigured snapshot store fails closed', async () => {
   const store = createFnoQuoteSnapshotStore({ databaseUrl: '' });
   assert.equal(store.configured, false);
