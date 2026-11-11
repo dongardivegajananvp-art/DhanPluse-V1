@@ -108,3 +108,49 @@ test("MCX server route imports the socket audit settle helper it invokes", async
   const serverSource = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   assert.match(serverSource, /import\s*\{[^}]*\bwaitForCompleteMcxSocketAudit\b[^}]*\}\s*from\s*[\x27"]\.\/mcx-socket-audit\.js[\x27"]/);
 });
+
+
+test("MCX full-universe audit requires all 72 official futures to have fresh exchange timestamps", () => {
+  const fullUniverse = Array.from({ length: 72 }, (_, index) => ({
+    symbol: `MCX:CONTRACT${String(index + 1).padStart(2, "0")}26NOVFUT`,
+    underlying: `CONTRACT${String(index + 1).padStart(2, "0")}`
+  }));
+  const ticks = new Map(fullUniverse.map((item, index) => [
+    item.symbol,
+    { ltp: 100 + index, chp: index % 2 ? -0.5 : 0.5, updatedAt: new Date(now - 1000).toISOString() }
+  ]));
+  const completeRows = buildMcxSocketQuoteRows(fullUniverse, ticks);
+  const completeAudit = buildVerifiedMcxAudit({
+    universe: fullUniverse, quoteRows: completeRows, now, limit: 72, maxAgeMs: 30_000
+  });
+  assert.equal(completeAudit.universeCount, 72);
+  assert.equal(completeAudit.coverage.requested, 72);
+  assert.equal(completeAudit.coverage.received, 72);
+  assert.equal(completeAudit.coverage.fresh, 72);
+  assert.equal(completeAudit.complete, true);
+  assert.equal(completeAudit.data.length, 72);
+
+  ticks.delete(fullUniverse[71].symbol);
+  const partialAudit = buildVerifiedMcxAudit({
+    universe: fullUniverse, quoteRows: buildMcxSocketQuoteRows(fullUniverse, ticks),
+    now, limit: 72, maxAgeMs: 30_000
+  });
+  assert.equal(partialAudit.complete, false);
+  assert.equal(partialAudit.coverage.fresh, 71);
+  assert.equal(partialAudit.coverage.missing, 1);
+  assert.equal(partialAudit.data.length, 0);
+});
+
+test("MCX route rebuilds quote rows outside the settle callback before shortlist ranking", async () => {
+  const serverSource = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  const start = serverSource.indexOf('app.get("/api/market/mcx-sureshot-auto-plans"');
+  const end = serverSource.indexOf("// Last-known F&O equity quotes", start);
+  const route = serverSource.slice(start, end);
+  const completeGuard = route.indexOf("if (!mcxAudit.complete)");
+  const rankedAt = route.indexOf("const ranked = buildVerifiedMcxShortlist");
+  const reboundAt = route.lastIndexOf("const quoteRows = buildMcxSocketQuoteRows(universe.data, latestTicks)", rankedAt);
+  assert.ok(completeGuard >= 0 && rankedAt > completeGuard);
+  assert.ok(reboundAt > completeGuard && reboundAt < rankedAt,
+    "quoteRows must be rebuilt in the route scope after the full audit, not only inside getAudit()");
+  assert.match(route, /limit: universe\.data\.length, maxAgeMs: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS/);
+});
