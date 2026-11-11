@@ -119,7 +119,7 @@ export function buildVerifiedSureshotShortlist({
  * The full F&O quote snapshot is still required and audited before this selection.
  */
 export function selectSureshotOptionVerificationCandidates(ranked) {
-  if (!ranked || ranked.verified !== true || ranked.moverBoardsComplete !== true ||
+  if (!ranked || ranked.verified !== true ||
       !Array.isArray(ranked.topGainers) || !Array.isArray(ranked.topLosers) ||
       !Array.isArray(ranked.data)) {
     throw new Error("complete_verified_top_mover_boards_required");
