@@ -2255,7 +2255,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
     if (status) status.textContent = verified.length
       ? (result.selectedCandidatesComplete
         ? 'Full-universe quote ranking complete · ' + topFive.length + ' of 5 final-fresh setups displayed. Best valid setup is ranked #1.'
-        : 'Full-universe scan complete · all ' + result.scannedCandidateCount + ' eligible candidates checked.')
+        : 'Full-universe quote ranking complete · all ' + result.scannedCandidateCount + ' selected top-mover/index candidates checked.')
       : 'Full-universe quote ranking complete · NO TRADE. All five slots remain BLOCKED because no candidate passed every direction, contract, fresh quote, candle and minimum 1:2 T2 reward/risk check.';
     // Mark the trading date only after the complete F&O quote universe was ranked and every selected top-mover/index candidate was checked.
     // Failed/incomplete scans remain eligible for the automatic session retry.
