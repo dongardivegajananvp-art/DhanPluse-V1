@@ -290,6 +290,20 @@ function setBackendStatus(message) {
   if (settings) settings.textContent = message;
 }
 
+async function fetchBackendHealthPath(path, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(BACKEND_URL + path, {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      signal: controller.signal
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 function setFyersStatus(message) {
   fyersAuthState = message;
   const rows = document.querySelectorAll('.statusrow');
@@ -356,19 +370,19 @@ async function refreshAuthoritativeFyersStatus() {
   if (authoritativeFyersStatusRefreshRunning || document.visibilityState === 'hidden') return;
   authoritativeFyersStatusRefreshRunning = true;
   try {
-    const response = await fetch(BACKEND_URL + '/api/status', {
-      headers: { Accept: 'application/json' }, cache: 'no-store'
-    });
+    const response = await fetchBackendHealthPath('/api/status');
     if (!response.ok) throw new Error('Authoritative FYERS status unavailable.');
     const status = await response.json().catch(() => ({}));
     if (!status || status.backend !== 'online') throw new Error('Backend status not confirmed online.');
     setBackendStatus('ONLINE');
     authoritativeFyersStatusUpdatedAt = Date.now();
     applyAuthoritativeFyersStatus(status);
-  } catch {
-    // Fail closed: never leave an old green/connected header when status cannot be verified.
+  } catch (error) {
+    // A failed/timeout status request must not leave the UI stuck on CHECKING
+    // or preserve stale green state. No market signal is enabled by this path.
     lastAuthoritativeFyersStatus = null;
     authoritativeFyersStatusUpdatedAt = 0;
+    setBackendStatus(error && error.name === 'AbortError' ? 'TIMEOUT' : 'UNREACHABLE');
     setStatus('LIVE DATA UNAVAILABLE');
     setFyersStatus('STATUS UNKNOWN');
     setConnection('Authoritative backend status unavailable · live signals blocked', true);
@@ -380,10 +394,7 @@ async function refreshAuthoritativeFyersStatus() {
 async function refreshSocketStatusDuringCooldown() {
   // Read only backend status; never probe FYERS REST quotes during cooldown.
   try {
-    const response = await fetch(BACKEND_URL + '/api/status', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store'
-    });
+    const response = await fetchBackendHealthPath('/api/status');
     if (!response.ok) return;
     const status = await response.json().catch(() => ({}));
     if (!status || status.backend !== 'online') return;
@@ -3410,7 +3421,7 @@ function checkAlerts(symbol, price) {
 async function testBackend() {
   setBackendStatus('CHECKING…');
   try {
-    const response = await fetch(BACKEND_URL + '/health', { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const response = await fetchBackendHealthPath('/health');
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.ok) throw new Error('Backend health check failed.');
     setBackendStatus('ONLINE');
@@ -3429,11 +3440,12 @@ async function testBackend() {
     logEvent('Backend health check succeeded.', 'info');
     showMessage('Backend is online. FYERS authentication and live quotes are checked separately.');
     return data;
-  } catch {
-    setBackendStatus('UNREACHABLE');
+  } catch (error) {
+    setBackendStatus(error && error.name === 'AbortError' ? 'TIMEOUT' : 'UNREACHABLE');
     setStatus('BACKEND UNAVAILABLE');
-    logEvent('Backend health check failed.', 'error');
-    showMessage('Backend test failed. Check Render status and CORS settings.', true);
+    const reason = error && error.name === 'AbortError' ? 'Backend health check timed out after 8 seconds.' : 'Backend health check failed: ' + String(error?.message || 'network or CORS error').slice(0, 120);
+    logEvent(reason, 'error');
+    showMessage(reason + ' Live signals remain blocked.', true);
     return null;
   }
 }
