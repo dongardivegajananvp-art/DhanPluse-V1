@@ -17,7 +17,7 @@ const TABLE_SQL = `
 export function createFyersDataApiCooldownStore({ databaseUrl } = {}) {
   const connectionString = String(databaseUrl || '').trim();
   const configured = Boolean(connectionString);
-  if (configured && !/^postgres(?:ql)?:\\/\\//i.test(connectionString)) {
+  if (configured && !(connectionString.startsWith('postgres://') || connectionString.startsWith('postgresql://'))) {
     throw new Error('DATABASE_URL must be a PostgreSQL connection URL.');
   }
   const pool = configured ? new Pool({
