@@ -7,7 +7,7 @@ test("NSE and MCX session clocks are evaluated independently in India time", () 
   assert.equal(beforeNseOpen.NSE.session, "SCHEDULED_CLOSED");
   assert.equal(beforeNseOpen.MCX.session, "SCHEDULED_OPEN");
   assert.equal(beforeNseOpen.NSE.localTime, "09:00");
-  assert.equal(beforeNseOpen.MCX.sessionHours, "09:00–23:55 IST (non-agri)");
+  assert.equal(beforeNseOpen.MCX.sessionHours, "09:00–23:30 IST (non-agri)");
 });
 
 test("both regular sessions are scheduled open during weekday overlap", () => {
@@ -22,11 +22,11 @@ test("NSE and MCX scheduled sessions close independently after their respective 
   assert.equal(status.MCX.session, "SCHEDULED_OPEN");
 });
 
-test("MCX non-agri close adjusts with US daylight saving", () => {
+test("MCX non-agri close remains 23:30 IST across seasonal dates", () => {
   const summer = getExchangeSessionWindows(new Date("2026-07-01T12:00:00.000Z"));
   const winter = getExchangeSessionWindows(new Date("2026-11-05T12:00:00.000Z"));
   assert.equal(summer.MCX.sessionHours, "09:00–23:30 IST (non-agri)");
-  assert.equal(winter.MCX.sessionHours, "09:00–23:55 IST (non-agri)");
+  assert.equal(winter.MCX.sessionHours, "09:00–23:30 IST (non-agri)");
 });
 
 test("weekends are scheduled closed for both exchanges", () => {
