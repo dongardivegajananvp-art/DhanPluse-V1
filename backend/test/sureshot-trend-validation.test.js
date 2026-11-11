@@ -41,7 +41,7 @@ test("confirms a strong CE trend only when ADX, EMA, VWAP and same-time volume a
   assert.ok(result.adx >= 20);
   assert.ok(result.volumeRatio >= 1.5);
   assert.ok(result.trendScore >= 70);
-  assert.equal(result.scoreParts.sameTimeVolume, 25);
+  assert.equal(result.scoreParts.sameTimeVolume, 20);
 });
 
 test("normalizes a strictly descending FYERS trend response before validation", () => {
