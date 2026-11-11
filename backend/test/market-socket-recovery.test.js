@@ -154,3 +154,19 @@ test("NSE silent-feed recovery uses exponential resubscribe backoff", () => {
   assert.equal(getMarketSocketReconnectDelay(3, 10_000, 120_000), 80_000);
   assert.equal(getMarketSocketReconnectDelay(4, 10_000, 120_000), 120_000);
 });
+
+
+test("NSE watchdog targets only stale symbols and preserves the strict freshness window", async () => {
+  const { getStaleNseSubscriptionSymbols } = await import("../src/market-socket-recovery.js");
+  const now = Date.parse("2026-11-11T08:00:10.000Z");
+  const symbols = ["NSE:NIFTY50-INDEX", "NSE:NIFTYBANK-INDEX"];
+  const ticks = new Map([
+    [symbols[0], { updatedAt: "2026-11-11T08:00:08.000Z" }],
+    [symbols[1], { updatedAt: "2026-11-11T08:00:00.000Z" }]
+  ]);
+  assert.deepEqual(getStaleNseSubscriptionSymbols({ symbols, ticks, now, freshnessMs: 10_000 }), [symbols[1]]);
+  assert.deepEqual(getStaleNseSubscriptionSymbols({ symbols, ticks: new Map(), now, connectedAt: now - 2_000, freshnessMs: 10_000 }), []);
+  assert.deepEqual(getStaleNseSubscriptionSymbols({ symbols, ticks: new Map(), now, connectedAt: now - 11_000, freshnessMs: 10_000 }), symbols);
+  ticks.set(symbols[0], { updatedAt: "2026-11-11T08:00:11.000Z" });
+  assert.deepEqual(getStaleNseSubscriptionSymbols({ symbols: [symbols[0]], ticks, now, freshnessMs: 10_000 }), [symbols[0]]);
+});
