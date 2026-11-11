@@ -25,7 +25,7 @@ test("Sureshot always renders five non-fabricated strike slots and adds Paper BU
   assert.match(html, /gvPaperBuyRow/);
   assert.match(html, /row\.paperPlanId/);
   assert.match(html, /BLOCKED/);
-  assert.match(html, /ALL_ELIGIBLE_CANDIDATES_CHECKED/);
+  assert.match(html, /ALL_TOP_MOVER_CANDIDATES_CHECKED/);
 });
 
 test("Paper BUY opens Position only after the server accepts a paper ledger write; no broker order route is called", async () => {
