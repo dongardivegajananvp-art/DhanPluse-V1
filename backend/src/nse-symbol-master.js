@@ -63,6 +63,8 @@ export function createNseSymbolMasterLoader({
       let stage = 'FETCH_NSE_SYMBOL_MASTERS';
       let foResponse;
       let cmResponse;
+      let foMaster = null;
+      let cmMaster = null;
       try {
         // Fetch both files together to bound network wait, then parse them
         // sequentially so two large JSON.parse operations never overlap.
@@ -91,19 +93,25 @@ export function createNseSymbolMasterLoader({
         }
 
         stage = 'PARSE_NSE_FO_MASTER';
-        const foMaster = await foResponse.json();
+        foMaster = await foResponse.json();
         if (!foMaster || typeof foMaster !== 'object' || Array.isArray(foMaster)) {
           throw new Error('FYERS NSE_FO symbol master format is invalid.');
         }
 
         stage = 'PARSE_NSE_CM_MASTER';
-        const cmMaster = await cmResponse.json();
+        cmMaster = await cmResponse.json();
         if (!cmMaster || typeof cmMaster !== 'object' || Array.isArray(cmMaster)) {
           throw new Error('FYERS NSE_CM symbol master format is invalid.');
         }
 
         stage = 'BUILD_VALIDATED_NSE_SNAPSHOT';
         const snapshot = build(foMaster, cmMaster);
+        // Drop the large raw masters before serializing the compact snapshot
+        // to PostgreSQL; otherwise the cache write can overlap their memory.
+        foMaster = null;
+        cmMaster = null;
+        foResponse = null;
+        cmResponse = null;
         if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
           throw new Error('FYERS NSE symbol master builder returned an invalid snapshot.');
         }
