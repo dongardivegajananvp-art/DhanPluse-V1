@@ -2517,6 +2517,9 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         error.mcxAudit = mcxAudit;
         throw error;
       }
+      // Rebuild the full quote rows outside the polling callback scope and revalidate
+      // them at the ranking boundary; callback-local rows are not accessible here.
+      const quoteRows = buildMcxSocketQuoteRows(universe.data, latestTicks);
       const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: universe.data.length, maxAgeMs: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS });
       mcxSureshotScanState = {
         id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
