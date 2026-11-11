@@ -5,13 +5,6 @@ function istParts(instant) {
   return Object.fromEntries(parts.map(part => [part.type, part.value]));
 }
 
-function isUsDaylightSaving(instant) {
-  const zone = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York", timeZoneName: "longOffset"
-  }).formatToParts(instant).find(part => part.type === "timeZoneName")?.value || "";
-  return zone.includes("-04:00");
-}
-
 /**
  * Clock-based NSE/MCX session windows only. Exchange holidays and special
  * sessions are deliberately not inferred; exchange-timestamped FYERS ticks
@@ -24,7 +17,7 @@ export function getExchangeSessionWindows(now = new Date()) {
   const weekday = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(local.weekday);
   const minute = Number(local.hour) * 60 + Number(local.minute);
   const nseOpen = weekday && minute >= 9 * 60 + 15 && minute < 15 * 60 + 30;
-  const mcxClose = isUsDaylightSaving(instant) ? 23 * 60 + 30 : 23 * 60 + 55;
+  const mcxClose = 23 * 60 + 30;
   const mcxOpen = weekday && minute >= 9 * 60 && minute < mcxClose;
   const base = {
     timezone: "Asia/Kolkata",
@@ -41,7 +34,7 @@ export function getExchangeSessionWindows(now = new Date()) {
     },
     MCX: {
       ...base, session: mcxOpen ? "SCHEDULED_OPEN" : "SCHEDULED_CLOSED",
-      sessionHours: "09:00–" + (mcxClose === 23 * 60 + 30 ? "23:30" : "23:55") + " IST (non-agri)",
+      sessionHours: "09:00–23:30 IST (non-agri)",
       note: "Regular MCX non-agri session clock only; holidays and special sessions are not checked."
     }
   };
