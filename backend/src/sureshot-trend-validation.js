@@ -61,7 +61,7 @@ function calculateAdx(rows, period = 14) {
  * ADX, relative volume, EMA slope/alignment and VWAP are scored rather than
  * each being an independent mandatory pass condition.
  */
-export function validateSureshotTrend({ candles, resolution = "5", now = Date.now(), minTrendScore = 55 }) {
+export function validateSureshotTrend({ candles, resolution = "5", now = Date.now(), minTrendScore = 45 }) {
   const minutes = Number(resolution);
   if (minutes !== 5 || !Array.isArray(candles)) return { ok: false, reason: "Sureshot trend validation requires FYERS 5-minute candles." };
   const ordered = normalizeFyersCandleOrder(candles);
