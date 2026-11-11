@@ -22,7 +22,7 @@ test('NSE and MCX Sureshot, candle and option-risk requests abort on a bounded t
   ]) assert.ok(html.includes(path), 'Missing bounded endpoint ' + path);
   assert.match(html, /scanRequestTimeoutMs = isBackend && \[/);
   assert.match(html, /\? 120000 : 0/);
-  assert.match(html, /finally \(\) => \{/);
+  assert.match(html, /\.finally\(\(\) => \{/);
   assert.match(html, /window\.clearTimeout\(timeoutId\)/);
 });
 
