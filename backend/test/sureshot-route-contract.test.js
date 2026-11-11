@@ -16,7 +16,7 @@ test("Sureshot verifies the complete F&O quote universe and option-checks bounde
   const route = server.slice(start, end);
   assert.match(route, /if \(!nseRegularSessionNow\(\)\)/);
   assert.match(route, /isCompleteFreshFnoQuoteSnapshot\(stockQuoteCache\.data, expectedQuoteSymbols/);
-  assert.match(route, /loadVerifiedFnoStockQuotes\(\{ priority: "sureshot" \}\)/);
+  assert.match(route, /loadVerifiedFnoStockQuotes\(\{ priority: "sureshot", stage: scanStage \}\)/);
   assert.match(route, /buildVerifiedSureshotShortlist\(/);
   assert.match(route, /limit: SURESHOT_UNIVERSE_SCAN_LIMIT/);
   assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
