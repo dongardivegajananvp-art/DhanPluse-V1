@@ -7,7 +7,7 @@ const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8"
 const indexHtml = await readFile(new URL("../../site/index.html", import.meta.url), "utf8");
 const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
 
-test("Sureshot backend verifies every eligible F&O and individually fresh index candidate in five-item batches", () => {
+test("Sureshot ranks the full F&O quote universe then verifies top 10 gainers, top 10 losers and individually fresh indices in five-item batches", () => {
   assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 250/);
   assert.match(server, /const SURESHOT_BATCH_SIZE = 5/);
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
@@ -170,13 +170,13 @@ test("MCX Sureshot audits and verifies every eligible future in resumable batche
   assert.match(route, /ALL_ELIGIBLE_MCX_CANDIDATES_CHECKED/);
   assert.match(route, /fullUniverseAuditCount: fullUniverseAudit\.length/);
   assert.match(route, /partialPlansDiscarded: !resumableScan/);
-  assert.match(app, /MCX TOP MOVER VERIFICATION RESULTS/);
-  assert.match(app, /MCX TOP 5 VERIFIED SETUPS/);
+  assert.match(app, /MCX FULL UNIVERSE AUDIT RESULTS/);
+  assert.match(app, /MCX TOP 3 VERIFIED SETUPS/);
   assert.match(app, /while \(attempts\+\+ < 100\)/);
   assert.match(app, /payload\.scanPaused === true/);
   assert.match(app, /row\.optionPremium/);
-  assert.match(indexHtml, /MCX TOP MOVER VERIFICATION RESULTS/);
-  assert.match(indexHtml, /MCX TOP 5 VERIFIED SETUPS/);
+  assert.match(indexHtml, /MCX FULL UNIVERSE AUDIT RESULTS/);
+  assert.match(indexHtml, /MCX TOP 3 VERIFIED SETUPS/);
 });
 
 test("NSE and MCX Sureshot scan gates are independent", () => {
