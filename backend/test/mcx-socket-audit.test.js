@@ -1,4 +1,5 @@
 import test from "node:test";
+import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { buildMcxSocketQuoteRows } from "../src/mcx-socket-audit.js";
 import { buildVerifiedMcxAudit } from "../src/mcx-sureshot.js";
@@ -100,4 +101,10 @@ test("MCX socket settle window times out without relaxing freshness", async () =
   assert.equal(result.timedOut, true);
   assert.equal(result.waitedMs, 2_000);
   assert.equal(result.audit.complete, false);
+});
+
+
+test("MCX server route imports the socket audit settle helper it invokes", async () => {
+  const serverSource = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  assert.match(serverSource, /import\s*\{[^}]*\bwaitForCompleteMcxSocketAudit\b[^}]*\}\s*from\s*[\x27"]\.\/mcx-socket-audit\.js[\x27"]/);
 });
