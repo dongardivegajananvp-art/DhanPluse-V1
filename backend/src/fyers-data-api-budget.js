@@ -17,8 +17,10 @@ export function createFyersDataApiBudget({
   fetchImpl = fetch,
   now = () => Date.now(),
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  maxRequestsPerMinute = 15,
-  minIntervalMs = 4000,
+  // Conservative per-process ceiling: 6 Data API calls/minute, at least 10s apart.
+  // This lowers quote/history burst pressure while preserving serialized reads.
+  maxRequestsPerMinute = 6,
+  minIntervalMs = 10_000,
   windowMs = 60_000,
   historyCacheMs = 5 * 60_000,
   optionChainCacheMs = 60_000,
