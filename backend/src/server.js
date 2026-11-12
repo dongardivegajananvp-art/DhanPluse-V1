@@ -2292,6 +2292,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       Date.now() - sureshotScanState.createdAt > SURESHOT_SCAN_TTL_MS ||
       offset !== sureshotScanState.nextOffset)) {
     sureshotScanState = null;
+    await clearSureshotScanState();
     return res.status(409).json({ ok: false, scanComplete: false, error: "Scan cursor expired or out of sequence. Start a fresh scan." });
   }
   // If the app was backgrounded or reloaded between batches, resume the
@@ -2301,6 +2302,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     offset = sureshotScanState.nextOffset;
   } else if (!scanId && sureshotScanState) {
     sureshotScanState = null;
+    await clearSureshotScanState();
   }
   nseSureshotAutoPlansInFlight = true;
   sureshotAutoPlansInFlight = true;
@@ -2736,6 +2738,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       bestSetup: topThreeSetups[0] || null, results,
       notice: "The complete eligible FYERS NSE F&O quote universe was checked. Final ranking uses a newly completed full-universe quote snapshot; each selected Top 3 candidate then receives a fresh underlying quote, fresh option quote and final completed-candle/risk validation. Only these fully revalidated plans receive Paper Mode IDs. FYERS pacing/cooldown remain enforced; no orders are placed." };
     sureshotScanState = null;
+    await clearSureshotScanState();
     return res.json(payload);
   } catch (error) {
     const status = Number(error.statusCode) || 503;
@@ -2746,7 +2749,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
     // committed; the in-progress batch is not appended until every candidate is
     // checked, so resuming re-runs that batch safely after Retry-After.
     const resumableScan = status === 429 && Boolean(sureshotScanState && sureshotScanState.id);
-    if (!resumableScan) sureshotScanState = null;
+    if (!resumableScan) { sureshotScanState = null; await clearSureshotScanState(); }
     return res.status(status).json({ ok: false, scanComplete: false, signalsAllowed: false, orderPlacement: "disabled", stage: scanStage,
       error: status === 429 ? "FYERS API cooldown/rate limit paused the full-universe scan; its server cursor is retained for a safe resume."
         : status === 401 ? "FYERS session expired; reconnect and rerun the scan."
