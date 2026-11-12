@@ -1,5 +1,18 @@
 # GV2VPD implementation status — Phase 1
 
+## Current requirement-aligned behavior (audit branch)
+
+The following describes the current implementation on branch `audit/gv2vpd-requirement-alignment`; older entries below are a historical change log and may describe superseded behavior.
+
+- NSE Sureshot checks every eligible fresh NSE F&O equity plus individually fresh NIFTY, BANK NIFTY and SENSEX rows. MCX Sureshot checks the complete active official MCX futures universe. Both revalidate every initial pass before Top 3 publication.
+- Option-chain data supplies contract identity only. The nearest listed strike in the nearest expiry is selected; live premium and completed option candles are fetched independently.
+- Direction requires a completed-candle supply/demand breakout aligned with a 20-period DMA/SMA crossover on 5-minute FYERS candles.
+- Entry is the fresh option ask. Stop is the 20-candle completed option swing low minus 0.35 x ATR(14). T1 is 2R; T2 is 3R. The former fixed 30% SL / 1.5x / 2.5x model and ₹30–₹150 premium filter have been retired.
+- Sureshot candle-history reads bypass the five-minute cache. Final quote requests are batched at no more than 50 symbols and evaluated immediately. FYERS 15/minute, four-second pacing and one-hour Cloudflare 1015 cooldown remain unchanged.
+- Paper BUY revalidates underlying direction, option candles and the fresh option quote before writing to PostgreSQL. Paper capital defaults to ₹5,000; per-trade risk cap is 1% (₹50), daily loss cap is 2% (₹100), and premium outlay cannot exceed configured capital. MCX Paper BUY uses the MCX session window; NSE/BSE Paper BUY uses the NSE session window. Live order placement remains disabled.
+- The production frontend now loads one canonical external `app.js` and `style.css`; the PWA shell precaches both versioned assets.
+
+
 This branch is a code implementation proposal for the existing DhanPluse-V1 repository. It does not merge, deploy, restart Render, change production environment variables, or place broker orders.
 
 ## Implemented in this branch
