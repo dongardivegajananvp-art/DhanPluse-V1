@@ -73,3 +73,16 @@ test("NSE and MCX Sureshot scans use independent in-flight locks", async () => {
   assert.ok(mcxRoute.includes("mcxSureshotAutoPlansInFlight = true;"));
   assert.ok(mcxRoute.includes("mcxSureshotAutoPlansInFlight = false;"));
 });
+
+test("protected API returns retryable 503 during PostgreSQL FYERS auth restoration, not destructive 401", async () => {
+  const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  const start = source.indexOf("function requireDashboardSession");
+  const end = source.indexOf("app.use('/api/market'", start);
+  assert.ok(start >= 0 && end > start);
+  const guard = source.slice(start, end);
+  assert.match(guard, /fyersTokenStore\.configured && !fyersTokenStoreReady/);
+  assert.match(guard, /res\.status\(503\)/);
+  assert.match(guard, /authState: 'RESTORING'/);
+  assert.ok(guard.indexOf("fyersTokenStore.configured && !fyersTokenStoreReady") <
+    guard.indexOf("const header = String(req.get('authorization')"));
+});
