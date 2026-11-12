@@ -54,7 +54,7 @@ test("normalizes strictly descending candle responses before crossover analysis"
 
 test("does not create a signal when the latest candle has no fresh DMA20 cross", () => {
   const rows = candlesForCross("CE");
-  rows[21] = [rows[21][0], 100, 101, 99, 100, 100];
+  rows[21] = [rows[21][0], 100, 101, 99, 99.9, 100];
   const result = validateSureshotTrend({ candles: rows, resolution: "5", now });
   assert.equal(result.ok, false);
   assert.match(result.reason, /No fresh DMA20 crossover/i);
