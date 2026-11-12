@@ -19,7 +19,6 @@ if (html.includes('gv2vpdAuthGate') ||
     html.includes('/api/app-auth/')) {
   throw new Error('A duplicate GV2VPD OTP App Login must not replace the existing FYERS login.');
 }
-if (!html.includes('id="backendDiagnostic"') || !app.includes("setBackendDiagnostic(message, isError = false)") || !app.includes("GET /api/status HTTP ")) throw new Error('Dashboard must expose exact backend HTTP/network failures instead of hiding them.');
     !app.includes("headers.set('Authorization', 'Bearer ' + requestSession)") ||
     !app.includes('Dashboard session missing or expired')) {
   throw new Error('The existing FYERS dashboard-session authentication flow must remain intact.');
@@ -94,6 +93,9 @@ if (!sw.includes('gv2vpd-shell-v3-three-tab-app') ||
   throw new Error('GV2VPD service-worker cache shell is incomplete.');
 }
 if (!app.includes("id=\\"backendDiagnostic\\"") || !app.includes("setBackendDiagnostic(message, isError = false)") || !app.includes("GET /api/status HTTP ")) throw new Error('Dashboard must expose exact backend HTTP/network failures instead of hiding them.');
+if (!html.includes('id="backendDiagnostic"') || !app.includes("setBackendDiagnostic(message, isError = false)") || !app.includes("GET /api/status HTTP ")) {
+  throw new Error('Dashboard must expose exact backend HTTP/network failures instead of hiding them.');
+}
 console.log('PASS: exactly three tabs; Home is default; Sureshot scanner preserved; broker and Paper positions are separated.');
 console.log('PASS: Paper BUY is Dashboard-Session-bound, server-plan-bound and fresh-FYERS-quote-verified; automatic exits are quote-monitored.');
 console.log('PASS: existing FYERS OAuth/dashboard-session login is retained; no duplicate OTP login gate exists.');
