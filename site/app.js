@@ -1664,7 +1664,7 @@ async function loadSureshotStockBoard() {
   if (currentTab !== 'Sureshot CE/PE') return;
   const button = document.querySelector('#refreshSureshotStockBoardBtn');
   const host = document.querySelector('#sureshotStockBoard');
-  if (!host || (button && button.disabled)) return;
+  if (!host || (button && button.disabled)) return false;
   if (button) button.disabled = true;
   host.innerHTML = '<div class="chart-empty">Loading official FYERS stock universe and quote snapshot…</div>';
   try {
@@ -2211,14 +2211,14 @@ async function loadMcxFuturesIntoSureshotSelect() {
 
 let mcxSureshotUniverseScanRunning = false;
 async function loadMcxSureshotUniverseShortlist() {
-  if (currentTab !== 'Sureshot CE/PE' || mcxSureshotUniverseScanRunning) return;
+  if (currentTab !== 'Sureshot CE/PE' || mcxSureshotUniverseScanRunning) return false;
   const button = document.querySelector('#scanMcxSureshotUniverseBtn');
   const host = document.querySelector('#mcxSureshotUniverseResults');
   const status = document.querySelector('#setupStatus');
   if (!host || (button && button.disabled)) return;
   if (!localStorage.getItem(DASHBOARD_SESSION_KEY)) {
     if (status) status.textContent = 'Connect FYERS first. MCX scan requires a valid broker session and fresh MCX exchange ticks.';
-    return;
+    return false;
   }
   mcxSureshotUniverseScanRunning = true;
   if (button) button.disabled = true;
@@ -2258,6 +2258,7 @@ async function loadMcxSureshotUniverseShortlist() {
     let offset = 0;
     let result = {};
     let responseOk = false;
+    let scanComplete = false;
     let attempts = 0;
     while (attempts++ < 100) {
       const url = new URL(BACKEND_URL + '/api/market/mcx-sureshot-auto-plans');
@@ -2290,6 +2291,7 @@ async function loadMcxSureshotUniverseShortlist() {
       }
       result = payload;
       responseOk = response.ok;
+      scanComplete = response.ok && payload.ok === true && payload.scanComplete === true;
       break;
     }
     if (attempts > 100) throw new Error('MCX scan exceeded its safe resume limit. No partial plans were published.');
@@ -2300,7 +2302,7 @@ async function loadMcxSureshotUniverseShortlist() {
         '</p><p>Partial plans are discarded. Audit findings remain visible; no candidate is promoted from incomplete data.</p></div>' + auditMarkup;
       if (status) status.textContent = 'MCX audit incomplete · NO TRADE · ' + Number(result.fullUniverseAuditCount || 0) + ' audit rows returned. Orders remain disabled.';
       logEvent('MCX full-universe audit incomplete; all partial plans discarded.', 'warn');
-      return;
+      return false;
     }
     const verifiedResults = (Array.isArray(result.topThreeSetups) ? result.topThreeSetups : result.results.filter(item =>
       item && item.status === 'VERIFIED SETUP' && item.plan && item.plan.contract && item.plan.quote && item.plan.risk && Number(item.plan.risk.rr) >= 2
@@ -2317,11 +2319,13 @@ async function loadMcxSureshotUniverseShortlist() {
     host.innerHTML = topMarkup + auditMarkup;
     if (status) status.textContent = 'MCX full-universe scan complete · ' + verifiedResults.length + ' verified Top 3 slot(s) displayed. All audit rows are available below. Orders remain disabled.';
     logEvent('MCX full-universe audit completed: ' + Number(result.fullUniverseAuditCount) + ' futures audited; ' + verifiedResults.length + ' Top 3 setup(s) verified.', 'info');
+    return scanComplete;
   } catch (error) {
     host.innerHTML = '<div class="chart-empty"><b>MCX NO TRADE — scan blocked.</b><p>' + escapeHtml(error.message || 'Verified MCX data unavailable.') +
       '</p><p>Partial results are discarded. The scan remains blocked until complete, fresh exchange-timestamped FYERS data returns.</p></div>';
     if (status) status.textContent = 'MCX scan blocked · no partial plans were displayed.';
     logEvent('MCX Sureshot scan blocked: ' + (error.message || 'unknown error'), 'warn');
+    return false;
   } finally {
     mcxSureshotUniverseScanRunning = false;
     if (button) button.disabled = false;
@@ -3200,11 +3204,27 @@ function render(tab) {
         updateExchangeLiveSwitches(status);
         if (currentTab !== 'Sureshot CE/PE' || nseSureshotScanRunning || mcxSureshotScanRunning || !isMcxMarketSessionOpen()) return;
         const today = indiaTradingDateKey();
-        let attempted = '';
-        try { attempted = localStorage.getItem('dhanpulse_mcx_sureshot_scan_attempt_day') || ''; } catch {}
-        if (attempted === today) return;
-        try { localStorage.setItem('dhanpulse_mcx_sureshot_scan_attempt_day', today); } catch {}
-        void loadMcxSureshotUniverseShortlist();
+        const completedKey = 'dhanpulse_mcx_sureshot_scan_complete_day';
+        const retryKey = 'dhanpulse_mcx_sureshot_scan_retry_at';
+        let completed = '', retryAt = 0;
+        try {
+          completed = localStorage.getItem(completedKey) || '';
+          retryAt = Number(localStorage.getItem(retryKey)) || 0;
+        } catch {}
+        if (completed === today || retryAt > Date.now()) return;
+        // Failed/incomplete attempts must not lock MCX out for the rest of the day.
+        // Retry only after a bounded backoff; mark the day complete only after the
+        // backend returns scanComplete=true for the full universe.
+        try { localStorage.setItem(retryKey, String(Date.now() + 5 * 60 * 1000)); } catch {}
+        const finished = await loadMcxSureshotUniverseShortlist();
+        if (finished === true) {
+          try {
+            localStorage.setItem(completedKey, today);
+            localStorage.removeItem(retryKey);
+          } catch {}
+        } else {
+          try { localStorage.setItem(retryKey, String(Date.now() + 5 * 60 * 1000)); } catch {}
+        }
       } catch {
         // Missing status is never treated as a live MCX feed.
       } finally {
