@@ -87,8 +87,9 @@ jobs:
           grep -q "GV2VPD — FYERS Workstation" <<< "$manifest"
           icon="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}gv2vpd-icon.svg?deploy_smoke=$(date +%s)")"
           grep -q "<svg" <<< "$icon"
-          grep -q "Paper Mode ledger" <<< "$html"
-          grep -q "Live BUY remains disabled" <<< "$html"
+          app_js="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}app.js?deploy_smoke=$(date +%s)")"
+          grep -q "Paper Mode ledger" <<< "$app_js"
+          grep -q "Live BUY remains disabled" <<< "$app_js"
           echo "PASS: ${app_url} serves GV2VPD Home/Sureshot/Position, PWA manifest/icon, Paper Mode, and read-only safety labels."
       - name: GV2VPD desktop and mobile browser smoke on published Pages URL
         env:
