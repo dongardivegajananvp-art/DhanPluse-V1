@@ -122,7 +122,7 @@ test("frontend records one automatic attempt per session day and marks completio
   assert.match(loader.slice(catchAt), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
   assert.match(trigger, /SURESHOT_AUTO_SCAN_RETRY_KEY/);
   const authStart = indexHtml.indexOf("localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken)");
-  const authEnd = indexHtml.indexOf("authExchangeInProgress = false", authStart);
+  const authEnd = indexHtml.indexOf("} catch (error)", authStart);
   const authSource = indexHtml.slice(authStart, authEnd);
   assert.match(authSource, /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY\)/);
   assert.match(authSource, /maybeStartAutomaticSureshotScan\(\)/, "successful FYERS auth starts the scan even when Dashboard is active");
