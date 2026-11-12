@@ -186,7 +186,6 @@ export function buildVerifiedSureshotTradePlan({
       latestCandleAt: direction.latestCandleAt,
       candleAgeSeconds: direction.candleAgeSeconds,
       completedCandleCount: direction.completedCandleCount,
-      ...(direction.trendMetrics && typeof direction.trendMetrics === "object" ? { trendMetrics: direction.trendMetrics } : {})
     },
     contract,
     quote: {
