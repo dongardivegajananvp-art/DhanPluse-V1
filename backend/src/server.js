@@ -1952,10 +1952,13 @@ function sendFyersDataApiCooldown(res, extra = {}) {
 async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } = {}) {
   const master = await getNseFnoEquityUniverse();
   const symbols = master.data.map(item => item.symbol);
-  const now = Date.now();
   const data = [];
   const missingSymbols = [];
   // Sequential batches with a small pause avoid a burst of parallel quote requests.
+  // Validate each batch against its own receive time; a single scan-start clock
+  // would incorrectly classify later exchange timestamps as future-dated during
+  // a multi-minute full-universe collection. The complete snapshot is checked
+  // again after the final batch to ensure early rows have not aged out.
   for (let offset = 0; offset < symbols.length; offset += STOCK_QUOTE_BATCH_SIZE) {
     const batch = symbols.slice(offset, offset + STOCK_QUOTE_BATCH_SIZE);
     const url = new URL("https://api-t1.fyers.in/data/quotes");
@@ -1986,6 +1989,7 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
       error.statusCode = 502;
       throw error;
     }
+    const quoteValidationNow = Date.now();
     const returned = new Set();
     const duplicateSymbols = new Set();
     const unexpectedSymbols = new Set();
@@ -2001,7 +2005,7 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
       const parsedTimestamp = parseFyersQuoteTimestamp(item);
       const stamp = parsedTimestamp?.timestampMs ?? 0;
       if (Number.isFinite(lp) && lp > 0 && Number.isFinite(chp) &&
-          stamp > 0 && stamp <= now + 5000 && now - stamp <= 30000) {
+          stamp > 0 && stamp <= quoteValidationNow + 5000 && quoteValidationNow - stamp <= 30000) {
         data.push({ n: item.n, v: { lp, ch: Number.isFinite(ch) ? ch : null, chp, tt: Math.floor(stamp / 1000) }, verified: true });
       }
     }
