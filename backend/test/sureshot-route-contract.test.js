@@ -84,20 +84,18 @@ test("frontend automatic NSE Sureshot scan starts app-wide without requiring the
   const helperEnd = app.indexOf("async function performSureshotSetup", helperStart);
   assert.ok(helperStart >= 0 && helperEnd > helperStart);
   const helper = app.slice(helperStart, helperEnd);
-  assert.doesNotMatch(helper, /currentTab/);
-  assert.match(helper, /!isRegularMarketSession\\(\\)/);
-  assert.match(helper, /DASHBOARD_SESSION_KEY/);
-  assert.match(helper, /SURESHOT_AUTO_SCAN_DAY_KEY/);
-  assert.match(helper, /SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
-  assert.match(helper, /SURESHOT_AUTO_SCAN_RETRY_KEY/);
-  assert.match(helper, /loadSureshotUniverseShortlist\\(\\{ automatic: true \\}\\)/);
-  assert.match(app, /maybeStartAutomaticSureshotScan\\(\\);\\s*window\\.setInterval\\(maybeStartAutomaticSureshotScan, 30000\\)/);
+  assert.ok(!helper.includes("currentTab"));
+  for (const token of ["isRegularMarketSession()", "DASHBOARD_SESSION_KEY", "SURESHOT_AUTO_SCAN_DAY_KEY",
+    "SURESHOT_AUTO_SCAN_ATTEMPT_KEY", "SURESHOT_AUTO_SCAN_RETRY_KEY",
+    "loadSureshotUniverseShortlist({ automatic: true })"]) assert.ok(helper.includes(token), token);
+  assert.ok(app.includes("maybeStartAutomaticSureshotScan();"));
+  assert.ok(app.includes("window.setInterval(maybeStartAutomaticSureshotScan, 30000)"));
   const loader = app.slice(app.indexOf("async function loadSureshotUniverseShortlist"), helperStart);
-  assert.match(loader, /const automatic = options\\.automatic === true/);
-  assert.match(loader, /!automatic && currentTab !== 'Sureshot CE\\/PE'/);
-  assert.match(loader, /visibleHost \\|\\| document\\.createElement\\('div'\\)/);
-  assert.match(loader, /sureshotUniverseScanHtml = host\\.innerHTML/);
-  assert.match(loader, /currentHost\\.innerHTML = sureshotUniverseScanHtml/);
+  for (const token of ["const automatic = options.automatic === true",
+    "!automatic && currentTab !== 'Sureshot CE/PE'",
+    "visibleHost || document.createElement('div')",
+    "sureshotUniverseScanHtml = host.innerHTML",
+    "currentHost.innerHTML = sureshotUniverseScanHtml"]) assert.ok(loader.includes(token), token);
 });
 
 test("frontend records one automatic attempt per session day and marks completion only after every eligible candidate passes", () => {
