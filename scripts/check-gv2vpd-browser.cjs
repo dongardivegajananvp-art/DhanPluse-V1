@@ -6,7 +6,7 @@ const backendUrl = process.env.GV2VPD_BACKEND_URL || 'https://dhanpulse-clean-te
 const backendOrigin = new URL(backendUrl).origin;
 if (!previewUrl) throw new Error('GV2VPD_PREVIEW_URL is required.');
 
-async function mockTestBackend(page) {
+async function mockTestBackend(page, socketState = { connected: false, feed: 'DISCONNECTED' }) {
   const backendOrigins = new Set([
     backendOrigin,
     'https://dhanpluse-v1.onrender.com',
@@ -28,10 +28,10 @@ async function mockTestBackend(page) {
         backend: 'online',
         fyers: 'connected',
         liveData: 'waiting-for-live-ticks',
-        marketSocketConnected: false,
+        marketSocketConnected: socketState.connected,
         orderPlacement: 'disabled',
         exchangeLiveStatus: {
-          NSE: { session: 'SCHEDULED_OPEN', feed: 'RECONNECTING' },
+          NSE: { session: 'SCHEDULED_OPEN', feed: socketState.feed },
           MCX: { session: 'SCHEDULED_CLOSED', feed: 'WAITING' }
         },
         fyersDataApi: { cooldownActive: false, retryAfterSeconds: 0 }
@@ -46,7 +46,7 @@ async function verifyDesktop(browser) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await mockTestBackend(page);
+  await mockTestBackend(page, { connected: true, feed: 'RECONNECTING' });
   const response = await page.goto(previewUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   assert.ok(response && response.ok(), 'PR preview /site/ page must return HTTP success');
   await page.waitForSelector('#nav button[data-tab]', { timeout: 10000 });
@@ -67,9 +67,11 @@ async function verifyDesktop(browser) {
 
   await page.locator('#nav button[data-tab="Home"]').click();
   assert.equal(await page.locator('#nav button[data-tab="Home"]').getAttribute('class').then(v => v.includes('active')), true);
-  await page.waitForFunction(() => document.querySelector('#dashFeed')?.textContent?.trim() === 'DISCONNECTED · BLOCKED', { timeout: 10000 });
-  assert.equal(await page.locator('#dashFeed').innerText(), 'DISCONNECTED · BLOCKED',
-    'Dashboard connection monitor must use authoritative backend socket status, not cached browser quotes');
+  await page.waitForFunction(() => document.querySelector('#dashFeed')?.textContent?.trim() === 'RECOVERING · BLOCKED', { timeout: 10000 });
+  assert.equal(await page.locator('#dashFeed').innerText(), 'RECOVERING · BLOCKED',
+    'Dashboard must distinguish a connected transport recovering NSE ticks from a true socket disconnect');
+  assert.match(await page.locator('#connectionValue').innerText(), /WebSocket connected · waiting for fresh NSE ticks after subscription recovery/i,
+    'Top connection status must not call a connected transport disconnected during subscription recovery');
   assert.match(await page.locator('body').innerText(), /Order placement/i);
   assert.match(await page.locator('body').innerText(), /DISABLED/i);
   assert.deepEqual(errors, [], 'desktop browser must have no uncaught JavaScript errors');
@@ -86,13 +88,15 @@ async function verifyMobile(browser) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  await mockTestBackend(page);
+  await mockTestBackend(page, { connected: false, feed: 'DISCONNECTED' });
   const response = await page.goto(previewUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   assert.ok(response && response.ok(), 'mobile PR preview must return HTTP success');
   const tabs = page.locator('#nav button[data-tab]');
   assert.equal(await tabs.count(), 3, 'mobile viewport must render exactly three tabs');
   await page.locator('#nav button[data-tab="Sureshot"]').tap();
   await page.waitForFunction(() => document.querySelector('#pageTitle')?.textContent?.trim() === 'Sureshot CE/PE');
+  await page.locator('#nav button[data-tab="Home"]').tap();
+  await page.waitForFunction(() => document.querySelector('#dashFeed')?.textContent?.trim() === 'DISCONNECTED · BLOCKED', { timeout: 10000 });
   await page.locator('#nav button[data-tab="Position"]').tap();
   await page.waitForSelector('#gvPaperLedger', { timeout: 5000 });
   assert.deepEqual(errors, [], 'mobile browser must have no uncaught JavaScript errors');
