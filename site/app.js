@@ -98,6 +98,7 @@ let sureshotRefreshPending = false;
 let sureshotAutoScanTimer = null;
 let connectionDiagnosticsTimer = null;
 let sureshotUniverseScanRunning = false;
+let sureshotUniverseScanHtml = '';
 let mcxSureshotUniverseScanRunning = false;
 const SURESHOT_AUTO_SCAN_DAY_KEY = 'dhanpulse-sureshot-auto-scan-day-v1';
 const SURESHOT_AUTO_SCAN_ATTEMPT_KEY = 'dhanpulse-sureshot-auto-scan-attempt-v1';
@@ -1742,8 +1743,8 @@ async function loadSureshotStockBoard() {
 }
 
 async function loadSureshotUniverseShortlist(options = {}) {
-  if (currentTab !== 'Sureshot CE/PE' || sureshotUniverseScanRunning) return;
   const automatic = options.automatic === true;
+  if ((!automatic && currentTab !== 'Sureshot CE/PE') || sureshotUniverseScanRunning) return;
   if (automatic && !isRegularMarketSession()) return;
   if (!localStorage.getItem(DASHBOARD_SESSION_KEY)) {
     const status = document.querySelector('#setupStatus');
@@ -1751,9 +1752,10 @@ async function loadSureshotUniverseShortlist(options = {}) {
     return;
   }
   const button = document.querySelector('#scanSureshotUniverseBtn');
-  const host = document.querySelector('#sureshotUniverseResults');
+  const visibleHost = document.querySelector('#sureshotUniverseResults');
+  const host = visibleHost || document.createElement('div');
   const status = document.querySelector('#setupStatus');
-  if (!host || (button && button.disabled)) return;
+  if ((button && button.disabled) || (!visibleHost && !automatic)) return;
   // Keep the 30-second session timer from duplicating an active scan. Failed
   // automatic scans are rescheduled using the provider Retry-After, not locked
   // out for the rest of the trading day and not retried in a tight loop.
@@ -1901,11 +1903,27 @@ async function loadSureshotUniverseShortlist(options = {}) {
     }
     if (status) status.textContent = 'Full-universe scan withheld · ' + (error.message || 'FYERS verification failed.');
   } finally {
+    sureshotUniverseScanHtml = host.innerHTML;
+    const currentHost = document.querySelector('#sureshotUniverseResults');
+    if (currentHost && currentHost !== host) currentHost.innerHTML = sureshotUniverseScanHtml;
     sureshotUniverseScanRunning = false;
     if (button) button.disabled = false;
   }
 }
-// Auto-start one full-universe scan per India trading date when this tab is active and FYERS is authenticated.
+// Auto-start once per India trading date whenever the app is open, not only when Sureshot is the active tab.
+function maybeStartAutomaticSureshotScan() {
+  if (!isRegularMarketSession() || sureshotUniverseScanRunning ||
+      !localStorage.getItem(DASHBOARD_SESSION_KEY)) return;
+  const today = indiaTradingDateKey();
+  let completedToday = '', attemptedToday = sureshotAutoScanAttemptedToday, retryAt = 0;
+  try {
+    completedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_DAY_KEY) || '';
+    attemptedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY) || attemptedToday;
+    retryAt = Number(localStorage.getItem(SURESHOT_AUTO_SCAN_RETRY_KEY)) || 0;
+  } catch {}
+  if (completedToday === today || attemptedToday === today || retryAt > Date.now()) return;
+  void loadSureshotUniverseShortlist({ automatic: true });
+}
 async function performSureshotSetup() {
   if(currentTab!=='Sureshot CE/PE')return;
   const status=document.querySelector('#setupStatus'),cards=document.querySelector('#setupCards'),symbolEl=document.querySelector('#setupSymbol'),resolutionEl=document.querySelector('#setupResolution'),chart=document.querySelector('#setupZoneChart'),summary=document.querySelector('#setupZoneSummary');
@@ -2846,7 +2864,11 @@ function render(tab) {
   else if (tab === 'NIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[0].symbol);
   else if (tab === 'BANKNIFTY') featureContent.innerHTML = focusedQuoteMarkup(SYMBOLS[1].symbol);
   else if (tab === 'Watchlist') featureContent.innerHTML = watchlistMarkup();
-  else if (tab === 'Sureshot CE/PE') featureContent.innerHTML = advancedScannerMarkup(tab);
+  else if (tab === 'Sureshot CE/PE') {
+    featureContent.innerHTML = advancedScannerMarkup(tab);
+    const cachedScan = document.querySelector('#sureshotUniverseResults');
+    if (cachedScan && sureshotUniverseScanHtml) cachedScan.innerHTML = sureshotUniverseScanHtml;
+  }
   else if (tab === 'FYERS Connection') featureContent.innerHTML = settingsMarkup();
   else if (['Breakout Scanner','Momentum Scanner','Zero-to-Hero'].includes(tab)) featureContent.innerHTML = advancedScannerMarkup(tab);
   else if (tab === 'FII/DII Flow') featureContent.innerHTML = advancedScannerMarkup(tab);
@@ -3733,6 +3755,9 @@ document.querySelector('#settingsBtn')?.addEventListener('click', () => render('
 // Preserve user-created watchlists, alerts and journal entries across reloads.
 render('Home');
 restoreLastKnownIndexQuotes();
+// Session/time-only scheduler; the scan itself remains guarded by NSE session and FYERS auth.
+maybeStartAutomaticSureshotScan();
+window.setInterval(maybeStartAutomaticSureshotScan, 30000);
 testBackend();
 void refreshAuthoritativeFyersStatus();
 window.setInterval(() => { void refreshAuthoritativeFyersStatus(); }, 5000);
