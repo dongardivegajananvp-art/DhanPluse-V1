@@ -2652,7 +2652,6 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       }
     }
     const verified = topThreeSetups;
-    const topThreeSetups = verified.slice(0, 3);
     const sessionToken = /^Bearer ([a-f0-9]{64})$/.exec(String(req.get('authorization') || ''))?.[1] || '';
     for (const item of topThreeSetups) {
       const tradePlan = item.plan;
