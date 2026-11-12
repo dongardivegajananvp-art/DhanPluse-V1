@@ -19,6 +19,7 @@ if (html.includes('gv2vpdAuthGate') ||
     html.includes('/api/app-auth/')) {
   throw new Error('A duplicate GV2VPD OTP App Login must not replace the existing FYERS login.');
 }
+if (!app.includes("headers.set('Authorization', 'Bearer ' + requestSession)") ||
     !app.includes("headers.set('Authorization', 'Bearer ' + requestSession)") ||
     !app.includes('Dashboard session missing or expired')) {
   throw new Error('The existing FYERS dashboard-session authentication flow must remain intact.');
