@@ -2,18 +2,18 @@ import fs from 'node:fs';
 
 const html = fs.readFileSync(new URL('../site/index.html', import.meta.url), 'utf8');
 const app = fs.readFileSync(new URL('../site/app.js', import.meta.url), 'utf8');
-if (!html.includes('<script src="./app.js?v=gv2vpd-20261112-audit"></script>')) {
+if (!html.includes('<script src="./app.js?v=gv2vpd-20261112-24tab"></script>') || !html.includes('journal.js?v=gv2vpd-20261112-24tab') || !html.includes('risk-calculator.js?v=gv2vpd-20261112-24tab') || !html.includes('backtest.js?v=gv2vpd-20261112-24tab')) {
   throw new Error('The canonical versioned external frontend bundle is missing.');
 }
 const navBlock = html.match(/<nav id="nav">([\s\S]*?)<\/nav>/);
 if (!navBlock) throw new Error('Navigation block #nav is missing.');
 const navTabs = [...navBlock[1].matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]);
-if (navTabs.length !== 3 || navTabs.join('|') !== 'Home|Sureshot|Position') {
-  throw new Error('Expected exactly Home, Sureshot and Position; found: ' + navTabs.join(', '));
+const normalizedTabs = navTabs.map(value => value.replace(/&amp;/g, '&'));
+const expectedTabs = ['Dashboard','Stock Explorer','NIFTY','BANKNIFTY','Watchlist','Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','FII/DII Flow','Market Activity','Charts & Patterns','Gap-Up/Down','Gainers & Losers','Option Chain','Technical Indicators','AI Signals','Position','Alerts','FYERS Settings','Logs','Trade Journal','Capital Protection','Backtesting'];
+if (normalizedTabs.length !== 24 || normalizedTabs.join('|') !== expectedTabs.join('|')) {
+  throw new Error('Expected the original 24-tab GV2VPD workstation; found: ' + normalizedTabs.join(', '));
 }
-if (html.includes('id="publicNav"') || /data-tab="(?:Dashboard|FYERS Connection|Stock Explorer|About|Features|Contact|Login|Signup)"/.test(html)) {
-  throw new Error('Legacy or public navigation remains exposed.');
-}
+if (html.includes('id="publicNav"')) throw new Error('Public marketing navigation must not replace the trading workstation.');
 if (html.includes('gv2vpdAuthGate') ||
     html.includes('gv2vpd-app-session-v1') ||
     html.includes('X-GV2VPD-Session') ||
@@ -26,9 +26,10 @@ if (!app.includes("localStorage.getItem(DASHBOARD_SESSION_KEY)") ||
   throw new Error('The existing FYERS dashboard-session authentication flow must remain intact.');
 }
 if (!app.includes("const initialTab = new URLSearchParams(window.location.search).get('tab');") ||
-    !app.includes("render(initialTab === 'Position' ? 'Position' : 'Home');") ||
+    !app.includes("render(initialTab && descriptions[initialTab] ? initialTab : 'Dashboard');") ||
     !app.includes("if (tab === 'Home') tab = 'Dashboard';") ||
-    !app.includes("else if (tab === 'Sureshot') tab = 'Sureshot CE/PE';")) {
+    !app.includes("else if (tab === 'Sureshot') tab = 'Sureshot CE/PE';") ||
+    !app.includes("if (!descriptions[tab]) tab = 'Sureshot CE/PE';")) {
   throw new Error('Home must remain the default landing page, direct Position links must work, and Sureshot must map to the existing verified scanner.');
 }
 const backend = fs.readFileSync(new URL('../backend/src/server.js', import.meta.url), 'utf8');
@@ -37,7 +38,7 @@ if (!app.includes("BACKEND_URL + '/api/fyers/funds'") || !app.includes('homeAcco
 }
 if (!app.includes("if (tab === 'Position')") ||
     !app.includes("BACKEND_URL + '/api/fyers/positions'") ||
-    !app.includes('Broker-confirmed positions')) {
+    !app.includes('Holdings, positions & Paper Mode')) {
   throw new Error('Position must display the broker-confirmed FYERS position response.');
 }
 
@@ -90,11 +91,11 @@ if (!html.includes('GV2VPD — FYERS') ||
   throw new Error('GV2VPD identity and versioned PWA shell must be published together.');
 }
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
-if (!sw.includes('gv2vpd-shell-v4-external-assets') ||
+if (!sw.includes('gv2vpd-shell-v5-24tab') ||
     !sw.includes('gv2vpd-icon.svg') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('GV2VPD service-worker cache shell is incomplete.');
 }
-console.log('PASS: exactly three tabs; Home is default; Sureshot scanner preserved; broker and Paper positions are separated.');
+console.log('PASS: original 24-tab GV2VPD workstation restored; Dashboard is default; Sureshot and all workspace handlers remain reachable.');
 console.log('PASS: Paper BUY is Dashboard-Session-bound, server-plan-bound and fresh-FYERS-quote-verified; automatic exits are quote-monitored.');
 console.log('PASS: existing FYERS OAuth/dashboard-session login is retained; no duplicate OTP login gate exists.');
