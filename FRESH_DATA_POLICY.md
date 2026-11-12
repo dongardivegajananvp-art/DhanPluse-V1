@@ -37,6 +37,9 @@ During 09:00–15:30 IST, every tab must show verified fresh data or an explicit
 ## Known gaps to resolve
 - Static policy and unit tests do not replace browser/mobile end-to-end checks across the two production tabs and their Sureshot/connection workflows.
 - Full NSE F&O symbol-master coverage and rate-limit recovery must be verified during a regular market session.
+- Sureshot underlying and option candle-history reads bypass the shared five-minute history cache; ordinary chart reads may still use the short history cache. A Sureshot revalidation must never treat a cached candle response as a new upstream read.
+- Final option-quote revalidation batches are capped at 50 symbols per FYERS request. Each quote batch is evaluated immediately so earlier exchange timestamps are not held until later batches complete.
+- Contract descriptors from the option chain are used only for symbol, side, strike and expiry. Premium, bid/ask, OI, volume and Greeks are not sourced from the chain.
 - Option-chain display intentionally blocks unless FYERS returns an explicit verifiable exchange timestamp; verify the provider response or keep the module unavailable.
 - FII/DII source is not verified; keep unavailable until connected.
 - OAuth redirect mismatch and repeated WebSocket disconnects require end-to-end verification.
