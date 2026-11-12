@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const server = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
 const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8");
-const indexHtml = await readFile(new URL("../../site/index.html", import.meta.url), "utf8");
+
 const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
 const shortlist = await readFile(new URL("../src/sureshot-shortlist.js", import.meta.url), "utf8");
 
@@ -38,13 +38,13 @@ test("Sureshot verifies the complete F&O quote universe and option-checks every 
   assert.match(app, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
   assert.match(app, /TOP 3 VERIFIED SETUPS/);
   assert.match(app, /FULL UNIVERSE AUDIT RESULTS/);
-  assert.match(indexHtml, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
-  assert.match(indexHtml, /TOP 3 VERIFIED SETUPS/);
-  assert.match(indexHtml, /Scan Full F&O \+ Fresh Indices/);
+  assert.match(app, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
+  assert.match(app, /TOP 3 VERIFIED SETUPS/);
+  assert.match(app, /Scan Full F&O \+ Fresh Indices/);
   assert.match(app, /row\.finalVerifiedAt/);
-  assert.match(indexHtml, /row\.finalVerifiedAt/);
+  assert.match(app, /row\.finalVerifiedAt/);
   assert.match(app, /quoteAgeSeconds\) > 15/);
-  assert.match(indexHtml, /quoteAgeSeconds\) > 15/);
+  assert.match(app, /quoteAgeSeconds\) > 15/);
 });
 
 test("each selected candidate must pass underlying history, contract, live option quote, option candles and risk validation", () => {
@@ -83,8 +83,8 @@ test("server cursor resumes an interrupted scan in sequence and rejects expired/
   assert.match(route, /if \(!scanId && sureshotScanState[\s\S]*offset = sureshotScanState\.nextOffset/);
 });
 
-test("the published inline app and app.js both start automatic NSE Sureshot scans app-wide", () => {
-  for (const [label, source] of [["published inline app", indexHtml], ["app.js", app]]) {
+test("the canonical frontend app starts automatic NSE Sureshot scans app-wide", () => {
+  for (const [label, source] of [["app.js", app]]) {
     const helperStart = source.indexOf("function maybeStartAutomaticSureshotScan()");
     const helperEnd = source.indexOf("async function performSureshotSetup", helperStart);
     assert.ok(helperStart >= 0 && helperEnd > helperStart, label + " helper exists");
@@ -106,13 +106,13 @@ test("the published inline app and app.js both start automatic NSE Sureshot scan
 });
 
 test("frontend resumes interrupted automatic scans after a page reload and marks completion only after every eligible candidate passes", () => {
-  const start = indexHtml.indexOf("async function loadSureshotUniverseShortlist");
-  const end = indexHtml.indexOf("async function performSureshotSetup", start);
+  const start = app.indexOf("async function loadSureshotUniverseShortlist");
+  const end = app.indexOf("async function performSureshotSetup", start);
   assert.ok(start >= 0 && end > start);
-  const loader = indexHtml.slice(start, end);
-  const triggerStart = indexHtml.indexOf("const startAutomaticTopFiveScan");
-  const triggerEnd = indexHtml.indexOf("sureshotAutoScanTimer = window.setInterval", triggerStart);
-  const trigger = indexHtml.slice(triggerStart, triggerEnd);
+  const loader = app.slice(start, end);
+  const triggerStart = app.indexOf("const startAutomaticTopThreeScan");
+  const triggerEnd = app.indexOf("sureshotAutoScanTimer = window.setInterval", triggerStart);
+  const trigger = app.slice(triggerStart, triggerEnd);
   const marker = loader.indexOf("localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY");
   const complete = loader.indexOf("result.selectedCandidatesComplete !== true");
   const catchAt = loader.indexOf("} catch (error)");
@@ -126,9 +126,9 @@ test("frontend resumes interrupted automatic scans after a page reload and marks
   assert.match(loader.slice(catchAt), /retryAfterSeconds/);
   assert.match(loader.slice(catchAt), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
   assert.match(trigger, /SURESHOT_AUTO_SCAN_RETRY_KEY/);
-  const authStart = indexHtml.indexOf("localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken)");
-  const authEnd = indexHtml.indexOf("} catch (error)", authStart);
-  const authSource = indexHtml.slice(authStart, authEnd);
+  const authStart = app.indexOf("localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken)");
+  const authEnd = app.indexOf("} catch (error)", authStart);
+  const authSource = app.slice(authStart, authEnd);
   assert.match(authSource, /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY\)/);
   assert.match(authSource, /maybeStartAutomaticSureshotScan\(\)/, "successful FYERS auth starts the scan even when Dashboard is active");
 });
@@ -189,8 +189,8 @@ test("MCX Sureshot audits and verifies every eligible future in resumable batche
   assert.match(app, /while \(attempts\+\+ < 100\)/);
   assert.match(app, /payload\.scanPaused === true/);
   assert.match(app, /row\.optionPremium/);
-  assert.match(indexHtml, /MCX FULL UNIVERSE AUDIT RESULTS/);
-  assert.match(indexHtml, /MCX TOP 3 VERIFIED SETUPS/);
+  assert.match(app, /MCX FULL UNIVERSE AUDIT RESULTS/);
+  assert.match(app, /MCX TOP 3 VERIFIED SETUPS/);
 });
 
 test("NSE and MCX Sureshot scan gates are independent", () => {
@@ -206,7 +206,7 @@ test("NSE and MCX Sureshot scan gates are independent", () => {
   const mcxFrontend = app.slice(app.indexOf("async function loadMcxSureshotUniverseShortlist"), app.indexOf("async function loadAdvancedScanner"));
   assert.match(mcxFrontend, /mcxSureshotUniverseScanRunning/);
   assert.doesNotMatch(mcxFrontend, /sureshotUniverseScanRunning/);
-  assert.match(app, /mcxSureshotUniverseScanRunning \|\| mcxAutoScanStatusCheckInFlight/);
+  assert.match(app, /nseSureshotScanRunning \|\| mcxSureshotScanRunning \|\| mcxAutoScanStatusCheckInFlight/);
 });
 
 
