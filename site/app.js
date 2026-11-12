@@ -1772,6 +1772,22 @@ async function loadSureshotUniverseShortlist(options = {}) {
   const host = visibleHost || document.createElement('div');
   const status = document.querySelector('#setupStatus');
   if ((button && button.disabled) || (!visibleHost && !automatic)) return;
+  // A manual click must respect the same provider cooldown as the automatic
+  // scheduler. Otherwise users can repeatedly invoke a scan that the backend
+  // will correctly reject locally while Cloudflare's 1015 circuit is active.
+  if (!automatic) {
+    let retryAt = 0;
+    try { retryAt = Number(localStorage.getItem(SURESHOT_AUTO_SCAN_RETRY_KEY)) || 0; } catch {}
+    if (retryAt > Date.now()) {
+      const waitSeconds = Math.ceil((retryAt - Date.now()) / 1000);
+      if (button) {
+        button.disabled = true;
+        setTimeout(() => { if (button.isConnected) button.disabled = false; }, Math.max(0, retryAt - Date.now()));
+      }
+      if (status) status.textContent = 'FYERS rate-limit cooldown active · no request sent · try again in about ' + waitSeconds + ' seconds.';
+      return;
+    }
+  }
   // Keep the 30-second session timer from duplicating an active scan. Failed
   // automatic scans are rescheduled using the provider Retry-After, not locked
   // out for the rest of the trading day and not retried in a tight loop.
@@ -1926,9 +1942,10 @@ async function loadSureshotUniverseShortlist(options = {}) {
       '<div class="table-wrap"><table class="console-table"><thead><tr><th>Slot</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry / SL / Target / RR</th><th>Paper BUY</th></tr></thead><tbody>' +
       [1,2,3].map(slot => '<tr><td>#' + slot + '</td><td>Awaiting verified scan</td><td>—</td><td>NO VERIFIED STRIKE</td><td>BLOCKED</td><td>DISABLED</td></tr>').join('') +
       '</tbody></table></div></div>';
-    if (automatic && Number(error.statusCode) !== 401) {
-      // Honour FYERS/our circuit-breaker Retry-After. For other transient
-      // failures, wait five minutes; never let the 30-second UI timer hammer it.
+    if (Number(error.statusCode) === 429 || (automatic && Number(error.statusCode) !== 401)) {
+      // Persist provider cooldowns for manual and automatic scans alike. A
+      // manual retry must never bypass the same 1015/429 wait window.
+      // For other automatic transient failures, wait five minutes.
       const delayMs = Math.min(60 * 60 * 1000, Math.max(60 * 1000,
         retryAfterSeconds > 0 ? retryAfterSeconds * 1000 : 5 * 60 * 1000));
       try {
