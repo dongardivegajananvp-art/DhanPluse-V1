@@ -710,12 +710,17 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
   } else if (nseClosed) {
     label = mcxLive ? 'MCX LIVE · NSE CLOSED' : 'NSE MARKET CLOSED';
     connection = mcxLive ? 'MCX fresh ticks verified · NSE session closed' : 'NSE session closed · MCX status checked independently';
-  } else if (nseFeed === 'LIVE') {
+  } else if (nseFeed === 'LIVE' && socketConnected) {
     label = 'FYERS QUOTES RECEIVED';
-    connection = socketConnected ? 'FYERS WebSocket connected · NSE fresh ticks' : 'NSE fresh ticks verified · socket disconnected';
-  } else if (nseFeed === 'DISCONNECTED' || nseFeed === 'RECONNECTING') {
+    connection = 'FYERS WebSocket connected · NSE fresh ticks';
+  } else if (!socketConnected || nseFeed === 'DISCONNECTED') {
     label = 'FYERS SOCKET DISCONNECTED';
-    connection = 'FYERS WebSocket disconnected · live signals blocked';
+    connection = nseFeed === 'LIVE'
+      ? 'Recent NSE ticks only · WebSocket disconnected · live signals blocked'
+      : 'FYERS WebSocket disconnected · live signals blocked';
+  } else if (nseFeed === 'RECONNECTING') {
+    label = 'FYERS FEED RECOVERING';
+    connection = 'WebSocket connected · waiting for fresh NSE ticks after subscription recovery';
   } else if (nseFeed === 'STALE') {
     label = 'LIVE DATA STALE';
     connection = 'FYERS WebSocket active · exchange ticks stale';
@@ -731,7 +736,8 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
   updateMcxConnectionDiagnostics(status);
   updateSureshotExchangeCards(status);
   const cooldown = restCooldown || Boolean(status && status.fyersDataApi && status.fyersDataApi.cooldownActive);
-  setConnection(connection + (cooldown ? ' · REST cooldown' : ''), nseClosed ? !mcxLive : nseFeed !== 'LIVE');
+  const liveVerified = authenticated && socketConnected && nseFeed === 'LIVE';
+  setConnection(connection + (cooldown ? ' · REST cooldown' : ''), nseClosed ? !mcxLive : !liveVerified);
 }
 
 async function refreshAuthoritativeFyersStatus() {
@@ -3955,6 +3961,21 @@ async function loadCandles() {
   }catch(error){status.textContent=(error.message||'Historical candles unavailable.')+' No chart values were fabricated.';chart.innerHTML='<div class="chart-empty">Verified candles unavailable.</div>';summary.textContent='Pattern analysis withheld until verified OHLC data is available.';const mainChart=document.querySelector('#mainTabChart');if(mainChart&&currentTab==='Charts & Patterns')mainChart.innerHTML='<div class="chart-empty">Historical chart unavailable until FYERS returns verified candles.</div>';const mainNote=document.querySelector('#mainViewNote');if(mainNote&&currentTab==='Charts & Patterns')mainNote.textContent='No candle values were fabricated. Check FYERS connection and historical-data access.';table.innerHTML='';logEvent('Historical candle request failed.','warn');}
 }
 
+function authoritativeNseFeedLabel() {
+  const status = lastAuthoritativeFyersStatus;
+  const statusAgeMs = Date.now() - authoritativeFyersStatusUpdatedAt;
+  if (!status || !Number.isFinite(statusAgeMs) || statusAgeMs < 0 || statusAgeMs > 10000) return 'STATUS STALE · BLOCKED';
+  if (status.fyers !== 'connected') return 'NOT CONNECTED';
+  const nse = status.exchangeLiveStatus && status.exchangeLiveStatus.NSE ? status.exchangeLiveStatus.NSE : {};
+  if (nse.session === 'SCHEDULED_CLOSED') return 'NSE CLOSED · LAST KNOWN';
+  if (status.marketSocketConnected !== true || nse.feed === 'DISCONNECTED') return 'DISCONNECTED · BLOCKED';
+  if (nse.feed === 'LIVE') return 'LIVE · VERIFIED';
+  if (nse.feed === 'RECONNECTING') return 'RECOVERING · BLOCKED';
+  if (nse.feed === 'PARTIAL') return 'PARTIAL · BLOCKED';
+  if (nse.feed === 'STALE') return 'STALE · BLOCKED';
+  return 'WAITING · BLOCKED';
+}
+
 function updateDynamicPanel() {
   SYMBOLS.forEach(item => {
     const quote = quoteFor(item.symbol);
@@ -4006,11 +4027,11 @@ function updateDynamicPanel() {
   const dashBackend = document.querySelector('#dashBackend');
   if (dashBackend) dashBackend.textContent = backendHealthState;
   const dashFeed = document.querySelector('#dashFeed');
-  if (dashFeed) dashFeed.textContent = SYMBOLS.every(item => hasFreshLiveQuote(quoteFor(item.symbol))) ? 'LIVE' : (isRegularMarketSession() ? 'WAITING' : 'MARKET CLOSED / LAST KNOWN');
+  if (dashFeed) dashFeed.textContent = authoritativeNseFeedLabel();
   const settingsBackend = document.querySelector('#settingsBackend');
   if (settingsBackend) settingsBackend.textContent = backendHealthState;
   const settingsFeed = document.querySelector('#settingsFeed');
-  if (settingsFeed) settingsFeed.textContent = SYMBOLS.every(item => hasFreshLiveQuote(quoteFor(item.symbol))) ? 'LIVE' : (isRegularMarketSession() ? 'WAITING' : 'MARKET CLOSED / LAST KNOWN');
+  if (settingsFeed) settingsFeed.textContent = authoritativeNseFeedLabel();
   const sampleCount = document.querySelector('#chartSampleCount');
   if (sampleCount) sampleCount.textContent = 'Samples: ' + (historyBySymbol[SYMBOLS[0].symbol] || []).length;
 }
