@@ -114,18 +114,17 @@ export function buildVerifiedSureshotShortlist({
 
 
 /**
- * Limit expensive per-underlying option verification to the two complete mover
- * boards (Top 10 gainers + Top 10 losers) and independently fresh index ticks.
- * The full F&O quote snapshot is still required and audited before this selection.
+ * Deep-verify every member of the already complete, fresh F&O equity snapshot.
+ * Fresh index ticks are included independently. Five-item request batches and
+ * the shared FYERS budget control pacing; they must not silently shrink coverage.
  */
 export function selectSureshotOptionVerificationCandidates(ranked) {
   if (!ranked || ranked.verified !== true ||
-      !Array.isArray(ranked.topGainers) || !Array.isArray(ranked.topLosers) ||
-      !Array.isArray(ranked.data)) {
-    throw new Error("complete_verified_top_mover_boards_required");
+      !Array.isArray(ranked.equityCandidates) || !Array.isArray(ranked.data)) {
+    throw new Error("complete_verified_fno_universe_required");
   }
   const bySymbol = new Map();
-  for (const row of [...ranked.topGainers, ...ranked.topLosers,
+  for (const row of [...ranked.equityCandidates,
     ...ranked.data.filter(item => item.underlyingType === "INDEX")]) {
     if (!row || typeof row.symbol !== "string" || !row.symbol ||
         !Number.isFinite(Number(row.changePct))) continue;
