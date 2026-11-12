@@ -28,7 +28,8 @@ export function createFyersDataApiBudget({
   // were observed to receive another 1015 and extend the provider block.
   cloudflareCooldownMs = [60 * 60_000, 60 * 60_000, 60 * 60_000],
   rateLimitCooldownMs = [60_000, 2 * 60_000, 5 * 60_000],
-  maxCooldownMs = 60 * 60_000
+  maxCooldownMs = 60 * 60_000,
+  onCooldownChange = null
 } = {}) {
   let queue = Promise.resolve();
   let requestTimes = [];
@@ -86,7 +87,7 @@ export function createFyersDataApiBudget({
     });
   }
 
-  function activateCooldown(response, body, pathname) {
+  async function activateCooldown(response, body, pathname) {
     const server = String(response.headers?.get?.('server') || '');
     const cfRay = String(response.headers?.get?.('cf-ray') || '');
     const cloudflare1015 =
@@ -110,6 +111,14 @@ export function createFyersDataApiBudget({
     cooldownPathname = pathname;
     cooldownGeneration += 1;
     cooldownUntil = Math.max(cooldownUntil, now() + Math.min(maxCooldownMs, Math.max(backoffMs, retryMs)));
+    if (typeof onCooldownChange === 'function') {
+      try {
+        await onCooldownChange({ cooldownUntil, cooldownReason, cooldownPathname, cooldownGeneration,
+          consecutiveCloudflareBlocks, consecutiveRateLimitBlocks });
+      } catch (error) {
+        console.warn('FYERS cooldown persistence failed:', String(error?.message || error).slice(0, 160));
+      }
+    }
   }
 
   async function run(url, init = {}) {
@@ -184,7 +193,7 @@ export function createFyersDataApiBudget({
         const response = await fetchImpl(url, { ...fetchInit, signal });
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
-          activateCooldown(response, body, target.pathname);
+          await activateCooldown(response, body, target.pathname);
         } else if (canClearFyersDataApiCooldown({
           responseOk: response.ok,
           blockedPathname: cooldownPathname,
@@ -199,6 +208,14 @@ export function createFyersDataApiBudget({
           cooldownPathname = null;
           cooldownUntil = 0;
           cooldownReason = null;
+          if (typeof onCooldownChange === 'function') {
+            try {
+              await onCooldownChange({ cooldownUntil: 0, cooldownReason: null, cooldownPathname: null,
+                cooldownGeneration, consecutiveCloudflareBlocks, consecutiveRateLimitBlocks });
+            } catch (error) {
+              console.warn('FYERS cooldown persistence failed:', String(error?.message || error).slice(0, 160));
+            }
+          }
         }
 
         if ((cacheKey && response.ok) || quoteFlightKey) {
@@ -231,6 +248,19 @@ export function createFyersDataApiBudget({
       if (inFlightKey && inFlight.get(inFlightKey) === requestPromise) inFlight.delete(inFlightKey);
     }
   }
+
+  run.restoreStatus = state => {
+    const until = Date.parse(String(state?.blockedUntil || ''));
+    if (!Number.isFinite(until) || until <= now() || until - now() > maxCooldownMs ||
+        !['/data/quotes', '/data/history', '/data/options-chain-v3'].includes(state?.cooldownPathname)) return false;
+    cooldownUntil = until;
+    cooldownReason = String(state.cooldownReason || 'RESTORED_COOLDOWN').slice(0, 40);
+    cooldownPathname = state.cooldownPathname;
+    cooldownGeneration = Math.max(cooldownGeneration, Number(state.cooldownGeneration) || 0);
+    consecutiveCloudflareBlocks = Math.max(0, Number(state.consecutiveCloudflareBlocks) || 0);
+    consecutiveRateLimitBlocks = Math.max(0, Number(state.consecutiveRateLimitBlocks) || 0);
+    return true;
+  };
 
   run.getStatus = () => {
     const remainingMs = Math.max(0, cooldownUntil - now());
