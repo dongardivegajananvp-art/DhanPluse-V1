@@ -51,22 +51,30 @@ async function verifyDesktop(browser) {
   assert.ok(response && response.ok(), 'PR preview /site/ page must return HTTP success');
   await page.waitForSelector('#nav button[data-tab]', { timeout: 10000 });
   const tabs = await page.locator('#nav button[data-tab]').evaluateAll(nodes => nodes.map(node => node.dataset.tab));
-  assert.deepEqual(tabs, ['Home', 'Sureshot', 'Position'], 'exactly the requested three tabs must render');
+  const expectedTabs = ['Dashboard','Stock Explorer','NIFTY','BANKNIFTY','Watchlist','Sureshot CE/PE','Breakout Scanner','Momentum Scanner','Zero-to-Hero','FII/DII Flow','Market Activity','Charts & Patterns','Gap-Up/Down','Gainers & Losers','Option Chain','Technical Indicators','AI Signals','Position','Alerts','FYERS Settings','Logs','Trade Journal','Capital Protection','Backtesting'];
+  assert.deepEqual(tabs, expectedTabs, 'the original 24-tab workstation must render in the expected order');
 
-  await page.locator('#nav button[data-tab="Sureshot"]').click();
+  await page.locator('#nav button[data-tab="Sureshot CE/PE"]').click();
   await page.waitForFunction(() => document.querySelector('#pageTitle')?.textContent?.trim() === 'Sureshot CE/PE');
   assert.ok(await page.locator('#featureContent').count(), 'Sureshot workspace container must exist');
 
   await page.locator('#nav button[data-tab="Position"]').click();
-  await page.waitForFunction(() => document.querySelector('#pageTitle')?.textContent?.trim() === 'Position');
-  await page.waitForSelector('#gvPositionStatus', { timeout: 5000 });
+  await page.waitForFunction(() => document.querySelector('#pageTitle')?.textContent?.trim() === 'Holdings & Positions');
+  await page.waitForSelector('#portfolioStatus', { timeout: 5000 });
+  await page.waitForSelector('#holdingsTable', { timeout: 5000 });
+  await page.waitForSelector('#positionsTable', { timeout: 5000 });
   await page.waitForSelector('#gvPaperLedger', { timeout: 5000 });
   const positionText = await page.locator('#featureContent').innerText();
   assert.match(positionText, /Paper Mode ledger/i);
   assert.match(positionText, /Live BUY remains disabled/i);
 
-  await page.locator('#nav button[data-tab="Home"]').click();
-  assert.equal(await page.locator('#nav button[data-tab="Home"]').getAttribute('class').then(v => v.includes('active')), true);
+  for (const tab of expectedTabs) {
+    await page.locator('#nav button[data-tab="' + tab + '"]').click();
+    const expectedTitle = tab === 'Position' ? 'Holdings & Positions' : tab;
+    await page.waitForFunction(expected => document.querySelector('#pageTitle')?.textContent?.trim() === expected, expectedTitle);
+  }
+  await page.locator('#nav button[data-tab="Dashboard"]').click();
+  assert.equal(await page.locator('#nav button[data-tab="Dashboard"]').getAttribute('class').then(v => v.includes('active')), true);
   await page.waitForFunction(() => document.querySelector('#dashFeed')?.textContent?.trim() === 'RECOVERING · BLOCKED', { timeout: 10000 });
   assert.equal(await page.locator('#dashFeed').innerText(), 'RECOVERING · BLOCKED',
     'Dashboard must distinguish a connected transport recovering NSE ticks from a true socket disconnect');
@@ -93,11 +101,12 @@ async function verifyMobile(browser) {
   assert.ok(response && response.ok(), 'mobile PR preview must return HTTP success');
   const tabs = page.locator('#nav button[data-tab]');
   assert.equal(await tabs.count(), 3, 'mobile viewport must render exactly three tabs');
-  await page.locator('#nav button[data-tab="Sureshot"]').tap();
+  await page.locator('#nav button[data-tab="Sureshot CE/PE"]').tap();
   await page.waitForFunction(() => document.querySelector('#pageTitle')?.textContent?.trim() === 'Sureshot CE/PE');
-  await page.locator('#nav button[data-tab="Home"]').tap();
+  await page.locator('#nav button[data-tab="Dashboard"]').tap();
   await page.waitForFunction(() => document.querySelector('#dashFeed')?.textContent?.trim() === 'DISCONNECTED · BLOCKED', { timeout: 10000 });
   await page.locator('#nav button[data-tab="Position"]').tap();
+  await page.waitForSelector('#holdingsTable', { timeout: 5000 });
   await page.waitForSelector('#gvPaperLedger', { timeout: 5000 });
   assert.deepEqual(errors, [], 'mobile browser must have no uncaught JavaScript errors');
   await context.close();
@@ -108,7 +117,7 @@ async function verifyMobile(browser) {
   try {
     await verifyDesktop(browser);
     await verifyMobile(browser);
-    console.log('PASS: GV2VPD PR preview desktop + mobile smoke; Home/Sureshot/Position navigation works; Position/Paper ledger renders; live order placement stays disabled.');
+    console.log('PASS: GV2VPD PR preview desktop + mobile smoke; all 24 tabs navigate; Holdings/Positions/Paper ledger renders; live order placement stays disabled.');
   } finally {
     await browser.close();
   }
