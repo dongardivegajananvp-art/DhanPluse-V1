@@ -44,3 +44,46 @@ test('expired, malformed and overlong persisted cooldowns are rejected', () => {
   assert.equal(request.restoreStatus({ blockedUntil: '2026-11-12T08:30:00Z', cooldownPathname: '/unknown' }), false);
 });
 
+
+test('Data API fails closed after cooldown persistence fails', async () => {
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    now: () => Date.parse('2026-11-12T08:00:00Z'),
+    minIntervalMs: 0,
+    onCooldownChange: async () => false,
+    fetchImpl: async () => {
+      sent += 1;
+      return response(429, 'Cloudflare Error 1015', {
+        server: 'cloudflare', 'cf-ray': 'persistence-failure-test', 'retry-after': '0'
+      });
+    }
+  });
+  const first = await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ');
+  assert.equal(first.status, 429);
+  const blocked = await request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3AINFOSYS-EQ');
+  assert.equal(blocked.status, 503);
+  assert.equal(sent, 1, 'no further upstream request after cooldown persistence failure');
+  assert.equal(request.getStatus().cooldownPersistenceHealthy, false);
+});
+
+test('Data API waits for durable cooldown write before returning provider 429', async () => {
+  let release;
+  let writeFinished = false;
+  const writeGate = new Promise(resolve => { release = resolve; });
+  const request = createFyersDataApiBudget({
+    now: () => Date.parse('2026-11-12T08:00:00Z'),
+    minIntervalMs: 0,
+    onCooldownChange: async () => { await writeGate; writeFinished = true; return true; },
+    fetchImpl: async () => response(429, 'Cloudflare Error 1015', {
+      server: 'cloudflare', 'cf-ray': 'durability-order-test', 'retry-after': '0'
+    })
+  });
+  let settled = false;
+  const pending = request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ATCS-EQ').then(r => { settled = true; return r; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false, 'provider response must not return before durable save');
+  release();
+  const result = await pending;
+  assert.equal(result.status, 429);
+  assert.equal(writeFinished, true);
+});
