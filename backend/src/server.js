@@ -2226,7 +2226,6 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
   if (!nseRegularSessionNow()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Market session is closed; actionable option plans are withheld." });
   const indiaScanClock = new Date(Date.now() + 330 * 60_000);
   const indiaScanMinutes = indiaScanClock.getUTCHours() * 60 + indiaScanClock.getUTCMinutes();
-  if (indiaScanMinutes < 9 * 60 + 30) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Sureshot final selection is blocked until 09:30 Asia/Kolkata." });
   if (nseSureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "An NSE Sureshot batch is already running." });
   let scanId = String(req.query.scanId || "");
   let offset = Number(req.query.offset ?? 0);
@@ -2303,7 +2302,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         underlyingUrl.searchParams.set("range_to", today); underlyingUrl.searchParams.set("cont_flag", "1");
         scanStage = "VERIFY_UNDERLYING_CANDLES";
         const underlyingHistory = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot", stage: scanStage });
-        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [], "5", Date.now(), { strictTrend: true });
+        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [], "5", Date.now());
         if (!direction.ok || !direction.side) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
           continue;
@@ -2431,7 +2430,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         underlyingUrl.searchParams.set("range_to", today); underlyingUrl.searchParams.set("cont_flag", "1");
         scanStage = "FINAL_REVALIDATE_UNDERLYING";
         const history = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot", stage: scanStage });
-        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now(), { strictTrend: true });
+        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now());
         if (!direction.ok || direction.side !== item.direction) {
           item.status = "NO TRADE";
           item.reason = "Final freshness revalidation failed: underlying direction is no longer confirmed.";
@@ -2700,7 +2699,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         historyUrl.searchParams.set("date_format", "1"); historyUrl.searchParams.set("range_from", from);
         historyUrl.searchParams.set("range_to", today); historyUrl.searchParams.set("cont_flag", "1");
         const history = await fyersReadOnlyGet(historyUrl, { priority: "sureshot", stage: scanStage });
-        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now(), { strictTrend: true });
+        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now());
         if (!direction.ok || !direction.side) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
           continue;
@@ -2822,7 +2821,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         url.searchParams.set("range_to", today); url.searchParams.set("cont_flag", "1");
         stage = "FINAL_REVALIDATE_MCX_UNDERLYING";
         const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage: scanStage });
-        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now(), { strictTrend: true });
+        const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now());
         if (!direction.ok || direction.side !== item.direction) {
           item.status = "NO TRADE"; item.reason = "Final underlying-candle revalidation failed."; delete item.plan; continue;
         }
@@ -3648,7 +3647,7 @@ app.post('/api/paper/buy', async (req, res) => {
     });
     const direction = deriveVerifiedUnderlyingDirection(
       Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [],
-      '5', Date.now(), { strictTrend: true }
+      '5', Date.now()
     );
     if (!direction.ok || direction.side !== snapshot.side) {
       return res.status(409).json({ ok: false, error: 'Underlying direction changed or its latest FYERS candles are not verified; Paper BUY blocked.' });
