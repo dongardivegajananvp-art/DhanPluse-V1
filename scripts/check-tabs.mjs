@@ -26,7 +26,7 @@ if (!app.includes("localStorage.getItem(DASHBOARD_SESSION_KEY)") ||
   throw new Error('The existing FYERS dashboard-session authentication flow must remain intact.');
 }
 if (!app.includes("const initialTab = new URLSearchParams(window.location.search).get('tab');") ||
-    !app.includes("render(initialTab && descriptions[initialTab] ? initialTab : 'Dashboard');") ||
+    !app.includes("render(initialTab && (descriptions[initialTab] || ['Home','Sureshot'].includes(initialTab)) ? initialTab : 'Dashboard');") ||
     !app.includes("if (tab === 'Home') tab = 'Dashboard';") ||
     !app.includes("else if (tab === 'Sureshot') tab = 'Sureshot CE/PE';") ||
     !app.includes("if (!descriptions[tab]) tab = 'Sureshot CE/PE';")) {
@@ -79,6 +79,7 @@ if (!app.includes("BACKEND_URL + '/api/paper/buy'") ||
 }
 if (!app.includes("tab === 'Sureshot CE/PE') featureContent.innerHTML = advancedScannerMarkup(tab)") ||
     !app.includes('async function loadSureshotUniverseShortlist(options = {})') ||
+    !app.includes('underlyingQuoteAgeSeconds') ||
     app.includes('DMA20 crossover and supply/demand breakout must agree') ||
     app.includes('after 09:30')) {
   throw new Error('Existing FYERS-verified Sureshot scanner must be preserved.');
