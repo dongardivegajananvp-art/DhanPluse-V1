@@ -93,6 +93,7 @@ if (!sw.includes('gv2vpd-shell-v3-three-tab-app') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('GV2VPD service-worker cache shell is incomplete.');
 }
+if (!app.includes("id=\\"backendDiagnostic\\"") || !app.includes("setBackendDiagnostic(message, isError = false)") || !app.includes("GET /api/status HTTP ")) throw new Error('Dashboard must expose exact backend HTTP/network failures instead of hiding them.');
 console.log('PASS: exactly three tabs; Home is default; Sureshot scanner preserved; broker and Paper positions are separated.');
 console.log('PASS: Paper BUY is Dashboard-Session-bound, server-plan-bound and fresh-FYERS-quote-verified; automatic exits are quote-monitored.');
 console.log('PASS: existing FYERS OAuth/dashboard-session login is retained; no duplicate OTP login gate exists.');
