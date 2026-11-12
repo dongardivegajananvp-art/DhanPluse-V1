@@ -2277,6 +2277,11 @@ async function initializeRuntimeStateStore() {
         scanId: cursor.id, nextOffset: cursor.nextOffset, candidateCount: cursor.candidates.length
       }));
     } else if (cursor) await runtimeStateStore.delete('nse-sureshot-scan-cursor');
+    console.info('GV2VPD durable runtime state store initialized.', JSON.stringify({
+      cooldownRestored: fetchWithFyersBudget.getStatus().remainingMs > 0,
+      scanCursorRestored: Boolean(sureshotScanState),
+      scanOffset: sureshotScanState?.nextOffset ?? null
+    }));
     return true;
   } catch (error) {
     console.error('Durable runtime state initialization failed; in-memory safety controls remain active:', String(error?.message || error).slice(0, 180));
