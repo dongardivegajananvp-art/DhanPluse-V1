@@ -47,7 +47,7 @@ jobs:
           grep -q 'data-tab="Home"' dist/site/index.html
           grep -q 'data-tab="Sureshot"' dist/site/index.html
           grep -q 'data-tab="Position"' dist/site/index.html
-          grep -q "gv2vpd-shell-v3-three-tab-app" dist/site/sw.js
+          grep -q "gv2vpd-shell-v4-external-assets" dist/site/sw.js
           grep -q "GV2VPD — FYERS Workstation" dist/site/manifest.webmanifest
           grep -q "Paper Mode ledger" dist/site/index.html
           grep -q "Live BUY remains disabled" dist/site/index.html
@@ -82,7 +82,7 @@ jobs:
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "gv2vpd-shell-v3-three-tab-app" <<< "$sw"
+          grep -q "gv2vpd-shell-v4-external-assets" <<< "$sw"
           manifest="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}manifest.webmanifest?deploy_smoke=$(date +%s)")"
           grep -q "GV2VPD — FYERS Workstation" <<< "$manifest"
           icon="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}gv2vpd-icon.svg?deploy_smoke=$(date +%s)")"
