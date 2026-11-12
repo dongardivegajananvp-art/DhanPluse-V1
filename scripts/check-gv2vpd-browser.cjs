@@ -67,6 +67,9 @@ async function verifyDesktop(browser) {
 
   await page.locator('#nav button[data-tab="Home"]').click();
   assert.equal(await page.locator('#nav button[data-tab="Home"]').getAttribute('class').then(v => v.includes('active')), true);
+  await page.waitForFunction(() => document.querySelector('#dashFeed')?.textContent?.trim() === 'DISCONNECTED · BLOCKED', { timeout: 10000 });
+  assert.equal(await page.locator('#dashFeed').innerText(), 'DISCONNECTED · BLOCKED',
+    'Dashboard connection monitor must use authoritative backend socket status, not cached browser quotes');
   assert.match(await page.locator('body').innerText(), /Order placement/i);
   assert.match(await page.locator('body').innerText(), /DISABLED/i);
   assert.deepEqual(errors, [], 'desktop browser must have no uncaught JavaScript errors');
