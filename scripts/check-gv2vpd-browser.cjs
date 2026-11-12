@@ -72,6 +72,9 @@ async function verifyDesktop(browser) {
     await page.locator('#nav button[data-tab="' + tab + '"]').click();
     const expectedTitle = tab === 'Position' ? 'Holdings & Positions' : tab;
     await page.waitForFunction(expected => document.querySelector('#pageTitle')?.textContent?.trim() === expected, expectedTitle);
+    if (tab === 'Trade Journal') await page.waitForSelector('#dpJournalForm', { timeout: 5000 });
+    if (tab === 'Capital Protection') await page.waitForSelector('#dpRiskForm', { timeout: 5000 });
+    if (tab === 'Backtesting') await page.waitForSelector('#dpBtForm', { timeout: 5000 });
   }
   await page.locator('#nav button[data-tab="Dashboard"]').click();
   assert.equal(await page.locator('#nav button[data-tab="Dashboard"]').getAttribute('class').then(v => v.includes('active')), true);
@@ -100,7 +103,7 @@ async function verifyMobile(browser) {
   const response = await page.goto(previewUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   assert.ok(response && response.ok(), 'mobile PR preview must return HTTP success');
   const tabs = page.locator('#nav button[data-tab]');
-  assert.equal(await tabs.count(), 3, 'mobile viewport must render exactly three tabs');
+  assert.equal(await tabs.count(), 24, 'mobile viewport must render all 24 workstation tabs');
   await page.locator('#nav button[data-tab="Sureshot CE/PE"]').tap();
   await page.waitForFunction(() => document.querySelector('#pageTitle')?.textContent?.trim() === 'Sureshot CE/PE');
   await page.locator('#nav button[data-tab="Dashboard"]').tap();
