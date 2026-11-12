@@ -1,6 +1,5 @@
 const CACHE_NAME = 'gv2vpd-shell-v4-external-assets';
-// Inline app bundle compatibility marker: app.js?v=20261106-authoritative-status-v2
-const SHELL = ['./', './index.html', './manifest.webmanifest', './gv2vpd-icon.svg'];
+const SHELL = ['./', './index.html', './style.css?v=gv2vpd-20261112-audit', './app.js?v=gv2vpd-20261112-audit', './manifest.webmanifest', './gv2vpd-icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
