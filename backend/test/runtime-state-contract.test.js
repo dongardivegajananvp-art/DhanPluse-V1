@@ -27,3 +27,11 @@ test('NSE Sureshot scan cursor and completed batches survive backend restarts sa
   assert.match(store, /CREATE TABLE IF NOT EXISTS gv2vpd_runtime_state/);
   assert.match(store, /ON CONFLICT \(state_key\) DO UPDATE/);
 });
+
+test('Sureshot fails closed when durable runtime state is unavailable or cursor writes fail', () => {
+  assert.match(server, /const runtimeStateAvailable = await runtimeStateReady/);
+  assert.match(server, /if \(!runtimeStateAvailable\)[\s\S]*?No upstream scan request was sent/);
+  assert.match(server, /runtimeStateReady = Promise\.resolve\(false\)/);
+  assert.equal((server.match(/if \(!\(await persistSureshotScanState\(\)\)\)/g) || []).length, 2);
+  assert.match(server, /verified plans withheld/);
+});
