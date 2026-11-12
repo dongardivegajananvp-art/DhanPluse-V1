@@ -2225,7 +2225,6 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
   if (!nseRegularSessionNow()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Market session is closed; actionable option plans are withheld." });
   const indiaScanClock = new Date(Date.now() + 330 * 60_000);
-  const indiaScanMinutes = indiaScanClock.getUTCHours() * 60 + indiaScanClock.getUTCMinutes();
   if (nseSureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "An NSE Sureshot batch is already running." });
   let scanId = String(req.query.scanId || "");
   let offset = Number(req.query.offset ?? 0);
