@@ -54,7 +54,7 @@ test("ordinary SDK close keeps the socket owner intact for SDK-managed reconnect
   assert.doesNotMatch(closeHandler[0], /marketSocket\s*=\s*null|marketSocketToken\s*=/);
 });
 
-test("SDK handles transport reconnects while the 10-second NSE heartbeat restores silent subscriptions", async () => {
+test("SDK handles transport reconnects while the 30-second NSE heartbeat restores silent subscriptions", async () => {
   const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   const start = source.indexOf("function startMarketDataStream");
   const end = source.indexOf("// NSE feed heartbeat:", start);
@@ -64,9 +64,9 @@ test("SDK handles transport reconnects while the 10-second NSE heartbeat restore
   assert.match(lifecycle, /sdkReconnect\(SDK_RECONNECT_RETRIES\)/);
   assert.match(lifecycle, /socket\.connect\(\)/);
   const heartbeat = source.slice(end, source.indexOf("marketSocketWatchdog.unref", end));
-  assert.match(source, /NSE_TICK_HEARTBEAT_MS = 10_000/);
+  assert.match(source, /NSE_TICK_HEARTBEAT_MS = 30_000/);
   assert.match(heartbeat, /marketSocket\.subscribe\(nseIndexSymbols\)/);
-  assert.match(heartbeat, /no_fresh_nse_tick_within_10_seconds/);
+  assert.match(heartbeat, /no_fresh_nse_tick_within_30_seconds/);
   assert.match(heartbeat, /getMarketSocketReconnectDelay\(nseResubscribeCount, 10_000, 120_000\)/);
   assert.doesNotMatch(heartbeat, /marketSocket\.close\(/);
   assert.match(heartbeat, /setInterval\([\s\S]*?,\s*1_000\)/);
@@ -103,7 +103,7 @@ test("market ticks without exchange timestamps are rejected and live snapshots e
 test("FYERS SDK reconnect attempts are bounded to avoid repeated provider 429 pressure", async () => {
   const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   assert.match(source, /const SDK_RECONNECT_RETRIES = 50;/);
-  assert.match(source, /NSE_TICK_HEARTBEAT_MS = 10_000/);
+  assert.match(source, /NSE_TICK_HEARTBEAT_MS = 30_000/);
 });
 
 test("FYERS SDK error event does not falsely mark a still-ticking socket disconnected", async () => {
@@ -150,9 +150,9 @@ test("NSE status exposes RECONNECTING while a fresh-tick recovery is pending and
 
 
 test("NSE silent-feed recovery uses exponential resubscribe backoff", () => {
-  assert.equal(getMarketSocketReconnectDelay(0, 10_000, 120_000), 10_000);
-  assert.equal(getMarketSocketReconnectDelay(1, 10_000, 120_000), 20_000);
-  assert.equal(getMarketSocketReconnectDelay(2, 10_000, 120_000), 40_000);
-  assert.equal(getMarketSocketReconnectDelay(3, 10_000, 120_000), 80_000);
-  assert.equal(getMarketSocketReconnectDelay(4, 10_000, 120_000), 120_000);
+  assert.equal(getMarketSocketReconnectDelay(0, 30_000, 120_000), 30_000);
+  assert.equal(getMarketSocketReconnectDelay(1, 30_000, 120_000), 60_000);
+  assert.equal(getMarketSocketReconnectDelay(2, 30_000, 120_000), 120_000);
+  assert.equal(getMarketSocketReconnectDelay(3, 30_000, 120_000), 120_000);
+  assert.equal(getMarketSocketReconnectDelay(4, 30_000, 120_000), 120_000);
 });
