@@ -79,33 +79,35 @@ test("server cursor resumes an interrupted scan in sequence and rejects expired/
   assert.match(route, /if \(!scanId && sureshotScanState[\s\S]*offset = sureshotScanState\.nextOffset/);
 });
 
-test("frontend automatic NSE Sureshot scan starts app-wide without requiring the Sureshot tab", () => {
-  const helperStart = app.indexOf("function maybeStartAutomaticSureshotScan()");
-  const helperEnd = app.indexOf("async function performSureshotSetup", helperStart);
-  assert.ok(helperStart >= 0 && helperEnd > helperStart);
-  const helper = app.slice(helperStart, helperEnd);
-  assert.ok(!helper.includes("currentTab"));
-  for (const token of ["isRegularMarketSession()", "DASHBOARD_SESSION_KEY", "SURESHOT_AUTO_SCAN_DAY_KEY",
-    "SURESHOT_AUTO_SCAN_ATTEMPT_KEY", "SURESHOT_AUTO_SCAN_RETRY_KEY",
-    "loadSureshotUniverseShortlist({ automatic: true })"]) assert.ok(helper.includes(token), token);
-  assert.ok(app.includes("maybeStartAutomaticSureshotScan();"));
-  assert.ok(app.includes("window.setInterval(maybeStartAutomaticSureshotScan, 30000)"));
-  const loader = app.slice(app.indexOf("async function loadSureshotUniverseShortlist"), helperStart);
-  for (const token of ["const automatic = options.automatic === true",
-    "!automatic && currentTab !== 'Sureshot CE/PE'",
-    "visibleHost || document.createElement('div')",
-    "sureshotUniverseScanHtml = host.innerHTML",
-    "currentHost.innerHTML = sureshotUniverseScanHtml"]) assert.ok(loader.includes(token), token);
+test("the published inline app and app.js both start automatic NSE Sureshot scans app-wide", () => {
+  for (const [label, source] of [["published inline app", indexHtml], ["app.js", app]]) {
+    const helperStart = source.indexOf("function maybeStartAutomaticSureshotScan()");
+    const helperEnd = source.indexOf("async function performSureshotSetup", helperStart);
+    assert.ok(helperStart >= 0 && helperEnd > helperStart, label + " helper exists");
+    const helper = source.slice(helperStart, helperEnd);
+    assert.ok(!helper.includes("currentTab"), label + " trigger is not tab-bound");
+    for (const token of ["isRegularMarketSession()", "DASHBOARD_SESSION_KEY", "SURESHOT_AUTO_SCAN_DAY_KEY",
+      "SURESHOT_AUTO_SCAN_ATTEMPT_KEY", "SURESHOT_AUTO_SCAN_RETRY_KEY",
+      "loadSureshotUniverseShortlist({ automatic: true })"]) assert.ok(helper.includes(token), label + ": " + token);
+    assert.ok(source.includes("maybeStartAutomaticSureshotScan();"), label + " starts at app boot");
+    assert.ok(source.includes("window.setInterval(maybeStartAutomaticSureshotScan, 30000)"), label + " has guarded local scheduler");
+    const loader = source.slice(source.indexOf("async function loadSureshotUniverseShortlist"), helperStart);
+    for (const token of ["const automatic = options.automatic === true",
+      "!automatic && currentTab !== 'Sureshot CE/PE'",
+      "visibleHost || document.createElement('div')",
+      "sureshotUniverseScanHtml = host.innerHTML",
+      "currentHost.innerHTML = sureshotUniverseScanHtml"]) assert.ok(loader.includes(token), label + ": " + token);
+  }
 });
 
 test("frontend records one automatic attempt per session day and marks completion only after every eligible candidate passes", () => {
-  const start = app.indexOf("async function loadSureshotUniverseShortlist");
-  const end = app.indexOf("async function performSureshotSetup", start);
+  const start = indexHtml.indexOf("async function loadSureshotUniverseShortlist");
+  const end = indexHtml.indexOf("async function performSureshotSetup", start);
   assert.ok(start >= 0 && end > start);
-  const loader = app.slice(start, end);
-  const triggerStart = app.indexOf("const startAutomaticTopFiveScan");
-  const triggerEnd = app.indexOf("sureshotAutoScanTimer = window.setInterval", triggerStart);
-  const trigger = app.slice(triggerStart, triggerEnd);
+  const loader = indexHtml.slice(start, end);
+  const triggerStart = indexHtml.indexOf("const startAutomaticTopFiveScan");
+  const triggerEnd = indexHtml.indexOf("sureshotAutoScanTimer = window.setInterval", triggerStart);
+  const trigger = indexHtml.slice(triggerStart, triggerEnd);
   const marker = loader.indexOf("localStorage.setItem(SURESHOT_AUTO_SCAN_DAY_KEY");
   const complete = loader.indexOf("result.selectedCandidatesComplete !== true");
   const catchAt = loader.indexOf("} catch (error)");
@@ -119,9 +121,11 @@ test("frontend records one automatic attempt per session day and marks completio
   assert.match(loader.slice(catchAt), /retryAfterSeconds/);
   assert.match(loader.slice(catchAt), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
   assert.match(trigger, /SURESHOT_AUTO_SCAN_RETRY_KEY/);
-  const authStart = app.indexOf("localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken)");
-  const authEnd = app.indexOf("authExchangeInProgress = false", authStart);
-  assert.match(app.slice(authStart, authEnd), /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY\)/);
+  const authStart = indexHtml.indexOf("localStorage.setItem(DASHBOARD_SESSION_KEY, data.dashboardSessionToken)");
+  const authEnd = indexHtml.indexOf("} catch (error)", authStart);
+  const authSource = indexHtml.slice(authStart, authEnd);
+  assert.match(authSource, /removeItem\(SURESHOT_AUTO_SCAN_ATTEMPT_KEY\)/);
+  assert.match(authSource, /maybeStartAutomaticSureshotScan\(\)/, "successful FYERS auth starts the scan even when Dashboard is active");
 });
 
 
