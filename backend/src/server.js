@@ -2244,7 +2244,11 @@ let runtimeStateReady = Promise.resolve(false);
 async function persistSureshotScanState() {
   if (!runtimeStateStore.configured || !sureshotScanState) return false;
   try { await runtimeStateStore.save('nse-sureshot-scan-cursor', sureshotScanState); return true; }
-  catch (error) { console.warn('NSE Sureshot scan cursor persistence failed:', String(error?.message || error).slice(0, 160)); return false; }
+  catch (error) {
+    runtimeStateReady = Promise.resolve(false);
+    console.error('NSE Sureshot scan cursor persistence failed; further scans are blocked until runtime state is restored:', String(error?.message || error).slice(0, 160));
+    return false;
+  }
 }
 async function clearSureshotScanState() {
   if (!runtimeStateStore.configured) return false;
@@ -2280,8 +2284,12 @@ async function initializeRuntimeStateStore() {
   }
 }
 app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, res) => {
-  await runtimeStateReady;
+  const runtimeStateAvailable = await runtimeStateReady;
   res.set("Cache-Control", "no-store");
+  if (!runtimeStateAvailable) return res.status(503).json({
+    ok: false, scanComplete: false, signalsAllowed: false, orderPlacement: "disabled",
+    error: "Durable PostgreSQL runtime state is unavailable; Sureshot scan is blocked. No upstream scan request was sent."
+  });
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
   if (!nseRegularSessionNow()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Market session is closed; actionable option plans are withheld." });
   if (nseSureshotAutoPlansInFlight) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "An NSE Sureshot batch is already running." });
@@ -2339,7 +2347,11 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         moverBoardsComplete: ranked.moverBoardsComplete,
         rankedCandidateCount: ranked.candidateCount, rankedEquityCount: ranked.equityCandidates.length,
         nextOffset: 0, results: [] };
-      await persistSureshotScanState();
+      if (!(await persistSureshotScanState())) {
+        const error = new Error("The initial Sureshot scan cursor could not be durably saved; scan blocked before candidate requests.");
+        error.statusCode = 503;
+        throw error;
+      }
     }
     const state = sureshotScanState;
     if (!state || state.nextOffset !== offset) return res.status(409).json({ ok: false, scanComplete: false, error: "Scan state unavailable. Start a fresh scan." });
@@ -2462,7 +2474,11 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       { rank: candidate.rank, underlyingSymbol: candidate.symbol, status: "NO TRADE", reason: "Candidate verification did not produce a complete result." });
     state.results.push(...batchResults);
     state.nextOffset += batchResults.length;
-    await persistSureshotScanState();
+    if (!(await persistSureshotScanState())) {
+      const error = new Error("Completed Sureshot batch could not be durably saved; scan paused and no partial ranking was published.");
+      error.statusCode = 503;
+      throw error;
+    }
     const selectedCandidatesComplete = state.nextOffset >= state.candidates.length;
     const scanComplete = selectedCandidatesComplete;
     if (!scanComplete) return res.json({ ok: true, scanComplete: false, batchComplete: true,
@@ -2737,8 +2753,13 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       topThreeSetupCount: topThreeSetups.length, topThreeSetups,
       bestSetup: topThreeSetups[0] || null, results,
       notice: "The complete eligible FYERS NSE F&O quote universe was checked. Final ranking uses a newly completed full-universe quote snapshot; each selected Top 3 candidate then receives a fresh underlying quote, fresh option quote and final completed-candle/risk validation. Only these fully revalidated plans receive Paper Mode IDs. FYERS pacing/cooldown remain enforced; no orders are placed." };
+    if (!(await clearSureshotScanState())) {
+      runtimeStateReady = Promise.resolve(false);
+      const error = new Error("Completed scan cursor could not be cleared from durable storage; verified plans withheld.");
+      error.statusCode = 503;
+      throw error;
+    }
     sureshotScanState = null;
-    await clearSureshotScanState();
     return res.json(payload);
   } catch (error) {
     const status = Number(error.statusCode) || 503;
