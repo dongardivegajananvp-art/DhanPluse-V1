@@ -22,6 +22,7 @@ test("Sureshot renders exactly three non-fabricated ranked setup slots and adds 
   const html = await readFile(appUrl, "utf8");
   assert.match(html, /Three ranked setup slots are shown/);
   assert.match(html, /NO VERIFIED STRIKE/);
+  assert.match(html, /TOP 3 VERIFIED SETUPS/);
   assert.match(html, /gvPaperBuyRow/);
   assert.match(html, /row\.paperPlanId/);
   assert.match(html, /BLOCKED/);
