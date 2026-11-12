@@ -1,5 +1,5 @@
 const CACHE_NAME = 'gv2vpd-shell-v5-24tab';
-const SHELL = ['./', './index.html', './style.css?v=gv2vpd-20261112-24tab', './app.js?v=gv2vpd-20261112-audit', './manifest.webmanifest', './gv2vpd-icon.svg'];
+const SHELL = ['./', './index.html', './style.css?v=gv2vpd-20261112-24tab', './app.js?v=gv2vpd-20261112-24tab', './journal.js?v=gv2vpd-20261112-24tab', './risk-calculator.js?v=gv2vpd-20261112-24tab', './backtest.js?v=gv2vpd-20261112-24tab', './manifest.webmanifest', './gv2vpd-icon.svg'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
