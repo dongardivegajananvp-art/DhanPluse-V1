@@ -1278,7 +1278,7 @@ async function fyersReadOnlyGet(url, { priority = 'normal', stage = null, bypass
     // Other Data API reads retain the existing 12s timeout. Queue/pacing time
     // is excluded by the budget layer; request spacing and cooldown are unchanged.
     timeoutMs: priority === 'sureshot' && historyRequest ? 30_000 : 12_000,
-    bypassCache: bypassCache || (priority === 'sureshot' && historyRequest)
+    bypassCache
   });
   if (priority === 'sureshot') {
     const cacheState = response.headers.get('x-dhanpulse-cache') || 'NOT_CACHED';
@@ -2520,7 +2520,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         underlyingUrl.searchParams.set("date_format", "1"); underlyingUrl.searchParams.set("range_from", from);
         underlyingUrl.searchParams.set("range_to", today); underlyingUrl.searchParams.set("cont_flag", "1");
         scanStage = "FINAL_REVALIDATE_UNDERLYING";
-        const history = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot", stage: scanStage });
+        const history = await fyersReadOnlyGet(underlyingUrl, { priority: "sureshot", stage: scanStage, bypassCache: true });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now());
         if (!direction.ok || direction.side !== item.direction) {
           item.status = "NO TRADE";
@@ -2550,7 +2550,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         optionHistoryUrl.searchParams.set("date_format", "1"); optionHistoryUrl.searchParams.set("range_from", from);
         optionHistoryUrl.searchParams.set("range_to", today); optionHistoryUrl.searchParams.set("cont_flag", "1");
         scanStage = "FINAL_REVALIDATE_OPTION_CANDLES";
-        const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot", stage: scanStage });
+        const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, { priority: "sureshot", stage: scanStage, bypassCache: true });
         finalOptionCandlesBySymbol.set(item.underlyingSymbol, Array.isArray(optionHistory?.candles) ? optionHistory.candles : []);
       } catch (error) {
         const status = Number(error.statusCode) || 0;
@@ -3031,7 +3031,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         url.searchParams.set("date_format", "1"); url.searchParams.set("range_from", from);
         url.searchParams.set("range_to", today); url.searchParams.set("cont_flag", "1");
         stage = "FINAL_REVALIDATE_MCX_UNDERLYING";
-        const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage });
+        const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage, bypassCache: true });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now());
         if (!direction.ok || direction.side !== item.direction) {
           item.status = "NO TRADE"; item.reason = "Final underlying-candle revalidation failed."; delete item.plan; continue;
@@ -3052,7 +3052,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         url.searchParams.set("date_format", "1"); url.searchParams.set("range_from", from);
         url.searchParams.set("range_to", today); url.searchParams.set("cont_flag", "1");
         stage = "FINAL_REVALIDATE_MCX_OPTION_CANDLES";
-        const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage });
+        const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage, bypassCache: true });
         finalOptionCandles.set(item.underlyingSymbol, Array.isArray(history?.candles) ? history.candles : []);
       } catch (error) {
         if ([401, 429].includes(Number(error.statusCode))) throw error;
