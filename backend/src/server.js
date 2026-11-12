@@ -185,7 +185,7 @@ const latestTicks = new Map();
 let lastAnyMarketTickAt = 0;
 let marketSocketConnectedAt = 0;
 // NSE heartbeat is independent of MCX and BSE activity.
-const NSE_TICK_HEARTBEAT_MS = 10_000;
+const NSE_TICK_HEARTBEAT_MS = 30_000;
 const NSE_TICK_FRESHNESS_SECONDS = 10;
 // MCX has its own freshness gate and subscription retry on the shared FYERS
 // Data Socket. NSE silence must never trigger this controller, or vice versa.
@@ -745,7 +745,7 @@ const marketSocketWatchdog = setInterval(() => {
     return ageMs < 0 ? Infinity : ageMs;
   });
   const silentForMs = staleNseAgesMs.length ? Math.max(...staleNseAgesMs) : Infinity;
-  const retryDelayMs = getMarketSocketReconnectDelay(nseResubscribeCount, 10_000, 120_000);
+  const retryDelayMs = getMarketSocketReconnectDelay(nseResubscribeCount, 30_000, 120_000);
   if (silentForMs < NSE_TICK_HEARTBEAT_MS || now - lastNseResubscribeAt < retryDelayMs) return;
   nseReconnectPending = true;
   lastNseResubscribeAt = now;
@@ -754,10 +754,10 @@ const marketSocketWatchdog = setInterval(() => {
     if (streamConnected && marketSocket && typeof marketSocket.subscribe === 'function') {
       marketSocket.mode(marketSocket.FullMode);
       marketSocket.subscribe(nseIndexSymbols);
-      streamError = 'NSE feed is reconnecting after 10 seconds without a fresh exchange tick.';
+      streamError = 'NSE feed is recovering after 30 seconds without a fresh exchange tick.';
       console.warn('NSE tick heartbeat missed; reapplying subscriptions on connected WebSocket.', JSON.stringify({
-        reason: 'no_fresh_nse_tick_within_10_seconds', silentForMs,
-        retry: nseResubscribeCount, nextRetryDelayMs: getMarketSocketReconnectDelay(nseResubscribeCount, 10_000, 120_000),
+        reason: 'no_fresh_nse_tick_within_30_seconds', silentForMs,
+        retry: nseResubscribeCount, nextRetryDelayMs: getMarketSocketReconnectDelay(nseResubscribeCount, 30_000, 120_000),
         recovery: 'reapply_nse_subscriptions_on_existing_shared_socket',
         transportConnected: true, symbols: nseIndexSymbols
       }));
@@ -765,7 +765,7 @@ const marketSocketWatchdog = setInterval(() => {
       streamError = 'NSE socket disconnected; FYERS SDK auto-reconnect is in progress.';
       console.warn('NSE WebSocket transport unavailable; FYERS SDK auto-reconnect pending.', JSON.stringify({
         reason: 'socket_transport_not_connected', silentForMs,
-        retry: nseResubscribeCount, nextRetryDelayMs: getMarketSocketReconnectDelay(nseResubscribeCount, 10_000, 120_000),
+        retry: nseResubscribeCount, nextRetryDelayMs: getMarketSocketReconnectDelay(nseResubscribeCount, 30_000, 120_000),
         recovery: 'fyers_sdk_auto_reconnect'
       }));
     }
