@@ -6,8 +6,9 @@ const server = await readFile(new URL("../src/server.js", import.meta.url), "utf
 const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8");
 const indexHtml = await readFile(new URL("../../site/index.html", import.meta.url), "utf8");
 const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
+const shortlist = await readFile(new URL("../src/sureshot-shortlist.js", import.meta.url), "utf8");
 
-test("Sureshot verifies the complete F&O quote universe and option-checks bounded mover candidates in five-item batches", () => {
+test("Sureshot verifies the complete F&O quote universe and option-checks every candidate in five-item batches", () => {
   assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 250/);
   assert.match(server, /const SURESHOT_BATCH_SIZE = 5/);
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
