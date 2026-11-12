@@ -291,6 +291,25 @@ function setBackendStatus(message) {
   if (settings) settings.textContent = message;
 }
 
+function setBackendDiagnostic(message, isError = false) {
+  let el = document.querySelector('#backendDiagnostic');
+  if (!el) {
+    const backendNode = document.querySelector('#backendStatus');
+    const host = backendNode && backendNode.closest('.panel');
+    if (host) {
+      el = document.createElement('p');
+      el.id = 'backendDiagnostic';
+      el.className = 'hint';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      host.appendChild(el);
+    }
+  }
+  if (!el) return;
+  el.textContent = 'Backend API diagnostic: ' + message;
+  el.style.color = isError ? '#ff9a9a' : '';
+}
+
 async function fetchBackendHealthPath(path, timeoutMs = 8000) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -376,26 +395,32 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
 async function refreshAuthoritativeFyersStatus() {
   if (authoritativeFyersStatusRefreshRunning || document.visibilityState === 'hidden') return;
   authoritativeFyersStatusRefreshRunning = true;
+  const startedAt = performance.now();
   try {
     const response = await fetchBackendHealthPath('/api/status');
-    if (!response.ok) throw new Error('Authoritative FYERS status unavailable.');
-    const status = await response.json().catch(() => ({}));
-    if (!status || status.backend !== 'online') throw new Error('Backend status not confirmed online.');
+    const elapsedMs = Math.round(performance.now() - startedAt);
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error('GET /api/status HTTP ' + response.status + ' (' + elapsedMs + ' ms)' + (body ? ' · ' + body.slice(0, 180).replace(/\\s+/g, ' ') : ''));
+    }
+    let status;
+    try { status = await response.json(); }
+    catch { throw new Error('GET /api/status returned invalid JSON (HTTP ' + response.status + ', ' + elapsedMs + ' ms).'); }
+    if (!status || status.backend !== 'online') throw new Error('GET /api/status payload did not confirm backend=online (HTTP ' + response.status + ', ' + elapsedMs + ' ms).');
     setBackendStatus('ONLINE');
+    setBackendDiagnostic('GET /api/status · HTTP ' + response.status + ' · ' + elapsedMs + ' ms · ' + new Date().toLocaleTimeString());
     authoritativeFyersStatusUpdatedAt = Date.now();
     applyAuthoritativeFyersStatus(status);
   } catch (error) {
-    // A failed/timeout status request must not leave the UI stuck on CHECKING
-    // or preserve stale green state. No market signal is enabled by this path.
+    const message = error && error.message ? error.message : String(error || 'Unknown request failure');
+    setBackendDiagnostic(message + ' · ' + new Date().toLocaleTimeString(), true);
     lastAuthoritativeFyersStatus = null;
     authoritativeFyersStatusUpdatedAt = 0;
     setBackendStatus(error && error.name === 'AbortError' ? 'TIMEOUT' : 'UNREACHABLE');
     setStatus('LIVE DATA UNAVAILABLE');
     setFyersStatus('STATUS UNKNOWN');
     setConnection('Authoritative backend status unavailable · live signals blocked', true);
-  } finally {
-    authoritativeFyersStatusRefreshRunning = false;
-  }
+  } finally { authoritativeFyersStatusRefreshRunning = false; }
 }
 
 async function refreshSocketStatusDuringCooldown() {
