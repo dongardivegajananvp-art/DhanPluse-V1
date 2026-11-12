@@ -87,7 +87,7 @@ export function createFyersDataApiBudget({
     });
   }
 
-  function activateCooldown(response, body, pathname) {
+  async function activateCooldown(response, body, pathname) {
     const server = String(response.headers?.get?.('server') || '');
     const cfRay = String(response.headers?.get?.('cf-ray') || '');
     const cloudflare1015 =
@@ -112,10 +112,12 @@ export function createFyersDataApiBudget({
     cooldownGeneration += 1;
     cooldownUntil = Math.max(cooldownUntil, now() + Math.min(maxCooldownMs, Math.max(backoffMs, retryMs)));
     if (typeof onCooldownChange === 'function') {
-      Promise.resolve(onCooldownChange({
-        cooldownUntil, cooldownReason, cooldownPathname, cooldownGeneration,
-        consecutiveCloudflareBlocks, consecutiveRateLimitBlocks
-      })).catch(error => console.warn('FYERS cooldown persistence failed:', String(error?.message || error).slice(0, 160)));
+      try {
+        await onCooldownChange({ cooldownUntil, cooldownReason, cooldownPathname, cooldownGeneration,
+          consecutiveCloudflareBlocks, consecutiveRateLimitBlocks });
+      } catch (error) {
+        console.warn('FYERS cooldown persistence failed:', String(error?.message || error).slice(0, 160));
+      }
     }
   }
 
@@ -191,7 +193,7 @@ export function createFyersDataApiBudget({
         const response = await fetchImpl(url, { ...fetchInit, signal });
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
-          activateCooldown(response, body, target.pathname);
+          await activateCooldown(response, body, target.pathname);
         } else if (canClearFyersDataApiCooldown({
           responseOk: response.ok,
           blockedPathname: cooldownPathname,
@@ -207,9 +209,12 @@ export function createFyersDataApiBudget({
           cooldownUntil = 0;
           cooldownReason = null;
           if (typeof onCooldownChange === 'function') {
-            Promise.resolve(onCooldownChange({ cooldownUntil: 0, cooldownReason: null, cooldownPathname: null,
-              cooldownGeneration, consecutiveCloudflareBlocks, consecutiveRateLimitBlocks }))
-              .catch(error => console.warn('FYERS cooldown persistence failed:', String(error?.message || error).slice(0, 160)));
+            try {
+              await onCooldownChange({ cooldownUntil: 0, cooldownReason: null, cooldownPathname: null,
+                cooldownGeneration, consecutiveCloudflareBlocks, consecutiveRateLimitBlocks });
+            } catch (error) {
+              console.warn('FYERS cooldown persistence failed:', String(error?.message || error).slice(0, 160));
+            }
           }
         }
 
