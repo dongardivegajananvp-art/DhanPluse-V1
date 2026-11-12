@@ -39,7 +39,7 @@ Updated: 2026-11-12 (Asia/Kolkata)
 1. The latest backend instance previously reached the 512 MiB Render memory ceiling and was OOM-killed. Current production memory headroom and sustained stability need another measured session.
 2. FYERS returned a Cloudflare 1015 cooldown. The app must respect the provider cooldown; a full authenticated regular-session Sureshot run has not yet been proven end-to-end.
 3. The Sureshot scan cursor is currently process-memory state. An instance restart during a long scan can lose progress; restart-safe persistence remains a reliability gap.
-4. The final Top 3 must be checked against a fresh full-universe underlying quote snapshot before ranking. Initial mover ranking can age during a long scan; this needs explicit final freshness validation.
+4. The audit branch now rechecks a complete fresh F&O quote snapshot after the deep scan, re-ranks candidates from current FYERS percentage changes, then rechecks each selected Top 3 underlying quote and option quote immediately before publication. CI and real-session acceptance are still required.
 5. Gap-Up/Down currently offers per-symbol historical gap analysis. It does not yet implement the user's automatic ₹2,000-crore traded-value qualification and 09:00–09:07 opening scan.
 6. FII/DII is not populated from a verified FYERS source and must remain clearly unavailable.
 7. Real-session browser acceptance still needs a full scan result (or explicit NO TRADE) with actual exchange timestamps, selected contract, premium, completed option candles, Entry, SL, Target and RR.
