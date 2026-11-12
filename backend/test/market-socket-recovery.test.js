@@ -65,6 +65,7 @@ test("SDK handles transport reconnects while the 30-second NSE heartbeat restore
   assert.match(lifecycle, /socket\.connect\(\)/);
   const heartbeat = source.slice(end, source.indexOf("marketSocketWatchdog.unref", end));
   assert.match(source, /NSE_TICK_HEARTBEAT_MS = 30_000/);
+  assert.match(source, /NSE_TICK_FRESHNESS_SECONDS = 10/);
   assert.match(heartbeat, /marketSocket\.subscribe\(nseIndexSymbols\)/);
   assert.match(heartbeat, /no_fresh_nse_tick_within_30_seconds/);
   assert.match(heartbeat, /getMarketSocketReconnectDelay\(nseResubscribeCount, 30_000, 120_000\)/);
