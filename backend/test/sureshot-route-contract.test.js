@@ -279,3 +279,25 @@ test("Sureshot FYERS request audit distinguishes upstream, cached and locally bl
   assert.ok(server.includes("endpoint: new URL(String(url)).pathname"));
   assert.ok(server.includes('loadVerifiedFnoStockQuotes({ priority: "sureshot", stage: scanStage })'));
 });
+
+
+test("MCX automatic scan retries incomplete runs and records completion only after a full backend audit", () => {
+  const loaderStart = app.indexOf("async function loadMcxSureshotUniverseShortlist");
+  const loaderEnd = app.indexOf("async function loadAdvancedScanner", loaderStart);
+  assert.ok(loaderStart >= 0 && loaderEnd > loaderStart);
+  const loader = app.slice(loaderStart, loaderEnd);
+  assert.match(loader, /let scanComplete = false/);
+  assert.match(loader, /scanComplete = response\.ok && payload\.ok === true && payload\.scanComplete === true/);
+  assert.match(loader, /return scanComplete/);
+  assert.match(loader, /return false/);
+
+  const autoStart = app.indexOf("const startAutomaticMcxTopThreeScan");
+  const autoEnd = app.indexOf("sureshotAutoScanTimer = window.setInterval", autoStart);
+  assert.ok(autoStart >= 0 && autoEnd > autoStart);
+  const automatic = app.slice(autoStart, autoEnd);
+  assert.match(automatic, /dhanpulse_mcx_sureshot_scan_complete_day/);
+  assert.match(automatic, /dhanpulse_mcx_sureshot_scan_retry_at/);
+  assert.match(automatic, /await loadMcxSureshotUniverseShortlist\(\)/);
+  assert.match(automatic, /if \(finished === true\)/);
+  assert.doesNotMatch(automatic, /dhanpulse_mcx_sureshot_scan_attempt_day/);
+});
