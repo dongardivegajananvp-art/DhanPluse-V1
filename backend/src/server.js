@@ -47,11 +47,19 @@ const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
 const runtimeStateStore = createRuntimeStateStore({ databaseUrl: process.env.DATABASE_URL });
 const fetchWithFyersBudget = createFyersDataApiBudget({
-  onCooldownChange: state => runtimeStateStore.configured
-    ? (state.cooldownUntil > Date.now()
-      ? runtimeStateStore.save('fyers-data-api-cooldown', { ...state, blockedUntil: new Date(state.cooldownUntil).toISOString() })
-      : runtimeStateStore.delete('fyers-data-api-cooldown'))
-    : Promise.resolve(false)
+  onCooldownChange: async state => {
+    // Wait for schema initialization so the first provider 429 cannot race
+    // ahead of CREATE TABLE and silently leave only an in-memory cooldown.
+    if (!runtimeStateStore.configured || !(await runtimeStateReady)) return false;
+    if (state.cooldownUntil > Date.now()) {
+      await runtimeStateStore.save('fyers-data-api-cooldown', {
+        ...state, blockedUntil: new Date(state.cooldownUntil).toISOString()
+      });
+    } else {
+      await runtimeStateStore.delete('fyers-data-api-cooldown');
+    }
+    return true;
+  }
 });
 
 const app = express();
