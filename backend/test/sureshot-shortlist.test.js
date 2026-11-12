@@ -72,25 +72,24 @@ test("default shortlist is exactly five from the complete 218-equity universe", 
 });
 
 
-test("option verification is bounded to Top 10 gainers, Top 10 losers and fresh index ticks", () => {
+test("option verification includes every fresh F&O equity and each independently fresh index", () => {
   const ranked = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now, limit: 250 });
   const selected = selectSureshotOptionVerificationCandidates(ranked);
-  assert.equal(selected.length, 23);
-  assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY" && row.changePct > 0).length, 10);
-  assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY" && row.changePct < 0).length, 10);
+  assert.equal(selected.length, 221);
+  assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY").length, 218);
   assert.equal(selected.filter(row => row.underlyingType === "INDEX").length, 3);
-  assert.equal(new Set(selected.map(row => row.symbol)).size, selected.length);
-  assert.deepEqual(selected.map(row => row.rank), Array.from({ length: 23 }, (_, i) => i + 1));
+  assert.equal(new Set(selected.map(row => row.symbol)).size, 221);
+  assert.deepEqual(selected.map(row => row.rank), Array.from({ length: 221 }, (_, i) => i + 1));
 });
 
-test("uses available mover rows when a side has fewer than ten movers without inventing rows", () => {
+test("missing or stale index ticks do not remove any verified F&O equities", () => {
   const ranked = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks, now, limit: 250 });
-  const partial = { ...ranked, topLosers: ranked.topLosers.slice(0, 5), moverBoardsComplete: false };
+  const missingIndex = new Map(indexTicks);
+  missingIndex.delete("BSE:SENSEX-INDEX");
+  const partial = buildVerifiedSureshotShortlist({ quoteSnapshot, universe, indexTicks: missingIndex, now, limit: 250 });
   const selected = selectSureshotOptionVerificationCandidates(partial);
-  assert.equal(selected.length, 18);
-  assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY" && row.changePct > 0).length, 10);
-  assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY" && row.changePct < 0).length, 5);
-  assert.equal(selected.filter(row => row.underlyingType === "INDEX").length, 3);
+  assert.equal(selected.length, 220);
+  assert.equal(selected.filter(row => row.underlyingType === "FNO_EQUITY").length, 218);
 });
 
 test("requires every expected F&O symbol exactly once with a fresh exchange timestamp", () => {

@@ -2208,13 +2208,13 @@ app.get("/api/market/sureshot-shortlist", requireDashboardSession, async (_req, 
   }
 });
 
-// Verify the complete F&O quote universe first, then option-check only the Top 10
-// gainers + Top 10 losers and individually fresh index ticks in five-candidate
-// batches. The shared FYERS budget serializes requests and the server-held cursor
-// lets the browser continue without bursts or discarding completed batches.
+// Verify the complete F&O quote universe first, then option-check every eligible
+// F&O equity plus each independently fresh index tick in five-candidate batches.
+// The shared FYERS budget serializes requests and the server-held cursor lets the
+// browser continue without bursts or discarding completed batches.
 const SURESHOT_UNIVERSE_SCAN_LIMIT = 250;
 const SURESHOT_BATCH_SIZE = 5;
-const SURESHOT_SCAN_TTL_MS = 2 * 60 * 60 * 1000;
+const SURESHOT_SCAN_TTL_MS = 3 * 60 * 60 * 1000;
 let sureshotAutoPlansInFlight = false;
 let nseSureshotAutoPlansInFlight = false;
 let mcxSureshotAutoPlansInFlight = false;
@@ -2416,11 +2416,11 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       })) });
     const results = state.results;
     const initiallyVerifiedCandidateCount = results.filter(item => item.initiallyVerified === true).length;
-    // The full scan may take several minutes. Revalidate the highest-ranked ten
-    // initial passes at completion so their underlying candles, option premium
-    // and completed option candles are still fresh when Paper IDs are issued.
+    // Revalidate every initial pass before publishing the Top 3. Limiting this
+    // to the first five would make later verified F&O candidates ineligible for
+    // the final ranking and could hide the actual best setups.
     const finalCheckCandidates = results.filter(item =>
-      item.initiallyVerified === true && item.status === "VERIFIED SETUP").slice(0, 5);
+      item.initiallyVerified === true && item.status === "VERIFIED SETUP");
     const finalDirections = new Map();
     for (const item of finalCheckCandidates) {
       if (!nseRegularSessionNow()) { const error = new Error("Market session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
@@ -2564,7 +2564,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       scannedCandidateCount: results.length, verifiedSetupCount: verified.length, initiallyVerifiedCandidateCount,
       topThreeSetupCount: topThreeSetups.length, topThreeSetups,
       bestSetup: topThreeSetups[0] || null, results,
-      notice: "The complete eligible FYERS NSE F&O quote universe was verified and ranked. Option verification is limited to the complete Top 10 gainers + Top 10 losers boards plus individually fresh index ticks to bound FYERS Data API request volume. Selected candidates require fresh underlying candles, listed option contract identity, fresh option quotes, completed option candles and final revalidation; only current top-three plans receive Paper Mode IDs. No orders are placed." };
+      notice: "The complete eligible FYERS NSE F&O quote universe was verified and ranked. Every eligible F&O equity plus each independently fresh index tick was checked for underlying direction, listed option contract identity, fresh option premium, completed option candles and final revalidation. Only fully revalidated current top-three plans receive Paper Mode IDs. FYERS request pacing and cooldown remain enforced; no orders are placed." };
     sureshotScanState = null;
     return res.json(payload);
   } catch (error) {

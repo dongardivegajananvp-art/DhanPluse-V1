@@ -6,10 +6,12 @@ const server = await readFile(new URL("../src/server.js", import.meta.url), "utf
 const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8");
 const indexHtml = await readFile(new URL("../../site/index.html", import.meta.url), "utf8");
 const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
+const shortlist = await readFile(new URL("../src/sureshot-shortlist.js", import.meta.url), "utf8");
 
-test("Sureshot verifies the complete F&O quote universe and option-checks bounded mover candidates in five-item batches", () => {
+test("Sureshot verifies the complete F&O quote universe and option-checks every candidate in five-item batches", () => {
   assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 250/);
   assert.match(server, /const SURESHOT_BATCH_SIZE = 5/);
+  assert.match(server, /const SURESHOT_SCAN_TTL_MS = 3 \* 60 \* 60 \* 1000/);
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   assert.ok(start >= 0 && end > start);
@@ -31,6 +33,8 @@ test("Sureshot verifies the complete F&O quote universe and option-checks bounde
   assert.match(route, /item\.finalVerifiedAt = new Date\(\)\.toISOString\(\)/);
   assert.match(route, /initiallyVerifiedCandidateCount/);
   assert.match(route, /ALL_ELIGIBLE_CANDIDATES_CHECKED/);
+  assert.match(route, /Every eligible F\&O equity plus each independently fresh index tick was checked/);
+  assert.doesNotMatch(route, /Option verification is limited to the complete Top 10 gainers/);
   assert.match(app, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
   assert.match(app, /TOP 3 VERIFIED SETUPS/);
   assert.match(app, /FULL UNIVERSE AUDIT RESULTS/);
@@ -206,33 +210,23 @@ test("NSE and MCX Sureshot scan gates are independent", () => {
 });
 
 
-test("NSE option verification uses the complete Top 10 gainers/losers boards, not all 218 equities", () => {
+test("NSE option verification selects the complete verified F&O equity universe", () => {
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   const route = server.slice(start, end);
   assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
-  assert.ok(route.includes("topGainers: ranked.topGainers, topLosers: ranked.topLosers"));
-  assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
+  assert.ok(route.includes("candidates: moverCandidates"));
   assert.ok(server.includes("selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js'"));
+  assert.match(shortlist, /\[\.\.\.ranked\.equityCandidates/);
 });
 
 
-test("NSE option verification is bounded to Top 10 gainers, Top 10 losers and fresh indices", () => {
+test("NSE final freshness revalidation includes every initial pass before publishing Top 3", () => {
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   const route = server.slice(start, end);
-  assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
-  assert.ok(route.includes("topGainers: ranked.topGainers, topLosers: ranked.topLosers"));
-  assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
-  assert.ok(server.includes("selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js'"));
-});
-
-
-test("NSE final freshness revalidation is bounded to five candidates for up to three published setups", () => {
-  const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
-  const end = server.indexOf("// Last-known F&O equity quotes", start);
-  const route = server.slice(start, end);
-  assert.ok(route.includes(".slice(0, 5);"));
+  assert.ok(route.includes("const finalCheckCandidates = results.filter(item =>"));
+  assert.ok(!route.includes(".slice(0, 5);"));
   assert.ok(route.includes("finalRevalidationCandidateCount: finalCheckCandidates.length"));
   assert.ok(route.includes("topThreeSetups = verified.slice(0, 3)"));
 });

@@ -57,7 +57,7 @@ test("Paper ledger and broker order placement remain explicitly separate and rea
 
 test("Sureshot scan retains its server cursor across HTTP 429 and waits for provider cooldown", async () => {
   const server = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
-  assert.match(server, /const SURESHOT_SCAN_TTL_MS = 2 \* 60 \* 60 \* 1000/);
+  assert.match(server, /const SURESHOT_SCAN_TTL_MS = 3 \* 60 \* 60 \* 1000/);
   assert.match(server, /const resumableScan = status === 429 && Boolean\(sureshotScanState && sureshotScanState\.id\)/);
   assert.match(server, /scanPaused: resumableScan/);
   assert.match(server, /retryAfterSeconds: retryAfterSeconds \|\| null/);
