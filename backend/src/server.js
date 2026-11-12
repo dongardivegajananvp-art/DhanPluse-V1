@@ -60,7 +60,7 @@ const fyersTokenStore = createFyersTokenStore({
   encryptionKey: process.env.FYERS_TOKEN_ENCRYPTION_KEY
 });
 let fyersTokenStoreReady = false;
-const paperStore = createPaperTradingStore({ databaseUrl: process.env.DATABASE_URL });
+const paperStore = createPaperTradingStore({ databaseUrl: process.env.DATABASE_URL, capitalInr: Number(process.env.PAPER_CAPITAL_INR) || 5000, maxRiskPercent: 1, maxDailyLossPercent: 2 });
 const fnoQuoteSnapshotStore = createFnoQuoteSnapshotStore({ databaseUrl: process.env.DATABASE_URL });
 let fnoQuoteSnapshotStoreReady = false;
 const nseSymbolMasterCache = createNseSymbolMasterCache({ databaseUrl: process.env.DATABASE_URL });
@@ -3587,7 +3587,7 @@ app.get('/api/paper/positions', async (_req, res) => {
   try {
     const [positions, openPositions] = await Promise.all([paperStore.listPositions(), paperStore.listOpenPositions()]);
     return res.json({ ok: true, mode: 'PAPER_SIMULATION', positions, openPositionCount: openPositions.length,
-      orderPlacement: 'disabled', source: 'GV2VPD PostgreSQL paper ledger; not FYERS broker positions' });
+      orderPlacement: 'disabled', riskLimits: paperStore.riskLimits, source: 'GV2VPD PostgreSQL paper ledger; not FYERS broker positions' });
   } catch (error) {
     return res.status(503).json({ ok: false, error: 'Paper positions are unavailable.', detail: String(error.message || error).slice(0, 160) });
   }
