@@ -206,33 +206,23 @@ test("NSE and MCX Sureshot scan gates are independent", () => {
 });
 
 
-test("NSE option verification uses the complete Top 10 gainers/losers boards, not all 218 equities", () => {
+test("NSE option verification selects the complete verified F&O equity universe", () => {
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   const route = server.slice(start, end);
   assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
-  assert.ok(route.includes("topGainers: ranked.topGainers, topLosers: ranked.topLosers"));
-  assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
+  assert.ok(route.includes("candidates: moverCandidates"));
   assert.ok(server.includes("selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js'"));
+  assert.match(shortlist, /\[\.\.\.ranked\.equityCandidates/);
 });
 
 
-test("NSE option verification is bounded to Top 10 gainers, Top 10 losers and fresh indices", () => {
+test("NSE final freshness revalidation includes every initial pass before publishing Top 3", () => {
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   const route = server.slice(start, end);
-  assert.ok(route.includes("selectSureshotOptionVerificationCandidates(ranked)"));
-  assert.ok(route.includes("topGainers: ranked.topGainers, topLosers: ranked.topLosers"));
-  assert.ok(!route.includes("const moverCandidates = ranked.data.map"));
-  assert.ok(server.includes("selectSureshotOptionVerificationCandidates } from './sureshot-shortlist.js'"));
-});
-
-
-test("NSE final freshness revalidation is bounded to five candidates for up to three published setups", () => {
-  const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
-  const end = server.indexOf("// Last-known F&O equity quotes", start);
-  const route = server.slice(start, end);
-  assert.ok(route.includes(".slice(0, 5);"));
+  assert.ok(route.includes("const finalCheckCandidates = results.filter(item =>"));
+  assert.ok(!route.includes(".slice(0, 5);"));
   assert.ok(route.includes("finalRevalidationCandidateCount: finalCheckCandidates.length"));
   assert.ok(route.includes("topThreeSetups = verified.slice(0, 3)"));
 });
