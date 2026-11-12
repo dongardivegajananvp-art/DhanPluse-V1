@@ -80,17 +80,21 @@ export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now
   }
   let trend = null;
   if (strictTrend) {
-    trend = validateSureshotTrend({ candles, resolution: "5", now, minTrendScore: 45 });
+    trend = validateSureshotTrend({ candles, resolution: "5", now });
     if (!trend.ok) return { ok: false, reason: trend.reason };
-    side = trend.side;
-    reason = "Verified " + side + " trend: directional EMA/VWAP majority passed the weighted Trend Score threshold.";
+    if (!side) return { ok: false, reason: "No completed-candle supply/demand breakout is confirmed." };
+    if (side !== trend.side) {
+      return { ok: false, reason: "Supply/demand breakout and DMA20 crossover disagree; direction is not confirmed." };
+    }
+    reason = "Verified " + side + ": completed FYERS candle broke the " +
+      (side === "CE" ? "supply" : "demand") + " zone and the DMA20 crossover agrees.";
   }
   return {
     ok: true, side, reason, spot: latest.close,
     latestCandleAt: new Date(latest.time * 1000).toISOString(),
     candleAgeSeconds: Number((ageMs / 1000).toFixed(1)),
     completedCandleCount: valid.length, supply, demand,
-    ...(trend ? { trendScore: trend.trendScore, trendMetrics: trend } : {})
+    ...(trend ? { trendMetrics: trend } : {})
   };
 }
 
@@ -194,7 +198,7 @@ export function buildVerifiedSureshotTradePlan({
       latestCandleAt: direction.latestCandleAt,
       candleAgeSeconds: direction.candleAgeSeconds,
       completedCandleCount: direction.completedCandleCount,
-      ...(Number.isFinite(Number(direction.trendScore)) ? { trendScore: Number(direction.trendScore), trendMetrics: direction.trendMetrics } : {})
+      ...(direction.trendMetrics && typeof direction.trendMetrics === "object" ? { trendMetrics: direction.trendMetrics } : {})
     },
     contract,
     quote: {
