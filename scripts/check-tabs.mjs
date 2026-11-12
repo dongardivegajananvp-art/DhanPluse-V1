@@ -92,7 +92,6 @@ if (!sw.includes('gv2vpd-shell-v3-three-tab-app') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('GV2VPD service-worker cache shell is incomplete.');
 }
-if (!app.includes("id=\\"backendDiagnostic\\"") || !app.includes("setBackendDiagnostic(message, isError = false)") || !app.includes("GET /api/status HTTP ")) throw new Error('Dashboard must expose exact backend HTTP/network failures instead of hiding them.');
 if (!html.includes('id="backendDiagnostic"') || !app.includes("setBackendDiagnostic(message, isError = false)") || !app.includes("GET /api/status HTTP ")) {
   throw new Error('Dashboard must expose exact backend HTTP/network failures instead of hiding them.');
 }
