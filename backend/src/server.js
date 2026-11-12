@@ -36,6 +36,7 @@ import { buildMcxSocketQuoteRows, waitForCompleteMcxSocketAudit } from './mcx-so
 import { normalizeFyersCandleOrder } from './candle-order.js';
 import { parseFyersQuoteTimestamp, summarizeFyersQuoteTimestampFields } from './fyers-quote-timestamp.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
+import { createFnoQuoteSnapshotStore } from './fno-quote-snapshot-store.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 import { createPaperTradingStore } from './paper-trading-store.js';
 import { reconcilePaperSocketSubscriptions } from './paper-socket-subscriptions.js';
@@ -61,6 +62,8 @@ const fyersTokenStore = createFyersTokenStore({
 });
 let fyersTokenStoreReady = false;
 const paperStore = createPaperTradingStore({ databaseUrl: process.env.DATABASE_URL });
+const fnoQuoteSnapshotStore = createFnoQuoteSnapshotStore({ databaseUrl: process.env.DATABASE_URL });
+let fnoQuoteSnapshotStoreReady = false;
 const nseSymbolMasterCache = createNseSymbolMasterCache({ databaseUrl: process.env.DATABASE_URL });
 const verifiedPlanRegistry = createVerifiedPlanRegistry({ ttlMs: 30_000 });
 let paperStoreReady = false;
@@ -661,7 +664,7 @@ function startMarketDataStream(token, startReason = 'unspecified') {
       streamError = 'FYERS market socket disconnected; automatic recovery is in progress.';
       nseReconnectPending = true;
       marketSocketLastCloseAt = Date.now();
-      console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
+      console.warn('FYERS WebSocket transport closed; SDK auto-reconnect pending.', JSON.stringify({
         generation: socketGeneration, tokenFingerprint: requestedFingerprint,
         code: code ?? null,
         reason: safeReason || null,
@@ -728,6 +731,8 @@ function startMarketDataStream(token, startReason = 'unspecified') {
 // NSE feed heartbeat: MCX/BSE ticks do not count as proof that NSE index
 // subscriptions are alive. After 10 seconds without a fresh exchange-timestamped
 // NSE tick, re-apply only NSE subscriptions on the existing FYERS Data Socket.
+// A missed tick heartbeat is NOT a transport close: keep the socket-connected
+// state separate so the API/UI can report feed recovery without claiming disconnect.
 // Actual transport closes use the SDK auto-reconnect controller.
 const marketSocketWatchdog = setInterval(() => {
   if (!accessToken || !marketSocket || !nseRegularSessionNow()) return;
@@ -750,7 +755,7 @@ const marketSocketWatchdog = setInterval(() => {
       marketSocket.mode(marketSocket.FullMode);
       marketSocket.subscribe(nseIndexSymbols);
       streamError = 'NSE feed is reconnecting after 10 seconds without a fresh exchange tick.';
-      console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
+      console.warn('NSE tick heartbeat missed; reapplying subscriptions on connected WebSocket.', JSON.stringify({
         reason: 'no_fresh_nse_tick_within_10_seconds', silentForMs,
         retry: nseResubscribeCount, nextRetryDelayMs: getMarketSocketReconnectDelay(nseResubscribeCount, 10_000, 120_000),
         recovery: 'reapply_nse_subscriptions_on_existing_shared_socket',
@@ -758,7 +763,7 @@ const marketSocketWatchdog = setInterval(() => {
       }));
     } else {
       streamError = 'NSE socket disconnected; FYERS SDK auto-reconnect is in progress.';
-      console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
+      console.warn('NSE WebSocket transport unavailable; FYERS SDK auto-reconnect pending.', JSON.stringify({
         reason: 'socket_transport_not_connected', silentForMs,
         retry: nseResubscribeCount, nextRetryDelayMs: getMarketSocketReconnectDelay(nseResubscribeCount, 10_000, 120_000),
         recovery: 'fyers_sdk_auto_reconnect'
@@ -766,7 +771,7 @@ const marketSocketWatchdog = setInterval(() => {
     }
   } catch (error) {
     streamError = 'NSE subscription recovery failed; automatic retry remains active.';
-    console.error('NSE socket disconnected, reconnecting... subscription recovery failed:', String(error?.message || error).slice(0, 200));
+    console.error('NSE subscription recovery failed; retry remains pending:', String(error?.message || error).slice(0, 200));
   }
 }, 1_000);
 marketSocketWatchdog.unref?.();
@@ -1738,6 +1743,46 @@ async function getMcxOptionContractMetadata(symbol) {
 }
 let stockQuoteCache = { fetchedAt: 0, data: null };
 let stockQuotePromise = null;
+let fnoQuoteSnapshotStoreInitPromise = null;
+let fnoQuoteSnapshotStoreFailureCount = 0;
+let fnoQuoteSnapshotStoreRetryAt = 0;
+async function ensureFnoQuoteSnapshotStoreReady() {
+  if (fnoQuoteSnapshotStoreReady) return true;
+  if (!fnoQuoteSnapshotStore.configured || Date.now() < fnoQuoteSnapshotStoreRetryAt) return false;
+  if (fnoQuoteSnapshotStoreInitPromise) return fnoQuoteSnapshotStoreInitPromise;
+  fnoQuoteSnapshotStoreInitPromise = (async () => {
+    try {
+      await fnoQuoteSnapshotStore.initialize();
+      fnoQuoteSnapshotStoreReady = true;
+      fnoQuoteSnapshotStoreFailureCount = 0;
+      fnoQuoteSnapshotStoreRetryAt = 0;
+      console.log('Durable PostgreSQL F&O snapshot store initialized; closed-session recovery enabled.');
+      return true;
+    } catch (error) {
+      fnoQuoteSnapshotStoreReady = false;
+      fnoQuoteSnapshotStoreFailureCount += 1;
+      const retryDelayMs = Math.min(5 * 60_000, 5_000 * (2 ** Math.min(6, fnoQuoteSnapshotStoreFailureCount - 1)));
+      fnoQuoteSnapshotStoreRetryAt = Date.now() + retryDelayMs;
+      console.error('Durable F&O snapshot store initialization failed; retry backoff activated:', JSON.stringify({
+        failureCount: fnoQuoteSnapshotStoreFailureCount,
+        retryAfterSeconds: Math.ceil(retryDelayMs / 1000),
+        reason: String(error?.message || error).slice(0, 160)
+      }));
+      return false;
+    }
+  })().finally(() => { fnoQuoteSnapshotStoreInitPromise = null; });
+  return fnoQuoteSnapshotStoreInitPromise;
+}
+async function persistVerifiedFnoQuoteSnapshot(snapshot, symbols) {
+  if (!await ensureFnoQuoteSnapshotStoreReady()) return;
+  try {
+    const result = await fnoQuoteSnapshotStore.save(snapshot, symbols, Date.now());
+    if (result.saved) console.info('Complete verified FYERS F&O snapshot persisted for closed-session preparation.', JSON.stringify({ universeCount: symbols.length, snapshotFetchedAt: snapshot.fetchedAt }));
+    else console.warn('FYERS F&O snapshot not persisted:', result.reason);
+  } catch (error) {
+    console.warn('FYERS F&O snapshot persistence unavailable; live in-memory verification remains active:', String(error?.message || error).slice(0, 160));
+  }
+}
 const STOCK_QUOTE_CACHE_MS = 30000;
 const STOCK_QUOTE_BATCH_SIZE = 50;
 
@@ -1809,6 +1854,7 @@ function syncFnoQuoteCacheFromMoversPayload(payload, symbols = moversSymbols) {
   const snapshot = moversPayloadToFnoQuoteSnapshot(payload, symbols, Date.now());
   if (!snapshot) return false;
   stockQuoteCache = { fetchedAt: Date.parse(snapshot.fetchedAt), data: snapshot };
+  void persistVerifiedFnoQuoteSnapshot(snapshot, symbols);
   return true;
 }
 async function getNseFnoEquityUniverse() {
@@ -1987,7 +2033,8 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
     freshnessLimitSeconds: 30, universe: "FYERS current NSE F&O equity symbol master",
     universeCount: symbols.length, quotedCount: data.length, data, missingSymbols
   };
-  stockQuoteCache = { fetchedAt: Date.now(), data: result };
+  stockQuoteCache = { fetchedAt: Date.parse(result.fetchedAt), data: result };
+  await persistVerifiedFnoQuoteSnapshot(result, symbols);
   syncMoversCacheFromFnoQuoteSnapshot(result, master.data.map(item => item.symbol));
   return result;
 }
@@ -2041,6 +2088,62 @@ app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) =
     });
   } finally {
     if (stockQuotePromise === request) stockQuotePromise = null;
+  }
+});
+
+app.get("/api/market/sureshot-preparation", requireDashboardSession, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!accessToken) return res.status(401).json({
+    ok: false, preparationOnly: true, signalsAllowed: false, orderPlacement: "disabled",
+    error: "Connect FYERS first. No cached preparation snapshot is available without an authenticated session."
+  });
+  if (nseRegularSessionNow()) return res.status(409).json({
+    ok: false, preparationOnly: true, signalsAllowed: false, orderPlacement: "disabled",
+    error: "NSE market is open. Use the live Sureshot scan; preparation snapshots are closed-session only."
+  });
+  try {
+    const universe = await getNseFnoEquityUniverse();
+    const expectedSymbols = universe.data.map(item => item.symbol);
+    if (!fnoQuoteSnapshotStoreReady) await ensureFnoQuoteSnapshotStoreReady();
+    if (!stockQuoteCache.data && fnoQuoteSnapshotStoreReady) {
+      const restored = await fnoQuoteSnapshotStore.load(expectedSymbols, Date.now(), 24 * 60 * 60 * 1000);
+      if (restored) {
+        stockQuoteCache = { fetchedAt: restored.fetchedAt, data: restored.snapshot };
+        console.info('Prior-session FYERS F&O snapshot restored from PostgreSQL for preparation only.', JSON.stringify({ universeCount: expectedSymbols.length, ageHours: Number((restored.ageMs / 3600000).toFixed(2)), exchangeTime: restored.snapshot.fetchedAt }));
+      }
+    }
+    const snapshot = stockQuoteCache.data;
+    const cacheAgeMs = Date.now() - Number(stockQuoteCache.fetchedAt || 0);
+    const maxAgeMs = 24 * 60 * 60 * 1000;
+    if (!snapshot || cacheAgeMs < 0 || cacheAgeMs > maxAgeMs) {
+      return res.status(409).json({
+        ok: false, preparationOnly: true, signalsAllowed: false, orderPlacement: "disabled",
+        error: "No complete last-session FYERS F&O snapshot is cached. Preparation list withheld; no REST refresh is attempted while market is closed.",
+        cacheAgeHours: Number.isFinite(cacheAgeMs) && cacheAgeMs >= 0 ? Number((cacheAgeMs / 3600000).toFixed(2)) : null
+      });
+    }
+    const ranked = buildVerifiedSureshotShortlist({
+      quoteSnapshot: snapshot, universe,
+      indexTicks: new Map(),
+      now: Date.now(), maxEquityQuoteAgeMs: maxAgeMs,
+      maxIndexTickAgeMs: maxAgeMs, limit: SURESHOT_UNIVERSE_SCAN_LIMIT
+    });
+    return res.json({
+      ok: true, preparationOnly: true, marketSession: "CLOSED",
+      signalsAllowed: false, orderPlacement: "disabled", readOnly: true,
+      source: "Cached last-known FYERS exchange-timestamped F&O snapshot only",
+      cacheAgeHours: Number((cacheAgeMs / 3600000).toFixed(2)),
+      snapshotFetchedAt: snapshot.fetchedAt || null,
+      universeCount: expectedSymbols.length, quotedCount: snapshot.quotedCount,
+      topGainers: ranked.topGainers, topLosers: ranked.topLosers,
+      notice: "Preparation watchlist only. Cached prior-session movers are not live signals or trade setups. No option premium, Entry, SL, Target, Paper BUY or order is authorized. Run the live scan during NSE hours for fresh option verification."
+    });
+  } catch (error) {
+    return res.status(Number(error.statusCode) || 503).json({
+      ok: false, preparationOnly: true, signalsAllowed: false, orderPlacement: "disabled",
+      error: "Preparation snapshot could not be verified; watchlist withheld.",
+      detail: String(error.message || "Verification failed.").slice(0, 180)
+    });
   }
 });
 
@@ -3580,6 +3683,14 @@ app.use((err, _req, res, _next) => {
 
 const port = Number(process.env.PORT || 8080);
 
+async function initializeFnoQuoteSnapshotStore() {
+  if (!fnoQuoteSnapshotStore.configured) {
+    console.warn('Closed-session Sureshot preparation persistence disabled: DATABASE_URL is not configured.');
+    return;
+  }
+  await ensureFnoQuoteSnapshotStoreReady();
+}
+
 async function initializePaperStore() {
   if (!paperStore.configured) {
     console.warn('Paper Mode disabled: DATABASE_URL is not configured; no in-memory substitute will be used.');
@@ -3628,6 +3739,7 @@ function startServer() {
   const server = app.listen(port, () => {
     console.log(`DhanPulse backend listening on ${port}`);
     void initializePaperStore();
+    void initializeFnoQuoteSnapshotStore();
     void initializeFyersTokenStore();
   });
   server.on('error', error => {
