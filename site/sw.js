@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gv2vpd-shell-v3-three-tab-app';
+const CACHE_NAME = 'gv2vpd-shell-v4-external-assets';
 // Inline app bundle compatibility marker: app.js?v=20261106-authoritative-status-v2
 const SHELL = ['./', './index.html', './manifest.webmanifest', './gv2vpd-icon.svg'];
 
