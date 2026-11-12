@@ -178,7 +178,7 @@ test("MCX Sureshot passes its own stage context to every FYERS REST call", () =>
   const route = server.slice(start, end);
   assert.doesNotMatch(route, /stage: scanStage/,
     "scanStage belongs to the separate NSE route and is undefined in the MCX handler");
-  const calls = [...route.matchAll(/fyersReadOnlyGet\\([^;]*?\\{ priority: "sureshot", stage \\}\\)/gs)];
+  const calls = [...route.matchAll(/fyersReadOnlyGet\([^;]*?\{ priority: "sureshot", stage \}\)/gs)];
   assert.equal(calls.length, 6, "all six MCX FYERS history/quote requests pass the current MCX stage");
   assert.equal((route.match(/stage: scanStage/g) || []).length, 0,
     "the MCX handler must not reference the NSE-only stage variable");
