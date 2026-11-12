@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validatePaperPlan, isNewerExchangeTimestamp } from '../src/paper-trading-store.js';
+import { validatePaperPlan, isNewerExchangeTimestamp, getPaperRiskLimits } from '../src/paper-trading-store.js';
 
 const now = Date.parse('2026-11-09T03:00:00.000Z');
 const valid = {
@@ -49,4 +49,18 @@ test('accepts only strictly newer exchange timestamps for automatic exit process
   assert.equal(isNewerExchangeTimestamp(previous, previous), false);
   assert.equal(isNewerExchangeTimestamp('2026-11-09T02:59:59.000Z', previous), false);
   assert.equal(isNewerExchangeTimestamp('', previous), false);
+});
+
+test('Paper Mode enforces one-percent per-trade risk and a two-percent daily loss cap', () => {
+  assert.deepEqual(getPaperRiskLimits(), {
+    capitalInr: 5000,
+    maxRiskPerTradeInr: 50,
+    maxRiskPercent: 1,
+    maxDailyLossInr: 100,
+    maxDailyLossPercent: 2,
+    maxPremiumOutlayInr: 5000
+  });
+  assert.equal(getPaperRiskLimits({ capitalInr: 1000 }).maxRiskPerTradeInr, 10);
+  assert.equal(getPaperRiskLimits({ capitalInr: 1000 }).maxDailyLossInr, 20);
+  assert.throws(() => getPaperRiskLimits({ capitalInr: 0 }), /valid positive values/i);
 });
