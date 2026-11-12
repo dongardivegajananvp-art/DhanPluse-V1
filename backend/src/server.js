@@ -36,6 +36,7 @@ import { normalizeFyersCandleOrder } from './candle-order.js';
 import { parseFyersQuoteTimestamp, summarizeFyersQuoteTimestampFields } from './fyers-quote-timestamp.js';
 import { moversPayloadToFnoQuoteSnapshot, fnoQuoteSnapshotToMoversPayload, isCompleteFreshFnoQuoteSnapshot } from './fno-quote-snapshot.js';
 import { createFnoQuoteSnapshotStore } from './fno-quote-snapshot-store.js';
+import { createRuntimeStateStore } from './runtime-state-store.js';
 import { deriveVerifiedUnderlyingDirection, selectNearestVerifiedOptionContract, buildVerifiedSureshotTradePlan } from './sureshot-auto-plans.js';
 import { createPaperTradingStore } from './paper-trading-store.js';
 import { reconcilePaperSocketSubscriptions } from './paper-socket-subscriptions.js';
@@ -44,7 +45,14 @@ import { decodeFyersSocketMessage, summarizeFyersSocketMessage } from './fyers-s
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
-const fetchWithFyersBudget = createFyersDataApiBudget();
+const runtimeStateStore = createRuntimeStateStore({ databaseUrl: process.env.DATABASE_URL });
+const fetchWithFyersBudget = createFyersDataApiBudget({
+  onCooldownChange: state => runtimeStateStore.configured
+    ? (state.cooldownUntil > Date.now()
+      ? runtimeStateStore.save('fyers-data-api-cooldown', { ...state, blockedUntil: new Date(state.cooldownUntil).toISOString() })
+      : runtimeStateStore.delete('fyers-data-api-cooldown'))
+    : Promise.resolve(false)
+});
 
 const app = express();
 app.disable('x-powered-by');
@@ -2232,7 +2240,47 @@ let nseSureshotAutoPlansInFlight = false;
 let mcxSureshotAutoPlansInFlight = false;
 let sureshotScanState = null;
 let mcxSureshotScanState = null;
+let runtimeStateReady = Promise.resolve(false);
+async function persistSureshotScanState() {
+  if (!runtimeStateStore.configured || !sureshotScanState) return false;
+  try { await runtimeStateStore.save('nse-sureshot-scan-cursor', sureshotScanState); return true; }
+  catch (error) { console.warn('NSE Sureshot scan cursor persistence failed:', String(error?.message || error).slice(0, 160)); return false; }
+}
+async function clearSureshotScanState() {
+  if (!runtimeStateStore.configured) return false;
+  try { await runtimeStateStore.delete('nse-sureshot-scan-cursor'); return true; }
+  catch (error) { console.warn('NSE Sureshot scan cursor cleanup failed:', String(error?.message || error).slice(0, 160)); return false; }
+}
+async function initializeRuntimeStateStore() {
+  if (!runtimeStateStore.configured) {
+    console.warn('Durable FYERS cooldown and NSE Sureshot cursor persistence disabled: DATABASE_URL is not configured.');
+    return false;
+  }
+  try {
+    await runtimeStateStore.initialize();
+    const cooldown = await runtimeStateStore.load('fyers-data-api-cooldown');
+    if (cooldown && fetchWithFyersBudget.restoreStatus(cooldown)) {
+      console.warn('FYERS Data API cooldown restored from PostgreSQL; upstream reads remain paused.', JSON.stringify(fetchWithFyersBudget.getStatus()));
+    } else if (cooldown) await runtimeStateStore.delete('fyers-data-api-cooldown');
+    const cursor = await runtimeStateStore.load('nse-sureshot-scan-cursor');
+    if (cursor && typeof cursor.id === 'string' && Number.isFinite(cursor.createdAt) &&
+        Date.now() - cursor.createdAt >= 0 && Date.now() - cursor.createdAt <= SURESHOT_SCAN_TTL_MS &&
+        Array.isArray(cursor.candidates) && Array.isArray(cursor.results) &&
+        Number.isInteger(cursor.nextOffset) && cursor.nextOffset >= 0 &&
+        cursor.nextOffset <= cursor.candidates.length && cursor.results.length === cursor.nextOffset) {
+      sureshotScanState = cursor;
+      console.log('NSE Sureshot scan cursor restored from PostgreSQL:', JSON.stringify({
+        scanId: cursor.id, nextOffset: cursor.nextOffset, candidateCount: cursor.candidates.length
+      }));
+    } else if (cursor) await runtimeStateStore.delete('nse-sureshot-scan-cursor');
+    return true;
+  } catch (error) {
+    console.error('Durable runtime state initialization failed; in-memory safety controls remain active:', String(error?.message || error).slice(0, 180));
+    return false;
+  }
+}
 app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, res) => {
+  await runtimeStateReady;
   res.set("Cache-Control", "no-store");
   if (!accessToken) return res.status(401).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Connect FYERS first." });
   if (!nseRegularSessionNow()) return res.status(409).json({ ok: false, scanComplete: false, signalsAllowed: false, error: "Market session is closed; actionable option plans are withheld." });
@@ -2289,6 +2337,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         moverBoardsComplete: ranked.moverBoardsComplete,
         rankedCandidateCount: ranked.candidateCount, rankedEquityCount: ranked.equityCandidates.length,
         nextOffset: 0, results: [] };
+      await persistSureshotScanState();
     }
     const state = sureshotScanState;
     if (!state || state.nextOffset !== offset) return res.status(409).json({ ok: false, scanComplete: false, error: "Scan state unavailable. Start a fresh scan." });
@@ -2411,6 +2460,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       { rank: candidate.rank, underlyingSymbol: candidate.symbol, status: "NO TRADE", reason: "Candidate verification did not produce a complete result." });
     state.results.push(...batchResults);
     state.nextOffset += batchResults.length;
+    await persistSureshotScanState();
     const selectedCandidatesComplete = state.nextOffset >= state.candidates.length;
     const scanComplete = selectedCandidatesComplete;
     if (!scanComplete) return res.json({ ok: true, scanComplete: false, batchComplete: true,
@@ -3950,6 +4000,7 @@ function startServer() {
   // health endpoint must stay responsive even when the optional token-store
   // connection is slow or unavailable; auth routes remain gated by
   // fyersTokenStoreReady until initialization completes.
+  runtimeStateReady = initializeRuntimeStateStore();
   const server = app.listen(port, () => {
     console.log(`DhanPulse backend listening on ${port}`);
     void initializePaperStore();
