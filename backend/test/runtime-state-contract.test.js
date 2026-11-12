@@ -22,7 +22,7 @@ test('NSE Sureshot scan cursor and completed batches survive backend restarts sa
   assert.match(server, /runtimeStateStore\.save\('nse-sureshot-scan-cursor', sureshotScanState\)/);
   assert.match(server, /await persistSureshotScanState\(\)/);
   assert.match(server, /cursor\.results\.length === cursor\.nextOffset/);
-  assert.match(server, /cursor\.createdAt <= SURESHOT_SCAN_TTL_MS/);
+  assert.match(server, /Date\\.now\\(\\) - cursor\\.createdAt <= SURESHOT_SCAN_TTL_MS/);
   assert.match(server, /await clearSureshotScanState\(\)/);
   assert.match(store, /CREATE TABLE IF NOT EXISTS gv2vpd_runtime_state/);
   assert.match(store, /ON CONFLICT \(state_key\) DO UPDATE/);
