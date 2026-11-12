@@ -66,7 +66,7 @@ async function verifyDesktop(browser) {
   await page.waitForSelector('#gvPaperLedger', { timeout: 5000 });
   const positionText = await page.locator('#featureContent').innerText();
   assert.match(positionText, /Paper Mode ledger/i);
-  assert.match(positionText, /Live BUY remains disabled/i);
+  assert.match(positionText, /No order placement/i);
 
   for (const tab of expectedTabs) {
     await page.locator('#nav button[data-tab="' + tab + '"]').click();
