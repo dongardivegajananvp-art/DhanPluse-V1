@@ -1887,8 +1887,8 @@ async function loadSureshotUniverseShortlist(options = {}) {
         const lotText = Number.isInteger(Number(lotSize)) && Number(lotSize) > 0 ? Number(lotSize).toLocaleString('en-IN') + ' units' : 'Contract verify';
         return '<tr><td><b>#' + Number(row.rank) + '</b></td><td><b>' +
           escapeHtml(String(row.underlyingSymbol || '').replace(/^NSE:/, '').replace(/^BSE:/, '').replace(/-EQ$/, '').replace(/-INDEX$/, '')) +
-          '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td>₹' + formatPrice(row.ltp) + '</td><td>' + moveText + '</td><td>' + lotText + '</td><td>' +
-          (plan ? '<span class="signal-tone positive">VERIFIED</span>' : '<span class="signal-tone neutral">NO TRADE</span>') +
+          '</b><small>' + escapeHtml(row.underlyingType) + '</small></td><td>₹' + formatPrice(row.ltp) + '</td><td>' + moveText + '</td><td>' + (Number.isFinite(Number(row.underlyingQuoteAgeSeconds)) ? Number(row.underlyingQuoteAgeSeconds).toFixed(1) + ' sec' : '—') + '</td><td>' + lotText + '</td><td>' +
+          (plan ? '<span class="signal-tone positive">VERIFIED</span>' : row.status === 'INITIAL CHECK PASSED' ? '<span class="signal-tone neutral">NOT TOP 3</span>' : '<span class="signal-tone neutral">NO TRADE</span>') +
           '</td><td>' + (plan ? escapeHtml(plan.direction) : '—') + '</td><td>' +
           (plan ? escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) : '<span class="signal-tone neutral">NO VERIFIED STRIKE</span>') +
           '</td><td>' + (plan ? '₹' + formatPrice(plan.risk.entryPrice) : '—') + '</td><td>' +
