@@ -133,7 +133,9 @@ test("NSE status exposes RECONNECTING while a fresh-tick recovery is pending and
   const source = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   assert.match(source, /: nseReconnectPending \? 'RECONNECTING'/);
   assert.match(source, /const mcxFeed = !accessToken \? 'NOT_CONNECTED'[\s\S]*?mcxSubscribedSocket !== marketSocket/);
-  assert.match(source, /NSE socket disconnected, reconnecting\.\.\./);
+  assert.match(source, /NSE tick heartbeat missed; reapplying subscriptions on connected WebSocket\./);
+  assert.match(source, /FYERS WebSocket transport closed; SDK auto-reconnect pending\./);
+  assert.match(source, /NSE WebSocket transport unavailable; FYERS SDK auto-reconnect pending\./);
   assert.match(source, /NSE live feed restored after automatic recovery/);
   assert.match(source, /MCX_TICK_HEARTBEAT_MS = 30_000/);
   assert.match(source, /MCX_TICK_FRESHNESS_SECONDS = 10/);
