@@ -2858,11 +2858,19 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
           timeoutMs: 60_000,
           pollIntervalMs: 1_000
         });
+      const mcxAuditDiagnostics = mcxAudit.audit.map(row => ({
+        symbol: row.symbol, status: row.status,
+        exchangeTime: row.exchangeTime ?? null,
+        quoteAgeSeconds: row.quoteAgeSeconds ?? null,
+        reason: row.reason ?? null
+      }));
       console.info("FYERS MCX full-universe WebSocket tick audit:", JSON.stringify({
         ...mcxAudit.coverage, subscribedSymbols: mcxFuturesSocketSymbols.size,
         freshnessWindowSeconds: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS / 1000,
         socketSettleWaitSeconds: Number((socketSettleWaitMs / 1000).toFixed(1)),
-        socketSettleTimedOut
+        socketSettleTimedOut, contractAudit: mcxAuditDiagnostics,
+        unexpectedSymbols: mcxAudit.unexpectedSymbols,
+        duplicateSymbols: mcxAudit.duplicateSymbols
       }));
       if (!mcxAudit.complete) {
         const error = new Error("MCX full-universe WebSocket tick audit remained incomplete after a 60-second subscription settle window; every eligible future must still have a fresh exchange timestamp. No candidates or plans may be published.");
@@ -3231,6 +3239,12 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
     console.warn("FYERS MCX Sureshot scan failed:", JSON.stringify({
       stage, status, retryAfterSeconds: retryAfterSeconds || null,
       message: String(error.message || error).slice(0, 280), quoteRowsReceived,
+      contractAudit: Array.isArray(error.mcxAudit?.audit) ? error.mcxAudit.audit.map(row => ({
+        symbol: row.symbol, status: row.status, exchangeTime: row.exchangeTime ?? null,
+        quoteAgeSeconds: row.quoteAgeSeconds ?? null, reason: row.reason ?? null
+      })) : [],
+      unexpectedSymbols: error.mcxAudit?.unexpectedSymbols || [],
+      duplicateSymbols: error.mcxAudit?.duplicateSymbols || [],
       nextOffset: resumableScan ? mcxSureshotScanState.nextOffset : null
     }));
     return res.status(status).json({
