@@ -3419,7 +3419,7 @@ app.get('/api/fyers/option-quote', async (req, res) => {
   const symbol = String(req.query.symbol || '');
   // Read-only single-contract quote; this endpoint never places orders.
   if (!isSupportedOptionContractSymbol(symbol)) {
-    return res.status(400).json({ ok: false, error: 'Invalid NSE option contract symbol.' });
+    return res.status(400).json({ ok: false, error: 'Invalid listed option contract symbol.' });
   }
   try {
     const url = new URL('https://api-t1.fyers.in/data/quotes');
@@ -3456,7 +3456,7 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
   const symbol = String(req.query.symbol || '');
   const resolution = String(req.query.resolution || '5');
   if (!isSupportedOptionContractSymbol(symbol)) {
-    return res.status(400).json({ ok: false, error: 'A selected NSE option contract symbol is required.' });
+    return res.status(400).json({ ok: false, error: 'A selected listed option contract symbol is required.' });
   }
   if (!['5', '15', '30', '60'].includes(resolution)) {
     return res.status(400).json({ ok: false, error: 'Option risk candles must use a 5, 15, 30 or 60 minute interval.' });
@@ -3511,20 +3511,11 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
       return res.status(502).json({ ok: false, error: 'Selected option bid/ask/LTP quote is missing, invalid or older than 15 seconds.' });
     }
     const candles = Array.isArray(historyResult?.candles) ? historyResult.candles : [];
-    if (ask < 30 || ask > 150) {
-      return res.status(422).json({ ok: false, error: "Verified option ask premium must be between ₹30 and ₹150.", quote: {
-        bid, ask, ltp, quoteTimeMs: quoteTime * 1000,
-        quoteAgeSeconds: Number(((Date.now() - quoteTime * 1000) / 1000).toFixed(1))
-      } });
-    }
-    const candleCheck = validateCompletedOptionCandles({ candles, resolution, now: Date.now(), lookback: 12 });
-    const plan = candleCheck.ok
-      ? buildFixedOptionRiskPlan({ entryPrice: ask, lotSize: contractMetadata.lotSize, tickSize: contractMetadata.tickSize })
-      : { ok: false, reason: candleCheck.reason };
-    if (plan.ok) {
-      plan.completedCandleCount = candleCheck.completedCandleCount;
-      plan.latestCompletedCandleAt = candleCheck.latestCompletedCandleAt;
-    }
+    const candles = Array.isArray(historyResult?.candles) ? historyResult.candles : [];
+    const plan = buildOptionRiskPlan({
+      candles, entryPrice: ask, lotSize: contractMetadata.lotSize, tickSize: contractMetadata.tickSize,
+      resolution, now: Date.now(), lookback: 20, atrPeriod: 14, atrBuffer: 0.35
+    });
     if (!plan.ok) {
       return res.status(422).json({ ok: false, error: plan.reason, quote: {
         bid, ask, ltp, quoteTimeMs: quoteTime * 1000,
@@ -3605,52 +3596,109 @@ app.get('/api/paper/positions', async (_req, res) => {
 app.post('/api/paper/buy', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!paperStoreReady) return res.status(503).json({ ok: false, error: 'Durable Paper Mode database is not ready; Paper BUY blocked.' });
-  if (!accessToken || !nseRegularSessionNow()) return res.status(409).json({ ok: false, error: 'NSE market is not open; Paper BUY blocked.' });
-  const indiaNow = new Date(Date.now() + 330 * 60_000);
-  const indiaMinutes = indiaNow.getUTCHours() * 60 + indiaNow.getUTCMinutes();
-  if (indiaMinutes < 9 * 60 + 15 || indiaMinutes >= 15 * 60 + 15) {
-    return res.status(409).json({ ok: false, error: 'Paper BUY is allowed only from 09:15 until 15:15 Asia/Kolkata.' });
-  }
+  if (!accessToken) return res.status(401).json({ ok: false, error: 'Connect FYERS before Paper BUY.' });
+
   const sessionToken = /^Bearer ([a-f0-9]{64})$/.exec(String(req.get('authorization') || ''))?.[1] || '';
   const planId = String(req.body?.planId || '');
   const issued = verifiedPlanRegistry.get(sessionToken, planId);
   if (!issued) return res.status(409).json({ ok: false, error: 'Verified Sureshot plan ID is invalid, expired, or belongs to another Dashboard Session.' });
   const snapshot = issued.snapshot;
-  if (snapshot.source !== 'FYERS_VERIFIED' || !isSupportedOptionContractSymbol(snapshot.symbol)) {
-    return res.status(422).json({ ok: false, error: 'Server-owned verified FYERS option contract is invalid.' });
+  if (snapshot.source !== 'FYERS_VERIFIED' || !isSupportedOptionContractSymbol(snapshot.symbol) ||
+      !isSupportedOptionContractSymbol(snapshot.underlyingSymbol) && !/^(?:NSE|BSE|MCX):[A-Z0-9&.-]+(?:-EQ|-INDEX|FUT)$/.test(String(snapshot.underlyingSymbol || ''))) {
+    return res.status(422).json({ ok: false, error: 'Server-owned verified FYERS option/underlying contract identity is invalid.' });
+  }
+
+  const exchange = String(snapshot.symbol).split(':')[0];
+  const sessionOpen = () => exchange === 'MCX'
+    ? getExchangeSessionWindows().MCX?.session === 'SCHEDULED_OPEN'
+    : ['NSE', 'BSE'].includes(exchange) && nseRegularSessionNow();
+  const nsePaperWindowOpen = () => {
+    const indiaClock = new Date(Date.now() + 330 * 60_000);
+    const minutes = indiaClock.getUTCHours() * 60 + indiaClock.getUTCMinutes();
+    return minutes >= 9 * 60 + 15 && minutes < 15 * 60 + 15;
+  };
+  const paperWindowOpen = () => sessionOpen() && (exchange === 'MCX' || nsePaperWindowOpen());
+  if (!paperWindowOpen()) {
+    return res.status(409).json({ ok: false, error: exchange + ' exchange session is closed or outside its Paper BUY window.' });
   }
   if (!streamConnected || !marketSocket) {
     return res.status(409).json({ ok: false, error: 'FYERS market WebSocket is not connected; Paper BUY blocked.' });
   }
+
   try {
     const metadata = await getFyersOptionContractMetadata(snapshot.symbol);
     if (!metadata || Number(metadata.lotSize) !== Number(snapshot.lotSize) ||
         Number(metadata.tickSize) !== Number(snapshot.tickSize)) {
       return res.status(409).json({ ok: false, error: 'FYERS official lot/tick metadata changed or is unavailable; rescan required.' });
     }
+
+    // Recheck the underlying direction and option-candle structure, then fetch
+    // the option quote last so the entry timestamp is fresh at plan creation.
+    const indiaNow = new Date(Date.now() + 330 * 60_000);
+    const today = indiaNow.toISOString().slice(0, 10);
+    const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 6)).toISOString().slice(0, 10);
+    const underlyingUrl = new URL('https://api-t1.fyers.in/data/history');
+    underlyingUrl.searchParams.set('symbol', snapshot.underlyingSymbol);
+    underlyingUrl.searchParams.set('resolution', '5');
+    underlyingUrl.searchParams.set('date_format', '1');
+    underlyingUrl.searchParams.set('range_from', from);
+    underlyingUrl.searchParams.set('range_to', today);
+    underlyingUrl.searchParams.set('cont_flag', '1');
+    const underlyingHistory = await fyersReadOnlyGet(underlyingUrl, {
+      priority: 'sureshot', stage: 'PAPER_BUY_REVALIDATE_UNDERLYING'
+    });
+    const direction = deriveVerifiedUnderlyingDirection(
+      Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [],
+      '5', Date.now(), { strictTrend: true }
+    );
+    if (!direction.ok || direction.side !== snapshot.side) {
+      return res.status(409).json({ ok: false, error: 'Underlying direction changed or its latest FYERS candles are not verified; Paper BUY blocked.' });
+    }
+
+    const optionHistoryUrl = new URL('https://api-t1.fyers.in/data/history');
+    optionHistoryUrl.searchParams.set('symbol', snapshot.symbol);
+    optionHistoryUrl.searchParams.set('resolution', '5');
+    optionHistoryUrl.searchParams.set('date_format', '1');
+    optionHistoryUrl.searchParams.set('range_from', from);
+    optionHistoryUrl.searchParams.set('range_to', today);
+    optionHistoryUrl.searchParams.set('cont_flag', '1');
+    const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, {
+      priority: 'sureshot', stage: 'PAPER_BUY_REVALIDATE_OPTION_CANDLES'
+    });
+
     const quoteUrl = new URL('https://api-t1.fyers.in/data/quotes');
     quoteUrl.searchParams.set('symbols', snapshot.symbol);
-    const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: 'sureshot' });
+    const quoteResult = await fyersReadOnlyGet(quoteUrl, {
+      priority: 'sureshot', stage: 'PAPER_BUY_REVALIDATE_OPTION_QUOTE'
+    });
     const rows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
     const row = rows.find(item => (item?.n || item?.symbol || item?.v?.symbol) === snapshot.symbol);
     const quote = row?.v || row;
-    const ask = Number(quote?.ask ?? quote?.ask_price);
     const quoteTime = epochSeconds(quote?.ltt ?? quote?.tt ?? quote?.exch_feed_time);
-    if (!Number.isFinite(ask) || ask < 30 || ask > 150 ||
-        quoteTimestampStatus(quoteTime, Date.now(), 10) !== 'FRESH') {
-      return res.status(409).json({ ok: false, error: 'Fresh FYERS option ask (₹30–₹150) with exchange timestamp <=10 seconds is required; Paper BUY blocked.' });
+    if (quoteTimestampStatus(quoteTime, Date.now(), 10) !== 'FRESH') {
+      return res.status(409).json({ ok: false, error: 'Fresh FYERS option quote with exchange timestamp <=10 seconds is required; Paper BUY blocked.' });
     }
-    const finalIndiaClock = new Date(Date.now() + 330 * 60_000);
-    const finalIndiaMinutes = finalIndiaClock.getUTCHours() * 60 + finalIndiaClock.getUTCMinutes();
-    if (!nseRegularSessionNow() || finalIndiaMinutes < 9 * 60 + 15 || finalIndiaMinutes >= 15 * 60 + 15 ||
-        !streamConnected || !marketSocket) {
-      return res.status(409).json({ ok: false, error: 'Market session, 15:15 cutoff or FYERS WebSocket changed during revalidation; Paper BUY blocked.' });
+
+    const contract = {
+      symbol: snapshot.symbol, side: snapshot.side, expiry: snapshot.expiry, strike: snapshot.strike,
+      lotSize: metadata.lotSize, tickSize: metadata.tickSize
+    };
+    const freshPlan = buildVerifiedSureshotTradePlan({
+      underlyingSymbol: snapshot.underlyingSymbol, direction, contract, quote,
+      optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
+      resolution: '5', lotSize: metadata.lotSize, tickSize: metadata.tickSize, now: Date.now()
+    });
+    if (!freshPlan.ok) return res.status(422).json({
+      ok: false, error: freshPlan.reason || 'Fresh quote/candles fail the verified risk-plan checks.'
+    });
+
+    if (!paperWindowOpen() || !streamConnected || !marketSocket) {
+      return res.status(409).json({ ok: false, error: 'Exchange session, Paper BUY window or FYERS WebSocket changed during revalidation; Paper BUY blocked.' });
     }
-    const risk = buildFixedOptionRiskPlan({ entryPrice: ask, lotSize: metadata.lotSize, tickSize: metadata.tickSize });
-    if (!risk.ok || risk.rr < 2) return res.status(422).json({ ok: false, error: risk.reason || 'Fresh quote fails the minimum 1:2 risk/reward gate.' });
     if (!verifiedPlanRegistry.get(sessionToken, planId)) {
-      return res.status(409).json({ ok: false, error: 'Verified Plan ID expired during quote revalidation; rerun Sureshot.' });
+      return res.status(409).json({ ok: false, error: 'Verified Plan ID expired during revalidation; rerun Sureshot.' });
     }
+
     const idempotencyKey = 'paper:' + planId;
     paperSocketSymbols.add(snapshot.symbol);
     try {
@@ -3660,6 +3708,7 @@ app.post('/api/paper/buy', async (req, res) => {
       paperSocketSymbols.delete(snapshot.symbol);
       return res.status(503).json({ ok: false, error: 'FYERS option WebSocket subscription failed; Paper BUY blocked.' });
     }
+
     let result;
     try {
       result = await paperStore.createPaperBuy({
@@ -3667,20 +3716,22 @@ app.post('/api/paper/buy', async (req, res) => {
         source: 'FYERS_VERIFIED',
         exchangeTimestamp: new Date(quoteTime * 1000).toISOString(),
         symbol: snapshot.symbol, side: snapshot.side, expiry: snapshot.expiry, strike: snapshot.strike,
-        plan: { entryPrice: risk.entryPrice, stopLoss: risk.stopLoss, target1: risk.target1,
-          target2: risk.target2, quantity: risk.quantity, lotSize: risk.lotSize }
+        plan: {
+          entryPrice: freshPlan.risk.entryPrice, stopLoss: freshPlan.risk.stopLoss,
+          target1: freshPlan.risk.target1, target2: freshPlan.risk.target2,
+          quantity: freshPlan.risk.quantity, lotSize: freshPlan.risk.lotSize
+        }
       });
     } catch (error) {
       const open = await paperStore.listOpenPositions().catch(() => []);
       if (!open.some(position => position.symbol === snapshot.symbol)) await subscribeOpenPaperPositions(marketSocket);
       throw error;
     }
-    // Re-read the durable open-position set after commit to close a socket reconnect race.
     void subscribeOpenPaperPositions(marketSocket);
-    // Keep the short-lived plan until TTL so a retry returns the same idempotent ledger row.
     return res.status(result.created ? 201 : 200).json({
       ok: true, created: result.created, mode: 'PAPER_SIMULATION', position: result.position,
-      riskAmount: result.riskAmount ?? null, orderPlacement: 'disabled',
+      riskAmount: result.riskAmount ?? null, riskLimits: paperStore.riskLimits,
+      orderPlacement: 'disabled',
       note: 'Simulation ledger only. No FYERS order endpoint was called.'
     });
   } catch (error) {
