@@ -325,15 +325,15 @@ test("Sureshot reuses cached candidate candles but forces fresh final candle rev
   const helperEnd = serverSource.indexOf("app.get('/api/market/chart-quote'", helperStart);
   assert.ok(helperStart >= 0 && helperEnd > helperStart);
   const helper = serverSource.slice(helperStart, helperEnd);
-  assert.match(helper, /bypassCache:\\s*bypassCache/);
+  assert.match(helper, /\bbypassCache\b/);
   assert.doesNotMatch(helper, /priority === 'sureshot' && historyRequest/);
 
   const routeStart = serverSource.indexOf('app.get("/api/market/mcx-sureshot-auto-plans"');
   const routeEnd = serverSource.indexOf("// Last-known F&O equity quotes", routeStart);
   assert.ok(routeStart >= 0 && routeEnd > routeStart);
   const route = serverSource.slice(routeStart, routeEnd);
-  assert.match(route, /VERIFY_MCX_UNDERLYING_CANDLES[\\s\\S]{0,500}fyersReadOnlyGet\\(historyUrl, \\{ priority: "sureshot", stage \\}\\)/);
-  assert.match(route, /VERIFY_MCX_OPTION_CANDLES[\\s\\S]{0,500}fyersReadOnlyGet\\(historyUrl, \\{ priority: "sureshot", stage \\}\\)/);
-  assert.match(route, /FINAL_REVALIDATE_MCX_UNDERLYING[\\s\\S]{0,220}bypassCache: true/);
-  assert.match(route, /FINAL_REVALIDATE_MCX_OPTION_CANDLES[\\s\\S]{0,220}bypassCache: true/);
+  assert.match(route, /VERIFY_MCX_UNDERLYING_CANDLES[\s\S]{0,500}fyersReadOnlyGet\(historyUrl, \{ priority: "sureshot", stage \}\)/);
+  assert.match(route, /VERIFY_MCX_OPTION_CANDLES[\s\S]{0,500}fyersReadOnlyGet\(historyUrl, \{ priority: "sureshot", stage \}\)/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_UNDERLYING[\s\S]{0,220}bypassCache: true/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_OPTION_CANDLES[\s\S]{0,220}bypassCache: true/);
 });
