@@ -1,7 +1,6 @@
 import { normalizeFyersCandleOrder } from "./candle-order.js";
 import { parseFyersQuoteTimestamp } from "./fyers-quote-timestamp.js";
 import { buildOptionRiskPlan } from "./option-risk-plan.js";
-import { validateSureshotTrend } from "./sureshot-trend-validation.js";
 
 function epochSeconds(value) {
   if (typeof value === "number" || (typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value))) {
@@ -28,7 +27,7 @@ function expiryTime(value) {
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now = Date.now(), { strictTrend = false } = {}) {
+export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now = Date.now()) {
   const minutes = Number(resolution);
   if (![5, 15, 30, 60].includes(minutes) || !Array.isArray(candles)) {
     return { ok: false, reason: "Unsupported or missing underlying candles." };
@@ -78,23 +77,12 @@ export function deriveVerifiedUnderlyingDirection(candles, resolution = "5", now
     side = "PE";
     reason = "Latest completed FYERS candle closed below the demand zone and prior close.";
   }
-  let trend = null;
-  if (strictTrend) {
-    trend = validateSureshotTrend({ candles, resolution: "5", now });
-    if (!trend.ok) return { ok: false, reason: trend.reason };
-    if (!side) return { ok: false, reason: "No completed-candle supply/demand breakout is confirmed." };
-    if (side !== trend.side) {
-      return { ok: false, reason: "Supply/demand breakout and DMA20 crossover disagree; direction is not confirmed." };
-    }
-    reason = "Verified " + side + ": completed FYERS candle broke the " +
-      (side === "CE" ? "supply" : "demand") + " zone and the DMA20 crossover agrees.";
-  }
+  if (!side) return { ok: false, reason };
   return {
     ok: true, side, reason, spot: latest.close,
     latestCandleAt: new Date(latest.time * 1000).toISOString(),
     candleAgeSeconds: Number((ageMs / 1000).toFixed(1)),
     completedCandleCount: valid.length, supply, demand,
-    ...(trend ? { trendMetrics: trend } : {})
   };
 }
 
