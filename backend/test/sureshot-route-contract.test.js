@@ -195,6 +195,10 @@ test("MCX Sureshot audits and verifies every eligible future in resumable batche
   assert.match(route, /buildMcxSocketQuoteRows\(universe\.data, latestTicks\)/);
   assert.match(route, /VERIFY_MCX_FUTURES_WEBSOCKET_TICKS/);
   assert.match(route, /buildVerifiedMcxAudit\(/);
+  assert.match(route, /const mcxAuditDiagnostics = mcxAudit\.audit\.map\(row => \(\{/);
+  assert.match(route, /contractAudit: mcxAuditDiagnostics/);
+  assert.match(route, /quoteAgeSeconds: row\.quoteAgeSeconds \?\? null/);
+  assert.match(route, /contractAudit: Array\.isArray\(error\.mcxAudit\?\.audit\)/);
   assert.match(route, /limit: universe\.data\.length/);
   assert.match(route, /const batch = state\.candidates\.slice\(offset, offset \+ SURESHOT_BATCH_SIZE\)/);
   assert.match(route, /VERIFY_MCX_UNDERLYING_CANDLES/);
