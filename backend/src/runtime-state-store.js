@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS gv2vpd_runtime_state (
 `;
 
 export function createRuntimeStateStore({ databaseUrl, PoolClass = Pool }) {
-  const configured = /^postgres(?:ql)?:\\/\\//i.test(String(databaseUrl || '').trim());
+  const configured = /^postgres(?:ql)?:\/\//i.test(String(databaseUrl || '').trim());
   const pool = configured ? new PoolClass({
     connectionString: String(databaseUrl).trim(),
     max: 2,
