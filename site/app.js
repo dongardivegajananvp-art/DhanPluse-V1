@@ -1915,13 +1915,16 @@ function maybeStartAutomaticSureshotScan() {
   if (!isRegularMarketSession() || sureshotUniverseScanRunning ||
       !localStorage.getItem(DASHBOARD_SESSION_KEY)) return;
   const today = indiaTradingDateKey();
-  let completedToday = '', attemptedToday = sureshotAutoScanAttemptedToday, retryAt = 0;
+  let completedToday = '', retryAt = 0;
   try {
     completedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_DAY_KEY) || '';
-    attemptedToday = localStorage.getItem(SURESHOT_AUTO_SCAN_ATTEMPT_KEY) || attemptedToday;
     retryAt = Number(localStorage.getItem(SURESHOT_AUTO_SCAN_RETRY_KEY)) || 0;
   } catch {}
-  if (completedToday === today || attemptedToday === today || retryAt > Date.now()) return;
+  // The attempt marker is diagnostic only, not a daily lock. If the browser
+  // closes/reloads mid-scan, the next app boot must resume the server cursor.
+  // In-memory nseSureshotScanRunning prevents duplicate requests in this tab;
+  // the backend in-flight guard and scan cursor protect cross-tab/reload cases.
+  if (completedToday === today || retryAt > Date.now()) return;
   void loadSureshotUniverseShortlist({ automatic: true });
 }
 async function performSureshotSetup() {
