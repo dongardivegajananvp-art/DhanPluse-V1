@@ -342,12 +342,17 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
   if (!authenticated) {
     label = 'FYERS NOT CONNECTED';
     connection = 'FYERS login required';
-  } else if (nseFeed === 'LIVE') {
+  } else if (nseFeed === 'LIVE' && socketConnected) {
     label = 'FYERS QUOTES RECEIVED';
-    connection = socketConnected ? 'FYERS WebSocket connected · NSE fresh ticks' : 'NSE fresh ticks verified · socket disconnected';
-  } else if (nseFeed === 'DISCONNECTED') {
+    connection = 'FYERS WebSocket connected · NSE fresh ticks';
+  } else if (!socketConnected || nseFeed === 'DISCONNECTED') {
     label = 'FYERS SOCKET DISCONNECTED';
-    connection = 'FYERS WebSocket disconnected · live signals blocked';
+    connection = nseFeed === 'LIVE'
+      ? 'Recent NSE ticks only · WebSocket disconnected · live signals blocked'
+      : 'FYERS WebSocket disconnected · live signals blocked';
+  } else if (nseFeed === 'RECONNECTING') {
+    label = 'FYERS FEED RECOVERING';
+    connection = 'WebSocket connected · waiting for fresh NSE ticks after subscription recovery';
   } else if (nseFeed === 'STALE') {
     label = 'LIVE DATA STALE';
     connection = 'FYERS WebSocket active · exchange ticks stale';
@@ -360,7 +365,8 @@ function applyAuthoritativeFyersStatus(status, restCooldown = false) {
   }
   setStatus(label);
   const cooldown = restCooldown || Boolean(status && status.fyersDataApi && status.fyersDataApi.cooldownActive);
-  setConnection(connection + (cooldown ? ' · REST cooldown' : ''), nseFeed !== 'LIVE');
+  const liveVerified = authenticated && socketConnected && nseFeed === 'LIVE';
+  setConnection(connection + (cooldown ? ' · REST cooldown' : ''), !liveVerified);
   // Keep the Dashboard's MCX panel on the same authoritative 5-second status poll.
   updateExchangeLiveSwitches(status);
   updateMcxConnectionDiagnostics(status);
@@ -3427,11 +3433,25 @@ function updateDynamicPanel() {
   const dashBackend = document.querySelector('#dashBackend');
   if (dashBackend) dashBackend.textContent = backendHealthState;
   const dashFeed = document.querySelector('#dashFeed');
-  if (dashFeed) dashFeed.textContent = SYMBOLS.every(item => hasFreshLiveQuote(quoteFor(item.symbol))) ? 'LIVE' : (isRegularMarketSession() ? 'WAITING' : 'MARKET CLOSED / LAST KNOWN');
+  if (dashFeed) {
+    const status = lastAuthoritativeFyersStatus;
+    const statusFresh = status && Date.now() - authoritativeFyersStatusUpdatedAt >= 0 &&
+      Date.now() - authoritativeFyersStatusUpdatedAt <= 10000;
+    const nseFeed = String(status?.exchangeLiveStatus?.NSE?.feed || 'UNAVAILABLE');
+    const socketConnected = status?.marketSocketConnected === true;
+    dashFeed.textContent = !statusFresh ? 'STATUS STALE · BLOCKED'
+      : status.fyers !== 'connected' ? 'NOT CONNECTED'
+      : !socketConnected ? 'DISCONNECTED · BLOCKED'
+      : nseFeed === 'LIVE' ? 'LIVE · VERIFIED'
+      : nseFeed === 'RECONNECTING' ? 'RECOVERING · BLOCKED'
+      : nseFeed === 'PARTIAL' ? 'PARTIAL · BLOCKED'
+      : nseFeed === 'STALE' ? 'STALE · BLOCKED'
+      : 'WAITING · BLOCKED';
+  }
   const settingsBackend = document.querySelector('#settingsBackend');
   if (settingsBackend) settingsBackend.textContent = backendHealthState;
   const settingsFeed = document.querySelector('#settingsFeed');
-  if (settingsFeed) settingsFeed.textContent = SYMBOLS.every(item => hasFreshLiveQuote(quoteFor(item.symbol))) ? 'LIVE' : (isRegularMarketSession() ? 'WAITING' : 'MARKET CLOSED / LAST KNOWN');
+  if (settingsFeed) settingsFeed.textContent = document.querySelector('#dashFeed')?.textContent || 'STATUS STALE · BLOCKED';
   const sampleCount = document.querySelector('#chartSampleCount');
   if (sampleCount) sampleCount.textContent = 'Samples: ' + (historyBySymbol[SYMBOLS[0].symbol] || []).length;
 }
