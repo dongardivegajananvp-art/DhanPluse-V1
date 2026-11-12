@@ -87,8 +87,9 @@ test("the published inline app and app.js both start automatic NSE Sureshot scan
     const helper = source.slice(helperStart, helperEnd);
     assert.ok(!helper.includes("currentTab"), label + " trigger is not tab-bound");
     for (const token of ["isRegularMarketSession()", "DASHBOARD_SESSION_KEY", "SURESHOT_AUTO_SCAN_DAY_KEY",
-      "SURESHOT_AUTO_SCAN_ATTEMPT_KEY", "SURESHOT_AUTO_SCAN_RETRY_KEY",
-      "loadSureshotUniverseShortlist({ automatic: true })"]) assert.ok(helper.includes(token), label + ": " + token);
+      "SURESHOT_AUTO_SCAN_RETRY_KEY", "loadSureshotUniverseShortlist({ automatic: true })"]) assert.ok(helper.includes(token), label + ": " + token);
+    assert.doesNotMatch(helper, /attemptedToday === today/, label + " must resume after an interrupted browser scan");
+    assert.match(helper, /attempt marker is diagnostic only/, label + " documents reload recovery");
     assert.ok(source.includes("maybeStartAutomaticSureshotScan();"), label + " starts at app boot");
     assert.ok(source.includes("window.setInterval(maybeStartAutomaticSureshotScan, 30000)"), label + " has guarded local scheduler");
     const loader = source.slice(source.indexOf("async function loadSureshotUniverseShortlist"), helperStart);
@@ -100,7 +101,7 @@ test("the published inline app and app.js both start automatic NSE Sureshot scan
   }
 });
 
-test("frontend records one automatic attempt per session day and marks completion only after every eligible candidate passes", () => {
+test("frontend resumes interrupted automatic scans after a page reload and marks completion only after every eligible candidate passes", () => {
   const start = indexHtml.indexOf("async function loadSureshotUniverseShortlist");
   const end = indexHtml.indexOf("async function performSureshotSetup", start);
   assert.ok(start >= 0 && end > start);
