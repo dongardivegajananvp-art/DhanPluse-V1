@@ -14,10 +14,17 @@ const candleRows = Array.from({ length: 16 }, (_, i) => {
 candleRows[14] = [Math.floor((now - 10 * 60_000) / 1000), 100, 102, 100, 101, 1000];
 candleRows[15] = [Math.floor((now - 5 * 60_000) / 1000), 103, 105, 102, 104, 1000];
 
-test("requires completed candles and blocks neutral/stale direction", () => {
-  const neutral = deriveVerifiedUnderlyingDirection(candleRows, "5", now);
-  assert.equal(neutral.ok, true);
-  assert.equal(neutral.side, "CE");
+test("requires a completed supply/demand breakout and blocks neutral/stale direction", () => {
+  const neutralRows = Array.from({ length: 16 }, (_, i) => {
+    const t = Math.floor((now - (16 - i) * 5 * 60_000) / 1000);
+    return [t, 100, 101, 99, 100, 1000];
+  });
+  const neutral = deriveVerifiedUnderlyingDirection(neutralRows, "5", now);
+  assert.equal(neutral.ok, false);
+  assert.match(neutral.reason, /did not confirm a supply or demand breakout/i);
+  const breakout = deriveVerifiedUnderlyingDirection(candleRows, "5", now);
+  assert.equal(breakout.ok, true, breakout.reason);
+  assert.equal(breakout.side, "CE");
   const stale = deriveVerifiedUnderlyingDirection(candleRows.slice(0, 12), "5", now);
   assert.equal(stale.ok, false);
 });

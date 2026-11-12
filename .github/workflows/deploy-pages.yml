@@ -44,10 +44,10 @@ jobs:
           test -s dist/site/gv2vpd-icon.svg
           grep -q "site/" dist/index.html
           grep -q "GV2VPD — FYERS" dist/site/index.html
-          grep -q 'data-tab="Home"' dist/site/index.html
-          grep -q 'data-tab="Sureshot"' dist/site/index.html
+          grep -q 'data-tab="Dashboard"' dist/site/index.html
+          grep -q 'data-tab="Sureshot CE/PE"' dist/site/index.html
           grep -q 'data-tab="Position"' dist/site/index.html
-          grep -q "gv2vpd-shell-v4-external-assets" dist/site/sw.js
+          grep -q "gv2vpd-shell-v5-24tab" dist/site/sw.js
           grep -q "GV2VPD — FYERS Workstation" dist/site/manifest.webmanifest
           grep -q "Paper Mode ledger" dist/site/app.js
           grep -q "Live BUY remains disabled" dist/site/app.js
@@ -71,18 +71,19 @@ jobs:
           html=""
           for attempt in $(seq 1 12); do
             html="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}?deploy_smoke=$(date +%s)" 2>/dev/null || true)"
-            if [[ -n "$html" ]] && grep -q "GV2VPD — FYERS" <<< "$html" && grep -q 'data-tab="Home"' <<< "$html" && grep -q 'data-tab="Sureshot"' <<< "$html" && grep -q 'data-tab="Position"' <<< "$html"; then
+            if [[ -n "$html" ]] && grep -q "GV2VPD — FYERS" <<< "$html" && grep -q 'data-tab="Dashboard"' <<< "$html" && grep -q 'data-tab="Sureshot CE/PE"' <<< "$html" && grep -q 'data-tab="Position"' <<< "$html"; then
               break
             fi
             echo "Waiting for the published GV2VPD /site/ shell (attempt $attempt/12)."
             sleep 10
           done
-          if [[ -z "$html" ]] || ! grep -q "GV2VPD — FYERS" <<< "$html" || ! grep -q 'data-tab="Home"' <<< "$html" || ! grep -q 'data-tab="Sureshot"' <<< "$html" || ! grep -q 'data-tab="Position"' <<< "$html"; then
-            echo "::error::The original /site/ URL did not serve the expected GV2VPD three-tab app."
+          tab_count="$(grep -o 'data-tab=' <<< "$html" | wc -l | tr -d ' ')"
+          if [[ -z "$html" ]] || [[ "$tab_count" != "24" ]] || ! grep -q "GV2VPD — FYERS" <<< "$html" || ! grep -q 'data-tab="Dashboard"' <<< "$html" || ! grep -q 'data-tab="Sureshot CE/PE"' <<< "$html" || ! grep -q 'data-tab="Position"' <<< "$html"; then
+            echo "::error::The original /site/ URL did not serve the expected GV2VPD 24-tab workstation."
             exit 1
           fi
           sw="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}sw.js?deploy_smoke=$(date +%s)")"
-          grep -q "gv2vpd-shell-v4-external-assets" <<< "$sw"
+          grep -q "gv2vpd-shell-v5-24tab" <<< "$sw"
           manifest="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}manifest.webmanifest?deploy_smoke=$(date +%s)")"
           grep -q "GV2VPD — FYERS Workstation" <<< "$manifest"
           icon="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}gv2vpd-icon.svg?deploy_smoke=$(date +%s)")"
@@ -90,7 +91,7 @@ jobs:
           app_js="$(curl --fail --silent --show-error --location --max-time 20 "${app_url}app.js?deploy_smoke=$(date +%s)")"
           grep -q "Paper Mode ledger" <<< "$app_js"
           grep -q "Live BUY remains disabled" <<< "$app_js"
-          echo "PASS: ${app_url} serves GV2VPD Home/Sureshot/Position, PWA manifest/icon, Paper Mode, and read-only safety labels."
+          echo "PASS: ${app_url} serves the original GV2VPD 24-tab workstation, PWA manifest/icon, Paper Mode, and read-only safety labels."
       - name: GV2VPD desktop and mobile browser smoke on published Pages URL
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}

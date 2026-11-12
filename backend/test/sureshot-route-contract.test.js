@@ -8,6 +8,22 @@ const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8"
 const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
 const shortlist = await readFile(new URL("../src/sureshot-shortlist.js", import.meta.url), "utf8");
 
+test("each sequential F&O quote batch validates exchange timestamps against its own receive time", () => {
+  const start = server.indexOf("async function loadVerifiedFnoStockQuotes");
+  const end = server.indexOf('app.get("/api/market/stock-quotes"', start);
+  assert.ok(start >= 0 && end > start, "verified F&O quote loader exists");
+  const loader = server.slice(start, end);
+  const responseAt = loader.indexOf("body = await fyersReadOnlyGet(url, { priority, stage })");
+  const receiveAt = loader.indexOf("const quoteValidationNow = Date.now()", responseAt);
+  assert.ok(responseAt >= 0 && receiveAt > responseAt,
+    "each batch captures validation time only after its FYERS response arrives");
+  assert.match(loader, /stamp <= quoteValidationNow \+ 5000 && quoteValidationNow - stamp <= 30000/);
+  assert.doesNotMatch(loader, /const now = Date\.now\(\)/,
+    "a scan-start clock must not reject later fresh batches as future-dated");
+  assert.match(loader, /isCompleteFreshFnoQuoteSnapshot\(result, symbols, Date\.now\(\)\)/,
+    "the complete snapshot must still be fresh after the final batch");
+});
+
 test("Sureshot verifies the complete F&O quote universe and option-checks every candidate in five-item batches", () => {
   assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 250/);
   assert.match(server, /const SURESHOT_BATCH_SIZE = 5/);
@@ -25,7 +41,14 @@ test("Sureshot verifies the complete F&O quote universe and option-checks every 
   assert.match(route, /const batch = state\.candidates\.slice\(offset, offset \+ SURESHOT_BATCH_SIZE\)/);
   assert.match(route, /state\.nextOffset >= state\.candidates\.length/);
   assert.match(route, /rankedCandidateCount: ranked\.candidateCount/);
-  assert.match(route, /topThreeSetups = verified\.slice\(0, 3\)/);
+  assert.match(route, /FINAL_REVALIDATE_FNO_UNIVERSE_QUOTES/);
+  assert.match(route, /FINAL_REVALIDATE_TOP3_UNDERLYING_QUOTES/);
+  assert.match(route, /FINAL_REVALIDATE_OPTION_QUOTES/);
+  assert.match(route, /topThreeSetups = \[\]/);
+  assert.match(route, /for \(let offset = 0; offset < finalQuoteCandidates\.length && topThreeSetups\.length < 3; offset \+= 3\)/);
+  assert.match(route, /const verified = topThreeSetups/);
+  assert.match(route, /underlyingQuoteAgeSeconds/);
+  assert.match(route, /maxIndexTickAgeMs: NSE_TICK_FRESHNESS_SECONDS \* 1000/);
   assert.match(route, /initiallyVerified: true/);
   assert.match(route, /FINAL_REVALIDATE_UNDERLYING/);
   assert.match(route, /FINAL_REVALIDATE_OPTION_QUOTES/);
@@ -33,7 +56,7 @@ test("Sureshot verifies the complete F&O quote universe and option-checks every 
   assert.match(route, /item\.finalVerifiedAt = new Date\(\)\.toISOString\(\)/);
   assert.match(route, /initiallyVerifiedCandidateCount/);
   assert.match(route, /ALL_ELIGIBLE_CANDIDATES_CHECKED/);
-  assert.match(route, /Every eligible F\&O equity plus each independently fresh index tick was checked/);
+  assert.match(route, /The complete eligible FYERS NSE F\&O quote universe was checked/);
   assert.doesNotMatch(route, /Option verification is limited to the complete Top 10 gainers/);
   assert.match(app, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
   assert.match(app, /TOP 3 VERIFIED SETUPS/);
@@ -221,14 +244,18 @@ test("NSE option verification selects the complete verified F&O equity universe"
 });
 
 
-test("NSE final freshness revalidation includes every initial pass before publishing Top 3", () => {
+test("NSE final candle revalidation covers every initial pass and final Top 3 ranking uses a fresh complete F&O snapshot", () => {
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   const route = server.slice(start, end);
   assert.ok(route.includes("const finalCheckCandidates = results.filter(item =>"));
   assert.ok(!route.includes(".slice(0, 5);"));
   assert.ok(route.includes("finalRevalidationCandidateCount: finalCheckCandidates.length"));
-  assert.ok(route.includes("topThreeSetups = verified.slice(0, 3)"));
+  assert.ok(route.includes("FINAL_REVALIDATE_FNO_UNIVERSE_QUOTES"));
+  assert.ok(route.includes("FINAL_REVALIDATE_TOP3_UNDERLYING_QUOTES"));
+  assert.ok(route.includes("FINAL_REVALIDATE_OPTION_QUOTES"));
+  assert.ok(route.includes("const verified = topThreeSetups"));
+  assert.ok(route.includes("underlyingQuoteAgeSeconds"));
 });
 
 test("Sureshot FYERS request audit distinguishes upstream, cached and locally blocked requests", () => {

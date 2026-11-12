@@ -40,7 +40,7 @@ test("Paper BUY opens Position only after the server accepts a paper ledger writ
   assert.match(buy, /\/api\/paper\/buy/);
   assert.match(buy, /searchParams\.set\('tab', 'Position'\)/);
   assert.doesNotMatch(buy, /\/api\/orders\//);
-  assert.match(html, /initialTab === 'Position' \? 'Position' : 'Home'/);
+  assert.match(html, /render\(initialTab && \(descriptions\[initialTab\] \|\| \['Home','Sureshot'\]\.includes\(initialTab\)\) \? initialTab : 'Dashboard'\);/);
   assert.match(html, /Manual Exit/);
   assert.match(html, /\.gvPaperExit/);
 });
