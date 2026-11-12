@@ -3,7 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const html = fs.readFileSync('site/index.html', 'utf8');\nconst appBundle = fs.readFileSync('site/app.js', 'utf8');\nexecFileSync(process.execPath, ['--check', 'site/app.js'], { stdio: 'inherit' });
+const html = fs.readFileSync('site/index.html', 'utf8');
+const appBundle = fs.readFileSync('site/app.js', 'utf8');
+execFileSync(process.execPath, ['--check', 'site/app.js'], { stdio: 'inherit' });
 const matches = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'gv2vpd-inline-js-'));
 let checked = 0;
@@ -18,7 +20,7 @@ try {
     checked += 1;
   }
   if (!checked) throw new Error('No inline JavaScript blocks were found in site/index.html.');
-  console.log('PASS: syntax-checked ' + checked + ' inline JavaScript block(s) in site/index.html.');
+  console.log('PASS: syntax-checked canonical site/app.js (' + appBundle.length + ' bytes) and ' + checked + ' inline JavaScript block(s).');
 } finally {
   fs.rmSync(directory, { recursive: true, force: true });
 }
