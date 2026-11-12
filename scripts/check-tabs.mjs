@@ -49,7 +49,7 @@ if (!backend.includes("app.use('/api/paper', requireDashboardSession)") ||
     !backend.includes("verifiedPlanRegistry.create(sessionToken") ||
     !backend.includes("verifiedPlanRegistry.get(sessionToken, planId)") ||
     !backend.includes("quoteTimestampStatus(quoteTime, Date.now(), 10)") ||
-    !backend.includes("buildOptionRiskPlan({ candles: optionHistory.candles, entryPrice: ask") ||
+    !backend.includes("const plan = buildOptionRiskPlan({") || !backend.includes("candles, entryPrice: ask, lotSize: contractMetadata.lotSize") ||
     !backend.includes("const idempotencyKey = 'paper:' + planId;") ||
     !backend.includes("void paperStore.processVerifiedQuote") ||
     !backend.includes("void reconcileOpenPaperPositions(result.added)") ||
