@@ -326,7 +326,7 @@ test("Sureshot reuses cached candidate candles but forces fresh final candle rev
   assert.ok(helperStart >= 0 && helperEnd > helperStart);
   const helper = serverSource.slice(helperStart, helperEnd);
   assert.match(helper, /\bbypassCache\b/);
-  assert.doesNotMatch(helper, /bypassCache:\\s*bypassCache\\s*\\|\\|/);
+  assert.equal(helper.includes("bypassCache: bypassCache ||"), false);
 
   const routeStart = serverSource.indexOf('app.get("/api/market/mcx-sureshot-auto-plans"');
   const routeEnd = serverSource.indexOf("// Last-known F&O equity quotes", routeStart);
