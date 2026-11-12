@@ -3993,7 +3993,7 @@ document.querySelector('#gv2vpdFyersConnect')?.addEventListener('click', () => s
 
 // Preserve user-created watchlists, alerts and journal entries across reloads.
 const initialTab = new URLSearchParams(window.location.search).get('tab');
-render(initialTab && descriptions[initialTab] ? initialTab : 'Dashboard');
+render(initialTab && (descriptions[initialTab] || ['Home','Sureshot'].includes(initialTab)) ? initialTab : 'Dashboard');
 restoreLastKnownIndexQuotes();
 // Start the guarded NSE scan app-wide after restoring an existing authenticated session.
 maybeStartAutomaticSureshotScan();
