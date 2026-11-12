@@ -70,13 +70,12 @@ test("matches MCX option families to their exact underlying futures token", () =
     "MCX:CRUDEOIL26DEC8500PE": { tradeStatus: 1, optType: "PE", tradingSession: "0900-2355", fyToken: "dec-pe", underFyTok: "fut-dec", underSym: "CRUDEOIL", strikePrice: 8500, expiryDate: secondExpiry, minLotSize: 1, qtyMultiplier: 100, tickSize: 0.05 }
   };
   const rows = buildMcxFuturesUniverse(paired, now);
-  assert.equal(rows.length, 2);
-  assert.deepEqual(rows.find(row => row.fyToken === "fut-nov").optionContracts.map(row => row.symbol), [
+  assert.equal(rows.length, 1, "one underlying must not be duplicated across expiries");
+  assert.equal(rows[0].symbol, "MCX:CRUDEOIL26NOVFUT");
+  assert.deepEqual(rows[0].optionContracts.map(row => row.symbol), [
     "MCX:CRUDEOIL26NOV8400CE", "MCX:CRUDEOIL26NOV8400PE"
   ]);
-  assert.deepEqual(rows.find(row => row.fyToken === "fut-dec").optionContracts.map(row => row.symbol), [
-    "MCX:CRUDEOIL26DEC8500CE", "MCX:CRUDEOIL26DEC8500PE"
-  ]);
+  assert.equal(rows[0].optionContracts.some(row => row.symbol.includes("DEC")), false);
 });
 
 test("MCX shortlist ranks only fresh exchange-timestamped quote rows", () => {
