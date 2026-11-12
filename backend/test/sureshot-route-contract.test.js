@@ -11,6 +11,7 @@ const shortlist = await readFile(new URL("../src/sureshot-shortlist.js", import.
 test("Sureshot verifies the complete F&O quote universe and option-checks every candidate in five-item batches", () => {
   assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 250/);
   assert.match(server, /const SURESHOT_BATCH_SIZE = 5/);
+  assert.match(server, /const SURESHOT_SCAN_TTL_MS = 3 \* 60 \* 60 \* 1000/);
   const start = server.indexOf('app.get("/api/market/sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   assert.ok(start >= 0 && end > start);
@@ -32,6 +33,8 @@ test("Sureshot verifies the complete F&O quote universe and option-checks every 
   assert.match(route, /item\.finalVerifiedAt = new Date\(\)\.toISOString\(\)/);
   assert.match(route, /initiallyVerifiedCandidateCount/);
   assert.match(route, /ALL_ELIGIBLE_CANDIDATES_CHECKED/);
+  assert.match(route, /Every eligible F\\&O equity plus each independently fresh index tick was checked/);
+  assert.doesNotMatch(route, /Option verification is limited to the complete Top 10 gainers/);
   assert.match(app, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
   assert.match(app, /TOP 3 VERIFIED SETUPS/);
   assert.match(app, /FULL UNIVERSE AUDIT RESULTS/);
