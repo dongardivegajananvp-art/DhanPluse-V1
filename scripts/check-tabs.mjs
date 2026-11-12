@@ -78,7 +78,9 @@ if (!app.includes("BACKEND_URL + '/api/paper/buy'") ||
   throw new Error('Position must show a separate durable Paper Mode ledger and Paper BUY must use the verified plan ID.');
 }
 if (!app.includes("tab === 'Sureshot CE/PE') featureContent.innerHTML = advancedScannerMarkup(tab)") ||
-    !app.includes('async function loadSureshotUniverseShortlist(options = {})')) {
+    !app.includes('async function loadSureshotUniverseShortlist(options = {})') ||
+    app.includes('DMA20 crossover and supply/demand breakout must agree') ||
+    app.includes('after 09:30')) {
   throw new Error('Existing FYERS-verified Sureshot scanner must be preserved.');
 }
 if (!app.includes('refreshAuthoritativeFyersStatus') ||
@@ -87,11 +89,14 @@ if (!app.includes('refreshAuthoritativeFyersStatus') ||
   throw new Error('Authoritative FYERS status refresh and bounded Sureshot auto-scan guard must remain.');
 }
 if (!html.includes('GV2VPD — FYERS') ||
-    !html.includes('sw.js?v=gv2vpd-20261112-audit')) {
+    !html.includes('sw.js?v=gv2vpd-20261112-24tab')) {
   throw new Error('GV2VPD identity and versioned PWA shell must be published together.');
 }
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
 if (!sw.includes('gv2vpd-shell-v5-24tab') ||
+    !sw.includes('journal.js?v=gv2vpd-20261112-24tab') ||
+    !sw.includes('risk-calculator.js?v=gv2vpd-20261112-24tab') ||
+    !sw.includes('backtest.js?v=gv2vpd-20261112-24tab') ||
     !sw.includes('gv2vpd-icon.svg') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('GV2VPD service-worker cache shell is incomplete.');
