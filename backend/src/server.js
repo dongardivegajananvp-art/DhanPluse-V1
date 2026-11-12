@@ -2632,6 +2632,15 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         if (topThreeSetups.length === 3) break;
       }
     }
+    topThreeSetups.sort((a, b) => Math.abs(Number(b.changePct)) - Math.abs(Number(a.changePct)) ||
+      String(a.underlyingSymbol).localeCompare(String(b.underlyingSymbol)));
+    results.sort((a, b) => {
+      const aMove = Number.isFinite(Number(a.changePct)) ? Math.abs(Number(a.changePct)) : -1;
+      const bMove = Number.isFinite(Number(b.changePct)) ? Math.abs(Number(b.changePct)) : -1;
+      return bMove - aMove || String(a.underlyingSymbol || "").localeCompare(String(b.underlyingSymbol || ""));
+    });
+    results.forEach((item, index) => { item.rank = index + 1; });
+    topThreeSetups.forEach((item, index) => { item.finalRank = index + 1; item.rank = index + 1; });
     const topThreeSet = new Set(topThreeSetups);
     for (const item of finalCheckCandidates) {
       if (item.status === "VERIFIED SETUP" && !topThreeSet.has(item)) {
@@ -2672,7 +2681,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       scannedCandidateCount: results.length, verifiedSetupCount: verified.length, initiallyVerifiedCandidateCount,
       topThreeSetupCount: topThreeSetups.length, topThreeSetups,
       bestSetup: topThreeSetups[0] || null, results,
-      notice: "The complete eligible FYERS NSE F&O quote universe was verified and ranked. Every eligible F&O equity plus each independently fresh index tick was checked for underlying direction, listed option contract identity, fresh option premium, completed option candles and final revalidation. Only fully revalidated current top-three plans receive Paper Mode IDs. FYERS request pacing and cooldown remain enforced; no orders are placed." };
+      notice: "The complete eligible FYERS NSE F&O quote universe was checked. Final ranking uses a newly completed full-universe quote snapshot; each selected Top 3 candidate then receives a fresh underlying quote, fresh option quote and final completed-candle/risk validation. Only these fully revalidated plans receive Paper Mode IDs. FYERS pacing/cooldown remain enforced; no orders are placed." };
     sureshotScanState = null;
     return res.json(payload);
   } catch (error) {
