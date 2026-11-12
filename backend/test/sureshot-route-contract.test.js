@@ -40,7 +40,7 @@ test("Sureshot verifies the complete F&O quote universe and option-checks every 
   assert.match(route, /item\.finalVerifiedAt = new Date\(\)\.toISOString\(\)/);
   assert.match(route, /initiallyVerifiedCandidateCount/);
   assert.match(route, /ALL_ELIGIBLE_CANDIDATES_CHECKED/);
-  assert.match(route, /Every eligible F\&O equity plus each independently fresh index tick was checked/);
+  assert.match(route, /The complete eligible FYERS NSE F\&O quote universe was checked/);
   assert.doesNotMatch(route, /Option verification is limited to the complete Top 10 gainers/);
   assert.match(app, /result\.stopReason !== 'ALL_ELIGIBLE_CANDIDATES_CHECKED'/);
   assert.match(app, /TOP 3 VERIFIED SETUPS/);
