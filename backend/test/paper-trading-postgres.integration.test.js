@@ -25,7 +25,7 @@ test('PostgreSQL Paper Mode ledger survives restart and serializes BUY/exit race
     side: 'CE',
     expiry: '2026-11-26',
     strike: 3000,
-    plan: { entryPrice: 100, stopLoss: 70, target1: 150, target2: 250, quantity: 50 },
+    plan: { entryPrice: 100, stopLoss: 99, target1: 102, target2: 103, quantity: 25 },
     ...overrides
   });
 
@@ -53,7 +53,7 @@ test('PostgreSQL Paper Mode ledger survives restart and serializes BUY/exit race
     assert.equal(stale.processed, false);
 
     const target1 = await store.processVerifiedQuote({
-      symbol: input.symbol, price: 150,
+      symbol: input.symbol, price: 102,
       exchangeTimestamp: new Date(now - 500).toISOString(), source: 'FYERS_VERIFIED'
     }, now);
     assert.equal(target1.updates.length, 1);
@@ -71,7 +71,7 @@ test('PostgreSQL Paper Mode ledger survives restart and serializes BUY/exit race
     const manualExitAt = now + 1500;
     const outcomes = await Promise.allSettled([
       store.processVerifiedQuote({
-        symbol: input.symbol, price: 250,
+        symbol: input.symbol, price: 103,
         exchangeTimestamp: new Date(autoExitAt - 100).toISOString(), source: 'FYERS_VERIFIED'
       }, autoExitAt),
       store.manualExit({
@@ -117,7 +117,7 @@ test('PostgreSQL Paper Mode ledger survives restart and serializes BUY/exit race
     }
   });
 
-  await t.test('two-position cap and ₹5,000 daily loss lock are enforced in PostgreSQL', async () => {
+  await t.test('two-position cap and ₹100 daily loss lock are enforced in PostgreSQL', async () => {
     const day = now + 2 * 24 * 60 * 60 * 1000;
     const first = await store.createPaperBuy(makeInput('cap-a-000001', 'NSE:INFY26NOV1500CE', day), day);
     const second = await store.createPaperBuy(makeInput('cap-b-000002', 'NSE:SBIN26NOV900CE', day), day);
@@ -138,11 +138,11 @@ test('PostgreSQL Paper Mode ledger survives restart and serializes BUY/exit race
       const symbol = `NSE:LOSS${index}26NOV100CE`;
       const position = await store.createPaperBuy(makeInput(`loss-${index}-00001`, symbol, at), at);
       const exit = await store.processVerifiedQuote({
-        symbol, price: 70,
+        symbol, price: 99,
         exchangeTimestamp: new Date(at - 500).toISOString(), source: 'FYERS_VERIFIED'
       }, at);
       assert.equal(exit.updates[0].exit_reason, 'STOP_LOSS');
-      assert.equal(Number(exit.updates[0].realized_pnl), -1500);
+      assert.equal(Number(exit.updates[0].realized_pnl), -25);
       assert.equal(position.created, true);
     }
     const blockedAt = lossDay + 4 * 20_000;
