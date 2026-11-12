@@ -664,7 +664,7 @@ function startMarketDataStream(token, startReason = 'unspecified') {
       streamError = 'FYERS market socket disconnected; automatic recovery is in progress.';
       nseReconnectPending = true;
       marketSocketLastCloseAt = Date.now();
-      console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
+      console.warn('FYERS WebSocket transport closed; SDK auto-reconnect pending.', JSON.stringify({
         generation: socketGeneration, tokenFingerprint: requestedFingerprint,
         code: code ?? null,
         reason: safeReason || null,
@@ -753,7 +753,7 @@ const marketSocketWatchdog = setInterval(() => {
       marketSocket.mode(marketSocket.FullMode);
       marketSocket.subscribe(nseIndexSymbols);
       streamError = 'NSE feed is reconnecting after 10 seconds without a fresh exchange tick.';
-      console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
+      console.warn('NSE tick heartbeat missed; reapplying subscriptions on connected WebSocket.', JSON.stringify({
         reason: 'no_fresh_nse_tick_within_10_seconds', silentForMs,
         retry: nseResubscribeCount, nextRetryDelayMs: getMarketSocketReconnectDelay(nseResubscribeCount, 10_000, 120_000),
         recovery: 'reapply_nse_subscriptions_on_existing_shared_socket',
@@ -761,7 +761,7 @@ const marketSocketWatchdog = setInterval(() => {
       }));
     } else {
       streamError = 'NSE socket disconnected; FYERS SDK auto-reconnect is in progress.';
-      console.warn('NSE socket disconnected, reconnecting...', JSON.stringify({
+      console.warn('NSE WebSocket transport unavailable; FYERS SDK auto-reconnect pending.', JSON.stringify({
         reason: 'socket_transport_not_connected', silentForMs,
         retry: nseResubscribeCount, nextRetryDelayMs: getMarketSocketReconnectDelay(nseResubscribeCount, 10_000, 120_000),
         recovery: 'fyers_sdk_auto_reconnect'
@@ -769,7 +769,7 @@ const marketSocketWatchdog = setInterval(() => {
     }
   } catch (error) {
     streamError = 'NSE subscription recovery failed; automatic retry remains active.';
-    console.error('NSE socket disconnected, reconnecting... subscription recovery failed:', String(error?.message || error).slice(0, 200));
+    console.error('NSE subscription recovery failed; retry remains pending:', String(error?.message || error).slice(0, 200));
   }
 }, 1_000);
 marketSocketWatchdog.unref?.();
