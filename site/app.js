@@ -2577,7 +2577,14 @@ function settingsMarkup() {
 let latestExchangeLiveStatus = {};
 function isMcxMarketSessionOpen() {
   const mcx = latestExchangeLiveStatus.MCX || {};
-  return mcx.session === 'SCHEDULED_OPEN' && mcx.feed === 'LIVE';
+  const subscribed = Number(mcx.subscribedSymbolCount) || 0;
+  const required = Number(mcx.requiredTickCount) || 0;
+  // Do not wait for feed=LIVE here: LIVE itself requires a complete fresh-tick
+  // audit. Start the audit once the official full-universe subscription is
+  // active, then let the backend decide whether every contract is fresh.
+  return mcx.session === 'SCHEDULED_OPEN' &&
+    mcx.feed !== 'DISCONNECTED' && mcx.feed !== 'NOT_CONNECTED' &&
+    subscribed > 0 && required > 0 && subscribed === required;
 }
 function updateSureshotExchangeCards(status) {
   const nse = status && status.exchangeLiveStatus && status.exchangeLiveStatus.NSE || {};
