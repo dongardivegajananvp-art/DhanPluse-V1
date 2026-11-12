@@ -2901,7 +2901,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         historyUrl.searchParams.set("symbol", candidate.symbol); historyUrl.searchParams.set("resolution", "5");
         historyUrl.searchParams.set("date_format", "1"); historyUrl.searchParams.set("range_from", from);
         historyUrl.searchParams.set("range_to", today); historyUrl.searchParams.set("cont_flag", "1");
-        const history = await fyersReadOnlyGet(historyUrl, { priority: "sureshot", stage: scanStage });
+        const history = await fyersReadOnlyGet(historyUrl, { priority: "sureshot", stage });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now());
         if (!direction.ok || !direction.side) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", reason: direction.reason || "No confirmed CE/PE direction." });
@@ -2954,7 +2954,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
       stage = "VERIFY_MCX_OPTION_QUOTES";
       const url = new URL("https://api-t1.fyers.in/data/quotes");
       url.searchParams.set("symbols", prepared.map(item => item.contract.symbol).join(","));
-      const result = await fyersReadOnlyGet(url, { priority: "sureshot", stage: scanStage });
+      const result = await fyersReadOnlyGet(url, { priority: "sureshot", stage });
       const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
       for (const row of rows) {
         const symbol = row?.n || row?.symbol || row?.v?.symbol;
@@ -2975,7 +2975,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         historyUrl.searchParams.set("symbol", item.contract.symbol); historyUrl.searchParams.set("resolution", "5");
         historyUrl.searchParams.set("date_format", "1"); historyUrl.searchParams.set("range_from", from);
         historyUrl.searchParams.set("range_to", today); historyUrl.searchParams.set("cont_flag", "1");
-        const optionHistory = await fyersReadOnlyGet(historyUrl, { priority: "sureshot", stage: scanStage });
+        const optionHistory = await fyersReadOnlyGet(historyUrl, { priority: "sureshot", stage });
         stage = "BUILD_MCX_RISK_PLAN";
         const plan = buildVerifiedSureshotTradePlan({
           underlyingSymbol: item.candidate.symbol, direction: item.direction, contract: item.contract,
@@ -3023,7 +3023,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         url.searchParams.set("date_format", "1"); url.searchParams.set("range_from", from);
         url.searchParams.set("range_to", today); url.searchParams.set("cont_flag", "1");
         stage = "FINAL_REVALIDATE_MCX_UNDERLYING";
-        const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage: scanStage });
+        const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage });
         const direction = deriveVerifiedUnderlyingDirection(Array.isArray(history?.candles) ? history.candles : [], "5", Date.now());
         if (!direction.ok || direction.side !== item.direction) {
           item.status = "NO TRADE"; item.reason = "Final underlying-candle revalidation failed."; delete item.plan; continue;
@@ -3044,7 +3044,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         url.searchParams.set("date_format", "1"); url.searchParams.set("range_from", from);
         url.searchParams.set("range_to", today); url.searchParams.set("cont_flag", "1");
         stage = "FINAL_REVALIDATE_MCX_OPTION_CANDLES";
-        const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage: scanStage });
+        const history = await fyersReadOnlyGet(url, { priority: "sureshot", stage });
         finalOptionCandles.set(item.underlyingSymbol, Array.isArray(history?.candles) ? history.candles : []);
       } catch (error) {
         if ([401, 429].includes(Number(error.statusCode))) throw error;
