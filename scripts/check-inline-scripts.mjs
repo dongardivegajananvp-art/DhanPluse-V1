@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const html = fs.readFileSync('site/index.html', 'utf8');
+const html = fs.readFileSync('site/index.html', 'utf8');\nconst appBundle = fs.readFileSync('site/app.js', 'utf8');\nexecFileSync(process.execPath, ['--check', 'site/app.js'], { stdio: 'inherit' });
 const matches = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'gv2vpd-inline-js-'));
 let checked = 0;
