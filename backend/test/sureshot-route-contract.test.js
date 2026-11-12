@@ -301,3 +301,15 @@ test("MCX automatic scan retries incomplete runs and records completion only aft
   assert.match(automatic, /if \(finished === true\)/);
   assert.doesNotMatch(automatic, /dhanpulse_mcx_sureshot_scan_attempt_day/);
 });
+
+
+test("MCX automatic scan starts after full-universe subscription without circularly requiring LIVE", () => {
+  const gateStart = app.indexOf("function isMcxMarketSessionOpen()");
+  const gateEnd = app.indexOf("function updateSureshotExchangeCards", gateStart);
+  assert.ok(gateStart >= 0 && gateEnd > gateStart);
+  const gate = app.slice(gateStart, gateEnd);
+  assert.match(gate, /mcx\.session === 'SCHEDULED_OPEN'/);
+  assert.match(gate, /subscribed === required/);
+  assert.doesNotMatch(gate, /mcx\.feed === 'LIVE'/);
+  assert.match(gate, /mcx\.feed !== 'DISCONNECTED'/);
+});
