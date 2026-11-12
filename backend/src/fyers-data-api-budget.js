@@ -43,6 +43,7 @@ export function createFyersDataApiBudget({
   // prevents a request that began before a 1015 from clearing that newer block.
   let cooldownPathname = null;
   let cooldownGeneration = 0;
+  let cooldownPersistenceHealthy = true;
   let queuedRequests = 0;
   const responseCache = new Map();
   const inFlight = new Map();
@@ -87,6 +88,12 @@ export function createFyersDataApiBudget({
     });
   }
 
+  function makePersistenceFailureResponse() {
+    return new Response(JSON.stringify({
+      s: 'error', message: 'FYERS cooldown could not be durably persisted; Data API requests are blocked fail-closed.'
+    }), { status: 503, headers: { 'content-type': 'application/json', 'x-dhanpulse-cooldown': 'persistence-failed' } });
+  }
+
   async function activateCooldown(response, body, pathname) {
     const server = String(response.headers?.get?.('server') || '');
     const cfRay = String(response.headers?.get?.('cf-ray') || '');
@@ -113,10 +120,12 @@ export function createFyersDataApiBudget({
     cooldownUntil = Math.max(cooldownUntil, now() + Math.min(maxCooldownMs, Math.max(backoffMs, retryMs)));
     if (typeof onCooldownChange === 'function') {
       try {
-        await onCooldownChange({ cooldownUntil, cooldownReason, cooldownPathname, cooldownGeneration,
+        const persisted = await onCooldownChange({ cooldownUntil, cooldownReason, cooldownPathname, cooldownGeneration,
           consecutiveCloudflareBlocks, consecutiveRateLimitBlocks });
+        if (persisted === false) throw new Error('durable cooldown store is unavailable');
       } catch (error) {
-        console.warn('FYERS cooldown persistence failed:', String(error?.message || error).slice(0, 160));
+        cooldownPersistenceHealthy = false;
+        console.error('FYERS cooldown persistence failed; further Data API requests are blocked until restart and state recovery:', String(error?.message || error).slice(0, 160));
       }
     }
   }
@@ -151,6 +160,7 @@ export function createFyersDataApiBudget({
       if (cached) responseCache.delete(cacheKey);
     }
 
+    if (!cooldownPersistenceHealthy) return makePersistenceFailureResponse();
     if (cooldownUntil > currentTime) return makeCooldownResponse();
 
     const pending = inFlightKey && inFlight.get(inFlightKey);
@@ -166,6 +176,7 @@ export function createFyersDataApiBudget({
         queuedRequests = Math.max(0, queuedRequests - 1);
         // Recheck inside the serial queue: calls already waiting when a 1015
         // arrives must be stopped locally instead of hitting the same WAF.
+        if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
         if (cooldownUntil > now()) return { response: makeCooldownResponse() };
 
         let time = now();
@@ -182,6 +193,7 @@ export function createFyersDataApiBudget({
         }
 
         // A prior queued request may have opened the circuit while this one waited.
+        if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
         if (cooldownUntil > now()) return { response: makeCooldownResponse() };
 
         time = now();
@@ -210,10 +222,13 @@ export function createFyersDataApiBudget({
           cooldownReason = null;
           if (typeof onCooldownChange === 'function') {
             try {
-              await onCooldownChange({ cooldownUntil: 0, cooldownReason: null, cooldownPathname: null,
+              const persisted = await onCooldownChange({ cooldownUntil: 0, cooldownReason: null, cooldownPathname: null,
                 cooldownGeneration, consecutiveCloudflareBlocks, consecutiveRateLimitBlocks });
+              if (persisted === false) throw new Error('durable cooldown store is unavailable');
+              cooldownPersistenceHealthy = true;
             } catch (error) {
-              console.warn('FYERS cooldown persistence failed:', String(error?.message || error).slice(0, 160));
+              cooldownPersistenceHealthy = false;
+              console.error('FYERS cooldown clear could not be durably persisted; Data API requests remain blocked:', String(error?.message || error).slice(0, 160));
             }
           }
         }
@@ -253,6 +268,7 @@ export function createFyersDataApiBudget({
     const until = Date.parse(String(state?.blockedUntil || ''));
     if (!Number.isFinite(until) || until <= now() || until - now() > maxCooldownMs ||
         !['/data/quotes', '/data/history', '/data/options-chain-v3'].includes(state?.cooldownPathname)) return false;
+    cooldownPersistenceHealthy = true;
     cooldownUntil = until;
     cooldownReason = String(state.cooldownReason || 'RESTORED_COOLDOWN').slice(0, 40);
     cooldownPathname = state.cooldownPathname;
@@ -266,6 +282,7 @@ export function createFyersDataApiBudget({
     const remainingMs = Math.max(0, cooldownUntil - now());
     return {
       cooldownActive: remainingMs > 0,
+      cooldownPersistenceHealthy,
       retryAfterSeconds: remainingMs > 0 ? Math.max(1, Math.ceil(remainingMs / 1000)) : 0,
       blockedUntil: remainingMs > 0 ? new Date(cooldownUntil).toISOString() : null,
       cooldownReason: remainingMs > 0 ? cooldownReason : null,
