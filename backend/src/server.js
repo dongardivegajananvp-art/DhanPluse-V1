@@ -3495,7 +3495,7 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
     historyUrl.searchParams.set('range_to', today);
     const [quoteResult, historyResult] = await Promise.all([
       fyersReadOnlyGet(quoteUrl),
-      fyersReadOnlyGet(historyUrl)
+      fyersReadOnlyGet(historyUrl, { bypassCache: true })
     ]);
     const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d :
       (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
@@ -3510,7 +3510,6 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
         quoteTimestampStatus(quoteTime, Date.now(), 15) !== 'FRESH') {
       return res.status(502).json({ ok: false, error: 'Selected option bid/ask/LTP quote is missing, invalid or older than 15 seconds.' });
     }
-    const candles = Array.isArray(historyResult?.candles) ? historyResult.candles : [];
     const candles = Array.isArray(historyResult?.candles) ? historyResult.candles : [];
     const plan = buildOptionRiskPlan({
       candles, entryPrice: ask, lotSize: contractMetadata.lotSize, tickSize: contractMetadata.tickSize,
