@@ -20,7 +20,6 @@ import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 import { buildOptionRiskPlan } from './option-risk-plan.js';
-import { buildFixedOptionRiskPlan, validateCompletedOptionCandles } from './fixed-option-risk-plan.js';
 import { getVerifiedOptionContractMetadata as resolveOptionContractMetadata } from './option-contract-metadata.js';
 import { isFyersAuthRejected, isExpiredFyersAccessTokenError } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
@@ -1230,7 +1229,7 @@ function invalidateFyersSession(reason) {
   });
 }
 
-async function fyersReadOnlyGet(url, { priority = 'normal', stage = null } = {}) {
+async function fyersReadOnlyGet(url, { priority = 'normal', stage = null, bypassCache = false } = {}) {
   // While a Sureshot scan is active, keep unrelated Data API traffic from
   // competing for the same account/IP budget. Existing in-flight reads finish;
   // Sureshot requests explicitly opt into the priority lane below.
@@ -1262,7 +1261,8 @@ async function fyersReadOnlyGet(url, { priority = 'normal', stage = null } = {})
     // Sureshot history reads get a bounded 30s network window after queueing.
     // Other Data API reads retain the existing 12s timeout. Queue/pacing time
     // is excluded by the budget layer; request spacing and cooldown are unchanged.
-    timeoutMs: priority === 'sureshot' && historyRequest ? 30_000 : 12_000
+    timeoutMs: priority === 'sureshot' && historyRequest ? 30_000 : 12_000,
+    bypassCache: bypassCache || (priority === 'sureshot' && historyRequest)
   });
   if (priority === 'sureshot') {
     const cacheState = response.headers.get('x-dhanpulse-cache') || 'NOT_CACHED';
@@ -2314,7 +2314,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         chainUrl.searchParams.set("symbol", candidate.symbol); chainUrl.searchParams.set("strikecount", "10");
         const chainResult = await fyersReadOnlyGet(chainUrl, { priority: "sureshot", stage: scanStage });
         const discovery = normalizeOptionContractDiscovery(chainResult?.data);
-        const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(), strikeMode: "one-otm" });
+        const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(), strikeMode: "nearest" });
         if (!selected.ok) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
           continue;
@@ -2385,7 +2385,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         scanStage = "BUILD_RISK_PLAN";
         const plan = buildVerifiedSureshotTradePlan({ underlyingSymbol: candidate.symbol, direction, contract, quote,
           optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5",
-          lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, riskModel: "fixed", requirePremiumRange: true, now: Date.now() });
+          lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, now: Date.now() });
         resultBySymbol.set(candidate.symbol, plan.ok ? {
           ...base, status: "VERIFIED SETUP", initiallyVerified: true,
           direction: direction.side, contract, plan
@@ -2471,57 +2471,62 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       }
     }
 
-    const finalQuoteBySymbol = new Map();
     const finalQuoteCandidates = finalCandleCandidates.filter(item =>
       item.status === "VERIFIED SETUP" && finalOptionCandlesBySymbol.has(item.underlyingSymbol));
-    if (finalQuoteCandidates.length) {
+    // FYERS quotes accepts bounded symbol batches. Build each plan immediately
+    // after its batch so the first exchange timestamps do not age while later
+    // batches wait in the shared four-second/15-per-minute request queue.
+    for (let quoteOffset = 0; quoteOffset < finalQuoteCandidates.length; quoteOffset += 50) {
+      const quoteBatch = finalQuoteCandidates.slice(quoteOffset, quoteOffset + 50);
+      if (!nseRegularSessionNow()) {
+        const error = new Error("Market session closed during final option quote revalidation; signals blocked.");
+        error.statusCode = 409; throw error;
+      }
       try {
         const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes");
-        quoteUrl.searchParams.set("symbols", finalQuoteCandidates.map(item => item.contract.symbol).join(","));
+        quoteUrl.searchParams.set("symbols", quoteBatch.map(item => item.contract.symbol).join(","));
         scanStage = "FINAL_REVALIDATE_OPTION_QUOTES";
         const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: "sureshot", stage: scanStage });
         const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
+        const quoteBySymbol = new Map();
+        const batchSymbols = new Set(quoteBatch.map(item => item.contract.symbol));
         for (const row of quoteRows) {
           const symbol = row?.n || row?.symbol || row?.v?.symbol;
-          if (symbol && finalQuoteCandidates.some(item => item.contract.symbol === symbol)) finalQuoteBySymbol.set(symbol, row?.v || row);
+          if (symbol && batchSymbols.has(symbol)) quoteBySymbol.set(symbol, row?.v || row);
+        }
+        for (const item of quoteBatch) {
+          if (item.status !== "VERIFIED SETUP") continue;
+          const quote = quoteBySymbol.get(item.contract.symbol);
+          if (!quote) {
+            item.status = "NO TRADE";
+            item.reason = "Final FYERS option quote revalidation returned no contract quote.";
+            delete item.plan;
+            continue;
+          }
+          const freshPlan = buildVerifiedSureshotTradePlan({
+            underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
+            contract: item.contract, quote, optionCandles: finalOptionCandlesBySymbol.get(item.underlyingSymbol) || [],
+            resolution: "5", lotSize: item.contract.lotSize, tickSize: item.contract.tickSize, now: Date.now()
+          });
+          if (!freshPlan.ok) {
+            item.status = "NO TRADE";
+            item.reason = "Final option premium/candle revalidation failed: " + freshPlan.reason;
+            delete item.plan;
+            continue;
+          }
+          item.plan = freshPlan;
+          item.finalVerifiedAt = new Date().toISOString();
+          item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
         }
       } catch (error) {
         const status = Number(error.statusCode) || 0;
         if (status === 429 || status === 401) throw error;
-        for (const item of finalQuoteCandidates) {
+        for (const item of quoteBatch) {
           item.status = "NO TRADE";
           item.reason = "Final FYERS option quote revalidation failed: " + String(error.message || "Quote unavailable.").slice(0, 140);
           delete item.plan;
         }
       }
-    }
-
-    if (!nseRegularSessionNow()) { const error = new Error("Market session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
-    for (const item of finalQuoteCandidates) {
-      if (item.status !== "VERIFIED SETUP") continue;
-      const contract = item.contract;
-      const quote = finalQuoteBySymbol.get(contract.symbol);
-      if (!quote) {
-        item.status = "NO TRADE";
-        item.reason = "Final FYERS option quote revalidation returned no contract quote.";
-        delete item.plan;
-        continue;
-      }
-      const freshPlan = buildVerifiedSureshotTradePlan({
-        underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
-        contract, quote, optionCandles: finalOptionCandlesBySymbol.get(item.underlyingSymbol) || [],
-        resolution: "5", lotSize: contract.lotSize, tickSize: contract.tickSize,
-        riskModel: "fixed", requirePremiumRange: true, now: Date.now()
-      });
-      if (!freshPlan.ok) {
-        item.status = "NO TRADE";
-        item.reason = "Final option premium/candle revalidation failed: " + freshPlan.reason;
-        delete item.plan;
-        continue;
-      }
-      item.plan = freshPlan;
-      item.finalVerifiedAt = new Date().toISOString();
-      item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
     }
 
     const finalCheckedSet = new Set(finalCheckCandidates);
@@ -2721,7 +2726,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         stage = "SELECT_MCX_OPTION_CONTRACT";
         const selected = selectNearestVerifiedOptionContract({
           discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot,
-          now: Date.now(), strikeMode: "one-otm"
+          now: Date.now(), strikeMode: "nearest"
         });
         if (!selected.ok) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
@@ -2774,7 +2779,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
           underlyingSymbol: item.candidate.symbol, direction: item.direction, contract: item.contract,
           quote, optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
           resolution: "5", lotSize: item.sizing.lotSize, tickSize: item.sizing.tickSize,
-          riskModel: "fixed", requirePremiumRange: true, now: Date.now()
+          now: Date.now()
         });
         resultBySymbol.set(item.candidate.symbol, plan.ok
           ? { ...item.base, status: "VERIFIED SETUP", initiallyVerified: true,
@@ -2806,7 +2811,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
 
     const results = state.results;
     const initiallyVerifiedCandidateCount = results.filter(item => item.initiallyVerified === true).length;
-    const finalCheckCandidates = results.filter(item => item.initiallyVerified === true && item.status === "VERIFIED SETUP").slice(0, 10);
+    const finalCheckCandidates = results.filter(item => item.initiallyVerified === true && item.status === "VERIFIED SETUP");
     const finalDirections = new Map();
     for (const item of finalCheckCandidates) {
       if (!mcxSessionOpen()) { const error = new Error("MCX session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
@@ -2847,29 +2852,60 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
     const finalQuoteCandidates = finalCandleCandidates.filter(item =>
       item.status === "VERIFIED SETUP" && finalOptionCandles.has(item.underlyingSymbol));
     const finalQuoteBySymbol = new Map();
-    if (finalQuoteCandidates.length) {
-      const url = new URL("https://api-t1.fyers.in/data/quotes");
-      url.searchParams.set("symbols", finalQuoteCandidates.map(item => item.contract.symbol).join(","));
-      stage = "FINAL_REVALIDATE_MCX_OPTION_QUOTES";
-      const result = await fyersReadOnlyGet(url, { priority: "sureshot", stage: scanStage });
-      const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
-      for (const row of rows) {
-        const symbol = row?.n || row?.symbol || row?.v?.symbol;
-        if (symbol && finalQuoteCandidates.some(item => item.contract.symbol === symbol)) finalQuoteBySymbol.set(symbol, row?.v || row);
+    for (let quoteOffset = 0; quoteOffset < finalQuoteCandidates.length; quoteOffset += 50) {
+      const quoteBatch = finalQuoteCandidates.slice(quoteOffset, quoteOffset + 50);
+      if (!mcxSessionOpen()) {
+        const error = new Error("MCX session closed during final option quote revalidation.");
+        error.statusCode = 409; throw error;
+      }
+      try {
+        const url = new URL("https://api-t1.fyers.in/data/quotes");
+        url.searchParams.set("symbols", quoteBatch.map(item => item.contract.symbol).join(","));
+        stage = "FINAL_REVALIDATE_MCX_OPTION_QUOTES";
+        const result = await fyersReadOnlyGet(url, { priority: "sureshot", stage });
+        const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
+        const batchSymbols = new Set(quoteBatch.map(item => item.contract.symbol));
+        for (const row of rows) {
+          const symbol = row?.n || row?.symbol || row?.v?.symbol;
+          if (symbol && batchSymbols.has(symbol)) finalQuoteBySymbol.set(symbol, row?.v || row);
+        }
+      } catch (error) {
+        const status = Number(error.statusCode) || 0;
+        if ([401, 429].includes(status)) throw error;
+        for (const item of quoteBatch) {
+          item.status = "NO TRADE";
+          item.reason = "Final MCX option quote revalidation failed: " + String(error.message || "Quote unavailable.").slice(0, 140);
+          delete item.plan;
+        }
+      }
+      for (const item of quoteBatch) {
+        if (item.status !== "VERIFIED SETUP") continue;
+        const quote = finalQuoteBySymbol.get(item.contract.symbol);
+        if (!quote) {
+          item.status = "NO TRADE";
+          item.reason = "Final MCX option quote revalidation returned no quote.";
+          delete item.plan;
+          continue;
+        }
+        const freshPlan = buildVerifiedSureshotTradePlan({
+          underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
+          contract: item.contract, quote, optionCandles: finalOptionCandles.get(item.underlyingSymbol) || [],
+          resolution: "5", lotSize: item.contract.lotSize, tickSize: item.contract.tickSize, now: Date.now()
+        });
+        if (!freshPlan.ok) {
+          item.status = "NO TRADE";
+          item.reason = "Final MCX premium/candle revalidation failed: " + freshPlan.reason;
+          delete item.plan;
+          continue;
+        }
+        item.plan = freshPlan;
+        item.finalVerifiedAt = new Date().toISOString();
+        item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
       }
     }
-    for (const item of finalQuoteCandidates) {
-      const quote = finalQuoteBySymbol.get(item.contract.symbol);
-      if (!quote) { item.status = "NO TRADE"; item.reason = "Final MCX option quote revalidation returned no quote."; delete item.plan; continue; }
-      const freshPlan = buildVerifiedSureshotTradePlan({
-        underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
-        contract: item.contract, quote, optionCandles: finalOptionCandles.get(item.underlyingSymbol) || [],
-        resolution: "5", lotSize: item.contract.lotSize, tickSize: item.contract.tickSize,
-        riskModel: "fixed", requirePremiumRange: true, now: Date.now()
-      });
-      if (!freshPlan.ok) { item.status = "NO TRADE"; item.reason = "Final MCX premium/candle revalidation failed: " + freshPlan.reason; delete item.plan; continue; }
-      item.plan = freshPlan; item.finalVerifiedAt = new Date().toISOString();
-      item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
+    if (!mcxSessionOpen()) {
+      const error = new Error("MCX session closed during final verification; all signals are blocked.");
+      error.statusCode = 409; throw error;
     }
     // The single diagnostic contract is not a proxy for all 72 futures.
     // Final publication is gated by the per-symbol full-universe tick audit below.
