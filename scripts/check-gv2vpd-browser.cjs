@@ -26,12 +26,12 @@ async function mockTestBackend(page) {
     if (url.pathname === '/api/status') {
       return json(200, {
         backend: 'online',
-        fyers: 'not-connected',
+        fyers: 'connected',
         liveData: 'waiting-for-live-ticks',
         marketSocketConnected: false,
         orderPlacement: 'disabled',
         exchangeLiveStatus: {
-          NSE: { session: 'SCHEDULED_CLOSED', feed: 'WAITING' },
+          NSE: { session: 'SCHEDULED_OPEN', feed: 'RECONNECTING' },
           MCX: { session: 'SCHEDULED_CLOSED', feed: 'WAITING' }
         },
         fyersDataApi: { cooldownActive: false, retryAfterSeconds: 0 }
