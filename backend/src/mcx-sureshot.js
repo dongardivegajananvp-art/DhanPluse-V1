@@ -90,8 +90,20 @@ export function buildMcxFuturesUniverse(master, now = Date.now()) {
       optionContracts: family.map(({ expiryMs, ...option }) => option)
     });
   }
-  const unique = new Map(futures.map(row => [row.symbol, row]));
-  return [...unique.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
+  // One MCX commodity must contribute one underlying future to the scan.
+  // Far-month futures remain valid exchange contracts, but they are not
+  // separate underlying setups and often have no trades/ticks in a 30s window.
+  // Select the nearest active expiry per commodity; its option family is
+  // already token-matched above, so contract identity remains exact.
+  const nearestByUnderlying = new Map();
+  for (const future of futures) {
+    const current = nearestByUnderlying.get(future.normalizedUnderlying);
+    if (!current || future.expiryMs < current.expiryMs ||
+        (future.expiryMs === current.expiryMs && future.symbol.localeCompare(current.symbol) < 0)) {
+      nearestByUnderlying.set(future.normalizedUnderlying, future);
+    }
+  }
+  return [...nearestByUnderlying.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 
 /**
