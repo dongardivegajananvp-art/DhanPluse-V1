@@ -49,7 +49,7 @@ jobs:
           grep -q 'data-tab="Position"' dist/site/index.html
           grep -q "gv2vpd-shell-v4-external-assets" dist/site/sw.js
           grep -q "GV2VPD — FYERS Workstation" dist/site/manifest.webmanifest
-          grep -q "Paper Mode ledger" dist/site/index.html
+          grep -q "Paper Mode ledger" dist/site/app.js
           grep -q "Live BUY remains disabled" dist/site/app.js
       - name: Upload correctly packaged Pages artifact
         uses: actions/upload-pages-artifact@v4
