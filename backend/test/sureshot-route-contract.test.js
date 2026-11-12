@@ -8,6 +8,22 @@ const app = await readFile(new URL("../../site/app.js", import.meta.url), "utf8"
 const discovery = await readFile(new URL("../src/option-contract-discovery.js", import.meta.url), "utf8");
 const shortlist = await readFile(new URL("../src/sureshot-shortlist.js", import.meta.url), "utf8");
 
+test("each sequential F&O quote batch validates exchange timestamps against its own receive time", () => {
+  const start = server.indexOf("async function loadVerifiedFnoStockQuotes");
+  const end = server.indexOf('app.get("/api/market/stock-quotes"', start);
+  assert.ok(start >= 0 && end > start, "verified F&O quote loader exists");
+  const loader = server.slice(start, end);
+  const responseAt = loader.indexOf("body = await fyersReadOnlyGet(url, { priority, stage })");
+  const receiveAt = loader.indexOf("const quoteValidationNow = Date.now()", responseAt);
+  assert.ok(responseAt >= 0 && receiveAt > responseAt,
+    "each batch captures validation time only after its FYERS response arrives");
+  assert.match(loader, /stamp <= quoteValidationNow \+ 5000 && quoteValidationNow - stamp <= 30000/);
+  assert.doesNotMatch(loader, /const now = Date\.now\(\)/,
+    "a scan-start clock must not reject later fresh batches as future-dated");
+  assert.match(loader, /isCompleteFreshFnoQuoteSnapshot\(result, symbols, Date\.now\(\)\)/,
+    "the complete snapshot must still be fresh after the final batch");
+});
+
 test("Sureshot verifies the complete F&O quote universe and option-checks every candidate in five-item batches", () => {
   assert.match(server, /const SURESHOT_UNIVERSE_SCAN_LIMIT = 250/);
   assert.match(server, /const SURESHOT_BATCH_SIZE = 5/);
