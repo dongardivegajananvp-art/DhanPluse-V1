@@ -731,6 +731,8 @@ function startMarketDataStream(token, startReason = 'unspecified') {
 // NSE feed heartbeat: MCX/BSE ticks do not count as proof that NSE index
 // subscriptions are alive. After 10 seconds without a fresh exchange-timestamped
 // NSE tick, re-apply only NSE subscriptions on the existing FYERS Data Socket.
+// A missed tick heartbeat is NOT a transport close: keep the socket-connected
+// state separate so the API/UI can report feed recovery without claiming disconnect.
 // Actual transport closes use the SDK auto-reconnect controller.
 const marketSocketWatchdog = setInterval(() => {
   if (!accessToken || !marketSocket || !nseRegularSessionNow()) return;
