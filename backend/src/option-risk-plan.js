@@ -93,7 +93,7 @@ export function buildOptionRiskPlan({
   const reward2 = target2 - roundedEntry;
   const rrTarget1 = reward1 / actualRisk;
   const rrTarget2 = reward2 / actualRisk;
-  if (!(actualRisk > 0 && reward1 > 0 && reward2 > 0 && rrTarget1 >= 2 && rrTarget2 >= 3)) {
+  if (!(actualRisk > 0 && reward1 > 0 && reward2 > 0 && rrTarget1 + 1e-9 >= 2 && rrTarget2 + 1e-9 >= 3)) {
     return { ok: false, reason: "Calculated 2R/3R targets failed after official tick-size rounding." };
   }
 
