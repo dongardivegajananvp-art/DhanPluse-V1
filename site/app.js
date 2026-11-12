@@ -1843,17 +1843,17 @@ async function loadSureshotUniverseShortlist(options = {}) {
     }
     const verified = result.results.filter(row => row.status === 'VERIFIED SETUP');
     const topThree = Array.isArray(result.topThreeSetups) ? result.topThreeSetups.slice(0, 3) : [];
-    if (topThree.length > 3 || topThree.some(row => row.status !== 'VERIFIED SETUP' || !row.finalVerifiedAt || !row.plan?.risk || !Number.isFinite(Number(row.plan?.quote?.quoteAgeSeconds)) || Number(row.plan.quote.quoteAgeSeconds) > 15 || !Number.isFinite(Number(row.plan?.risk?.rrTarget2 ?? row.plan?.risk?.rr)) || Number(row.plan.risk.rrTarget2 ?? row.plan.risk.rr) < 2)) {
+    if (topThree.length > 3 || topThree.some(row => row.status !== 'VERIFIED SETUP' || !row.finalVerifiedAt || !row.plan?.risk || !Number.isFinite(Number(row.plan?.quote?.quoteAgeSeconds)) || Number(row.plan.quote.quoteAgeSeconds) > 15 || !Number.isFinite(Number(row.underlyingQuoteAgeSeconds)) || Number(row.underlyingQuoteAgeSeconds) > 30 || !row.underlyingQuoteAt || (Date.now() - Date.parse(row.underlyingQuoteAt)) < 0 || (Date.now() - Date.parse(row.underlyingQuoteAt)) > 30000 || !Number.isFinite(Number(row.plan?.risk?.rrTarget2 ?? row.plan?.risk?.rr)) || Number(row.plan.risk.rrTarget2 ?? row.plan.risk.rr) < 2)) {
       throw new Error('The backend did not return a valid top-three verified setup list.');
     }
     const best = result.bestSetup;
     const topThreeHtml = topThree.length
-      ? '<article class="console-section"><div class="console-section-head"><h4>TOP 3 VERIFIED SETUPS</h4><span class="live-tag">' + topThree.length + ' / 3</span></div><div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Fresh premium</th><th>Quote age</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR (T2)</th></tr></thead><tbody>' +
+      ? '<article class="console-section"><div class="console-section-head"><h4>TOP 3 VERIFIED SETUPS</h4><span class="live-tag">' + topThree.length + ' / 3</span></div><div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>CE/PE</th><th>Expiry / Strike</th><th>Spot LTP</th><th>Move</th><th>Spot age</th><th>Fresh premium</th><th>Option age</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR (T2)</th></tr></thead><tbody>' +
         topThree.map((row, index) => {
           const plan = row.plan;
           return '<tr><td><b>#' + (index + 1) + '</b></td><td><b>' + escapeHtml(row.underlyingSymbol) + '</b></td><td>' + escapeHtml(plan.direction) +
             '</td><td>' + escapeHtml(plan.contract.expiryDate || plan.contract.expiry) + ' · ' + formatPrice(plan.contract.strike) +
-            '</td><td>₹' + formatPrice(plan.quote.ask) + '</td><td>' + Number(plan.quote.quoteAgeSeconds).toFixed(1) + ' sec</td><td>₹' + formatPrice(plan.risk.entryPrice) + '</td><td>₹' +
+            '</td><td>₹' + formatPrice(row.ltp) + '</td><td>' + (Number(row.changePct) > 0 ? '+' : '') + Number(row.changePct).toFixed(2) + '%</td><td>' + Number(row.underlyingQuoteAgeSeconds).toFixed(1) + ' sec</td><td>₹' + formatPrice(plan.quote.ask) + '</td><td>' + Number(plan.quote.quoteAgeSeconds).toFixed(1) + ' sec</td><td>₹' + formatPrice(plan.risk.entryPrice) + '</td><td>₹' +
             formatPrice(plan.risk.stopLoss) + '</td><td>₹' + formatPrice(plan.risk.target1) + '</td><td>₹' +
             formatPrice(plan.risk.target2) + '</td><td>1 : ' + Number(plan.risk.rrTarget2 ?? plan.risk.rr).toFixed(2) + '</td></tr>';
         }).join('') + '</tbody></table></div></article>'
@@ -1866,7 +1866,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
       (best ? '<article class="console-section"><div class="console-section-head"><h4>#1 BEST VERIFIED SETUP</h4><span class="signal-tone positive">' +
         escapeHtml(best.plan.direction) + '</span></div><strong class="console-price">₹' + formatPrice(best.plan.risk.entryPrice) +
         '</strong><div class="data-row"><span>Underlying</span><b>' + escapeHtml(best.underlyingSymbol) +
-        '</b></div><div class="data-row"><span>Contract</span><b>' + escapeHtml(best.plan.contract.symbol) +
+        '</b></div><div class="data-row"><span>Underlying LTP / move / tick age</span><b>₹' + formatPrice(best.ltp) + ' / ' + (Number(best.changePct) > 0 ? '+' : '') + Number(best.changePct).toFixed(2) + '% / ' + Number(best.underlyingQuoteAgeSeconds).toFixed(1) + ' sec</b></div><div class="data-row"><span>Contract</span><b>' + escapeHtml(best.plan.contract.symbol) +
         '</b></div><div class="data-row"><span>Expiry / Strike</span><b>' + escapeHtml(best.plan.contract.expiryDate || best.plan.contract.expiry) +
         ' · ' + formatPrice(best.plan.contract.strike) + '</b></div><div class="data-row"><span>Entry / Stop-loss / Target</span><b>₹' +
         formatPrice(best.plan.risk.entryPrice) + ' / ₹' + formatPrice(best.plan.risk.stopLoss) + ' / ₹' +
@@ -1879,7 +1879,7 @@ async function loadSureshotUniverseShortlist(options = {}) {
         (best.paperPlanId ? '<button type="button" class="primary" id="gvPaperBuyBest" data-plan-id="' + escapeHtml(best.paperPlanId) + '">Paper BUY · 1 lot</button><p class="hint">Plan ID expires at ' + escapeHtml(best.paperPlanExpiresAt || 'shortly') + '. BUY rechecks a fresh FYERS option ask before saving a simulation.</p>' : '<p class="hint">Paper BUY unavailable: this backend response did not issue a short-lived verified plan ID.</p>') +
         '</article>' : '') + topThreeHtml +
       '<div class="console-section-head"><div><h4>FULL UNIVERSE AUDIT RESULTS</h4><p>Every ranked F&O equity and fresh index candidate, with its individual verification outcome.</p></div></div>' +
-      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR</th><th>Paper BUY</th></tr></thead><tbody>' +
+      '<div class="table-wrap"><table class="console-table"><thead><tr><th>Rank</th><th>Underlying</th><th>LTP</th><th>Move</th><th>Spot age</th><th>Lot size</th><th>Result</th><th>CE/PE</th><th>Expiry / Strike</th><th>Entry</th><th>SL</th><th>T1</th><th>T2</th><th>RR</th><th>Paper BUY</th></tr></thead><tbody>' +
       result.results.map(row => {
         const plan = row.plan, move = Number(row.changePct);
         const moveText = (move > 0 ? '+' : '') + move.toFixed(2) + '%';
