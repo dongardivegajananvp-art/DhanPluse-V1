@@ -79,18 +79,25 @@ test("server cursor resumes an interrupted scan in sequence and rejects expired/
   assert.match(route, /if \(!scanId && sureshotScanState[\s\S]*offset = sureshotScanState\.nextOffset/);
 });
 
-test("frontend automatic scan requires active Sureshot tab, open session and shared authenticated session", () => {
-  const start = app.indexOf("const startAutomaticTopFiveScan");
-  const end = app.indexOf("sureshotAutoScanTimer = window.setInterval", start);
-  assert.ok(start >= 0 && end > start);
-  const trigger = app.slice(start, end);
-  assert.match(trigger, /currentTab !== 'Sureshot CE\/PE'/);
-  assert.match(trigger, /!isRegularMarketSession\(\)/);
-  assert.match(trigger, /SURESHOT_AUTO_SCAN_DAY_KEY/);
-  assert.match(trigger, /SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
-  const loader = app.slice(app.indexOf("async function loadSureshotUniverseShortlist"), app.indexOf("async function performSureshotSetup"));
-  assert.match(loader, /DASHBOARD_SESSION_KEY/);
-  assert.match(trigger, /loadSureshotUniverseShortlist\(\{ automatic: true \}\)/);
+test("frontend automatic NSE Sureshot scan starts app-wide without requiring the Sureshot tab", () => {
+  const helperStart = app.indexOf("function maybeStartAutomaticSureshotScan()");
+  const helperEnd = app.indexOf("async function performSureshotSetup", helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  const helper = app.slice(helperStart, helperEnd);
+  assert.doesNotMatch(helper, /currentTab/);
+  assert.match(helper, /!isRegularMarketSession\\(\\)/);
+  assert.match(helper, /DASHBOARD_SESSION_KEY/);
+  assert.match(helper, /SURESHOT_AUTO_SCAN_DAY_KEY/);
+  assert.match(helper, /SURESHOT_AUTO_SCAN_ATTEMPT_KEY/);
+  assert.match(helper, /SURESHOT_AUTO_SCAN_RETRY_KEY/);
+  assert.match(helper, /loadSureshotUniverseShortlist\\(\\{ automatic: true \\}\\)/);
+  assert.match(app, /maybeStartAutomaticSureshotScan\\(\\);\\s*window\\.setInterval\\(maybeStartAutomaticSureshotScan, 30000\\)/);
+  const loader = app.slice(app.indexOf("async function loadSureshotUniverseShortlist"), helperStart);
+  assert.match(loader, /const automatic = options\\.automatic === true/);
+  assert.match(loader, /!automatic && currentTab !== 'Sureshot CE\\/PE'/);
+  assert.match(loader, /visibleHost \\|\\| document\\.createElement\\('div'\\)/);
+  assert.match(loader, /sureshotUniverseScanHtml = host\\.innerHTML/);
+  assert.match(loader, /currentHost\\.innerHTML = sureshotUniverseScanHtml/);
 });
 
 test("frontend records one automatic attempt per session day and marks completion only after every eligible candidate passes", () => {
