@@ -30,7 +30,7 @@ test("selects the nearest listed CE/PE strike in the nearest expiry without cons
     discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 100, now, strikeMode: "nearest"
   });
   const put = selectNearestVerifiedOptionContract({
-    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "PE", spot: 100, now, strikeMode: "one-otm"
+    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "PE", spot: 100, now, strikeMode: "nearest"
   });
   assert.equal(call.ok, true);
   assert.equal(call.contract.strike, 100);
@@ -47,13 +47,19 @@ test("does not impose an unrequested ₹30–₹150 premium band", () => {
     candleAgeSeconds: 0, completedCandleCount: 30
   };
   const contract = { symbol: "NSE:ABC26NOV105CE", strike: 105, side: "CE", expiry };
-  const candles = Array.from({ length: 25 }, (_, index) => [
-    Math.floor((now - (25 - index) * 5 * 60_000) / 1000), 100, 102, 95, 101, 1000
+  const makeCandles = (open, high, low, close) => Array.from({ length: 25 }, (_, index) => [
+    Math.floor((now - (25 - index) * 5 * 60_000) / 1000), open, high, low, close, 1000
   ]);
-  const base = { underlyingSymbol: "NSE:ABC-EQ", direction, contract, optionCandles: candles,
-    lotSize: 25, tickSize: 0.05, now };
-  for (const [bid, ask] of [[19.9, 20], [199.9, 200]]) {
-    const result = buildVerifiedSureshotTradePlan({ ...base, quote: { bid, ask, lp: bid, tt: Math.floor((now - 1000) / 1000) } });
+  const cases = [
+    { bid: 19.9, ask: 20, candles: makeCandles(10, 12, 9, 11) },
+    { bid: 199.9, ask: 200, candles: makeCandles(100, 102, 95, 101) }
+  ];
+  for (const item of cases) {
+    const result = buildVerifiedSureshotTradePlan({
+      underlyingSymbol: "NSE:ABC-EQ", direction, contract, optionCandles: item.candles,
+      lotSize: 25, tickSize: 0.05, now,
+      quote: { bid: item.bid, ask: item.ask, lp: item.bid, tt: Math.floor((now - 1000) / 1000) }
+    });
     assert.equal(result.ok, true, result.reason);
     assert.ok(result.risk.rrTarget1 >= 2);
     assert.ok(result.risk.rrTarget2 >= 3);
