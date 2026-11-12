@@ -3703,6 +3703,8 @@ async function exchangeAuthCode() {
     if (currentTab === 'Sureshot CE/PE') {
       await loadSureshotSetup();
       if (isRegularMarketSession()) void loadSureshotUniverseShortlist({ automatic: true });
+    } else if (isRegularMarketSession()) {
+      maybeStartAutomaticSureshotScan();
     }
   } catch (error) {
     authExchangeInProgress = false;
