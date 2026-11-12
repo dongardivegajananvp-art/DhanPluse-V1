@@ -122,19 +122,19 @@ export function createFyersDataApiBudget({
     // request has passed the shared queue, pacing and cooldown gates. Creating
     // the timeout before queueing incorrectly spent the network timeout while
     // waiting for the four-second gap / rolling-minute budget.
-    const { timeoutMs = 12_000, signal: callerSignal, ...fetchInit } = init;
+    const { timeoutMs = 12_000, signal: callerSignal, bypassCache = false, ...fetchInit } = init;
     const method = String(fetchInit.method || 'GET').toUpperCase();
     const ttl = method === 'GET' ? cacheTtl(target) : 0;
     const cacheKey = ttl > 0 ? target.toString() : null;
     const quoteFlightKey = method === 'GET' && target.pathname === '/data/quotes'
       ? 'quote:' + target.toString()
       : null;
-    const inFlightKey = cacheKey || quoteFlightKey;
+    const inFlightKey = (cacheKey && bypassCache !== true) ? cacheKey : quoteFlightKey;
     const currentTime = now();
 
     // Validated callers still decide whether cached candles are fresh enough.
     // A cached historical response may be served during a quote API cooldown.
-    if (cacheKey) {
+    if (cacheKey && bypassCache !== true) {
       const cached = responseCache.get(cacheKey);
       if (cached && currentTime - cached.storedAt < ttl) {
         return makeResponse(cached, currentTime - cached.storedAt, true);

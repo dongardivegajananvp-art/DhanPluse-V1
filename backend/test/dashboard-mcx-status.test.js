@@ -2,25 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const frontendFiles = [
-  new URL("../../site/index.html", import.meta.url),
-  new URL("../../site/app.js", import.meta.url)
-];
+const appUrl = new URL("../../site/app.js", import.meta.url);
 
 test("Dashboard renders independent MCX feed status, contract, LTP and exchange timestamp", async () => {
-  for (const file of frontendFiles) {
-    const source = await readFile(file, "utf8");
-    assert.match(source, /id="dashboardMcxStatus"/);
-    assert.match(source, /id="dashboardMcxFeed"/);
-    assert.match(source, /id="dashboardMcxSession"/);
-    assert.match(source, /id="dashboardMcxSymbol"/);
-    assert.match(source, /id="dashboardMcxLtp"/);
-    assert.match(source, /id="dashboardMcxTime"/);
-    assert.match(source, /id="dashboardMcxDetail"/);
-    assert.match(source, /set\('#dashboardMcxFeed', feedLabel\(mcx\)\)/);
-    assert.match(source, /\['#dashboardMcxFeed', feedText\]/);
-    assert.match(source, /updateMcxConnectionDiagnostics\(status\)/);
+  const source = await readFile(appUrl, "utf8");
+  for (const id of ["dashboardMcxStatus", "dashboardMcxFeed", "dashboardMcxSession", "dashboardMcxSymbol",
+    "dashboardMcxLtp", "dashboardMcxTime", "dashboardMcxDetail"]) {
+    assert.ok(source.includes(id), "Missing MCX dashboard element: " + id);
   }
+  assert.match(source, /set\('#dashboardMcxFeed', feedLabel\(mcx\)\)/);
+  assert.match(source, /\['#dashboardMcxFeed', feedText\]/);
+  assert.match(source, /updateMcxConnectionDiagnostics\(status\)/);
 });
 
 test("Dashboard MCX LIVE label is driven by backend exchange-timestamp freshness, never by socket connection alone", async () => {

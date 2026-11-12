@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const htmlUrl = new URL("../../site/index.html", import.meta.url);
+const appUrl = new URL("../../site/app.js", import.meta.url);
 
 test("served Dashboard makes one explicit chart request and honors Retry-After without automatic retry", async () => {
-  const html = await readFile(htmlUrl, "utf8");
+  const html = await readFile(appUrl, "utf8");
   const chartStart = html.indexOf("async function loadDashboardCandles()");
   const chartEnd = html.indexOf("\nfunction quoteCardsMarkup", chartStart);
   assert.ok(chartStart >= 0 && chartEnd > chartStart);
@@ -18,10 +18,11 @@ test("served Dashboard makes one explicit chart request and honors Retry-After w
   assert.match(html, /loadDashboardCandles\);/);
 });
 
-test("Sureshot always renders five non-fabricated strike slots and adds Paper BUY only for server-verified plans", async () => {
-  const html = await readFile(htmlUrl, "utf8");
-  assert.match(html, /Five strike slots remain visible/);
+test("Sureshot renders exactly three non-fabricated ranked setup slots and adds Paper BUY only for server-verified plans", async () => {
+  const html = await readFile(appUrl, "utf8");
+  assert.match(html, /Three ranked setup slots are shown/);
   assert.match(html, /NO VERIFIED STRIKE/);
+  assert.match(html, /TOP 3 VERIFIED SETUPS/);
   assert.match(html, /gvPaperBuyRow/);
   assert.match(html, /row\.paperPlanId/);
   assert.match(html, /BLOCKED/);
@@ -29,7 +30,7 @@ test("Sureshot always renders five non-fabricated strike slots and adds Paper BU
 });
 
 test("Paper BUY opens Position only after the server accepts a paper ledger write; no broker order route is called", async () => {
-  const html = await readFile(htmlUrl, "utf8");
+  const html = await readFile(appUrl, "utf8");
   const start = html.indexOf("async function submitPaperBuy");
   const end = html.indexOf("\nasync function loadPaperLedger", start);
   assert.ok(start >= 0 && end > start);

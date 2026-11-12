@@ -20,7 +20,6 @@ import { isAllowedChartSymbol } from './chart-symbol-validation.js';
 import { normalizeInstitutionalFlow } from './institutional-flow.js';
 import { createFyersDataApiBudget } from './fyers-data-api-budget.js';
 import { buildOptionRiskPlan } from './option-risk-plan.js';
-import { buildFixedOptionRiskPlan, validateCompletedOptionCandles } from './fixed-option-risk-plan.js';
 import { getVerifiedOptionContractMetadata as resolveOptionContractMetadata } from './option-contract-metadata.js';
 import { isFyersAuthRejected, isExpiredFyersAccessTokenError } from './fyers-auth-recovery.js';
 import { normalizeOptionContractDiscovery } from './option-contract-discovery.js';
@@ -61,7 +60,7 @@ const fyersTokenStore = createFyersTokenStore({
   encryptionKey: process.env.FYERS_TOKEN_ENCRYPTION_KEY
 });
 let fyersTokenStoreReady = false;
-const paperStore = createPaperTradingStore({ databaseUrl: process.env.DATABASE_URL });
+const paperStore = createPaperTradingStore({ databaseUrl: process.env.DATABASE_URL, capitalInr: Number(process.env.PAPER_CAPITAL_INR) || 5000, maxRiskPercent: 1, maxDailyLossPercent: 2 });
 const fnoQuoteSnapshotStore = createFnoQuoteSnapshotStore({ databaseUrl: process.env.DATABASE_URL });
 let fnoQuoteSnapshotStoreReady = false;
 const nseSymbolMasterCache = createNseSymbolMasterCache({ databaseUrl: process.env.DATABASE_URL });
@@ -1230,7 +1229,7 @@ function invalidateFyersSession(reason) {
   });
 }
 
-async function fyersReadOnlyGet(url, { priority = 'normal', stage = null } = {}) {
+async function fyersReadOnlyGet(url, { priority = 'normal', stage = null, bypassCache = false } = {}) {
   // While a Sureshot scan is active, keep unrelated Data API traffic from
   // competing for the same account/IP budget. Existing in-flight reads finish;
   // Sureshot requests explicitly opt into the priority lane below.
@@ -1262,7 +1261,8 @@ async function fyersReadOnlyGet(url, { priority = 'normal', stage = null } = {})
     // Sureshot history reads get a bounded 30s network window after queueing.
     // Other Data API reads retain the existing 12s timeout. Queue/pacing time
     // is excluded by the budget layer; request spacing and cooldown are unchanged.
-    timeoutMs: priority === 'sureshot' && historyRequest ? 30_000 : 12_000
+    timeoutMs: priority === 'sureshot' && historyRequest ? 30_000 : 12_000,
+    bypassCache: bypassCache || (priority === 'sureshot' && historyRequest)
   });
   if (priority === 'sureshot') {
     const cacheState = response.headers.get('x-dhanpulse-cache') || 'NOT_CACHED';
@@ -2314,7 +2314,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         chainUrl.searchParams.set("symbol", candidate.symbol); chainUrl.searchParams.set("strikecount", "10");
         const chainResult = await fyersReadOnlyGet(chainUrl, { priority: "sureshot", stage: scanStage });
         const discovery = normalizeOptionContractDiscovery(chainResult?.data);
-        const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(), strikeMode: "one-otm" });
+        const selected = selectNearestVerifiedOptionContract({ discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot, now: Date.now(), strikeMode: "nearest" });
         if (!selected.ok) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
           continue;
@@ -2385,7 +2385,7 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
         scanStage = "BUILD_RISK_PLAN";
         const plan = buildVerifiedSureshotTradePlan({ underlyingSymbol: candidate.symbol, direction, contract, quote,
           optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [], resolution: "5",
-          lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, riskModel: "fixed", requirePremiumRange: true, now: Date.now() });
+          lotSize: contractSizing.lotSize, tickSize: contractSizing.tickSize, now: Date.now() });
         resultBySymbol.set(candidate.symbol, plan.ok ? {
           ...base, status: "VERIFIED SETUP", initiallyVerified: true,
           direction: direction.side, contract, plan
@@ -2471,57 +2471,62 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       }
     }
 
-    const finalQuoteBySymbol = new Map();
     const finalQuoteCandidates = finalCandleCandidates.filter(item =>
       item.status === "VERIFIED SETUP" && finalOptionCandlesBySymbol.has(item.underlyingSymbol));
-    if (finalQuoteCandidates.length) {
+    // FYERS quotes accepts bounded symbol batches. Build each plan immediately
+    // after its batch so the first exchange timestamps do not age while later
+    // batches wait in the shared four-second/15-per-minute request queue.
+    for (let quoteOffset = 0; quoteOffset < finalQuoteCandidates.length; quoteOffset += 50) {
+      const quoteBatch = finalQuoteCandidates.slice(quoteOffset, quoteOffset + 50);
+      if (!nseRegularSessionNow()) {
+        const error = new Error("Market session closed during final option quote revalidation; signals blocked.");
+        error.statusCode = 409; throw error;
+      }
       try {
         const quoteUrl = new URL("https://api-t1.fyers.in/data/quotes");
-        quoteUrl.searchParams.set("symbols", finalQuoteCandidates.map(item => item.contract.symbol).join(","));
+        quoteUrl.searchParams.set("symbols", quoteBatch.map(item => item.contract.symbol).join(","));
         scanStage = "FINAL_REVALIDATE_OPTION_QUOTES";
         const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: "sureshot", stage: scanStage });
         const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
+        const quoteBySymbol = new Map();
+        const batchSymbols = new Set(quoteBatch.map(item => item.contract.symbol));
         for (const row of quoteRows) {
           const symbol = row?.n || row?.symbol || row?.v?.symbol;
-          if (symbol && finalQuoteCandidates.some(item => item.contract.symbol === symbol)) finalQuoteBySymbol.set(symbol, row?.v || row);
+          if (symbol && batchSymbols.has(symbol)) quoteBySymbol.set(symbol, row?.v || row);
+        }
+        for (const item of quoteBatch) {
+          if (item.status !== "VERIFIED SETUP") continue;
+          const quote = quoteBySymbol.get(item.contract.symbol);
+          if (!quote) {
+            item.status = "NO TRADE";
+            item.reason = "Final FYERS option quote revalidation returned no contract quote.";
+            delete item.plan;
+            continue;
+          }
+          const freshPlan = buildVerifiedSureshotTradePlan({
+            underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
+            contract: item.contract, quote, optionCandles: finalOptionCandlesBySymbol.get(item.underlyingSymbol) || [],
+            resolution: "5", lotSize: item.contract.lotSize, tickSize: item.contract.tickSize, now: Date.now()
+          });
+          if (!freshPlan.ok) {
+            item.status = "NO TRADE";
+            item.reason = "Final option premium/candle revalidation failed: " + freshPlan.reason;
+            delete item.plan;
+            continue;
+          }
+          item.plan = freshPlan;
+          item.finalVerifiedAt = new Date().toISOString();
+          item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
         }
       } catch (error) {
         const status = Number(error.statusCode) || 0;
         if (status === 429 || status === 401) throw error;
-        for (const item of finalQuoteCandidates) {
+        for (const item of quoteBatch) {
           item.status = "NO TRADE";
           item.reason = "Final FYERS option quote revalidation failed: " + String(error.message || "Quote unavailable.").slice(0, 140);
           delete item.plan;
         }
       }
-    }
-
-    if (!nseRegularSessionNow()) { const error = new Error("Market session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
-    for (const item of finalQuoteCandidates) {
-      if (item.status !== "VERIFIED SETUP") continue;
-      const contract = item.contract;
-      const quote = finalQuoteBySymbol.get(contract.symbol);
-      if (!quote) {
-        item.status = "NO TRADE";
-        item.reason = "Final FYERS option quote revalidation returned no contract quote.";
-        delete item.plan;
-        continue;
-      }
-      const freshPlan = buildVerifiedSureshotTradePlan({
-        underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
-        contract, quote, optionCandles: finalOptionCandlesBySymbol.get(item.underlyingSymbol) || [],
-        resolution: "5", lotSize: contract.lotSize, tickSize: contract.tickSize,
-        riskModel: "fixed", requirePremiumRange: true, now: Date.now()
-      });
-      if (!freshPlan.ok) {
-        item.status = "NO TRADE";
-        item.reason = "Final option premium/candle revalidation failed: " + freshPlan.reason;
-        delete item.plan;
-        continue;
-      }
-      item.plan = freshPlan;
-      item.finalVerifiedAt = new Date().toISOString();
-      item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
     }
 
     const finalCheckedSet = new Set(finalCheckCandidates);
@@ -2721,7 +2726,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         stage = "SELECT_MCX_OPTION_CONTRACT";
         const selected = selectNearestVerifiedOptionContract({
           discovery, underlyingSymbol: candidate.symbol, side: direction.side, spot: direction.spot,
-          now: Date.now(), strikeMode: "one-otm"
+          now: Date.now(), strikeMode: "nearest"
         });
         if (!selected.ok) {
           resultBySymbol.set(candidate.symbol, { ...base, status: "NO TRADE", direction: direction.side, reason: selected.reason });
@@ -2774,7 +2779,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
           underlyingSymbol: item.candidate.symbol, direction: item.direction, contract: item.contract,
           quote, optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
           resolution: "5", lotSize: item.sizing.lotSize, tickSize: item.sizing.tickSize,
-          riskModel: "fixed", requirePremiumRange: true, now: Date.now()
+          now: Date.now()
         });
         resultBySymbol.set(item.candidate.symbol, plan.ok
           ? { ...item.base, status: "VERIFIED SETUP", initiallyVerified: true,
@@ -2806,7 +2811,7 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
 
     const results = state.results;
     const initiallyVerifiedCandidateCount = results.filter(item => item.initiallyVerified === true).length;
-    const finalCheckCandidates = results.filter(item => item.initiallyVerified === true && item.status === "VERIFIED SETUP").slice(0, 10);
+    const finalCheckCandidates = results.filter(item => item.initiallyVerified === true && item.status === "VERIFIED SETUP");
     const finalDirections = new Map();
     for (const item of finalCheckCandidates) {
       if (!mcxSessionOpen()) { const error = new Error("MCX session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
@@ -2847,29 +2852,60 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
     const finalQuoteCandidates = finalCandleCandidates.filter(item =>
       item.status === "VERIFIED SETUP" && finalOptionCandles.has(item.underlyingSymbol));
     const finalQuoteBySymbol = new Map();
-    if (finalQuoteCandidates.length) {
-      const url = new URL("https://api-t1.fyers.in/data/quotes");
-      url.searchParams.set("symbols", finalQuoteCandidates.map(item => item.contract.symbol).join(","));
-      stage = "FINAL_REVALIDATE_MCX_OPTION_QUOTES";
-      const result = await fyersReadOnlyGet(url, { priority: "sureshot", stage: scanStage });
-      const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
-      for (const row of rows) {
-        const symbol = row?.n || row?.symbol || row?.v?.symbol;
-        if (symbol && finalQuoteCandidates.some(item => item.contract.symbol === symbol)) finalQuoteBySymbol.set(symbol, row?.v || row);
+    for (let quoteOffset = 0; quoteOffset < finalQuoteCandidates.length; quoteOffset += 50) {
+      const quoteBatch = finalQuoteCandidates.slice(quoteOffset, quoteOffset + 50);
+      if (!mcxSessionOpen()) {
+        const error = new Error("MCX session closed during final option quote revalidation.");
+        error.statusCode = 409; throw error;
+      }
+      try {
+        const url = new URL("https://api-t1.fyers.in/data/quotes");
+        url.searchParams.set("symbols", quoteBatch.map(item => item.contract.symbol).join(","));
+        stage = "FINAL_REVALIDATE_MCX_OPTION_QUOTES";
+        const result = await fyersReadOnlyGet(url, { priority: "sureshot", stage });
+        const rows = Array.isArray(result?.d) ? result.d : (Array.isArray(result?.data) ? result.data : []);
+        const batchSymbols = new Set(quoteBatch.map(item => item.contract.symbol));
+        for (const row of rows) {
+          const symbol = row?.n || row?.symbol || row?.v?.symbol;
+          if (symbol && batchSymbols.has(symbol)) finalQuoteBySymbol.set(symbol, row?.v || row);
+        }
+      } catch (error) {
+        const status = Number(error.statusCode) || 0;
+        if ([401, 429].includes(status)) throw error;
+        for (const item of quoteBatch) {
+          item.status = "NO TRADE";
+          item.reason = "Final MCX option quote revalidation failed: " + String(error.message || "Quote unavailable.").slice(0, 140);
+          delete item.plan;
+        }
+      }
+      for (const item of quoteBatch) {
+        if (item.status !== "VERIFIED SETUP") continue;
+        const quote = finalQuoteBySymbol.get(item.contract.symbol);
+        if (!quote) {
+          item.status = "NO TRADE";
+          item.reason = "Final MCX option quote revalidation returned no quote.";
+          delete item.plan;
+          continue;
+        }
+        const freshPlan = buildVerifiedSureshotTradePlan({
+          underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
+          contract: item.contract, quote, optionCandles: finalOptionCandles.get(item.underlyingSymbol) || [],
+          resolution: "5", lotSize: item.contract.lotSize, tickSize: item.contract.tickSize, now: Date.now()
+        });
+        if (!freshPlan.ok) {
+          item.status = "NO TRADE";
+          item.reason = "Final MCX premium/candle revalidation failed: " + freshPlan.reason;
+          delete item.plan;
+          continue;
+        }
+        item.plan = freshPlan;
+        item.finalVerifiedAt = new Date().toISOString();
+        item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
       }
     }
-    for (const item of finalQuoteCandidates) {
-      const quote = finalQuoteBySymbol.get(item.contract.symbol);
-      if (!quote) { item.status = "NO TRADE"; item.reason = "Final MCX option quote revalidation returned no quote."; delete item.plan; continue; }
-      const freshPlan = buildVerifiedSureshotTradePlan({
-        underlyingSymbol: item.underlyingSymbol, direction: finalDirections.get(item.underlyingSymbol),
-        contract: item.contract, quote, optionCandles: finalOptionCandles.get(item.underlyingSymbol) || [],
-        resolution: "5", lotSize: item.contract.lotSize, tickSize: item.contract.tickSize,
-        riskModel: "fixed", requirePremiumRange: true, now: Date.now()
-      });
-      if (!freshPlan.ok) { item.status = "NO TRADE"; item.reason = "Final MCX premium/candle revalidation failed: " + freshPlan.reason; delete item.plan; continue; }
-      item.plan = freshPlan; item.finalVerifiedAt = new Date().toISOString();
-      item.quoteAgeSeconds = freshPlan.quote.quoteAgeSeconds;
+    if (!mcxSessionOpen()) {
+      const error = new Error("MCX session closed during final verification; all signals are blocked.");
+      error.statusCode = 409; throw error;
     }
     // The single diagnostic contract is not a proxy for all 72 futures.
     // Final publication is gated by the per-symbol full-universe tick audit below.
@@ -3383,7 +3419,7 @@ app.get('/api/fyers/option-quote', async (req, res) => {
   const symbol = String(req.query.symbol || '');
   // Read-only single-contract quote; this endpoint never places orders.
   if (!isSupportedOptionContractSymbol(symbol)) {
-    return res.status(400).json({ ok: false, error: 'Invalid NSE option contract symbol.' });
+    return res.status(400).json({ ok: false, error: 'Invalid listed option contract symbol.' });
   }
   try {
     const url = new URL('https://api-t1.fyers.in/data/quotes');
@@ -3420,7 +3456,7 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
   const symbol = String(req.query.symbol || '');
   const resolution = String(req.query.resolution || '5');
   if (!isSupportedOptionContractSymbol(symbol)) {
-    return res.status(400).json({ ok: false, error: 'A selected NSE option contract symbol is required.' });
+    return res.status(400).json({ ok: false, error: 'A selected listed option contract symbol is required.' });
   }
   if (!['5', '15', '30', '60'].includes(resolution)) {
     return res.status(400).json({ ok: false, error: 'Option risk candles must use a 5, 15, 30 or 60 minute interval.' });
@@ -3459,7 +3495,7 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
     historyUrl.searchParams.set('range_to', today);
     const [quoteResult, historyResult] = await Promise.all([
       fyersReadOnlyGet(quoteUrl),
-      fyersReadOnlyGet(historyUrl)
+      fyersReadOnlyGet(historyUrl, { bypassCache: true })
     ]);
     const quoteRows = Array.isArray(quoteResult?.d) ? quoteResult.d :
       (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
@@ -3475,20 +3511,10 @@ app.get('/api/fyers/option-risk-plan', async (req, res) => {
       return res.status(502).json({ ok: false, error: 'Selected option bid/ask/LTP quote is missing, invalid or older than 15 seconds.' });
     }
     const candles = Array.isArray(historyResult?.candles) ? historyResult.candles : [];
-    if (ask < 30 || ask > 150) {
-      return res.status(422).json({ ok: false, error: "Verified option ask premium must be between ₹30 and ₹150.", quote: {
-        bid, ask, ltp, quoteTimeMs: quoteTime * 1000,
-        quoteAgeSeconds: Number(((Date.now() - quoteTime * 1000) / 1000).toFixed(1))
-      } });
-    }
-    const candleCheck = validateCompletedOptionCandles({ candles, resolution, now: Date.now(), lookback: 12 });
-    const plan = candleCheck.ok
-      ? buildFixedOptionRiskPlan({ entryPrice: ask, lotSize: contractMetadata.lotSize, tickSize: contractMetadata.tickSize })
-      : { ok: false, reason: candleCheck.reason };
-    if (plan.ok) {
-      plan.completedCandleCount = candleCheck.completedCandleCount;
-      plan.latestCompletedCandleAt = candleCheck.latestCompletedCandleAt;
-    }
+    const plan = buildOptionRiskPlan({
+      candles, entryPrice: ask, lotSize: contractMetadata.lotSize, tickSize: contractMetadata.tickSize,
+      resolution, now: Date.now(), lookback: 20, atrPeriod: 14, atrBuffer: 0.35
+    });
     if (!plan.ok) {
       return res.status(422).json({ ok: false, error: plan.reason, quote: {
         bid, ask, ltp, quoteTimeMs: quoteTime * 1000,
@@ -3560,7 +3586,7 @@ app.get('/api/paper/positions', async (_req, res) => {
   try {
     const [positions, openPositions] = await Promise.all([paperStore.listPositions(), paperStore.listOpenPositions()]);
     return res.json({ ok: true, mode: 'PAPER_SIMULATION', positions, openPositionCount: openPositions.length,
-      orderPlacement: 'disabled', source: 'GV2VPD PostgreSQL paper ledger; not FYERS broker positions' });
+      orderPlacement: 'disabled', riskLimits: paperStore.riskLimits, source: 'GV2VPD PostgreSQL paper ledger; not FYERS broker positions' });
   } catch (error) {
     return res.status(503).json({ ok: false, error: 'Paper positions are unavailable.', detail: String(error.message || error).slice(0, 160) });
   }
@@ -3569,52 +3595,109 @@ app.get('/api/paper/positions', async (_req, res) => {
 app.post('/api/paper/buy', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!paperStoreReady) return res.status(503).json({ ok: false, error: 'Durable Paper Mode database is not ready; Paper BUY blocked.' });
-  if (!accessToken || !nseRegularSessionNow()) return res.status(409).json({ ok: false, error: 'NSE market is not open; Paper BUY blocked.' });
-  const indiaNow = new Date(Date.now() + 330 * 60_000);
-  const indiaMinutes = indiaNow.getUTCHours() * 60 + indiaNow.getUTCMinutes();
-  if (indiaMinutes < 9 * 60 + 15 || indiaMinutes >= 15 * 60 + 15) {
-    return res.status(409).json({ ok: false, error: 'Paper BUY is allowed only from 09:15 until 15:15 Asia/Kolkata.' });
-  }
+  if (!accessToken) return res.status(401).json({ ok: false, error: 'Connect FYERS before Paper BUY.' });
+
   const sessionToken = /^Bearer ([a-f0-9]{64})$/.exec(String(req.get('authorization') || ''))?.[1] || '';
   const planId = String(req.body?.planId || '');
   const issued = verifiedPlanRegistry.get(sessionToken, planId);
   if (!issued) return res.status(409).json({ ok: false, error: 'Verified Sureshot plan ID is invalid, expired, or belongs to another Dashboard Session.' });
   const snapshot = issued.snapshot;
-  if (snapshot.source !== 'FYERS_VERIFIED' || !isSupportedOptionContractSymbol(snapshot.symbol)) {
-    return res.status(422).json({ ok: false, error: 'Server-owned verified FYERS option contract is invalid.' });
+  if (snapshot.source !== 'FYERS_VERIFIED' || !isSupportedOptionContractSymbol(snapshot.symbol) ||
+      !isSupportedOptionContractSymbol(snapshot.underlyingSymbol) && !/^(?:NSE|BSE|MCX):[A-Z0-9&.-]+(?:-EQ|-INDEX|FUT)$/.test(String(snapshot.underlyingSymbol || ''))) {
+    return res.status(422).json({ ok: false, error: 'Server-owned verified FYERS option/underlying contract identity is invalid.' });
+  }
+
+  const exchange = String(snapshot.symbol).split(':')[0];
+  const sessionOpen = () => exchange === 'MCX'
+    ? getExchangeSessionWindows().MCX?.session === 'SCHEDULED_OPEN'
+    : ['NSE', 'BSE'].includes(exchange) && nseRegularSessionNow();
+  const nsePaperWindowOpen = () => {
+    const indiaClock = new Date(Date.now() + 330 * 60_000);
+    const minutes = indiaClock.getUTCHours() * 60 + indiaClock.getUTCMinutes();
+    return minutes >= 9 * 60 + 15 && minutes < 15 * 60 + 15;
+  };
+  const paperWindowOpen = () => sessionOpen() && (exchange === 'MCX' || nsePaperWindowOpen());
+  if (!paperWindowOpen()) {
+    return res.status(409).json({ ok: false, error: exchange + ' exchange session is closed or outside its Paper BUY window.' });
   }
   if (!streamConnected || !marketSocket) {
     return res.status(409).json({ ok: false, error: 'FYERS market WebSocket is not connected; Paper BUY blocked.' });
   }
+
   try {
     const metadata = await getFyersOptionContractMetadata(snapshot.symbol);
     if (!metadata || Number(metadata.lotSize) !== Number(snapshot.lotSize) ||
         Number(metadata.tickSize) !== Number(snapshot.tickSize)) {
       return res.status(409).json({ ok: false, error: 'FYERS official lot/tick metadata changed or is unavailable; rescan required.' });
     }
+
+    // Recheck the underlying direction and option-candle structure, then fetch
+    // the option quote last so the entry timestamp is fresh at plan creation.
+    const indiaNow = new Date(Date.now() + 330 * 60_000);
+    const today = indiaNow.toISOString().slice(0, 10);
+    const from = new Date(Date.UTC(indiaNow.getUTCFullYear(), indiaNow.getUTCMonth(), indiaNow.getUTCDate() - 6)).toISOString().slice(0, 10);
+    const underlyingUrl = new URL('https://api-t1.fyers.in/data/history');
+    underlyingUrl.searchParams.set('symbol', snapshot.underlyingSymbol);
+    underlyingUrl.searchParams.set('resolution', '5');
+    underlyingUrl.searchParams.set('date_format', '1');
+    underlyingUrl.searchParams.set('range_from', from);
+    underlyingUrl.searchParams.set('range_to', today);
+    underlyingUrl.searchParams.set('cont_flag', '1');
+    const underlyingHistory = await fyersReadOnlyGet(underlyingUrl, {
+      priority: 'sureshot', stage: 'PAPER_BUY_REVALIDATE_UNDERLYING'
+    });
+    const direction = deriveVerifiedUnderlyingDirection(
+      Array.isArray(underlyingHistory?.candles) ? underlyingHistory.candles : [],
+      '5', Date.now(), { strictTrend: true }
+    );
+    if (!direction.ok || direction.side !== snapshot.side) {
+      return res.status(409).json({ ok: false, error: 'Underlying direction changed or its latest FYERS candles are not verified; Paper BUY blocked.' });
+    }
+
+    const optionHistoryUrl = new URL('https://api-t1.fyers.in/data/history');
+    optionHistoryUrl.searchParams.set('symbol', snapshot.symbol);
+    optionHistoryUrl.searchParams.set('resolution', '5');
+    optionHistoryUrl.searchParams.set('date_format', '1');
+    optionHistoryUrl.searchParams.set('range_from', from);
+    optionHistoryUrl.searchParams.set('range_to', today);
+    optionHistoryUrl.searchParams.set('cont_flag', '1');
+    const optionHistory = await fyersReadOnlyGet(optionHistoryUrl, {
+      priority: 'sureshot', stage: 'PAPER_BUY_REVALIDATE_OPTION_CANDLES'
+    });
+
     const quoteUrl = new URL('https://api-t1.fyers.in/data/quotes');
     quoteUrl.searchParams.set('symbols', snapshot.symbol);
-    const quoteResult = await fyersReadOnlyGet(quoteUrl, { priority: 'sureshot' });
+    const quoteResult = await fyersReadOnlyGet(quoteUrl, {
+      priority: 'sureshot', stage: 'PAPER_BUY_REVALIDATE_OPTION_QUOTE'
+    });
     const rows = Array.isArray(quoteResult?.d) ? quoteResult.d : (Array.isArray(quoteResult?.data) ? quoteResult.data : []);
     const row = rows.find(item => (item?.n || item?.symbol || item?.v?.symbol) === snapshot.symbol);
     const quote = row?.v || row;
-    const ask = Number(quote?.ask ?? quote?.ask_price);
     const quoteTime = epochSeconds(quote?.ltt ?? quote?.tt ?? quote?.exch_feed_time);
-    if (!Number.isFinite(ask) || ask < 30 || ask > 150 ||
-        quoteTimestampStatus(quoteTime, Date.now(), 10) !== 'FRESH') {
-      return res.status(409).json({ ok: false, error: 'Fresh FYERS option ask (₹30–₹150) with exchange timestamp <=10 seconds is required; Paper BUY blocked.' });
+    if (quoteTimestampStatus(quoteTime, Date.now(), 10) !== 'FRESH') {
+      return res.status(409).json({ ok: false, error: 'Fresh FYERS option quote with exchange timestamp <=10 seconds is required; Paper BUY blocked.' });
     }
-    const finalIndiaClock = new Date(Date.now() + 330 * 60_000);
-    const finalIndiaMinutes = finalIndiaClock.getUTCHours() * 60 + finalIndiaClock.getUTCMinutes();
-    if (!nseRegularSessionNow() || finalIndiaMinutes < 9 * 60 + 15 || finalIndiaMinutes >= 15 * 60 + 15 ||
-        !streamConnected || !marketSocket) {
-      return res.status(409).json({ ok: false, error: 'Market session, 15:15 cutoff or FYERS WebSocket changed during revalidation; Paper BUY blocked.' });
+
+    const contract = {
+      symbol: snapshot.symbol, side: snapshot.side, expiry: snapshot.expiry, strike: snapshot.strike,
+      lotSize: metadata.lotSize, tickSize: metadata.tickSize
+    };
+    const freshPlan = buildVerifiedSureshotTradePlan({
+      underlyingSymbol: snapshot.underlyingSymbol, direction, contract, quote,
+      optionCandles: Array.isArray(optionHistory?.candles) ? optionHistory.candles : [],
+      resolution: '5', lotSize: metadata.lotSize, tickSize: metadata.tickSize, now: Date.now()
+    });
+    if (!freshPlan.ok) return res.status(422).json({
+      ok: false, error: freshPlan.reason || 'Fresh quote/candles fail the verified risk-plan checks.'
+    });
+
+    if (!paperWindowOpen() || !streamConnected || !marketSocket) {
+      return res.status(409).json({ ok: false, error: 'Exchange session, Paper BUY window or FYERS WebSocket changed during revalidation; Paper BUY blocked.' });
     }
-    const risk = buildFixedOptionRiskPlan({ entryPrice: ask, lotSize: metadata.lotSize, tickSize: metadata.tickSize });
-    if (!risk.ok || risk.rr < 2) return res.status(422).json({ ok: false, error: risk.reason || 'Fresh quote fails the minimum 1:2 risk/reward gate.' });
     if (!verifiedPlanRegistry.get(sessionToken, planId)) {
-      return res.status(409).json({ ok: false, error: 'Verified Plan ID expired during quote revalidation; rerun Sureshot.' });
+      return res.status(409).json({ ok: false, error: 'Verified Plan ID expired during revalidation; rerun Sureshot.' });
     }
+
     const idempotencyKey = 'paper:' + planId;
     paperSocketSymbols.add(snapshot.symbol);
     try {
@@ -3624,6 +3707,7 @@ app.post('/api/paper/buy', async (req, res) => {
       paperSocketSymbols.delete(snapshot.symbol);
       return res.status(503).json({ ok: false, error: 'FYERS option WebSocket subscription failed; Paper BUY blocked.' });
     }
+
     let result;
     try {
       result = await paperStore.createPaperBuy({
@@ -3631,20 +3715,22 @@ app.post('/api/paper/buy', async (req, res) => {
         source: 'FYERS_VERIFIED',
         exchangeTimestamp: new Date(quoteTime * 1000).toISOString(),
         symbol: snapshot.symbol, side: snapshot.side, expiry: snapshot.expiry, strike: snapshot.strike,
-        plan: { entryPrice: risk.entryPrice, stopLoss: risk.stopLoss, target1: risk.target1,
-          target2: risk.target2, quantity: risk.quantity, lotSize: risk.lotSize }
+        plan: {
+          entryPrice: freshPlan.risk.entryPrice, stopLoss: freshPlan.risk.stopLoss,
+          target1: freshPlan.risk.target1, target2: freshPlan.risk.target2,
+          quantity: freshPlan.risk.quantity, lotSize: freshPlan.risk.lotSize
+        }
       });
     } catch (error) {
       const open = await paperStore.listOpenPositions().catch(() => []);
       if (!open.some(position => position.symbol === snapshot.symbol)) await subscribeOpenPaperPositions(marketSocket);
       throw error;
     }
-    // Re-read the durable open-position set after commit to close a socket reconnect race.
     void subscribeOpenPaperPositions(marketSocket);
-    // Keep the short-lived plan until TTL so a retry returns the same idempotent ledger row.
     return res.status(result.created ? 201 : 200).json({
       ok: true, created: result.created, mode: 'PAPER_SIMULATION', position: result.position,
-      riskAmount: result.riskAmount ?? null, orderPlacement: 'disabled',
+      riskAmount: result.riskAmount ?? null, riskLimits: paperStore.riskLimits,
+      orderPlacement: 'disabled',
       note: 'Simulation ledger only. No FYERS order endpoint was called.'
     });
   } catch (error) {

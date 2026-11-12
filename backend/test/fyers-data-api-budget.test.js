@@ -216,6 +216,27 @@ test('identical history reads are coalesced and briefly cached', async () => {
   assert.equal(sent, 2);
 });
 
+test('bypassCache forces a fresh history request and refreshes the shared cache', async () => {
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    minIntervalMs: 0,
+    fetchImpl: async () => {
+      sent += 1;
+      return fakeResponse(200, JSON.stringify({ s: 'ok', generation: sent }), { 'content-type': 'application/json' });
+    }
+  });
+  const url = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ&resolution=5';
+  await request(url);
+  const fresh = await request(url, { bypassCache: true });
+  assert.equal(sent, 2);
+  assert.equal(fresh.headers.get('x-dhanpulse-cache'), 'MISS');
+  assert.equal((await fresh.json()).generation, 2);
+  const cached = await request(url);
+  assert.equal(sent, 2);
+  assert.equal(cached.headers.get('x-dhanpulse-cache'), 'HIT');
+  assert.equal((await cached.json()).generation, 2);
+});
+
 test('default history cache reuses OHLC for five minutes, then requires a fresh FYERS read', async () => {
   let clock = 540_000;
   let sent = 0;

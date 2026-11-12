@@ -1,4 +1,5 @@
 import { normalizeFyersCandleOrder } from "./candle-order.js";
+
 function indiaDateKeyFromSeconds(seconds) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit"
@@ -7,69 +8,20 @@ function indiaDateKeyFromSeconds(seconds) {
   return fields.year + "-" + fields.month + "-" + fields.day;
 }
 
-function indiaMinuteOfDay(seconds) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hourCycle: "h23"
-  }).formatToParts(new Date(seconds * 1000));
-  const fields = Object.fromEntries(parts.map(part => [part.type, part.value]));
-  return Number(fields.hour) * 60 + Number(fields.minute);
-}
-
-function calculateEma(values, period) {
-  if (values.length < period + 1) return null;
-  const alpha = 2 / (period + 1);
-  let ema = values.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
-  let previous = ema;
-  for (let i = period; i < values.length; i++) {
-    previous = ema;
-    ema = alpha * values[i] + (1 - alpha) * ema;
-  }
-  return { current: ema, previous };
-}
-
-function calculateAdx(rows, period = 14) {
-  if (rows.length < period * 2 + 2) return null;
-  const tr = [], plusDm = [], minusDm = [];
-  for (let i = 1; i < rows.length; i++) {
-    const current = rows[i], prior = rows[i - 1];
-    const up = current.high - prior.high;
-    const down = prior.low - current.low;
-    tr.push(Math.max(current.high - current.low, Math.abs(current.high - prior.close), Math.abs(current.low - prior.close)));
-    plusDm.push(up > down && up > 0 ? up : 0);
-    minusDm.push(down > up && down > 0 ? down : 0);
-  }
-  let smoothTr = tr.slice(0, period).reduce((sum, value) => sum + value, 0);
-  let smoothPlus = plusDm.slice(0, period).reduce((sum, value) => sum + value, 0);
-  let smoothMinus = minusDm.slice(0, period).reduce((sum, value) => sum + value, 0);
-  const dx = [];
-  for (let i = period; i < tr.length; i++) {
-    smoothTr = smoothTr - smoothTr / period + tr[i];
-    smoothPlus = smoothPlus - smoothPlus / period + plusDm[i];
-    smoothMinus = smoothMinus - smoothMinus / period + minusDm[i];
-    if (smoothTr <= 0) continue;
-    const plusDi = 100 * smoothPlus / smoothTr;
-    const minusDi = 100 * smoothMinus / smoothTr;
-    const denominator = plusDi + minusDi;
-    if (denominator > 0) dx.push(100 * Math.abs(plusDi - minusDi) / denominator);
-  }
-  if (dx.length < period) return null;
-  return dx.slice(-period).reduce((sum, value) => sum + value, 0) / period;
-}
-
 /**
- * Weighted Sureshot trend score. Data completeness/freshness stays hard-gated;
- * ADX, relative volume, EMA slope/alignment and VWAP are scored rather than
- * each being an independent mandatory pass condition.
+ * Sureshot direction uses a 20-period simple moving-average crossover on
+ * completed FYERS 5-minute candles. Supply/demand breakout agreement is checked
+ * by deriveVerifiedUnderlyingDirection; this module only validates the crossover.
  */
-export function validateSureshotTrend({ candles, resolution = "5", now = Date.now(), minTrendScore = 45 }) {
-  const minutes = Number(resolution);
-  if (minutes !== 5 || !Array.isArray(candles)) return { ok: false, reason: "Sureshot trend validation requires FYERS 5-minute candles." };
+export function validateSureshotTrend({ candles, resolution = "5", now = Date.now() }) {
+  if (Number(resolution) !== 5 || !Array.isArray(candles)) {
+    return { ok: false, reason: "Sureshot DMA20 crossover requires FYERS 5-minute candles." };
+  }
   const ordered = normalizeFyersCandleOrder(candles);
   if (!ordered.ok) return { ok: false, reason: "Underlying candle timestamps are invalid, duplicated or inconsistently ordered." };
-  candles = ordered.data;
   const completed = [];
   let previousTime = -Infinity;
-  for (const row of candles) {
+  for (const row of ordered.data) {
     if (!Array.isArray(row) || row.length < 6) return { ok: false, reason: "Underlying candle row is incomplete." };
     const [time, open, high, low, close, volume] = row.slice(0, 6).map(Number);
     if (![time, open, high, low, close, volume].every(Number.isFinite) ||
@@ -79,83 +31,43 @@ export function validateSureshotTrend({ candles, resolution = "5", now = Date.no
       return { ok: false, reason: "Underlying candles contain invalid, future, duplicated or out-of-order OHLC data." };
     }
     previousTime = time;
-    if (time * 1000 + minutes * 60_000 <= now) completed.push({ time, open, high, low, close, volume });
+    if (time * 1000 + 5 * 60_000 <= now) completed.push({ time, open, high, low, close, volume });
   }
-  if (completed.length < 30) return { ok: false, reason: "At least 30 completed FYERS 5-minute candles are required for the trend check." };
-  const latest = completed[completed.length - 1];
-  const latestAgeMs = now - (latest.time * 1000 + minutes * 60_000);
-  if (latestAgeMs < 0 || latestAgeMs > 15 * 60_000) return { ok: false, reason: "Latest completed underlying candle is stale." };
+  if (completed.length < 21) return { ok: false, reason: "At least 21 completed FYERS 5-minute candles are required for the DMA20 crossover." };
 
+  const latest = completed[completed.length - 1];
+  const prior = completed[completed.length - 2];
+  const latestAgeMs = now - (latest.time * 1000 + 5 * 60_000);
+  if (latestAgeMs < 0 || latestAgeMs > 15 * 60_000) return { ok: false, reason: "Latest completed underlying candle is stale." };
   const todayKey = indiaDateKeyFromSeconds(Math.floor(now / 1000));
-  const todayRows = completed.filter(row => indiaDateKeyFromSeconds(row.time) === todayKey);
-  if (!todayRows.length || todayRows[todayRows.length - 1].time !== latest.time) {
+  if (indiaDateKeyFromSeconds(latest.time) !== todayKey) {
     return { ok: false, reason: "Latest completed FYERS candle is not from the current India trading session." };
   }
-  const latestMinute = indiaMinuteOfDay(latest.time);
-  const sessions = new Map();
-  for (const row of completed) {
-    const key = indiaDateKeyFromSeconds(row.time);
-    if (key >= todayKey) continue;
-    if (!sessions.has(key)) sessions.set(key, []);
-    sessions.get(key).push(row);
+
+  const previousWindow = completed.slice(-21, -1);
+  const currentWindow = completed.slice(-20);
+  if (previousWindow.length !== 20 || currentWindow.length !== 20) {
+    return { ok: false, reason: "DMA20 calculation history is incomplete." };
   }
-  const priorKeys = [...sessions.keys()].sort().slice(-5);
-  if (priorKeys.length < 5) return { ok: false, reason: "Five previous FYERS trading sessions are required for the same-time volume average." };
-  const priorVolumes = [];
-  for (const key of priorKeys) {
-    const rows = sessions.get(key).filter(row => indiaMinuteOfDay(row.time) <= latestMinute);
-    if (!rows.length) return { ok: false, reason: "Previous-session volume coverage is incomplete at the current elapsed time." };
-    priorVolumes.push(rows.reduce((sum, row) => sum + row.volume, 0));
-  }
-  const averagePriorVolume = priorVolumes.reduce((sum, value) => sum + value, 0) / priorVolumes.length;
-  const currentVolume = todayRows.filter(row => indiaMinuteOfDay(row.time) <= latestMinute)
-    .reduce((sum, row) => sum + row.volume, 0);
-  if (!(averagePriorVolume > 0 && currentVolume > 0)) return { ok: false, reason: "Current or five-day comparison volume is missing." };
-  const volumeRatio = currentVolume / averagePriorVolume;
+  const average = rows => rows.reduce((sum, row) => sum + row.close, 0) / rows.length;
+  const previousDma20 = average(previousWindow);
+  const dma20 = average(currentWindow);
+  const bullishCross = prior.close <= previousDma20 && latest.close > dma20;
+  const bearishCross = prior.close >= previousDma20 && latest.close < dma20;
+  const side = bullishCross ? "CE" : bearishCross ? "PE" : null;
+  if (!side) return { ok: false, reason: "No fresh DMA20 crossover on the latest completed FYERS 5-minute candle." };
 
-  const totalVolume = todayRows.reduce((sum, row) => sum + row.volume, 0);
-  const vwapVolume = todayRows.reduce((sum, row) => sum + ((row.high + row.low + row.close) / 3) * row.volume, 0);
-  if (!(totalVolume > 0)) return { ok: false, reason: "Current-session VWAP cannot be verified without volume." };
-  const vwap = vwapVolume / totalVolume;
-
-  const ema = calculateEma(completed.map(row => row.close), 20);
-  const adx = calculateAdx(completed, 14);
-  if (!ema || !Number.isFinite(adx)) return { ok: false, reason: "Not enough completed candles to calculate ADX(14) and EMA(20)." };
-  const bullish = {
-    emaSlope: ema.current > ema.previous,
-    emaAlignment: latest.close > ema.current,
-    vwapAlignment: latest.close > vwap
-  };
-  const bearish = {
-    emaSlope: ema.current < ema.previous,
-    emaAlignment: latest.close < ema.current,
-    vwapAlignment: latest.close < vwap
-  };
-  const bullishVotes = Object.values(bullish).filter(Boolean).length;
-  const bearishVotes = Object.values(bearish).filter(Boolean).length;
-  const side = bullishVotes >= 2 && bullishVotes > bearishVotes ? "CE" :
-    bearishVotes >= 2 && bearishVotes > bullishVotes ? "PE" : null;
-  if (!side) return { ok: false, reason: "No directional majority: at least two of EMA slope, EMA price alignment and session VWAP must agree." };
-
-  // Context contributes up to 35 points; directional confirmation contributes
-  // up to 65. Weak ADX/volume reduces rank but cannot alone veto a valid trend.
-  const scoreParts = {
-    adx: adx >= 25 ? 15 : adx >= 18 ? 10 : adx >= 14 ? 5 : 0,
-    sameTimeVolume: volumeRatio >= 1.5 ? 20 : volumeRatio >= 1 ? 12 : 5,
-    emaSlope: (side === "CE" ? bullish.emaSlope : bearish.emaSlope) ? 25 : 0,
-    emaAlignment: (side === "CE" ? bullish.emaAlignment : bearish.emaAlignment) ? 20 : 0,
-    vwapAlignment: (side === "CE" ? bullish.vwapAlignment : bearish.vwapAlignment) ? 20 : 0
-  };
-  const trendScore = Object.values(scoreParts).reduce((sum, value) => sum + value, 0);
-  if (trendScore < minTrendScore) return { ok: false, reason: "Weighted Trend Score " + trendScore + "/100 is below the required " + minTrendScore + "." };
   return {
-    ok: true, side, trendScore, scoreParts,
-    adx: Number(adx.toFixed(2)), ema20: Number(ema.current.toFixed(4)),
-    ema20Previous: Number(ema.previous.toFixed(4)), vwap: Number(vwap.toFixed(4)),
-    volumeRatio: Number(volumeRatio.toFixed(2)), currentVolume,
-    averagePreviousFiveSameTimeVolume: Number(averagePriorVolume.toFixed(2)),
+    ok: true,
+    side,
+    crossover: side === "CE" ? "BULLISH" : "BEARISH",
+    dma20: Number(dma20.toFixed(4)),
+    previousDma20: Number(previousDma20.toFixed(4)),
+    latestClose: Number(latest.close.toFixed(4)),
+    previousClose: Number(prior.close.toFixed(4)),
     latestCompletedCandleAt: new Date(latest.time * 1000).toISOString(),
     candleAgeSeconds: Number((latestAgeMs / 1000).toFixed(1)),
-    completedCandleCount: completed.length
+    completedCandleCount: completed.length,
+    method: "20-period simple moving-average crossover on completed FYERS 5-minute candles"
   };
 }

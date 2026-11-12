@@ -33,8 +33,8 @@ test("normalizes a strictly descending underlying candle response before directi
 test("blocks a contract whose exchange, side, symbol suffix or strike does not match", () => {
   const direction = { ok: true, side: "CE", spot: 104, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
   const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now - 1000) / 1000) };
-  const options = Array.from({ length: 14 }, (_, i) => [Math.floor((now - (14 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
-  options[13][3] = 15;
+  const options = Array.from({ length: 22 }, (_, i) => [Math.floor((now - (22 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
+  options[21][3] = 15;
   const base = { symbol: "NSE:ABC26NOV100CE", strike: 100, side: "CE", expiry: "1795651200" };
   for (const contract of [
     { ...base, side: "PE" },
@@ -56,8 +56,8 @@ test("blocks expired contracts and stale or future underlying direction", () => 
   const direction = { ok: true, side: "CE", spot: 104, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
   const contract = { symbol: "NSE:ABC26NOV100CE", strike: 100, side: "CE", expiry: "1795651200" };
   const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now - 1000) / 1000) };
-  const options = Array.from({ length: 14 }, (_, i) => [Math.floor((now - (14 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
-  options[13][3] = 15;
+  const options = Array.from({ length: 22 }, (_, i) => [Math.floor((now - (22 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
+  options[21][3] = 15;
   const expired = buildVerifiedSureshotTradePlan({
     underlyingSymbol: "NSE:ABC-EQ", direction,
     contract: { ...contract, expiry: String(Math.floor((now - 86400_000) / 1000)) },
@@ -84,8 +84,8 @@ test("blocks future-dated option quotes and invalid spread thresholds", () => {
   const direction = { ok: true, side: "CE", spot: 104, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
   const contract = { symbol: "NSE:ABC26NOV100CE", strike: 100, side: "CE", expiry: "1795651200" };
   const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now + 1000) / 1000) };
-  const options = Array.from({ length: 14 }, (_, i) => [Math.floor((now - (14 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
-  options[13][3] = 15;
+  const options = Array.from({ length: 22 }, (_, i) => [Math.floor((now - (22 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
+  options[21][3] = 15;
   assert.equal(buildVerifiedSureshotTradePlan({
     underlyingSymbol: "NSE:ABC-EQ", direction, contract, quote, optionCandles: options, now
   }).ok, false);
@@ -117,8 +117,8 @@ test("blocks stale option quotes and only accepts a fresh >=1:2 risk plan", () =
   const direction = { ok: true, side: "CE", spot: 104, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
   const contract = { symbol: "NSE:ABC26NOV100CE", strike: 100, side: "CE", expiry: "1795651200" };
   const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now - 1000) / 1000) };
-  const options = Array.from({ length: 14 }, (_, i) => [Math.floor((now - (14 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
-  options[13][3] = 15;
+  const options = Array.from({ length: 22 }, (_, i) => [Math.floor((now - (22 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
+  options[21][3] = 15;
   const result = buildVerifiedSureshotTradePlan({ underlyingSymbol: "NSE:ABC-EQ", direction, contract, quote, optionCandles: options, lotSize: 25, tickSize: 0.05, now });
   assert.equal(result.ok, true);
   assert.ok(result.risk.rr >= 2);
@@ -133,8 +133,8 @@ test("builds a verified MCX option risk plan without crossing exchange symbols",
   const direction = { ok: true, side: "CE", spot: 8440, latestCandleAt: new Date(now - 300000).toISOString(), candleAgeSeconds: 0, completedCandleCount: 15 };
   const contract = { symbol: "MCX:CRUDEOIL26NOV8400CE", strike: 8400, side: "CE", expiry: "1795651200" };
   const quote = { bid: 19.2, ask: 20, lp: 19.5, tt: Math.floor((now - 1000) / 1000) };
-  const options = Array.from({ length: 14 }, (_, i) => [Math.floor((now - (14 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
-  options[13][3] = 15;
+  const options = Array.from({ length: 22 }, (_, i) => [Math.floor((now - (22 - i) * 5 * 60_000) / 1000), 20, 21, 19, 20, 100]);
+  options[21][3] = 15;
   const result = buildVerifiedSureshotTradePlan({
     underlyingSymbol: "MCX:CRUDEOIL26NOVFUT", direction, contract, quote,
     optionCandles: options, lotSize: 100, tickSize: 0.05, now
@@ -145,7 +145,7 @@ test("builds a verified MCX option risk plan without crossing exchange symbols",
   assert.ok(result.risk.rr >= 2);
   assert.equal(result.risk.lotSize, 100);
 });
-test("one-OTM contract selection ignores option-chain Greeks and uses only listed identity fields", () => {
+test("nearest contract selection ignores option-chain Greeks and uses only listed identity fields", () => {
   const expiry = String(Math.floor((now + 10 * 86400_000) / 1000));
   const discovery = {
     expiryData: [{ expiry, date: "2026-11-12" }],
@@ -156,9 +156,9 @@ test("one-OTM contract selection ignores option-chain Greeks and uses only liste
     ]
   };
   const selected = selectNearestVerifiedOptionContract({
-    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 102, now, strikeMode: "one-otm"
+    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 102, now, strikeMode: "nearest"
   });
   assert.equal(selected.ok, true);
-  assert.equal(selected.contract.symbol, "NSE:ABC26NOV105CE");
+  assert.equal(selected.contract.symbol, "NSE:ABC26NOV100CE");
   assert.equal("delta" in selected.contract, false);
 });

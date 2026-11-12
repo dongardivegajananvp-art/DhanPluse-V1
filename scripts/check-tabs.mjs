@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 
 const html = fs.readFileSync(new URL('../site/index.html', import.meta.url), 'utf8');
-const inlineApp = html.match(/<script>\s*([\s\S]*?)<\/script>/);
-if (!inlineApp) throw new Error('Inline production app bundle is missing.');
-const app = inlineApp[1];
+const app = fs.readFileSync(new URL('../site/app.js', import.meta.url), 'utf8');
+if (!html.includes('<script src="./app.js?v=gv2vpd-20261112-audit"></script>')) {
+  throw new Error('The canonical versioned external frontend bundle is missing.');
+}
 const navBlock = html.match(/<nav id="nav">([\s\S]*?)<\/nav>/);
 if (!navBlock) throw new Error('Navigation block #nav is missing.');
 const navTabs = [...navBlock[1].matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]);
@@ -48,7 +49,7 @@ if (!backend.includes("app.use('/api/paper', requireDashboardSession)") ||
     !backend.includes("verifiedPlanRegistry.create(sessionToken") ||
     !backend.includes("verifiedPlanRegistry.get(sessionToken, planId)") ||
     !backend.includes("quoteTimestampStatus(quoteTime, Date.now(), 10)") ||
-    !backend.includes("buildFixedOptionRiskPlan({ entryPrice: ask") ||
+    !backend.includes("const plan = buildOptionRiskPlan({") || !backend.includes("candles, entryPrice: ask, lotSize: contractMetadata.lotSize") ||
     !backend.includes("const idempotencyKey = 'paper:' + planId;") ||
     !backend.includes("void paperStore.processVerifiedQuote") ||
     !backend.includes("void reconcileOpenPaperPositions(result.added)") ||
@@ -62,7 +63,8 @@ if (!paperStore.includes("pg_advisory_xact_lock(716202611)") ||
     !paperStore.includes("last_quote_timestamp") ||
     !paperStore.includes("Maximum two open Paper positions allowed.") ||
     !paperStore.includes("An open Paper position already exists for this option contract.") ||
-    !paperStore.includes("Daily paper loss limit of ₹5,000")) {
+    !paperStore.includes("riskLimits.maxDailyLossInr") ||
+    !paperStore.includes("riskLimits.maxRiskPerTradeInr")) {
   throw new Error('Paper ledger persistence, concurrency, out-of-order quote, max-position and daily-loss guards are required.');
 }
 const paperBuyRoute = backend.slice(backend.indexOf("app.post('/api/paper/buy'"), backend.indexOf("app.all('/api/orders/*'"));
@@ -84,11 +86,11 @@ if (!app.includes('refreshAuthoritativeFyersStatus') ||
   throw new Error('Authoritative FYERS status refresh and bounded Sureshot auto-scan guard must remain.');
 }
 if (!html.includes('GV2VPD — FYERS') ||
-    !html.includes('sw.js?v=20261108-gv2vpd-three-tab-v1')) {
+    !html.includes('sw.js?v=gv2vpd-20261112-audit')) {
   throw new Error('GV2VPD identity and versioned PWA shell must be published together.');
 }
 const sw = fs.readFileSync(new URL('../site/sw.js', import.meta.url), 'utf8');
-if (!sw.includes('gv2vpd-shell-v3-three-tab-app') ||
+if (!sw.includes('gv2vpd-shell-v4-external-assets') ||
     !sw.includes('gv2vpd-icon.svg') ||
     !sw.includes("fetch(request, { cache: 'no-store' })")) {
   throw new Error('GV2VPD service-worker cache shell is incomplete.');
