@@ -171,6 +171,19 @@ test("Paper position close releases its FYERS socket symbol and reconnect restor
   assert.match(server, /subscribeOpenPaperPositions\(socket, \{ forceSubscribe: true \}\)/);
 });
 
+test("MCX Sureshot passes its own stage context to every FYERS REST call", () => {
+  const start = server.indexOf('app.get("/api/market/mcx-sureshot-auto-plans"');
+  const end = server.indexOf("// Last-known F&O equity quotes", start);
+  assert.ok(start >= 0 && end > start);
+  const route = server.slice(start, end);
+  assert.doesNotMatch(route, /stage: scanStage/,
+    "scanStage belongs to the separate NSE route and is undefined in the MCX handler");
+  const calls = [...route.matchAll(/fyersReadOnlyGet\([^;]+?\{ priority: "sureshot", stage: ([A-Za-z_$][\\w$]*) \}\)/gs)];
+  assert.ok(calls.length >= 6, "all MCX quote/history requests pass an explicit stage");
+  assert.ok(calls.every(match => match[1] === "stage"),
+    "each MCX FYERS REST call must pass the current MCX stage for cooldown/audit attribution");
+});
+
 test("MCX Sureshot audits and verifies every eligible future in resumable batches before publishing Top 3", () => {
   const start = server.indexOf('app.get("/api/market/mcx-sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
