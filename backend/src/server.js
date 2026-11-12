@@ -2416,11 +2416,11 @@ app.get("/api/market/sureshot-auto-plans", requireDashboardSession, async (req, 
       })) });
     const results = state.results;
     const initiallyVerifiedCandidateCount = results.filter(item => item.initiallyVerified === true).length;
-    // The full scan may take several minutes. Revalidate the highest-ranked ten
-    // initial passes at completion so their underlying candles, option premium
-    // and completed option candles are still fresh when Paper IDs are issued.
+    // Revalidate every initial pass before publishing the Top 3. Limiting this
+    // to the first five would make later verified F&O candidates ineligible for
+    // the final ranking and could hide the actual best setups.
     const finalCheckCandidates = results.filter(item =>
-      item.initiallyVerified === true && item.status === "VERIFIED SETUP").slice(0, 5);
+      item.initiallyVerified === true && item.status === "VERIFIED SETUP");
     const finalDirections = new Map();
     for (const item of finalCheckCandidates) {
       if (!nseRegularSessionNow()) { const error = new Error("Market session closed during final setup revalidation; signals blocked."); error.statusCode = 409; throw error; }
