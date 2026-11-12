@@ -401,7 +401,7 @@ async function refreshAuthoritativeFyersStatus() {
     const elapsedMs = Math.round(performance.now() - startedAt);
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      throw new Error('GET /api/status HTTP ' + response.status + ' (' + elapsedMs + ' ms)' + (body ? ' · ' + body.slice(0, 180).replace(/\\s+/g, ' ') : ''));
+      throw new Error('GET /api/status HTTP ' + response.status + ' (' + elapsedMs + ' ms)' + (body ? ' · ' + body.slice(0, 180).replace(/\s+/g, ' ') : ''));
     }
     let status;
     try { status = await response.json(); }
