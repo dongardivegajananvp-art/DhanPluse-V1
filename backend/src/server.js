@@ -1016,6 +1016,19 @@ function createDashboardSessionToken() {
 }
 
 function requireDashboardSession(req, res, next) {
+  // The HTTP listener starts before PostgreSQL-backed FYERS auth restoration.
+  // During that bounded startup window, protected routes must not emit 401:
+  // the frontend interprets 401 as a revoked bearer and deletes its valid
+  // persisted-session token. Return retryable 503 until restoration completes.
+  if (fyersTokenStore.configured && !fyersTokenStoreReady) {
+    res.set('Retry-After', '2');
+    return res.status(503).json({
+      ok: false,
+      error: 'FYERS authentication is restoring from secure storage; retry shortly.',
+      authState: 'RESTORING'
+    });
+  }
+
   // The official FYERS NSE F&O instrument master is public reference data.
   // Exempt only this read-only GET endpoint; all quotes, candles, options,
   // portfolio and signal endpoints remain protected by the dashboard session.
