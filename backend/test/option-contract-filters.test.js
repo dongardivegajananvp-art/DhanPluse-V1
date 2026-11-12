@@ -17,7 +17,7 @@ test("option-chain normalization preserves only listed contract identity and omi
   }]);
 });
 
-test("selects exactly one listed ATM+1 OTM strike for CE and PE without consulting delta", () => {
+test("selects the nearest listed CE/PE strike in the nearest expiry without consulting chain Greeks", () => {
   const expiryData = [{ expiry, date: "2026-11-26" }];
   const rows = [
     [90, "CE", 0.02], [95, "CE", 0.99], [100, "CE", 0.50], [105, "CE", 0.01], [110, "CE", 0.34],
@@ -27,54 +27,35 @@ test("selects exactly one listed ATM+1 OTM strike for CE and PE without consulti
   }));
   const discovery = { expiryData, optionsChain: rows };
   const call = selectNearestVerifiedOptionContract({
-    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 100, now, strikeMode: "one-otm"
+    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 100, now, strikeMode: "nearest"
   });
   const put = selectNearestVerifiedOptionContract({
     discovery, underlyingSymbol: "NSE:ABC-EQ", side: "PE", spot: 100, now, strikeMode: "one-otm"
   });
   assert.equal(call.ok, true);
-  assert.equal(call.contract.strike, 105);
+  assert.equal(call.contract.strike, 100);
   assert.equal("delta" in call.contract, false);
   assert.equal(put.ok, true);
-  assert.equal(put.contract.strike, 95);
+  assert.equal(put.contract.strike, 100);
   assert.equal("delta" in put.contract, false);
 });
 
-test("blocks when no listed OTM contract exists; does not substitute ATM", () => {
-  const discovery = {
-    expiryData: [{ expiry, date: "2026-11-26" }],
-    optionsChain: [
-      { symbol: "NSE:ABC26NOV95CE", strike_price: 95, option_type: "CE", expiry },
-      { symbol: "NSE:ABC26NOV100CE", strike_price: 100, option_type: "CE", expiry }
-    ]
-  };
-  const result = selectNearestVerifiedOptionContract({
-    discovery, underlyingSymbol: "NSE:ABC-EQ", side: "CE", spot: 100, now, strikeMode: "one-otm"
-  });
-  assert.equal(result.ok, false);
-  assert.match(result.reason, /exact ATM \+ 1 OTM/i);
-});
-
-test("blocks premiums outside ₹30–₹150 when the fixed risk model is active", () => {
+test("does not impose an unrequested ₹30–₹150 premium band", () => {
   const direction = {
     ok: true, side: "CE", spot: 104,
     latestCandleAt: new Date(now - 300000).toISOString(),
-    candleAgeSeconds: 0, completedCandleCount: 15
+    candleAgeSeconds: 0, completedCandleCount: 30
   };
   const contract = { symbol: "NSE:ABC26NOV105CE", strike: 105, side: "CE", expiry };
-  const candles = Array.from({ length: 12 }, (_, index) => [
-    Math.floor((now - (12 - index) * 5 * 60_000) / 1000), 100, 101, 99, 100, 1000
+  const candles = Array.from({ length: 25 }, (_, index) => [
+    Math.floor((now - (25 - index) * 5 * 60_000) / 1000), 100, 102, 95, 101, 1000
   ]);
   const base = { underlyingSymbol: "NSE:ABC-EQ", direction, contract, optionCandles: candles,
-    lotSize: 25, tickSize: 0.05, riskModel: "fixed", requirePremiumRange: true, now };
-  const low = buildVerifiedSureshotTradePlan({ ...base, quote: { bid: 29.9, ask: 29.95, lp: 29.9, tt: Math.floor((now - 1000) / 1000) } });
-  const high = buildVerifiedSureshotTradePlan({ ...base, quote: { bid: 150, ask: 150.05, lp: 150, tt: Math.floor((now - 1000) / 1000) } });
-  const valid = buildVerifiedSureshotTradePlan({ ...base, quote: { bid: 99.95, ask: 100, lp: 100, tt: Math.floor((now - 1000) / 1000) } });
-  assert.equal(low.ok, false);
-  assert.match(low.reason, /premium/i);
-  assert.equal(high.ok, false);
-  assert.equal(valid.ok, true);
-  assert.equal(valid.risk.stopLoss, 70);
-  assert.equal(valid.risk.target1, 150);
-  assert.equal(valid.risk.target2, 250);
+    lotSize: 25, tickSize: 0.05, now };
+  for (const [bid, ask] of [[19.9, 20], [199.9, 200]]) {
+    const result = buildVerifiedSureshotTradePlan({ ...base, quote: { bid, ask, lp: bid, tt: Math.floor((now - 1000) / 1000) } });
+    assert.equal(result.ok, true, result.reason);
+    assert.ok(result.risk.rrTarget1 >= 2);
+    assert.ok(result.risk.rrTarget2 >= 3);
+  }
 });
