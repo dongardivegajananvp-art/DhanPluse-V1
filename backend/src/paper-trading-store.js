@@ -41,6 +41,24 @@ const asNumber = value => {
 };
 const isoDate = value => new Date(value).toISOString().slice(0, 10);
 
+export function getPaperRiskLimits({ capitalInr = 5000, maxRiskPercent = 1, maxDailyLossPercent = 2 } = {}) {
+  const capital = asNumber(capitalInr);
+  const riskPct = asNumber(maxRiskPercent);
+  const dailyPct = asNumber(maxDailyLossPercent);
+  if (!(capital > 0) || !(riskPct > 0 && riskPct <= 5) || !(dailyPct > 0 && dailyPct <= 10)) {
+    throw new Error('Paper capital and percentage risk limits must be valid positive values.');
+  }
+  const round = value => Number(value.toFixed(2));
+  return {
+    capitalInr: round(capital),
+    maxRiskPerTradeInr: round(capital * riskPct / 100),
+    maxRiskPercent: riskPct,
+    maxDailyLossInr: round(capital * dailyPct / 100),
+    maxDailyLossPercent: dailyPct,
+    maxPremiumOutlayInr: round(capital)
+  };
+}
+
 export function isNewerExchangeTimestamp(nextTimestamp, previousTimestamp) {
   const next = Date.parse(nextTimestamp || '');
   if (!Number.isFinite(next)) return false;
@@ -78,7 +96,8 @@ export function validatePaperPlan(input, now = Date.now()) {
   return { plan, entry, sl, t1, t2, quantity, timestamp, symbol, expiry, side, strike };
 }
 
-export function createPaperTradingStore({ databaseUrl }) {
+export function createPaperTradingStore({ databaseUrl, capitalInr = 5000, maxRiskPercent = 1, maxDailyLossPercent = 2 }) {
+  const riskLimits = getPaperRiskLimits({ capitalInr, maxRiskPercent, maxDailyLossPercent });
   const configured = /^postgres(?:ql)?:\/\//i.test(String(databaseUrl || '').trim());
   const pool = configured ? new Pool({
     connectionString: String(databaseUrl).trim(),
@@ -116,7 +135,8 @@ export function createPaperTradingStore({ databaseUrl }) {
          FROM gv2vpd_paper_positions WHERE trade_date=$1 OR state='OPEN'`, [tradeDate]
       );
       const dailyPnl = Number(day.rows[0].realized) + Number(day.rows[0].unrealized);
-      if (dailyPnl <= -5000) throw new Error('Daily paper loss limit of ₹5,000 reached. BUY locked for today.');
+      if (dailyPnl <= -riskLimits.maxDailyLossInr) throw new Error('Daily paper loss limit of ₹' + riskLimits.maxDailyLossInr.toLocaleString('en-IN') + ' reached. BUY locked for today.');
+      if (risk > riskLimits.maxRiskPerTradeInr) throw new Error('Paper BUY blocked: one-lot risk ₹' + risk.toFixed(2) + ' exceeds the 1% per-trade cap of ₹' + riskLimits.maxRiskPerTradeInr.toLocaleString('en-IN') + '.');
       const open = await client.query(
         "SELECT COUNT(*)::int AS count FROM gv2vpd_paper_positions WHERE state='OPEN'"
       );
@@ -125,7 +145,7 @@ export function createPaperTradingStore({ databaseUrl }) {
         "SELECT 1 FROM gv2vpd_paper_positions WHERE state='OPEN' AND symbol=$1 LIMIT 1", [v.symbol]
       );
       if (duplicateContract.rows.length) throw new Error('An open Paper position already exists for this option contract.');
-      if (v.entry * v.quantity > 5000) throw new Error('Paper BUY blocked: premium outlay exceeds configured ₹5,000 test capital.');
+      if (v.entry * v.quantity > riskLimits.maxPremiumOutlayInr) throw new Error('Paper BUY blocked: premium outlay exceeds configured test capital of ₹' + riskLimits.maxPremiumOutlayInr.toLocaleString('en-IN') + '.');
       const id = crypto.randomUUID();
       const inserted = await client.query(
         `INSERT INTO gv2vpd_paper_positions
@@ -230,5 +250,5 @@ export function createPaperTradingStore({ databaseUrl }) {
   }
 
   async function close() { if (pool) await pool.end(); }
-  return { configured, initialize, createPaperBuy, listPositions, listOpenPositions, processVerifiedQuote, manualExit, close };
+  return { configured, riskLimits, initialize, createPaperBuy, listPositions, listOpenPositions, processVerifiedQuote, manualExit, close };
 }
