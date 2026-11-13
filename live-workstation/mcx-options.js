@@ -119,3 +119,62 @@ export function evaluateMxcOptionBreakout(candles, tick, contract) {
     optionCandleTime: lastClosed.time
   };
 }
+
+
+export function evaluateMxcTrendPullback(candles, tick) {
+  if (!tick || !Number.isFinite(Number(tick.price)) || Number(tick.price) <= 0) {
+    return { status: 'DATA_UNAVAILABLE_NO_TRADE', reason: 'Fresh MCX futures tick unavailable' };
+  }
+  const window = getCompletedCandleWindow(candles, tick.exchangeTime);
+  if (!window.fresh) return { status: 'DATA_UNAVAILABLE_NO_TRADE', reason: 'Latest completed MCX futures candle is stale' };
+  if (window.completed.length < 51) return { status: 'DATA_UNAVAILABLE_NO_TRADE', reason: 'At least 51 completed candles are required for EMA50 pullback test' };
+  const recent = window.completed.slice(-51);
+  if (!recent.every((candle, index) => index === 0 || Number(candle.time) - Number(recent[index - 1].time) === 300)) {
+    return { status: 'DATA_UNAVAILABLE_NO_TRADE', reason: 'EMA pullback window has missing 5-minute candles' };
+  }
+  const closes = recent.map(candle => Number(candle.close));
+  const ema = (values, period) => {
+    const alpha = 2 / (period + 1);
+    let value = values[0];
+    for (let index = 1; index < values.length; index++) value = values[index] * alpha + value * (1 - alpha);
+    return value;
+  };
+  const ema20 = ema(closes.slice(-20), 20);
+  const ema50 = ema(closes, 50);
+  const prior = recent[recent.length - 2];
+  const last = recent[recent.length - 1];
+  const ranges = recent.slice(-15).map((candle, index, rows) => {
+    const previousClose = index ? Number(rows[index - 1].close) : Number(recent[recent.length - 16].close);
+    return Math.max(Number(candle.high) - Number(candle.low), Math.abs(Number(candle.high) - previousClose), Math.abs(Number(candle.low) - previousClose));
+  });
+  const atr = ranges.reduce((sum, value) => sum + value, 0) / ranges.length;
+  const tolerance = atr * 0.25;
+  const pullbackTouched = Number(prior.low) <= ema20 + tolerance && Number(prior.high) >= ema20 - tolerance;
+  const livePrice = Number(tick.price);
+  let side = '';
+  if (ema20 > ema50 && pullbackTouched && Number(last.close) > Number(last.open) &&
+      Number(last.close) > Number(prior.high) && Number(last.close) > ema20 && livePrice >= Number(last.close)) side = 'LONG';
+  if (ema20 < ema50 && pullbackTouched && Number(last.close) < Number(last.open) &&
+      Number(last.close) < Number(prior.low) && Number(last.close) < ema20 && livePrice <= Number(last.close)) side = 'SHORT';
+  if (!side) return { status: 'NO_TRADE', reason: 'No confirmed EMA20/EMA50 trend-pullback setup' };
+  const swing = recent.slice(-5);
+  const entry = Number(last.close);
+  const stopLoss = side === 'LONG' ? Math.min(...swing.map(candle => Number(candle.low))) : Math.max(...swing.map(candle => Number(candle.high)));
+  const risk = side === 'LONG' ? entry - stopLoss : stopLoss - entry;
+  if (!(risk > 0)) return { status: 'NO_TRADE', reason: 'Pullback swing risk is zero or invalid' };
+  const target = side === 'LONG' ? entry + 2 * risk : entry - 2 * risk;
+  if (!(target > 0)) return { status: 'NO_TRADE', reason: 'Pullback target is invalid' };
+  return {
+    status: 'SETUP_CONFIRMED',
+    strategy: 'B_TREND_PULLBACK',
+    side,
+    entry,
+    stopLoss,
+    target,
+    rr: 2,
+    ema20: Number(ema20.toFixed(4)),
+    ema50: Number(ema50.toFixed(4)),
+    atr: Number(atr.toFixed(4)),
+    candleTime: last.time
+  };
+}
