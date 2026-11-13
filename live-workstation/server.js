@@ -314,7 +314,7 @@ app.get('/api/mcx/contracts',async(req,res)=>{
     const master=await loadMcxComMaster();
     const now=Date.now();
     const pattern=new RegExp('^MCX:'+product+'[0-9]{2}[A-Z]{3}FUT');
-    const contracts=Object.entries(master).filter(([symbol,row])=>pattern.test(symbol)&&symbol.endsWith('FUT')&&row&&Number(row.tradeStatus)===1)
+    const contracts=Object.entries(master).filter(([symbol,row])=>pattern.test(symbol)&&symbol.length===('MCX:'+product).length+8&&symbol.endsWith('FUT')&&row&&Number(row.tradeStatus)===1)
       .map(([symbol,row])=>({symbol,expiry:toEpochSeconds(row.expiryDate)}))
       .filter(row=>row.expiry&&row.expiry*1000>now)
       .sort((a,b)=>a.expiry-b.expiry||a.symbol.localeCompare(b.symbol))
