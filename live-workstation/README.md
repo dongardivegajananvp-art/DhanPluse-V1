@@ -20,8 +20,17 @@ The new backend SELECTs the existing AES-256-GCM encrypted `dhanpulse_fyers_auth
 - 5-minute history is fetched only after chart instrument selection and cached per symbol.
 - CE/PE candidates come from the FYERS Option Chain API and are cross-checked against the official NSE F&O Symbol Master for active status, lot size and tick size. The selected option premium is then read from the WebSocket.
 - Positions, overall P&L and order book are read from authenticated FYERS account APIs.
+
+- F&O gainer discovery validates the documented FYERS Futures Scan configuration and only renders movers after a fresh WebSocket tick; API failure details are preserved for diagnosis.
+- The 5-minute chart updates its active candle from the selected symbol's fresh exchange ticks without quote REST polling. It displays Entry/SL/Target only after a completed 20-candle breakout is confirmed and uses a 1:2 reference risk/reward plan; otherwise it explicitly shows WAIT / NO TRADE.
 - Order adapter uses FYERS synchronous order placement, market-protected order type, linked SL/target, explicit second confirmation, fresh premium gate, official lot/tick-size validation, max-quantity cap and duplicate request-ID protection. It never auto-retries an uncertain order.
 - MCX chart symbol selection and NSE/MCX tick caches remain separate. No MCX full-universe REST scan.
+
+## WebSocket diagnostics and recovery
+- Startup, socket connect/close/error, subscription application, and accepted exchange-timestamped ticks are logged without exposing tokens or prices.
+- The authenticated `/api/health` endpoint distinguishes WebSocket transport state from fresh market ticks and reports the latest exchange timestamp.
+- During regular NSE hours, a bounded watchdog reapplies the three baseline index subscriptions on the existing socket if fresh ticks stop; it does not create another socket or poll REST quotes.
+- Socket error events alone do not mark the transport disconnected; the close event or SDK connection state controls that status.
 
 ## Production gates still closed
 - `LIVE_ORDERS_ENABLED` must remain false until a reviewed production deployment is explicitly approved.
