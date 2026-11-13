@@ -497,7 +497,6 @@ app.post('/api/order',async(req,res)=>{
     meta=optionMeta(symbol,master);
   }
   if(!meta)return res.status(400).json({error:'Official contract lot/tick metadata is unavailable'});
-  if(!meta)return res.status(400).json({error:'Official contract lot/tick metadata is unavailable'});
   const quantity=Number(qty),sl=Number(stopLoss),tp=Number(takeProfit),maxQty=Number(process.env.MAX_ORDER_QTY||meta.lotSize*5),maxRisk=Number(process.env.MAX_ORDER_RISK_INR);
   if(!Number.isInteger(maxQty)||maxQty<meta.lotSize||!Number.isInteger(quantity)||quantity<meta.lotSize||quantity%meta.lotSize!==0||quantity>maxQty)
     return res.status(400).json({error:'Quantity must be a valid lot multiple within configured maximum'});
@@ -564,7 +563,7 @@ app.post('/api/order',async(req,res)=>{
         console.error('FYERS orderbook reconciliation deferred.',JSON.stringify({orderId,message:String(reconcileError?.message||reconcileError).slice(0,140)}));
       }
     }
-    await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='BROKER_ACKNOWLEDGED',broker_order_id=$2,response_message=$3,updated_at=NOW() WHERE request_id=$1",[requestId,orderId,String(result.message||'FYERS accepted order request')+' · orderbook='+brokerOrderStatus+' · margin='+marginCheck.required+'/'+marginCheck.available].slice(0,500)]);
+    await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='BROKER_ACKNOWLEDGED',broker_order_id=$2,response_message=$3,updated_at=NOW() WHERE request_id=$1",[requestId,orderId,(String(result.message||'FYERS accepted order request')+' · orderbook='+brokerOrderStatus+' · margin='+marginCheck.required+'/'+marginCheck.available).slice(0,500)]);
     return res.status(202).json({accepted:true,orderId,message:result.message||'FYERS accepted order request',status:'BROKER_ACKNOWLEDGED',brokerOrderStatus,filledQty,pendingQty,rejectionReason,margin:marginCheck,source:'FYERS sync order API + margin preflight'});
   }catch(error){
     await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='UNCERTAIN_NO_RETRY',response_message=$2,updated_at=NOW() WHERE request_id=$1",[requestId,String(error?.message||error).slice(0,500)]).catch(dbError=>console.error('Could not persist uncertain order result.',String(dbError?.message||dbError).slice(0,120)));
