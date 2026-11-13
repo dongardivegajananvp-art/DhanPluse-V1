@@ -18,7 +18,7 @@ function workstationBasicAuth(req,res,next){
   const expected=String(process.env.WORKSTATION_ACCESS_PASSWORD||'');
   if(expected.length<24)return res.status(503).send('Workstation access password is not configured.');
   const header=String(req.headers.authorization||'');
-  const match=header.match(/^Basic\\s+([A-Za-z0-9+/=]+)$/i);
+  const match=header.match(/^Basic\s+([A-Za-z0-9+/=]+)$/i);
   if(match){
     let decoded='';
     try{decoded=Buffer.from(match[1],'base64').toString('utf8');}catch{}
