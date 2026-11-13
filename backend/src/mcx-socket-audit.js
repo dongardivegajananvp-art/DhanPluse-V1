@@ -33,11 +33,13 @@ export async function waitForCompleteMcxSocketAudit({
   now = Date.now,
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   timeoutMs = 60_000,
-  pollIntervalMs = 1_000
+  pollIntervalMs = 1_000,
+  minimumPartialWaitMs = 5_000
 } = {}) {
   if (typeof getAudit !== "function" || typeof now !== "function" ||
       typeof sleep !== "function" || !Number.isFinite(timeoutMs) || timeoutMs < 0 ||
-      !Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0) {
+      !Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0 ||
+      !Number.isFinite(minimumPartialWaitMs) || minimumPartialWaitMs < 0) {
     throw new Error("invalid_mcx_socket_audit_wait_options");
   }
   const startedAt = now();
@@ -45,7 +47,9 @@ export async function waitForCompleteMcxSocketAudit({
   while (true) {
     audit = await getAudit();
     const elapsedMs = Math.max(0, now() - startedAt);
-    if (audit?.complete) return { audit, waitedMs: elapsedMs, timedOut: false };
+    if (audit?.complete || (Number(audit?.freshQuoteCount) > 0 && elapsedMs >= minimumPartialWaitMs)) {
+      return { audit, waitedMs: elapsedMs, timedOut: elapsedMs >= timeoutMs, partial: !audit.complete };
+    }
     const remainingMs = timeoutMs - elapsedMs;
     if (remainingMs <= 0) break;
     await sleep(Math.min(pollIntervalMs, remainingMs));

@@ -1985,12 +1985,14 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
       // consumers. A separate raw fetch here used to bypass endpoint cooldown state.
       body = await fyersReadOnlyGet(url, { priority, stage });
     } catch (error) {
-      if (Number(error.statusCode) === 429) {
-        console.warn("FYERS stock quotes rate-limited:", JSON.stringify({
-          batchNumber: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1,
-          batchSize: batch.length,
+      if (priority === "sureshot" && Number(error.statusCode) === 429 && data.length) {
+        console.warn("FYERS NSE quote scan continuing with individually fresh rows after rate limit:", JSON.stringify({
+          completedBatches: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE),
+          universeCount: symbols.length,
+          freshQuoteCount: data.length,
           retryAfterSeconds: Number(error.retryAfterSeconds) || null
         }));
+        break;
       }
       throw error;
     }
@@ -2046,14 +2048,6 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
       throw error;
     }
   }
-  if (missingSymbols.length > 0) {
-    const error = new Error(`Incomplete verified F&O quote coverage (${data.length}/${symbols.length}); partial rankings discarded.`);
-    error.statusCode = 503;
-    error.universeCount = symbols.length;
-    error.quotedCount = data.length;
-    error.missingCount = missingSymbols.length;
-    throw error;
-  }
   if (!data.length) {
     const error = new Error("No fresh exchange-timestamped F&O stock quotes. No stale prices shown.");
     error.statusCode = 503;
@@ -2064,19 +2058,16 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
     ok: true, source: "FYERS quotes API", verified: true, fetchedAt: new Date().toISOString(),
     marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED",
     freshnessLimitSeconds: 30, universe: "FYERS current NSE F&O equity symbol master",
-    universeCount: symbols.length, quotedCount: data.length, data, missingSymbols
+    universeCount: symbols.length, quotedCount: data.length, data, missingSymbols,
+    partial: missingSymbols.length > 0
   };
-  if (!isCompleteFreshFnoQuoteSnapshot(result, symbols, Date.now())) {
+  if (isCompleteFreshFnoQuoteSnapshot(result, symbols, Date.now())) {
+    stockQuoteCache = { fetchedAt: Date.parse(result.fetchedAt), data: result };
+    await persistVerifiedFnoQuoteSnapshot(result, symbols);
+    syncMoversCacheFromFnoQuoteSnapshot(result, master.data.map(item => item.symbol));
+  } else {
     stockQuoteCache = { fetchedAt: 0, data: null };
-    const error = new Error("The sequential FYERS F&O quote snapshot aged beyond 30 seconds before all batches completed; the full ranking was discarded.");
-    error.statusCode = 503;
-    error.universeCount = symbols.length;
-    error.quotedCount = data.length;
-    throw error;
   }
-  stockQuoteCache = { fetchedAt: Date.parse(result.fetchedAt), data: result };
-  await persistVerifiedFnoQuoteSnapshot(result, symbols);
-  syncMoversCacheFromFnoQuoteSnapshot(result, master.data.map(item => item.symbol));
   return result;
 }
 app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) => {
@@ -2872,14 +2863,16 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
         unexpectedSymbols: mcxAudit.unexpectedSymbols,
         duplicateSymbols: mcxAudit.duplicateSymbols
       }));
-      if (!mcxAudit.complete) {
-        const error = new Error("MCX full-universe WebSocket tick audit remained incomplete after a 60-second subscription settle window; every eligible future must still have a fresh exchange timestamp. No candidates or plans may be published.");
+      if (!mcxAudit.freshQuoteCount) {
+        const error = new Error("No MCX future has a fresh exchange-timestamped WebSocket tick yet; scan remains NO TRADE.");
         error.statusCode = 409;
         error.mcxAudit = mcxAudit;
         throw error;
       }
-      const quoteRows = buildMcxSocketQuoteRows(universe.data, latestTicks);
-      const ranked = buildVerifiedMcxShortlist({ universe: universe.data, quoteRows, now: Date.now(), limit: universe.data.length, maxAgeMs: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS });
+      // Full universe is audited and reported, while every independently fresh
+      // future can proceed to its own candle/option verification. A stale peer
+      // is excluded as a candidate; it must not block valid peers.
+      const ranked = { data: mcxAudit.data, candidateCount: mcxAudit.candidateCount };
       mcxSureshotScanState = {
         id: crypto.randomBytes(16).toString("hex"), createdAt: Date.now(),
         universeCount: universe.count, universe: universe.data, audit: mcxAudit.audit,
@@ -3139,8 +3132,8 @@ app.get("/api/market/mcx-sureshot-auto-plans", requireDashboardSession, async (r
     console.info("FYERS MCX final full-universe WebSocket tick revalidation:", JSON.stringify({
       ...finalFuturesAudit.coverage, freshnessWindowSeconds: MCX_FULL_UNIVERSE_QUOTE_MAX_AGE_MS / 1000
     }));
-    if (!finalFuturesAudit.complete) {
-      const error = new Error("Final MCX full-universe WebSocket tick revalidation is incomplete or stale; no setup may be published.");
+    if (!finalFuturesAudit.freshQuoteCount) {
+      const error = new Error("No MCX future retained a fresh exchange timestamp at final publication; all setups remain NO TRADE.");
       error.statusCode = 409;
       error.mcxAudit = finalFuturesAudit;
       throw error;

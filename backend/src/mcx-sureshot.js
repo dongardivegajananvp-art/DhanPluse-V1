@@ -162,15 +162,19 @@ export function buildVerifiedMcxAudit({ universe, quoteRows, now = Date.now(), l
   const excluded = audit.filter(row => row.status === "STALE_OR_INVALID_QUOTE");
   const complete = missing.length === 0 && excluded.length === 0 &&
     unexpectedSymbols.length === 0 && duplicateSymbols.length === 0 && fresh.length === expected.size;
-  const ranked = complete ? fresh.slice().sort((a, b) =>
+  // Keep the full-universe audit strict for coverage reporting, but do not
+  // discard independently fresh contracts because a different contract is
+  // stale or missing. Candidate-level verification happens before any plan
+  // can be published.
+  const ranked = fresh.slice().sort((a, b) =>
     Math.abs(b.changePct) - Math.abs(a.changePct) || a.symbol.localeCompare(b.symbol)
-  ) : [];
+  );
   return {
     ok: complete, complete, source: "FYERS MCX_COM master + fresh exchange-timestamped futures quotes",
     universeCount: universe.length, receivedQuoteCount: received.size,
     freshQuoteCount: fresh.length, excludedQuoteCount: excluded.length,
     missingQuoteCount: missing.length, unexpectedSymbols, duplicateSymbols,
-    candidateCount: complete ? ranked.length : 0,
+    candidateCount: ranked.length,
     coverage: { requested: universe.length, received: received.size, fresh: fresh.length,
       excluded: excluded.length, missing: missing.length },
     audit,

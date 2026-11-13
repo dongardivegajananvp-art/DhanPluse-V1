@@ -30,9 +30,12 @@ export function buildVerifiedSureshotShortlist({
   }
   if (!quoteSnapshot || quoteSnapshot.ok !== true || quoteSnapshot.verified !== true ||
       !Array.isArray(quoteSnapshot.data) || !universe || !Array.isArray(universe.data) ||
-      universe.data.length < 180 || quoteSnapshot.universeCount !== universe.data.length ||
-      quoteSnapshot.quotedCount !== universe.data.length || quoteSnapshot.data.length !== universe.data.length) {
-    throw new Error("complete_verified_fno_quote_snapshot_required");
+      universe.data.length < 180 || !Number.isInteger(quoteSnapshot.universeCount) ||
+      quoteSnapshot.universeCount !== universe.data.length ||
+      !Number.isInteger(quoteSnapshot.quotedCount) || quoteSnapshot.quotedCount < 1 ||
+      quoteSnapshot.quotedCount > universe.data.length ||
+      quoteSnapshot.data.length !== quoteSnapshot.quotedCount) {
+    throw new Error("verified_fno_quote_candidates_required");
   }
   const universeBySymbol = new Map(universe.data.map(row => [row?.symbol, row]));
   const requested = new Set(universeBySymbol.keys());
@@ -50,7 +53,7 @@ export function buildVerifiedSureshotShortlist({
     const ageMs = now - timestampMs;
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct) ||
         !Number.isFinite(timestampMs) || ageMs < -5000 || ageMs > maxEquityQuoteAgeMs) {
-      throw new Error("stale_or_invalid_fno_quote_snapshot");
+      continue;
     }
     candidates.push({
       symbol,
@@ -63,7 +66,7 @@ export function buildVerifiedSureshotShortlist({
       quoteAgeSeconds: Math.max(0, Number((ageMs / 1000).toFixed(1)))
     });
   }
-  if (seen.size !== requested.size) throw new Error("incomplete_fno_quote_coverage");
+  if (seen.size === 0) throw new Error("no_fresh_fno_quote_candidates");
 
   const ticks = indexTicks instanceof Map ? indexTicks : new Map(Object.entries(indexTicks || {}));
   for (const symbol of INDEX_SYMBOLS) {
@@ -98,11 +101,13 @@ export function buildVerifiedSureshotShortlist({
     .slice(0, 10).map((row, index) => ({ rank: index + 1, ...row }));
   return {
     ok: true,
-    source: "FYERS complete NSE F&O quote snapshot + individually fresh FYERS WebSocket index ticks",
+    source: "FYERS individually fresh NSE F&O quotes + individually fresh FYERS WebSocket index ticks",
     verified: true,
     universeCount: requested.size + candidates.filter(row => row.underlyingType === "INDEX").length,
+    quotedEquityCount: equityRows.length,
+    partialQuoteCoverage: equityRows.length !== requested.size,
     candidateCount: candidates.length,
-    rankedBy: "absolute FYERS percentage change; complete F&O equities plus individually fresh NIFTY/BANKNIFTY/SENSEX ticks",
+    rankedBy: "absolute FYERS percentage change; individually fresh F&O equities plus fresh NIFTY/BANKNIFTY/SENSEX ticks",
     topGainers,
     topLosers,
     equityCandidates: equityRows.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct) || a.symbol.localeCompare(b.symbol)),

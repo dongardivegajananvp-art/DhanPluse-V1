@@ -13,12 +13,12 @@ test("NSE and MCX Sureshot cursors share the same FYERS REST priority gate", () 
   assert.match(route, /shouldPauseLastKnownStockRefresh/);
   assert.ok(route.indexOf("lastKnownStockCache.data &&") < route.indexOf("shouldPauseLastKnownStockRefresh"), "fresh display cache is returned before REST refresh is paused");
 });
-test("MCX quote rows are rebuilt in route scope after the complete socket audit and before ranking", () => {
+test("MCX route ranks individually fresh contracts and revalidates each candidate at publication", () => {
   const start = server.indexOf('app.get("/api/market/mcx-sureshot-auto-plans"');
   const end = server.indexOf("// Last-known F&O equity quotes", start);
   const route = server.slice(start, end);
-  const guard = route.indexOf("if (!mcxAudit.complete)");
-  const ranked = route.indexOf("const ranked = buildVerifiedMcxShortlist");
-  const rebuilt = route.lastIndexOf("const quoteRows = buildMcxSocketQuoteRows(universe.data, latestTicks)", ranked);
-  assert.ok(guard >= 0 && ranked > guard && rebuilt > guard && rebuilt < ranked);
+  assert.ok(route.includes("if (!mcxAudit.freshQuoteCount)"));
+  assert.ok(route.includes("const ranked = { data: mcxAudit.data, candidateCount: mcxAudit.candidateCount }"));
+  assert.ok(route.includes("if (!finalFuturesAudit.freshQuoteCount)"));
+  assert.ok(route.includes("const finalFutureBySymbol = new Map(finalFuturesAudit.data.map"));
 });

@@ -23,7 +23,7 @@ test("MCX socket audit uses exchange-stamped ticks for every requested future", 
   assert.equal(audit.data[0].symbol, universe[0].symbol);
 });
 
-test("MCX socket audit keeps missing and stale contracts visible and blocks ranking", () => {
+test("MCX socket audit keeps missing and stale contracts visible but retains fresh candidates", () => {
   const ticks = new Map([
     [universe[0].symbol, { ltp: 6500, chp: 1.25, updatedAt: new Date(now).toISOString() }],
     [universe[1].symbol, { ltp: 7000, chp: -0.5, updatedAt: new Date(now - 60_000).toISOString() }]
@@ -32,7 +32,8 @@ test("MCX socket audit keeps missing and stale contracts visible and blocks rank
     universe, quoteRows: buildMcxSocketQuoteRows(universe, ticks), now, maxAgeMs: 30_000
   });
   assert.equal(audit.complete, false);
-  assert.equal(audit.data.length, 0);
+  assert.equal(audit.data.length, 1);
+  assert.equal(audit.data[0].symbol, universe[0].symbol);
   assert.equal(audit.audit[0].status, "FRESH_QUOTE");
   assert.equal(audit.audit[1].status, "STALE_OR_INVALID_QUOTE");
 });
@@ -107,4 +108,25 @@ test("MCX socket settle window times out without relaxing freshness", async () =
 test("MCX server route imports the socket audit settle helper it invokes", async () => {
   const serverSource = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   assert.match(serverSource, /import\s*\{[^}]*\bwaitForCompleteMcxSocketAudit\b[^}]*\}\s*from\s*[\x27"]\.\/mcx-socket-audit\.js[\x27"]/);
+});
+
+
+test("MCX scan proceeds after a short settle when at least one contract has a fresh tick", async () => {
+  let clock = now;
+  let reads = 0;
+  const { waitForCompleteMcxSocketAudit } = await import("../src/mcx-socket-audit.js");
+  const partial = { complete: false, freshQuoteCount: 10, coverage: { fresh: 10, missing: 1 } };
+  const result = await waitForCompleteMcxSocketAudit({
+    now: () => clock,
+    sleep: async (ms) => { clock += ms; },
+    timeoutMs: 60_000,
+    pollIntervalMs: 1_000,
+    minimumPartialWaitMs: 5_000,
+    getAudit: async () => { reads++; return partial; }
+  });
+  assert.equal(reads, 6);
+  assert.equal(result.audit.freshQuoteCount, 10);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.partial, true);
+  assert.equal(result.waitedMs, 5_000);
 });
