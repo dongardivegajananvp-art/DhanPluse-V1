@@ -111,6 +111,7 @@ test("requires quote rows to be unique and within the declared verified partial 
     /fno_quote_coverage_mismatch/);
   const staleLast = structuredClone(quoteSnapshot);
   staleLast.data[217].v.tt = Math.floor((now - 30001) / 1000);
-  assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: staleLast, universe, indexTicks, now }),
-    /stale_or_invalid_fno_quote_snapshot/);
+  const staleLastResult = buildVerifiedSureshotShortlist({ quoteSnapshot: staleLast, universe, indexTicks, now });
+  assert.equal(staleLastResult.quotedEquityCount, 217);
+  assert.equal(staleLastResult.partialQuoteCoverage, true);
 });
