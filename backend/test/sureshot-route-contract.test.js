@@ -178,7 +178,7 @@ test("MCX Sureshot passes its own stage context to every FYERS REST call", () =>
   const route = server.slice(start, end);
   assert.doesNotMatch(route, /stage: scanStage/,
     "scanStage belongs to the separate NSE route and is undefined in the MCX handler");
-  const calls = [...route.matchAll(/fyersReadOnlyGet\([^;]*?\{ priority: "sureshot", stage \}\)/gs)];
+  const calls = [...route.matchAll(/fyersReadOnlyGet\([^;]*?\{ priority: "sureshot", stage(?:, bypassCache: true)? \}\)/gs)];
   assert.equal(calls.length, 6, "all six MCX FYERS history/quote requests pass the current MCX stage");
   assert.equal((route.match(/stage: scanStage/g) || []).length, 0,
     "the MCX handler must not reference the NSE-only stage variable");
@@ -316,4 +316,24 @@ test("MCX automatic scan starts after full-universe subscription without circula
   assert.match(gate, /subscribed === required/);
   assert.doesNotMatch(gate, /mcx\.feed === 'LIVE'/);
   assert.match(gate, /mcx\.feed !== 'DISCONNECTED'/);
+});
+
+
+test("Sureshot reuses cached candidate candles but forces fresh final candle revalidation", async () => {
+  const serverSource = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
+  const helperStart = serverSource.indexOf("async function fyersReadOnlyGet");
+  const helperEnd = serverSource.indexOf("app.get('/api/market/chart-quote'", helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  const helper = serverSource.slice(helperStart, helperEnd);
+  assert.match(helper, /\bbypassCache\b/);
+  assert.equal(helper.includes("bypassCache: bypassCache ||"), false);
+
+  const routeStart = serverSource.indexOf('app.get("/api/market/mcx-sureshot-auto-plans"');
+  const routeEnd = serverSource.indexOf("// Last-known F&O equity quotes", routeStart);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart);
+  const route = serverSource.slice(routeStart, routeEnd);
+  assert.match(route, /VERIFY_MCX_UNDERLYING_CANDLES[\s\S]{0,500}fyersReadOnlyGet\(historyUrl, \{ priority: "sureshot", stage \}\)/);
+  assert.match(route, /VERIFY_MCX_OPTION_CANDLES[\s\S]{0,500}fyersReadOnlyGet\(historyUrl, \{ priority: "sureshot", stage \}\)/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_UNDERLYING[\s\S]{0,220}bypassCache: true/);
+  assert.match(route, /FINAL_REVALIDATE_MCX_OPTION_CANDLES[\s\S]{0,220}bypassCache: true/);
 });
