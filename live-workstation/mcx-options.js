@@ -137,9 +137,12 @@ export function evaluateMxcTrendPullback(candles, tick, contract = null) {
   }
   const closes = recent.map(candle => Number(candle.close));
   const ema = (values, period) => {
+    if (values.length < period) return NaN;
+    // Seed each EMA with the period SMA, then apply the standard EMA recurrence.
+    // This avoids initializing EMA50 from a single first candle.
+    let value = values.slice(0, period).reduce((sum, close) => sum + close, 0) / period;
     const alpha = 2 / (period + 1);
-    let value = values[0];
-    for (let index = 1; index < values.length; index++) value = values[index] * alpha + value * (1 - alpha);
+    for (let index = period; index < values.length; index++) value = values[index] * alpha + value * (1 - alpha);
     return value;
   };
   const ema20 = ema(closes, 20);
