@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --check server.js && node --check token-reader.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=20"
