@@ -17,12 +17,15 @@ permissions:
 jobs:
   workstation:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 26]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: ${{ matrix.node-version }}
       - name: Install workstation dependencies
         working-directory: live-workstation
         run: npm install --no-audit --no-fund

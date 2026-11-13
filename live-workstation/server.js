@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
+import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -263,7 +264,8 @@ app.get('/api/history',async(req,res)=>{
   const symbol=String(req.query.symbol||'');
   if(symbol!==selectedSymbol)return res.status(409).json({error:'Select symbol before requesting history'});
   if(!authReady())return res.status(401).json({error:'Connect FYERS first'});
-  if(historyCache.has(symbol))return res.json({...historyCache.get(symbol),cached:true});
+  const cachedHistory=historyCache.get(symbol);
+  if(cachedHistory&&isHistoryCacheFresh(cachedHistory.fetchedAt))return res.json({...cachedHistory,cached:true});
   try{
     const now=Math.floor(Date.now()/1000),to=now-300,from=to-5*24*60*60;
     const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
@@ -291,10 +293,10 @@ async function loadGainerHistory(symbol){
 }
 function evaluateGainerBreakout(candles,tick){
  if(!freshTick(tick))return{status:'WAITING_FOR_FRESH_TICK',reason:'Underlying exchange tick is not fresh'};
- const currentBucket=Math.floor(Number(tick.exchangeTime)/300)*300,completed=candles[candles.length-1]?.time===currentBucket?candles.slice(0,-1):candles;
+ const {completed,lastClosed,fresh,contiguous}=getCompletedCandleWindow(candles,tick.exchangeTime);
  if(completed.length<21)return{status:'WAITING_FOR_21_COMPLETED_CANDLES',reason:'Need at least 21 completed FYERS 5-minute candles'};
- const lastClosed=completed[completed.length-1],candleAge=Number(tick.exchangeTime)-(Number(lastClosed.time)+300);
- if(!Number.isFinite(candleAge)||candleAge< -3||candleAge>600)return{status:'STALE_CANDLES',reason:'Latest completed 5-minute candle is stale'};
+ if(!fresh)return{status:'STALE_CANDLES',reason:'Latest completed 5-minute candle is stale'};
+ if(!contiguous)return{status:'INCOMPLETE_CANDLE_WINDOW',reason:'Breakout window contains missing 5-minute candles'};
  const prior=completed.slice(-21,-1),swing=completed.slice(-5),resistance=Math.max(...prior.map(c=>c.high)),support=Math.min(...prior.map(c=>c.low));
  let plan=null;
  if(lastClosed.close>resistance&&Number(tick.price)>=lastClosed.close){const sl=Math.min(...swing.map(c=>c.low)),risk=lastClosed.close-sl;if(risk>0)plan={side:'LONG',entry:lastClosed.close,stopLoss:sl,target:lastClosed.close+2*risk,rr:'1:2'};}
