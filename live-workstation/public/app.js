@@ -92,7 +92,7 @@ function renderMcxSetup(data){
  ];
  for(const [label,value] of rows){const line=document.createElement('div');line.className='mcx-setup-row';const key=document.createElement('span');key.textContent=label;const val=document.createElement('strong');val.textContent=value;line.append(key,val);root.append(line)}
  const note=document.createElement('small');note.textContent='FYERS verified data only · Analysis only · LIVE ORDER GATE LOCKED';root.append(note);
- selectedOption={...data.contract};optionContracts=[selectedOption];$('qty').value=selectedOption.lotSize;$('qty').min=selectedOption.lotSize;$('qty').step=selectedOption.lotSize;updatePremium();
+ selectedOption={...data.contract};optionContracts=[selectedOption];const contractSelect=$('contract');contractSelect.replaceChildren(new Option(data.contract.symbol+' · '+data.contract.side+' · '+fmt(data.contract.strike),data.contract.symbol));contractSelect.value=data.contract.symbol;contractSelect.disabled=true;$('qty').value=selectedOption.lotSize;$('qty').min=selectedOption.lotSize;$('qty').step=selectedOption.lotSize;updatePremium();
 }
 async function scanMcxBestSetup(attempt=0){
  if(!selected.startsWith('MCX:')||mcxScanBusy)return;
