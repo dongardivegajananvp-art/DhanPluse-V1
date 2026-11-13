@@ -332,7 +332,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
     mcxOptionCandidateSymbols=candidates.map(contract=>contract.symbol);
     syncSocketSubscriptions({reason:'mcx_option_candidate_scan'});
     const freshCandidates=candidates.filter(contract=>freshTick(lastTicks.get(contract.symbol)));
-    if(!freshCandidates.length)return{status:'WAITING_FOR_OPTION_TICKS',reason:'Subscribed to nearest-expiry ATM CE/PE candidates; waiting for fresh option exchange ticks',side:underlyingSetup.side,candidates:candidates.map(({symbol,side,strike,expiryDate})=>({symbol,side,strike,expiry:expiryDate}))};
+    if(freshCandidates.length!==candidates.length)return{status:'WAITING_FOR_OPTION_TICKS',reason:'Fresh option exchange ticks '+freshCandidates.length+'/'+candidates.length+'; waiting to compare every nearest-strike candidate',side:underlyingSetup.side,candidates:candidates.map(({symbol,side,strike,expiryDate})=>({symbol,side,strike,expiry:expiryDate}))};
     const valid=[];
     const rejected=[];
     for(const contract of freshCandidates){
