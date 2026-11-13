@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: gv2vpd-live-workstation
+    runtime: node
+    plan: free
+    region: singapore
+    rootDir: live-workstation
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: false
+    envVars:
+      - key: APP_ORIGIN
+        value: https://gv2vpd-live-workstation.onrender.com
+      - key: WORKSTATION_ACCESS_PASSWORD
+        sync: false
+      - key: FYERS_APP_ID
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: FYERS_TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: LIVE_ORDERS_ENABLED
+        value: "false"
+      - key: FYERS_STATIC_IP_CONFIRMED
+        value: "false"
