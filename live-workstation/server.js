@@ -320,6 +320,8 @@ app.get('/api/mcx/scan',async(req,res)=>{
     const underlyingSetup=evaluateMxcUnderlyingBreakout(underlyingHistory.candles,futureTick);
     if(underlyingSetup.status!=='SETUP_CONFIRMED')return{...underlyingSetup,source:'FYERS MCX futures tick + completed 5-minute candles'};
     const master=await loadMcxComMaster();
+    const futureMeta=master?.[future];
+    if(!futureMeta||Number(futureMeta.tradeStatus)!==1)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Exact MCX futures contract is not active in the official FYERS Symbol Master'};
     const contracts=listMxcOptionContracts(master,future);
     const candidates=pickMxcOptionCandidates(contracts,futureTick.price,underlyingSetup.side,3).map(contract=>({...contract,underlyingPrice:futureTick.price}));
     if(!candidates.length)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'No active FYERS MCX option contracts for the nearest expiry'};
@@ -333,7 +335,9 @@ app.get('/api/mcx/scan',async(req,res)=>{
     for(const contract of freshCandidates){
       try{
         const history=await loadMxcHistory(contract.symbol);
-        const setup=evaluateMxcOptionBreakout(history.candles,lastTicks.get(contract.symbol),contract);
+        const optionTick=lastTicks.get(contract.symbol);
+        if(!freshTick(optionTick)){rejected.push({symbol:contract.symbol,reason:'Option tick became stale during candle verification'});continue;}
+        const setup=evaluateMxcOptionBreakout(history.candles,optionTick,contract);
         if(setup.status==='SETUP_CONFIRMED')valid.push({...setup,contract});
         else rejected.push({symbol:contract.symbol,reason:setup.reason});
       }catch(error){
@@ -341,6 +345,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
         rejected.push({symbol:contract.symbol,reason:String(error?.message||error).slice(0,120)});
       }
     }
+    if(!freshTick(lastTicks.get(future)))return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX futures tick became stale during option verification'};
     if(!valid.length)return{status:'NO_TRADE',reason:rejected.length?'No candidate passed fresh option-candle breakout and 1:2 risk/reward checks':'Waiting for verified option history',side:underlyingSetup.side,rejected};
     valid.sort((a,b)=>b.score-a.score||a.contract.strikeDistance-b.contract.strikeDistance);
     const best=valid[0];
