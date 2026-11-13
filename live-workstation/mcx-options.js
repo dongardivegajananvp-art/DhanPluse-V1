@@ -139,7 +139,7 @@ export function evaluateMxcTrendPullback(candles, tick) {
     for (let index = 1; index < values.length; index++) value = values[index] * alpha + value * (1 - alpha);
     return value;
   };
-  const ema20 = ema(closes.slice(-20), 20);
+  const ema20 = ema(closes, 20);
   const ema50 = ema(closes, 50);
   const prior = recent[recent.length - 2];
   const last = recent[recent.length - 1];
