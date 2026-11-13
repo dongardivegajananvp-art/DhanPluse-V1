@@ -1,3 +1,4 @@
+import {createSharedTokenReader} from './token-reader.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -17,6 +18,7 @@ app.use(express.static(new URL('./public',import.meta.url).pathname));
 const appId=(process.env.FYERS_APP_ID||'').trim();
 const appSecret=(process.env.FYERS_APP_SECRET||'').trim();
 const redirectUri=(process.env.FYERS_REDIRECT_URI||'').trim();
+const tokenReader=createSharedTokenReader({databaseUrl:process.env.DATABASE_URL,encryptionKey:process.env.FYERS_TOKEN_ENCRYPTION_KEY});
 let accessToken='';
 let socket=null;
 let connected=false;
@@ -25,7 +27,7 @@ let lastTicks=new Map();
 let socketGeneration=0;
 const pendingOrders=new Map();
 
-function authReady(){return Boolean(appId&&appSecret&&redirectUri&&accessToken);}
+function authReady(){return Boolean(appId&&accessToken);}
 function ensureSocket(){
   if(!authReady()||socket)return;
   const owned=fyersDataSocket.getInstance(`${appId}:${accessToken}`,'',false);
@@ -61,4 +63,4 @@ app.get('/api/history',async(req,res)=>{
 });
 app.post('/api/order',async(req,res)=>{if(process.env.LIVE_ORDERS_ENABLED!=='true')return res.status(423).json({error:'Live orders are disabled until broker authentication, risk controls and order tests are complete'});if(!authReady())return res.status(401).json({error:'Connect FYERS first'});const {symbol,side,qty,type,productType,limitPrice,stopLoss,takeProfit,confirm}=req.body||{};if(confirm!==true)return res.status(400).json({error:'Explicit order confirmation required'});if(!/^NSE:[A-Z0-9&_-]+(CE|PE)$/.test(String(symbol))||!['BUY','SELL'].includes(side)||!Number.isInteger(Number(qty))||Number(qty)<1||Number(qty)>Number(process.env.MAX_ORDER_QTY||1))return res.status(400).json({error:'Order validation failed'});return res.status(501).json({error:'Broker order adapter is not enabled in this build; no order was sent'});});
 app.get('/api/positions',(_req,res)=>res.json({positions:[],orders:[],source:'FYERS order/position adapter pending'}));
-app.listen(Number(process.env.PORT)||10000,'0.0.0.0',()=>console.log('GV2VPD Live Workstation listening'));
+const server=app.listen(Number(process.env.PORT)||10000,'0.0.0.0',()=>console.log('GV2VPD Live Workstation listening'));\nasync function restoreSharedFyersSession(){if(!tokenReader){console.warn('Shared encrypted FYERS token reader is not configured; market stream remains disconnected.');return;}try{const saved=await tokenReader.read();if(!saved){console.warn('No encrypted FYERS session found in shared token store.');return;}accessToken=saved.accessToken;console.log('Existing encrypted FYERS session restored read-only; authenticatedAt='+saved.authenticatedAt);ensureSocket();}catch(error){console.error('Could not restore shared FYERS session:',String(error?.message||error).slice(0,160));}}\nvoid restoreSharedFyersSession();\nserver.on('error',error=>console.error('Workstation HTTP server error:',error.message));
