@@ -4,7 +4,8 @@ import {
   listMxcOptionContracts,
   pickMxcOptionCandidates,
   evaluateMxcUnderlyingBreakout,
-  evaluateMxcOptionBreakout
+  evaluateMxcOptionBreakout,
+  evaluateMxcTrendPullback
 } from './mcx-options.js';
 
 const now = Date.parse('2026-11-13T10:30:00Z');
@@ -62,4 +63,66 @@ test('option breakout returns a tick-aligned minimum 1:2 plan only with fresh pr
   assert.ok(result.entry > result.stopLoss);
   assert.ok(result.target > result.entry);
   assert.equal(evaluateMxcOptionBreakout(candles(), tick, contract).status, 'NO_TRADE');
+});
+
+
+function trendCandles() {
+  const start = Math.floor(now / 300000) * 300 - 60 * 300;
+  const rows = Array.from({ length: 60 }, (_, i) => ({
+    time: start + i * 300,
+    open: 100 + i * 0.5,
+    high: 101 + i * 0.5,
+    low: 99 + i * 0.5,
+    close: 100 + i * 0.5,
+    volume: 1
+  }));
+  rows[58] = { time: start + 58 * 300, open: 127, high: 129, low: 122, close: 124, volume: 1 };
+  rows[59] = { time: start + 59 * 300, open: 124.5, high: 130, low: 124, close: 129.5, volume: 1 };
+  return rows;
+}
+
+test('EMA20/EMA50 pullback fails closed without 51 completed fresh candles', () => {
+  const tick = { price: 129.6, exchangeTime: Math.floor(now / 1000) + 60 };
+  assert.equal(evaluateMxcTrendPullback(trendCandles().slice(-40), tick).status, 'DATA_UNAVAILABLE_NO_TRADE');
+  assert.equal(evaluateMxcTrendPullback(trendCandles(), { ...tick, exchangeTime: 1 }).status, 'DATA_UNAVAILABLE_NO_TRADE');
+});
+
+test('EMA20/EMA50 pullback confirms only a bullish completed-candle reclaim and tick-aligned 1:2 option plan', () => {
+  const tick = { price: 129.6, exchangeTime: Math.floor(now / 1000) + 60 };
+  const contract = { tickSize: 0.05 };
+  const result = evaluateMxcTrendPullback(trendCandles(), tick, contract);
+  assert.equal(result.status, 'SETUP_CONFIRMED');
+  assert.equal(result.strategy, 'B_EMA20_EMA50_TREND_PULLBACK');
+  assert.equal(result.side, 'LONG');
+  assert.ok(result.entry > result.stopLoss);
+  assert.ok(result.target > result.entry);
+  assert.ok(result.rr >= 2);
+  assert.equal(Math.round(result.stopLoss / 0.05), result.stopLoss / 0.05);
+  assert.equal(Math.round(result.target / 0.05), result.target / 0.05);
+});
+
+test('EMA20/EMA50 option premium BUY setup rejects bearish premium reclaim and missing tick metadata', () => {
+  const tick = { price: 129.6, exchangeTime: Math.floor(now / 1000) + 60 };
+  assert.equal(evaluateMxcTrendPullback(trendCandles(), tick, { tickSize: 0 }).status, 'DATA_UNAVAILABLE_NO_TRADE');
+});
+
+function bearishTrendCandles() {
+  const start = Math.floor(now / 300000) * 300 - 60 * 300;
+  const rows = Array.from({ length: 60 }, (_, i) => {
+    const close = 160 - i * 0.5;
+    return { time: start + i * 300, open: close + 0.5, high: close + 1, low: close - 1, close, volume: 1 };
+  });
+  rows[58] = { time: start + 58 * 300, open: 132, high: 138, low: 130, close: 136, volume: 1 };
+  rows[59] = { time: start + 59 * 300, open: 136, high: 137, low: 129, close: 129.5, volume: 1 };
+  return rows;
+}
+
+test('EMA20/EMA50 bearish reclaim is valid for underlying analysis but blocked as a long option-premium BUY', () => {
+  const tick = { price: 129.4, exchangeTime: Math.floor(now / 1000) + 60 };
+  const underlying = evaluateMxcTrendPullback(bearishTrendCandles(), tick);
+  assert.equal(underlying.status, 'SETUP_CONFIRMED');
+  assert.equal(underlying.side, 'SHORT');
+  const optionPremium = evaluateMxcTrendPullback(bearishTrendCandles(), tick, { tickSize: 0.05 });
+  assert.equal(optionPremium.status, 'NO_TRADE');
+  assert.match(optionPremium.reason, /bullish reclaim/);
 });
