@@ -94,7 +94,7 @@ function renderMcxSetup(data){
   ['Risk : Reward','1 : '+Number(data.rr).toFixed(2)]
  ];
  for(const [label,value] of rows){const line=document.createElement('div');line.className='mcx-setup-row';const key=document.createElement('span');key.textContent=label;const val=document.createElement('strong');val.textContent=value;line.append(key,val);root.append(line)}
- const note=document.createElement('small');note.textContent='FYERS verified data only · Analysis only · LIVE ORDER GATE LOCKED';root.append(note);
+ const note=document.createElement('small');note.textContent='FYERS verified B setup · Order gate requires production safety enablement';root.append(note);
  selectedOption={...data.contract,strategy:data.strategy||'B_EMA20_EMA50_TREND_PULLBACK'};optionContracts=[selectedOption];const contractSelect=$('contract');contractSelect.replaceChildren(new Option(data.contract.symbol+' · '+data.contract.side+' · '+fmt(data.contract.strike),data.contract.symbol));contractSelect.value=data.contract.symbol;contractSelect.disabled=true;$('qty').value=selectedOption.lotSize;$('qty').min=selectedOption.lotSize;$('qty').step=selectedOption.lotSize;$('sl').value=String(data.stopLoss);$('target').value=String(data.target);if([...$('product').options].some(o=>o.value==='MARGIN'))$('product').value='MARGIN';updatePremium();
 }
 async function scanMcxBestSetup(attempt=0){
