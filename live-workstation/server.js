@@ -22,7 +22,6 @@ let socket=null;
 let connected=false;
 let selectedSymbol='';
 let lastTicks=new Map();
-let reconnectTimer=null;
 let socketGeneration=0;
 const pendingOrders=new Map();
 
@@ -32,12 +31,12 @@ function ensureSocket(){
   const owned=fyersDataSocket.getInstance(`${appId}:${accessToken}`,'',false);
   socket=owned; socketGeneration++;
   owned.on('connect',()=>{if(socket!==owned)return;connected=true;try{owned.mode(owned.FullMode);owned.subscribe(['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX',...(selectedSymbol?[selectedSymbol]:[])]);}catch(e){console.error('subscribe failed',e.message);}});
-  owned.on('message',msg=>{if(socket!==owned)return;const rows=Array.isArray(msg)?msg:[msg];for(const row of rows){const symbol=row?.symbol||row?.n||row?.s;if(!symbol)continue;const price=Number(row.lp??row.ltp??row.v?.lp);const stamp=Number(row.ft??row.timestamp??row.v?.ft);if(!Number.isFinite(price)||price<=0||!Number.isFinite(stamp))continue;lastTicks.set(symbol,{symbol,price,exchangeTime:stamp,receivedAt:Date.now()});}});
+  owned.on('message',raw=>{if(socket!==owned)return;let msg=raw;try{if(typeof raw==='string')msg=JSON.parse(raw);else if(Buffer.isBuffer(raw))msg=JSON.parse(raw.toString('utf8'));}catch{return;}const rows=Array.isArray(msg)?msg:[msg];for(const row of rows){if(!row||typeof row!=='object')continue;const symbol=row.symbol||row.n||row.s;const price=Number(row.ltp??row.lp??row.v?.lp);const stamp=Number(row.exch_feed_time??row.last_traded_time??row.ltt??row.tt??row.ft??row.timestamp??row.v?.exch_feed_time??row.v?.ltt??row.v?.ft);if(!symbol||!Number.isFinite(price)||price<=0||!Number.isFinite(stamp)||stamp<=0)continue;lastTicks.set(symbol,{symbol,price,exchangeTime:stamp,receivedAt:Date.now()});}});
   owned.on('error',e=>{connected=false;console.error('FYERS socket error',String(e?.message||e));});
-  owned.on('close',()=>{if(socket!==owned)return;connected=false;socket=null;clearTimeout(reconnectTimer);reconnectTimer=setTimeout(()=>{reconnectTimer=null;ensureSocket();},5000);});
+  owned.on('close',()=>{if(socket!==owned)return;connected=false;});
   const reconnect=typeof owned.autoreconnect==='function'?owned.autoreconnect.bind(owned):typeof owned.autoReconnect==='function'?owned.autoReconnect.bind(owned):null;
   if(!reconnect)throw new Error('FYERS SDK auto-reconnect unavailable');
-  reconnect(20);owned.connect();
+  reconnect(50);owned.connect();
 }
 app.get('/api/health',(_req,res)=>res.json({ok:true,authenticated:authReady(),socketConnected:connected,marketData:'exchange-timestamp-required',orderMode:process.env.LIVE_ORDERS_ENABLED==='true'?'LIVE':'DISABLED'}));
 app.get('/api/market',(_req,res)=>res.json({connected,quotes:[...lastTicks.values()]}));
