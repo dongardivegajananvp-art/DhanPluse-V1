@@ -64,7 +64,7 @@ const subscribedSymbols=new Set();
 const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
 function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!socket||!connected)return {subscribed:0,removed:0};
-  const wanted=new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...fnoMoversCache.rows.map(x=>x.symbol)]);
+  const wanted=new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol]).filter(Boolean)]);
   const add=[...wanted].filter(x=>force||!subscribedSymbols.has(x));
   const remove=[...subscribedSymbols].filter(x=>!wanted.has(x));
   if(remove.length&&typeof socket.unsubscribe==='function'){
@@ -258,6 +258,7 @@ app.get('/api/health',(_req,res)=>{
 app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,underlying:row.underlyingSymbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
 app.post('/api/select-symbol',(req,res)=>{const symbol=String(req.body?.symbol||'').trim();if(!/^(NSE|BSE):[A-Z0-9&_.-]{2,48}(?:-(EQ|INDEX)|[0-9]{2}[A-Z0-9]+FUT)$/.test(symbol)&&!/^MCX:[A-Z0-9&_.-]{3,48}$/.test(symbol))return res.status(400).json({error:'Invalid FYERS NSE/BSE cash-index or MCX contract symbol'});selectedSymbol=symbol;syncSocketSubscriptions();res.json({selectedSymbol,exchange:symbol.split(':')[0],historyFetch:'on-demand-only'});});
 const historyCache=new Map();
+const gainerHistoryCache=new Map();
 app.get('/api/history',async(req,res)=>{
   const symbol=String(req.query.symbol||'');
   if(symbol!==selectedSymbol)return res.status(409).json({error:'Select symbol before requesting history'});
@@ -274,6 +275,45 @@ app.get('/api/history',async(req,res)=>{
     const result={symbol,resolution:'5',candles,source:'FYERS Data API',fetchedAt:new Date().toISOString()};
     historyCache.set(symbol,result);res.set('Cache-Control','no-store').json(result);
   }catch(e){res.status(502).json({error:'FYERS history request failed',detail:String(e?.message||e).slice(0,180)});}
+});
+
+
+async function loadGainerHistory(symbol){
+ const cached=gainerHistoryCache.get(symbol);if(cached&&Date.now()-cached.cachedAt<300000)return cached;
+ const now=Math.floor(Date.now()/1000),to=now-300,from=to-5*24*60*60;
+ const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
+ const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000});
+ const payload=await response.json().catch(()=>({}));
+ if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles)){const error=new Error('FYERS did not return verified 5-minute candles for top gainer');error.statusCode=response.status;error.retryAfterMs=Number(payload.retryAfterSeconds)*1000||fyersRetryAfterMs(response);throw error;}
+ const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))&&Number(c[3])>0).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
+ if(!candles.length)throw new Error('No valid FYERS 5-minute candles for top gainer');
+ const result={symbol,candles,source:'FYERS Data API',cachedAt:Date.now(),fetchedAt:new Date().toISOString()};gainerHistoryCache.set(symbol,result);return result;
+}
+function evaluateGainerBreakout(candles,tick){
+ if(!freshTick(tick))return{status:'WAITING_FOR_FRESH_TICK',reason:'Underlying exchange tick is not fresh'};
+ const currentBucket=Math.floor(Number(tick.exchangeTime)/300)*300,completed=candles[candles.length-1]?.time===currentBucket?candles.slice(0,-1):candles;
+ if(completed.length<21)return{status:'WAITING_FOR_21_COMPLETED_CANDLES',reason:'Need at least 21 completed FYERS 5-minute candles'};
+ const lastClosed=completed[completed.length-1],candleAge=Number(tick.exchangeTime)-(Number(lastClosed.time)+300);
+ if(!Number.isFinite(candleAge)||candleAge< -3||candleAge>600)return{status:'STALE_CANDLES',reason:'Latest completed 5-minute candle is stale'};
+ const prior=completed.slice(-21,-1),swing=completed.slice(-5),resistance=Math.max(...prior.map(c=>c.high)),support=Math.min(...prior.map(c=>c.low));
+ let plan=null;
+ if(lastClosed.close>resistance&&Number(tick.price)>=lastClosed.close){const sl=Math.min(...swing.map(c=>c.low)),risk=lastClosed.close-sl;if(risk>0)plan={side:'LONG',entry:lastClosed.close,stopLoss:sl,target:lastClosed.close+2*risk,rr:'1:2'};}
+ else if(lastClosed.close<support&&Number(tick.price)<=lastClosed.close){const sl=Math.max(...swing.map(c=>c.high)),risk=sl-lastClosed.close;if(risk>0)plan={side:'SHORT',entry:lastClosed.close,stopLoss:sl,target:lastClosed.close-2*risk,rr:'1:2'};}
+ return plan?{status:'SETUP_CONFIRMED',...plan,candleTime:lastClosed.time,underlyingPrice:Number(tick.price)}:{status:'WAIT',reason:'No confirmed 20-candle breakout'};
+}
+app.get('/api/gainer-scan',async(_req,res)=>{
+ res.set('Cache-Control','no-store');if(!authReady())return res.status(401).json({error:'FYERS session unavailable',results:[]});
+ const movers=await loadFnoMovers();
+ if(!isNseRegularSession())return res.json({results:movers.rows.map(row=>({symbol:row.symbol,underlying:row.underlyingSymbol,status:'MARKET_CLOSED',reason:'Live breakout scan is disabled outside NSE regular session'})),source:'FYERS only'});
+ const results=[];
+ for(const row of movers.rows){
+  const tick=lastTicks.get(row.underlyingSymbol);
+  if(!freshTick(tick)){results.push({symbol:row.symbol,underlying:row.underlyingSymbol,status:'WAITING_FOR_FRESH_TICK',reason:'Waiting for fresh cash-equity exchange tick'});continue;}
+  try{const history=await loadGainerHistory(row.underlyingSymbol),setup=evaluateGainerBreakout(history.candles,tick);results.push({symbol:row.symbol,underlying:row.underlyingSymbol,price:tick.price,exchangeTime:tick.exchangeTime,candleTime:setup.candleTime||null,...setup});}
+  catch(error){results.push({symbol:row.symbol,underlying:row.underlyingSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,150)});if(Number(error?.statusCode)===429){for(const skipped of movers.rows.slice(results.length))results.push({symbol:skipped.symbol,underlying:skipped.underlyingSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'FYERS REST cooldown; no further upstream request was sent'});break;}}
+ }
+ console.info('FYERS top-five breakout scan completed.',JSON.stringify({count:results.length,setups:results.filter(x=>x.status==='SETUP_CONFIRMED').length,waiting:results.filter(x=>x.status!=='SETUP_CONFIRMED').length}));
+ res.json({results,source:'FYERS exchange ticks + FYERS 5-minute OHLC',scannedAt:new Date().toISOString()});
 });
 
 app.get('/api/options',async(req,res)=>{const underlying=String(req.query.symbol||'');if(!/^(NSE|BSE):[A-Z0-9&.-]+-EQ$/.test(underlying)&&!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(underlying))return res.status(400).json({error:'Select a valid NSE/BSE underlying'});if(!authReady())return res.status(401).json({error:'FYERS session unavailable'});const cached=optionChains.get(underlying);if(cached&&Date.now()-cached.fetchedAt<300000)return res.json(cached);try{const url=new URL(FYERS_DATA+'/options-chain-v3');url.searchParams.set('symbol',underlying);url.searchParams.set('strikecount','10');url.searchParams.set('greeks','0');const response=await fyersGet(url);const data=response.data;if(!data||!Array.isArray(data.optionsChain)||!data.optionsChain.length)throw new Error('FYERS option chain is empty');const master=underlying.startsWith('BSE:')?await loadBseFoMaster():await loadNseFoMaster();const contracts=data.optionsChain.filter(x=>['CE','PE'].includes(String(x.option_type||'').toUpperCase())&&typeof x.symbol==='string').map(x=>{const meta=optionMeta(x.symbol,master);return meta?{symbol:x.symbol,side:meta.side,strike:meta.strike,expiry:meta.expiryDate,lotSize:meta.lotSize,tickSize:meta.tickSize}:null;}).filter(Boolean);if(!contracts.length){const chainSymbols=data.optionsChain.slice(0,4).map(x=>String(x.symbol||'')).filter(Boolean);throw new Error('No active option contracts matched the FYERS Symbol Master; chainRows='+data.optionsChain.length+', masterRows='+Object.keys(master).length+', sample='+chainSymbols.join(','));}const result={underlying,contracts,expiries:data.expiryData||[],fetchedAt:Date.now(),source:'FYERS option chain + official NSE F&O Symbol Master'};optionChains.set(underlying,result);console.info('FYERS option-chain contracts verified.',JSON.stringify({underlying,contractCount:contracts.length,expiryCount:(data.expiryData||[]).length,fetchedAt:new Date(result.fetchedAt).toISOString(),cache:'MISS'}));res.json(result);}catch(e){console.error('FYERS option-chain refresh failed.',JSON.stringify({underlying,statusCode:e?.statusCode||null,retryAfterMs:e?.retryAfterMs||0,message:String(e.message||e).slice(0,180)}));res.status(e?.statusCode===429?429:502).json({error:'Option contract discovery failed closed',detail:String(e.message||e).slice(0,180),retryAfterMs:e?.retryAfterMs||0});}});

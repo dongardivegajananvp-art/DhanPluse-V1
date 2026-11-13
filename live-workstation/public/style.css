@@ -2,3 +2,5 @@
 .mcx-load{display:flex;gap:5px;margin-top:8px}.mcx-load input{width:190px;min-width:0;background:#0a1421;border:1px solid #31445d;color:#e7eef8;border-radius:5px;padding:8px;font-size:11px}.mcx-load button{background:#1b765f;border:0;color:#fff;border-radius:5px;padding:8px 10px;font-size:10px;font-weight:700}.chart-placeholder{overflow:auto}.chart-placeholder svg{width:100%;height:100%;min-width:600px;display:block}
 
 .gainer-card{cursor:pointer;background:#0b1421;border:1px solid #25364a;border-radius:6px;padding:10px;color:#c8d7e8;white-space:nowrap;font-size:11px}.gainer-card:hover{border-color:#42d6a0}.order-panel select:disabled{opacity:.65}.position-row{padding:8px 4px;border-bottom:1px solid #223248;color:#c2d0e1;font-size:11px}.chart-placeholder svg{width:100%;height:100%;min-width:600px;display:block}
+
+.gainer-scan-note{margin-top:8px;color:#8295ad;font-size:9px;letter-spacing:1px}.gainer-card{white-space:normal;min-width:190px;max-width:280px;line-height:1.5;text-align:left}.gainer-card:hover{transform:translateY(-1px)}
