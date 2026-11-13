@@ -197,7 +197,7 @@ function ensureSocket(){
         const price=Number(row.ltp??row.lp??value.lp??value.ltp);
         const stamp=toEpochSeconds(row.exch_feed_time??row.last_traded_time??row.ltt??row.tt??value.exch_feed_time??value.last_traded_time??value.ltt??value.tt);
         if(!symbol||!Number.isFinite(price)||price<=0||!Number.isFinite(stamp)||stamp<=0)continue;
-        const tick={symbol,price,exchangeTime:stamp,receivedAt:Date.now()};
+        const previousCloseRaw=row.prev_close_price??row.prevClose??row.prev_close??value.prev_close_price??value.prevClose??value.prev_close;const previousClose=Number(previousCloseRaw);const tick={symbol,price,previousClose:Number.isFinite(previousClose)&&previousClose>0?previousClose:null,exchangeTime:stamp,receivedAt:Date.now()};
         lastTicks.set(symbol,tick);
         if(symbol.startsWith('MCX:'))mcxTicks.set(symbol,tick);
         else if(symbol.startsWith('NSE:')||symbol.startsWith('BSE:'))nseTicks.set(symbol,tick);
