@@ -28,6 +28,19 @@ const nseTicks=new Map(),mcxTicks=new Map();
 let socketGeneration=0;
 const pendingOrders=new Map();
 
+const optionChains=new Map();
+let nseFoMaster=null,nseFoMasterFetchedAt=0,nseFoMasterPromise=null;
+let fnoMoversCache={rows:[],updatedAt:0,expiresAt:0,error:'Not loaded'};
+let fnoMoversPromise=null;
+const FYERS_DATA='https://api-t1.fyers.in/data';
+const FYERS_API='https://api-t1.fyers.in/api/v3';
+const freshTick=(tick,maxAgeMs=10000)=>Boolean(tick&&Date.now()-tick.receivedAt>=0&&Date.now()-tick.receivedAt<=maxAgeMs&&Date.now()/1000-Number(tick.exchangeTime)<=10&&Date.now()/1000-Number(tick.exchangeTime)>=-3);
+async function fyersGet(url){const r=await fetch(url,{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},signal:AbortSignal.timeout(12000)});const j=await r.json().catch(()=>({}));if(!r.ok||j.s==='error')throw new Error(String(j.message||j.code||'FYERS request failed'));return j;}
+async function fyersPost(url,body){const r=await fetch(url,{method:'POST',headers:{Authorization:appId+':'+accessToken,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(12000)});const j=await r.json().catch(()=>({}));if(!r.ok||j.s!=='ok')throw new Error(String(j.message||j.code||'FYERS order request failed'));return j;}
+async function loadNseFoMaster(){if(nseFoMaster&&Date.now()-nseFoMasterFetchedAt<86400000)return nseFoMaster;if(nseFoMasterPromise)return nseFoMasterPromise;nseFoMasterPromise=(async()=>{const r=await fetch('https://public.fyers.in/sym_details/NSE_FO_sym_master.json',{headers:{Accept:'application/json'},signal:AbortSignal.timeout(30000)});if(!r.ok)throw new Error('FYERS NSE F&O symbol master unavailable');const master=await r.json();if(!master||typeof master!=='object'||Array.isArray(master))throw new Error('Invalid FYERS symbol master');nseFoMaster=master;nseFoMasterFetchedAt=Date.now();return master;})().finally(()=>{nseFoMasterPromise=null});return nseFoMasterPromise;}
+function optionMeta(symbol,master){const x=master?.[symbol];if(!x||Number(x.tradeStatus)!==1||!['CE','PE'].includes(String(x.optType||'').toUpperCase()))return null;const lotSize=Number(x.minLotSize),tickSize=Number(x.tickSize),strike=Number(x.strikePrice);if(!Number.isInteger(lotSize)||lotSize<1||!Number.isFinite(tickSize)||tickSize<=0||!Number.isFinite(strike)||strike<=0)return null;return{symbol,side:String(x.optType).toUpperCase(),strike,lotSize,tickSize,expiryDate:String(x.expiryDate||'')};}
+
+
 function authReady(){return Boolean(appId&&accessToken);}
 function ensureSocket(){
   if(!authReady()||socket)return;
