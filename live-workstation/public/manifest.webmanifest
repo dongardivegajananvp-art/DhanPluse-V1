@@ -1,0 +1,24 @@
+{
+  "id": "/",
+  "name": "GV2VPD Live Trading Workstation",
+  "short_name": "GV2VPD",
+  "description": "Read-only FYERS live trading workstation.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a101b",
+  "theme_color": "#0a101b",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icons/gv2vpd.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": [
+    "finance",
+    "productivity"
+  ]
+}

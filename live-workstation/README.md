@@ -40,3 +40,9 @@ The new backend SELECTs the existing AES-256-GCM encrypted `dhanpulse_fyers_auth
 - FYERS SDK supports automatic reconnect with a retry count up to 50. The SDK documentation does not specify a strict five-second reconnect interval; this must be measured in a deployed test before claiming a 5-second SLA.
 - Production smoke verification on 2026-11-13 confirmed the encrypted FYERS session restored read-only, WebSocket connected, all three index feeds fresh, five F&O gainer underlying ticks fresh, the automatic top-five scan returned five results, and option-chain contracts were verified for POWERINDIA and AMBER. This is not a full validation of every broker endpoint.
 - No live order has been sent. Order placement remains disabled.
+
+## Installable PWA
+- The existing workstation is installable from supported mobile/desktop browsers using the web app manifest and service worker.
+- The service worker caches only the static app shell and offline fallback. All `/api/` requests bypass the cache; quotes, exchange timestamps, candles, option premiums, signals, positions and orders are never stored for offline display.
+- When offline, the fallback explicitly displays `NO LIVE DATA · NO TRADE`. Reconnect is required before FYERS data can be verified.
+- No new backend, site, login, FYERS session or order capability is introduced by the PWA shell.
