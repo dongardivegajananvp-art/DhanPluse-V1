@@ -48,7 +48,7 @@ export async function waitForCompleteMcxSocketAudit({
     audit = await getAudit();
     const elapsedMs = Math.max(0, now() - startedAt);
     if (audit?.complete || (Number(audit?.freshQuoteCount) > 0 && elapsedMs >= minimumPartialWaitMs)) {
-      return { audit, waitedMs: elapsedMs, timedOut: !audit.complete };
+      return { audit, waitedMs: elapsedMs, timedOut: elapsedMs >= timeoutMs, partial: !audit.complete };
     }
     const remainingMs = timeoutMs - elapsedMs;
     if (remainingMs <= 0) break;
