@@ -1,4 +1,4 @@
-const CACHE_NAME='gv2vpd-pwa-shell-v3';
+const CACHE_NAME='gv2vpd-pwa-shell-v4';
 const APP_SHELL=['/','/style.css','/app.js','/chart-safety.js','/manifest.webmanifest','/icons/gv2vpd.svg','/offline.html'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(APP_SHELL)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('gv2vpd-pwa-')&&key!==CACHE_NAME).map(key=>caches.delete(key)))).then(()=>self.clients.claim()))});
