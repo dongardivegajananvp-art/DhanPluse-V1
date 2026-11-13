@@ -11,7 +11,28 @@ const app=express();
 app.disable('x-powered-by');
 app.use(helmet({contentSecurityPolicy:false}));
 app.use(express.json({limit:'32kb'}));
-app.use(cors({origin:(origin,cb)=>cb(null,!origin||origin===process.env.APP_ORIGIN)}));
+app.use(cors({origin:(origin,cb)=>cb(null,!origin||origin===process.env.APP_ORIGIN),credentials:false}));
+function workstationBasicAuth(req,res,next){
+  if(req.method==='OPTIONS')return next();
+  const expected=String(process.env.WORKSTATION_ACCESS_PASSWORD||'');
+  if(expected.length<24)return res.status(503).send('Workstation access password is not configured.');
+  const header=String(req.headers.authorization||'');
+  const match=header.match(/^Basic\\s+([A-Za-z0-9+/=]+)$/i);
+  if(match){
+    let decoded='';
+    try{decoded=Buffer.from(match[1],'base64').toString('utf8');}catch{}
+    const split=decoded.indexOf(':');
+    const username=split>=0?decoded.slice(0,split):'';
+    const password=split>=0?decoded.slice(split+1):'';
+    const supplied=Buffer.from(password,'utf8'),wanted=Buffer.from(expected,'utf8');
+    const passwordOk=supplied.length===wanted.length&&crypto.timingSafeEqual(supplied,wanted);
+    if(username==='gv2vpd'&&passwordOk)return next();
+  }
+  res.set('WWW-Authenticate','Basic realm="GV2VPD Live Workstation", charset="UTF-8"');
+  return res.status(401).send('Authentication required.');
+}
+import crypto from 'node:crypto';
+app.use(workstationBasicAuth);
 app.use(express.static(new URL('./public',import.meta.url).pathname));
 
 const appId=(process.env.FYERS_APP_ID||'').trim();
