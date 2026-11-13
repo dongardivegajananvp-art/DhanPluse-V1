@@ -40,6 +40,14 @@ const tokenReader=createSharedTokenReader({databaseUrl:process.env.DATABASE_URL,
 let accessToken='';
 let socket=null;
 let connected=false;
+let socketConnectCount=0;
+let lastSocketConnectAt=null;
+let lastSocketMessageAt=null;
+let lastAcceptedTickAt=null;
+let lastSocketError='';
+let socketPayloadDiagnostics=0;
+let lastTickDiagnosticAt=new Map();
+let lastSubscriptionRecoveryAt=0;
 let selectedSymbol='';
 let selectedOptionSymbol='';
 let lastTicks=new Map();
@@ -53,7 +61,25 @@ let fnoMoversCache={rows:[],updatedAt:0,expiresAt:0,error:'Not loaded'};
 let fnoMoversPromise=null,screenerConfigCache=null,screenerConfigFetchedAt=0,screenerConfigPromise=null;
 const subscribedSymbols=new Set();
 const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
-function syncSocketSubscriptions(){if(!socket||!connected)return;const wanted=new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...fnoMoversCache.rows.map(x=>x.symbol)]);const add=[...wanted].filter(x=>!subscribedSymbols.has(x));const remove=[...subscribedSymbols].filter(x=>!wanted.has(x));if(remove.length&&typeof socket.unsubscribe==='function'){try{socket.unsubscribe(remove);for(const symbol of remove)subscribedSymbols.delete(symbol);}catch(e){console.error('FYERS unsubscribe failed',e.message);}}if(add.length){try{socket.subscribe(add);for(const symbol of add)subscribedSymbols.add(symbol);}catch(e){console.error('FYERS subscribe failed',e.message);}}}
+function syncSocketSubscriptions({force=false,reason='state_change'}={}){
+  if(!socket||!connected)return {subscribed:0,removed:0};
+  const wanted=new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...fnoMoversCache.rows.map(x=>x.symbol)]);
+  const add=[...wanted].filter(x=>force||!subscribedSymbols.has(x));
+  const remove=[...subscribedSymbols].filter(x=>!wanted.has(x));
+  if(remove.length&&typeof socket.unsubscribe==='function'){
+    try{socket.unsubscribe(remove);for(const symbol of remove)subscribedSymbols.delete(symbol);}
+    catch(e){console.error('FYERS unsubscribe failed',String(e?.message||e).slice(0,160));}
+  }
+  if(add.length){
+    try{
+      socket.mode(socket.FullMode);
+      socket.subscribe(add);
+      for(const symbol of add)subscribedSymbols.add(symbol);
+      console.info('FYERS market subscriptions applied.',JSON.stringify({reason,count:add.length,symbols:add}));
+    }catch(e){console.error('FYERS subscribe failed.',JSON.stringify({reason,message:String(e?.message||e).slice(0,180),count:add.length}));}
+  }
+  return {subscribed:add.length,removed:remove.length};
+}
 const FYERS_DATA='https://api-t1.fyers.in/data';
 const FYERS_API='https://api-t1.fyers.in/api/v3';
 const freshTick=(tick,maxAgeMs=10000)=>Boolean(tick&&Date.now()-tick.receivedAt>=0&&Date.now()-tick.receivedAt<=maxAgeMs&&Date.now()/1000-Number(tick.exchangeTime)<=10&&Date.now()/1000-Number(tick.exchangeTime)>=-3);
@@ -72,18 +98,115 @@ async function loadFnoMovers(){if(fnoMoversCache.expiresAt>Date.now())return fno
 function authReady(){return Boolean(appId&&accessToken);}
 function ensureSocket(){
   if(!authReady()||socket)return;
-  const owned=fyersDataSocket.getInstance(`${appId}:${accessToken}`,'',false);
-  socket=owned;
-  owned.on('connect',()=>{if(socket!==owned)return;connected=true;try{owned.mode(owned.FullMode);subscribedSymbols.clear();syncSocketSubscriptions();}catch(e){console.error('subscribe failed',e.message);}});
-  owned.on('message',raw=>{if(socket!==owned)return;let msg=raw;try{if(typeof raw==='string')msg=JSON.parse(raw);else if(Buffer.isBuffer(raw))msg=JSON.parse(raw.toString('utf8'));else if(raw instanceof ArrayBuffer)msg=JSON.parse(Buffer.from(raw).toString('utf8'));else if(ArrayBuffer.isView(raw))msg=JSON.parse(Buffer.from(raw.buffer,raw.byteOffset,raw.byteLength).toString('utf8'));}catch{return;}const rows=Array.isArray(msg)?msg:[msg];for(const row of rows){if(!row||typeof row!=='object')continue;const symbol=row.symbol||row.n;const price=Number(row.ltp??row.lp??row.v?.lp);const stamp=toEpochSeconds(row.exch_feed_time??row.last_traded_time??row.ltt??row.tt??row.v?.exch_feed_time??row.v?.last_traded_time??row.v?.ltt??row.v?.tt);if(!symbol||!Number.isFinite(price)||price<=0||!Number.isFinite(stamp)||stamp<=0)continue;const tick={symbol,price,exchangeTime:stamp,receivedAt:Date.now()};lastTicks.set(symbol,tick);if(symbol.startsWith('MCX:'))mcxTicks.set(symbol,tick);else if(symbol.startsWith('NSE:')||symbol.startsWith('BSE:'))nseTicks.set(symbol,tick);}});
-  owned.on('error',e=>{connected=false;console.error('FYERS socket error',String(e?.message||e));});
-  owned.on('close',()=>{if(socket!==owned)return;connected=false;subscribedSymbols.clear();});
-  const reconnect=typeof owned.autoreconnect==='function'?owned.autoreconnect.bind(owned):typeof owned.autoReconnect==='function'?owned.autoReconnect.bind(owned):null;
-  if(!reconnect)throw new Error('FYERS SDK auto-reconnect unavailable');
-  reconnect(50);owned.connect();
+  let owned=null;
+  try{
+    owned=fyersDataSocket.getInstance(`${appId}:${accessToken}`,'',false);
+    socket=owned;
+    console.info('FYERS WebSocket owner created.',JSON.stringify({at:new Date().toISOString(),tokenRestored:true}));
+    owned.on('connect',()=>{
+      if(socket!==owned)return;
+      connected=true;
+      socketConnectCount+=1;
+      lastSocketConnectAt=new Date().toISOString();
+      lastSocketError='';
+      subscribedSymbols.clear();
+      console.info('FYERS WebSocket CONNECTED.',JSON.stringify({connectionNumber:socketConnectCount,connectedAt:lastSocketConnectAt}));
+      try{
+        owned.mode(owned.FullMode);
+        syncSocketSubscriptions({force:true,reason:'socket_connect'});
+      }catch(e){console.error('FYERS initial subscription restore failed.',String(e?.message||e).slice(0,180));}
+    });
+    owned.on('message',raw=>{
+      if(socket!==owned)return;
+      lastSocketMessageAt=new Date().toISOString();
+      let msg=raw;
+      try{
+        if(typeof raw==='string')msg=JSON.parse(raw);
+        else if(Buffer.isBuffer(raw))msg=JSON.parse(raw.toString('utf8'));
+        else if(raw instanceof ArrayBuffer)msg=JSON.parse(Buffer.from(raw).toString('utf8'));
+        else if(ArrayBuffer.isView(raw))msg=JSON.parse(Buffer.from(raw.buffer,raw.byteOffset,raw.byteLength).toString('utf8'));
+      }catch{
+        if(socketPayloadDiagnostics<3){console.warn('FYERS socket non-JSON frame received.',JSON.stringify({rawType:Buffer.isBuffer(raw)?'Buffer':typeof raw}));socketPayloadDiagnostics++;}
+        return;
+      }
+      const rows=Array.isArray(msg)?msg:Array.isArray(msg?.data)?msg.data:[msg];
+      if(socketPayloadDiagnostics<3){
+        const first=rows.find(x=>x&&typeof x==='object')||{};
+        console.info('FYERS socket payload shape.',JSON.stringify({frameCount:rows.length,keys:Object.keys(first).slice(0,18),nestedKeys:first.v&&typeof first.v==='object'?Object.keys(first.v).slice(0,12):[]}));
+        socketPayloadDiagnostics++;
+      }
+      let accepted=0;
+      for(const row of rows){
+        if(!row||typeof row!=='object')continue;
+        const value=row.v&&typeof row.v==='object'?row.v:{};
+        const symbol=String(row.symbol||row.n||value.symbol||'');
+        const price=Number(row.ltp??row.lp??value.lp??value.ltp);
+        const stamp=toEpochSeconds(row.exch_feed_time??row.last_traded_time??row.ltt??row.tt??value.exch_feed_time??value.last_traded_time??value.ltt??value.tt);
+        if(!symbol||!Number.isFinite(price)||price<=0||!Number.isFinite(stamp)||stamp<=0)continue;
+        const tick={symbol,price,exchangeTime:stamp,receivedAt:Date.now()};
+        lastTicks.set(symbol,tick);
+        if(symbol.startsWith('MCX:'))mcxTicks.set(symbol,tick);
+        else if(symbol.startsWith('NSE:')||symbol.startsWith('BSE:'))nseTicks.set(symbol,tick);
+        accepted++;
+        const lastLog=lastTickDiagnosticAt.get(symbol)||0;
+        if(Date.now()-lastLog>=30000){
+          const ageSeconds=Number((Date.now()/1000-stamp).toFixed(1));
+          console.info('FYERS exchange tick accepted.',JSON.stringify({symbol,exchangeTimestamp:new Date(stamp*1000).toISOString(),exchangeAgeSeconds:ageSeconds,freshness:ageSeconds>=0&&ageSeconds<=10?'FRESH':'STALE'}));
+          lastTickDiagnosticAt.set(symbol,Date.now());
+        }
+      }
+      if(accepted>0)lastAcceptedTickAt=new Date().toISOString();
+    });
+    owned.on('error',error=>{
+      if(socket!==owned)return;
+      lastSocketError=String(error?.message||error||'Unknown FYERS socket error').replace(/\\s+/g,' ').slice(0,180);
+      let sdkConnected=null;
+      try{if(typeof owned.isConnected==='function')sdkConnected=Boolean(owned.isConnected());}catch{}
+      if(sdkConnected===false)connected=false;
+      console.warn('FYERS WebSocket error event.',JSON.stringify({message:lastSocketError,transportConnected:connected,sdkConnected}));
+    });
+    owned.on('close',(code,reason)=>{
+      if(socket!==owned)return;
+      connected=false;
+      subscribedSymbols.clear();
+      console.warn('FYERS WebSocket CLOSED.',JSON.stringify({code:code??null,reason:reason==null?null:String(reason).slice(0,140),closedAt:new Date().toISOString()}));
+    });
+    const reconnect=typeof owned.autoreconnect==='function'?owned.autoreconnect.bind(owned):typeof owned.autoReconnect==='function'?owned.autoReconnect.bind(owned):null;
+    if(!reconnect)throw new Error('FYERS SDK auto-reconnect unavailable');
+    reconnect(50);
+    console.info('FYERS SDK auto-reconnect enabled.',JSON.stringify({retries:50,method:typeof owned.autoreconnect==='function'?'autoreconnect':'autoReconnect'}));
+    owned.connect();
+    console.info('FYERS WebSocket connect() invoked.');
+  }catch(e){
+    connected=false;
+    lastSocketError=String(e?.message||e).slice(0,180);
+    if(socket===owned)socket=null;
+    console.error('FYERS WebSocket startup failed.',lastSocketError);
+    throw e;
+  }
 }
-app.get('/api/health',(_req,res)=>res.json({ok:true,authenticated:authReady(),socketConnected:connected,marketData:'exchange-timestamp-required',orderMode:process.env.LIVE_ORDERS_ENABLED==='true'&&/200$/.test(appId)&&process.env.FYERS_STATIC_IP_CONFIRMED==='true'&&Number.isFinite(Number(process.env.MAX_ORDER_RISK_INR))&&Number(process.env.MAX_ORDER_RISK_INR)>0?'LIVE':'DISABLED',orderAppType200:/200$/.test(appId),staticIpConfirmed:process.env.FYERS_STATIC_IP_CONFIRMED==='true'}));
-app.get('/api/market',async(_req,res)=>{if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
+function isNseRegularSession(){
+  const parts=new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
+  const values=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+  const minute=Number(values.hour)*60+Number(values.minute);
+  return ['Mon','Tue','Wed','Thu','Fri'].includes(values.weekday)&&minute>=555&&minute<930;
+}
+const socketFeedWatchdog=setInterval(()=>{
+  if(!socket||!connected||!isNseRegularSession())return;
+  const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
+  if(freshIndexes.length===BASE_SUBSCRIPTIONS.length)return;
+  if(Date.now()-lastSubscriptionRecoveryAt<30000)return;
+  lastSubscriptionRecoveryAt=Date.now();
+  console.warn('FYERS index tick heartbeat missed; reapplying subscriptions on existing socket.',JSON.stringify({freshIndexCount:freshIndexes.length,requiredIndexCount:BASE_SUBSCRIPTIONS.length,recoveryAt:new Date().toISOString()}));
+  syncSocketSubscriptions({force:true,reason:'fresh_tick_watchdog'});
+},5000);
+socketFeedWatchdog.unref?.();
+app.get('/api/health',(_req,res)=>{
+  const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
+  const latestExchangeTime=[...lastTicks.values()].reduce((latest,tick)=>Math.max(latest,Number(tick.exchangeTime)||0),0);
+  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:freshIndexes.length,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData: freshIndexes.length===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',orderMode:'DISABLED'});
+});
+app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
 app.post('/api/select-symbol',(req,res)=>{const symbol=String(req.body?.symbol||'').trim();if(!/^(NSE|BSE):[A-Z0-9&_.-]{2,48}(?:-(EQ|INDEX)|[0-9]{2}[A-Z0-9]+FUT)$/.test(symbol)&&!/^MCX:[A-Z0-9&_.-]{3,48}$/.test(symbol))return res.status(400).json({error:'Invalid FYERS NSE/BSE cash-index or MCX contract symbol'});selectedSymbol=symbol;syncSocketSubscriptions();res.json({selectedSymbol,exchange:symbol.split(':')[0],historyFetch:'on-demand-only'});});
 const historyCache=new Map();
 app.get('/api/history',async(req,res)=>{
