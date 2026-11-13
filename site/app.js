@@ -3354,7 +3354,23 @@ function bindTabActions() {
   const scanMcxSureshotUniverseBtn=document.querySelector('#scanMcxSureshotUniverseBtn');
   if(scanMcxSureshotUniverseBtn) scanMcxSureshotUniverseBtn.addEventListener('click',loadMcxSureshotUniverseShortlist);
   const setupSymbol=document.querySelector('#setupSymbol');
-  if(setupSymbol) setupSymbol.addEventListener('change',loadSureshotSetup);
+  if(setupSymbol) setupSymbol.addEventListener('change',()=>{
+    // A changed underlying invalidates every contract descriptor from the
+    // previous instrument. Never carry an expiry or strike across symbols.
+    const expiry=document.querySelector('#setupExpiry');
+    const strike=document.querySelector('#setupStrike');
+    const side=document.querySelector('#setupOptionType');
+    if(expiry) expiry.innerHTML='<option value="">Nearest expiry</option>';
+    if(strike) strike.innerHTML='<option value="">Auto nearest eligible strike</option>';
+    if(side) side.value='AUTO';
+    const chart=document.querySelector('#setupZoneChart');
+    const summary=document.querySelector('#setupZoneSummary');
+    const cards=document.querySelector('#setupCards');
+    if(chart) chart.innerHTML='<div class="chart-empty">Loading verified FYERS candles for '+escapeHtml(setupSymbol.selectedOptions[0]?.textContent||setupSymbol.value)+'…</div>';
+    if(summary) summary.textContent='Previous underlying chart and zones cleared. Waiting for the newly selected instrument.';
+    if(cards) cards.innerHTML='<div class="chart-empty">Previous option contract and premium cleared. Revalidating expiry, strike and live premium for the selected underlying.</div>';
+    void loadSureshotSetup();
+  });
   const advancedRefresh=document.querySelector('#refreshAdvancedBtn');
   if(advancedRefresh) advancedRefresh.addEventListener('click',loadAdvancedScanner);
   const loadCandlesBtn=document.querySelector('#loadCandlesBtn');
