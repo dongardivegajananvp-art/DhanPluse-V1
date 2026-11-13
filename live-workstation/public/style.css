@@ -16,3 +16,11 @@
 /* Keep the existing shared chart readable on narrow screens; SVG candles scroll horizontally. */
 #chart{box-sizing:border-box;max-width:100%;overscroll-behavior-x:contain;scrollbar-width:thin;}
 #chart svg{max-width:none!important;}
+
+
+.mcx-paper-compare{margin-top:8px;padding:7px 9px;border:1px solid #334155;border-radius:8px;background:rgba(15,23,42,.45);font-size:12px}
+.mcx-paper-compare>small{display:block;color:#9fb0c7;font-weight:700;letter-spacing:.04em;margin-bottom:4px}
+.mcx-paper-row{display:flex;gap:8px;justify-content:space-between;align-items:flex-start;padding:4px 0;border-top:1px solid rgba(148,163,184,.16)}
+.mcx-paper-row b{white-space:nowrap;color:#dbeafe}
+.mcx-paper-row span{color:#cbd5e1;text-align:right;overflow-wrap:anywhere}
+.mcx-paper-compare>small:last-child{margin-top:4px;font-weight:400;letter-spacing:0}
