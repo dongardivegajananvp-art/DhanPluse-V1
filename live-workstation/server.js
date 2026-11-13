@@ -65,7 +65,7 @@ const mcxOptionChains=new Map();
 const mcxOptionHistoryCache=new Map();
 let mcxComMaster=null,mcxComMasterFetchedAt=0,mcxComMasterPromise=null;
 let mcxOptionCandidateSymbols=[];
-let mcxScanPromise=null;
+let mcxScanPromise=null,mcxScanSymbol='';
 let nseFoMaster=null,nseFoMasterFetchedAt=0,nseFoMasterPromise=null;
 let bseFoMaster=null,bseFoMasterFetchedAt=0,bseFoMasterPromise=null;
 let fnoMoversCache={rows:[],updatedAt:0,expiresAt:0,error:'Not loaded'};
@@ -312,7 +312,8 @@ app.get('/api/mcx/scan',async(req,res)=>{
   if(!mcxFutureRoot(future))return res.status(400).json({status:'NO_TRADE',reason:'Only exact MCX Crude Oil or Natural Gas FUT contracts are supported'});
   if(future!==selectedSymbol)return res.status(409).json({status:'NO_TRADE',reason:'Select this exact MCX futures contract in the chart first'});
   if(!authReady())return res.status(401).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:'FYERS session unavailable'});
-  if(mcxScanPromise){try{return res.json(await mcxScanPromise)}catch(error){return res.status(502).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,180)})}}
+  if(mcxScanPromise){if(mcxScanSymbol!==future)return res.status(409).json({status:'WAITING_FOR_OPTION_TICKS',reason:'Previous MCX contract scan is finishing; retry shortly'});try{return res.json(await mcxScanPromise)}catch(error){return res.status(502).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,180)})}}
+  mcxScanSymbol=future;
   mcxScanPromise=(async()=>{
     const futureTick=lastTicks.get(future);
     if(!freshTick(futureTick))return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Fresh MCX futures exchange tick is required'};
@@ -320,11 +321,13 @@ app.get('/api/mcx/scan',async(req,res)=>{
     const underlyingSetup=evaluateMxcUnderlyingBreakout(underlyingHistory.candles,futureTick);
     if(underlyingSetup.status!=='SETUP_CONFIRMED')return{...underlyingSetup,source:'FYERS MCX futures tick + completed 5-minute candles'};
     const master=await loadMcxComMaster();
+    if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed during scan; stale result discarded'};
     const futureMeta=master?.[future];
     if(!futureMeta||Number(futureMeta.tradeStatus)!==1)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Exact MCX futures contract is not active in the official FYERS Symbol Master'};
     const contracts=listMxcOptionContracts(master,future);
     const candidates=pickMxcOptionCandidates(contracts,futureTick.price,underlyingSetup.side,3).map(contract=>({...contract,underlyingPrice:futureTick.price}));
     if(!candidates.length)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'No active FYERS MCX option contracts for the nearest expiry'};
+    if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed during scan; stale candidates discarded'};
     mcxOptionChains.set(future,{contracts:candidates,fetchedAt:Date.now()});
     mcxOptionCandidateSymbols=candidates.map(contract=>contract.symbol);
     syncSocketSubscriptions({reason:'mcx_option_candidate_scan'});
@@ -335,6 +338,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
     for(const contract of freshCandidates){
       try{
         const history=await loadMxcHistory(contract.symbol);
+        if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed during option history check'};
         const optionTick=lastTicks.get(contract.symbol);
         if(!freshTick(optionTick)){rejected.push({symbol:contract.symbol,reason:'Option tick became stale during candle verification'});continue;}
         const setup=evaluateMxcOptionBreakout(history.candles,optionTick,contract);
@@ -345,6 +349,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
         rejected.push({symbol:contract.symbol,reason:String(error?.message||error).slice(0,120)});
       }
     }
+    if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed before setup confirmation'};
     if(!freshTick(lastTicks.get(future)))return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX futures tick became stale during option verification'};
     if(!valid.length)return{status:'NO_TRADE',reason:rejected.length?'No candidate passed fresh option-candle breakout and 1:2 risk/reward checks':'Waiting for verified option history',side:underlyingSetup.side,rejected};
     valid.sort((a,b)=>b.score-a.score||a.contract.strikeDistance-b.contract.strikeDistance);
@@ -367,7 +372,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
     res.set('Cache-Control','no-store').json(result);
   }catch(error){
     res.status(Number(error?.statusCode)===429?429:502).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,180)});
-  }finally{mcxScanPromise=null;}
+  }finally{mcxScanPromise=null;mcxScanSymbol='';}
 });
 
 
