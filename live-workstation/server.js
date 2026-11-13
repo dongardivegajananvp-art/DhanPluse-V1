@@ -90,6 +90,7 @@ let fyersRestQueue=Promise.resolve();
 let fyersRestLastRequestAt=0;
 let fyersRestCooldownUntil=0;
 let fyersRestCooldownReason='';
+let fyersRestCooldownPath='';
 let fyersRest429Count=0;
 const FYERS_REST_MIN_INTERVAL_MS=1500;
 const FYERS_REST_MAX_COOLDOWN_MS=60*60*1000;
@@ -110,14 +111,18 @@ async function fyersRestFetch(url,init={}){
     const response=await fetch(url,{...fetchInit,signal});
     if(response.status===429){
       const body=await response.clone().text().catch(()=>''),server=String(response.headers?.get?.('server')||''),cfRay=String(response.headers?.get?.('cf-ray')||'');
-      const cloudflare=/error\\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body)||(/cloudflare/i.test(server)&&Boolean(cfRay));
+      const cloudflare=/error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body)||(/cloudflare/i.test(server)&&Boolean(cfRay));
       fyersRest429Count+=1;
       const normalBackoff=[60000,120000,300000][Math.min(fyersRest429Count-1,2)];
       const retryMs=fyersRetryAfterMs(response);
       const backoffMs=cloudflare?FYERS_REST_MAX_COOLDOWN_MS:Math.max(normalBackoff,retryMs);
       fyersRestCooldownUntil=Math.max(fyersRestCooldownUntil,Date.now()+Math.min(FYERS_REST_MAX_COOLDOWN_MS,backoffMs));
       fyersRestCooldownReason=cloudflare?'CLOUDFLARE_1015':'HTTP_429';
+      fyersRestCooldownPath=target.pathname;
       console.error('FYERS REST rate limit; circuit opened.',JSON.stringify({path:target.pathname,status:429,reason:fyersRestCooldownReason,consecutive429:fyersRest429Count,retryAfterSeconds:Math.ceil((fyersRestCooldownUntil-Date.now())/1000),upstreamRequestSent:true}));
+    }else if(response.ok&&fyersRestCooldownUntil&&Date.now()>=fyersRestCooldownUntil&&target.pathname===fyersRestCooldownPath){
+      console.info('FYERS REST cooldown cleared after a successful endpoint probe.',JSON.stringify({path:target.pathname,clearedAt:new Date().toISOString()}));
+      fyersRest429Count=0;fyersRestCooldownUntil=0;fyersRestCooldownReason='';fyersRestCooldownPath='';
     }
     return response;
   };
@@ -297,7 +302,7 @@ app.get('/api/account',async(_req,res)=>{
       console.error('FYERS broker snapshot refresh failed.',JSON.stringify({statusCode:e?.statusCode||null,retryAfterMs:e?.retryAfterMs||0,hasLastVerifiedSnapshot:Boolean(accountSnapshot),message}));
       if(/HTTP 429/i.test(message)){
         accountFailureCount=Math.min(accountFailureCount+1,5);
-        accountRetryAfter=Date.now()+Math.min(300000,30000*Math.pow(2,accountFailureCount-1));
+        accountRetryAfter=Date.now()+Math.max(Number(e?.retryAfterMs)||0,Math.min(300000,30000*Math.pow(2,accountFailureCount-1)));
       }else{
         accountRetryAfter=Date.now()+10000;
       }
