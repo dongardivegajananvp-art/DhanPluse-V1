@@ -33,3 +33,25 @@ test('stale or future completed candles fail closed', () => {
   assert.equal(getCompletedCandleWindow([{ time: 1_800_000_000 }], exchangeTime - 10).fresh, false);
   assert.equal(getCompletedCandleWindow([], exchangeTime).fresh, false);
 });
+
+test('breakout window rejects missing 5-minute intervals', () => {
+  const exchangeTime = 1_800_000_000;
+  const bucket = Math.floor(exchangeTime / 300) * 300;
+  const candles = Array.from({ length: 21 }, (_, index) => ({
+    time: bucket - 300 * (21 - index)
+  }));
+  candles[10].time += 300;
+  const result = getCompletedCandleWindow(candles, exchangeTime);
+  assert.equal(result.fresh, true);
+  assert.equal(result.contiguous, false);
+});
+
+test('complete consecutive 5-minute breakout window is accepted', () => {
+  const exchangeTime = 1_800_000_000;
+  const bucket = Math.floor(exchangeTime / 300) * 300;
+  const candles = Array.from({ length: 21 }, (_, index) => ({
+    time: bucket - 300 * (21 - index)
+  }));
+  const result = getCompletedCandleWindow(candles, exchangeTime);
+  assert.equal(result.contiguous, true);
+});
