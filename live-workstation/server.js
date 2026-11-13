@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
+import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
