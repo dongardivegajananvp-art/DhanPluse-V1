@@ -19,5 +19,7 @@ export function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 
   const candleTime = Number(lastClosed?.time);
   const ageSeconds = lastClosed && Number.isFinite(candleTime) ? stamp - (candleTime + 300) : Infinity;
   const fresh = Boolean(lastClosed && Number.isFinite(candleTime) && ageSeconds >= -3 && ageSeconds <= maxAgeSeconds);
-  return { completed, lastClosed, ageSeconds, fresh };
+  const recent = completed.slice(-21);
+  const contiguous = recent.length === 21 && recent.every((candle, index) => index === 0 || Number(candle.time) - Number(recent[index - 1].time) === 300);
+  return { completed, lastClosed, ageSeconds, fresh, contiguous };
 }
