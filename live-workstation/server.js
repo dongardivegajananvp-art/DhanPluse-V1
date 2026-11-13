@@ -159,7 +159,7 @@ function ensureSocket(){
     });
     owned.on('error',error=>{
       if(socket!==owned)return;
-      lastSocketError=String(error?.message||error||'Unknown FYERS socket error').replace(/\\s+/g,' ').slice(0,180);
+      lastSocketError=String(error?.message||error||'Unknown FYERS socket error').replace(/\s+/g,' ').slice(0,180);
       let sdkConnected=null;
       try{if(typeof owned.isConnected==='function')sdkConnected=Boolean(owned.isConnected());}catch{}
       if(sdkConnected===false)connected=false;
