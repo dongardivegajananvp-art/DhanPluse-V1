@@ -24,6 +24,7 @@ let socket=null;
 let connected=false;
 let selectedSymbol='';
 let lastTicks=new Map();
+const nseTicks=new Map(),mcxTicks=new Map();
 let socketGeneration=0;
 const pendingOrders=new Map();
 
@@ -33,7 +34,7 @@ function ensureSocket(){
   const owned=fyersDataSocket.getInstance(`${appId}:${accessToken}`,'',false);
   socket=owned; socketGeneration++;
   owned.on('connect',()=>{if(socket!==owned)return;connected=true;try{owned.mode(owned.FullMode);owned.subscribe(['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX',...(selectedSymbol?[selectedSymbol]:[])]);}catch(e){console.error('subscribe failed',e.message);}});
-  owned.on('message',raw=>{if(socket!==owned)return;let msg=raw;try{if(typeof raw==='string')msg=JSON.parse(raw);else if(Buffer.isBuffer(raw))msg=JSON.parse(raw.toString('utf8'));}catch{return;}const rows=Array.isArray(msg)?msg:[msg];for(const row of rows){if(!row||typeof row!=='object')continue;const symbol=row.symbol||row.n||row.s;const price=Number(row.ltp??row.lp??row.v?.lp);const stamp=Number(row.exch_feed_time??row.last_traded_time??row.ltt??row.tt??row.ft??row.timestamp??row.v?.exch_feed_time??row.v?.ltt??row.v?.ft);if(!symbol||!Number.isFinite(price)||price<=0||!Number.isFinite(stamp)||stamp<=0)continue;lastTicks.set(symbol,{symbol,price,exchangeTime:stamp,receivedAt:Date.now()});}});
+  owned.on('message',raw=>{if(socket!==owned)return;let msg=raw;try{if(typeof raw==='string')msg=JSON.parse(raw);else if(Buffer.isBuffer(raw))msg=JSON.parse(raw.toString('utf8'));}catch{return;}const rows=Array.isArray(msg)?msg:[msg];for(const row of rows){if(!row||typeof row!=='object')continue;const symbol=row.symbol||row.n||row.s;const price=Number(row.ltp??row.lp??row.v?.lp);const stamp=Number(row.exch_feed_time??row.last_traded_time??row.ltt??row.tt??row.ft??row.timestamp??row.v?.exch_feed_time??row.v?.ltt??row.v?.ft);if(!symbol||!Number.isFinite(price)||price<=0||!Number.isFinite(stamp)||stamp<=0)continue;const tick={symbol,price,exchangeTime:stamp,receivedAt:Date.now()};lastTicks.set(symbol,tick);if(symbol.startsWith('MCX:'))mcxTicks.set(symbol,tick);else if(symbol.startsWith('NSE:')||symbol.startsWith('BSE:'))nseTicks.set(symbol,tick);}});
   owned.on('error',e=>{connected=false;console.error('FYERS socket error',String(e?.message||e));});
   owned.on('close',()=>{if(socket!==owned)return;connected=false;});
   const reconnect=typeof owned.autoreconnect==='function'?owned.autoreconnect.bind(owned):typeof owned.autoReconnect==='function'?owned.autoReconnect.bind(owned):null;
@@ -41,8 +42,8 @@ function ensureSocket(){
   reconnect(50);owned.connect();
 }
 app.get('/api/health',(_req,res)=>res.json({ok:true,authenticated:authReady(),socketConnected:connected,marketData:'exchange-timestamp-required',orderMode:process.env.LIVE_ORDERS_ENABLED==='true'?'LIVE':'DISABLED'}));
-app.get('/api/market',(_req,res)=>res.json({connected,quotes:[...lastTicks.values()]}));
-app.post('/api/select-symbol',(req,res)=>{const symbol=String(req.body?.symbol||'');if(!/^NSE:[A-Z0-9&_-]+-(EQ|INDEX)$/.test(symbol))return res.status(400).json({error:'Invalid NSE cash/index symbol'});selectedSymbol=symbol;if(socket&&connected)socket.subscribe([symbol]);res.json({selectedSymbol,historyFetch:'on-demand-only'});});
+app.get('/api/market',(_req,res)=>res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()]}));
+app.post('/api/select-symbol',(req,res)=>{const symbol=String(req.body?.symbol||'').trim();if(!/^(NSE|BSE):[A-Z0-9&_-]+-(EQ|INDEX)$/.test(symbol)&&!/^MCX:[A-Z0-9&_-]{3,48}$/.test(symbol))return res.status(400).json({error:'Invalid FYERS NSE/BSE cash-index or MCX contract symbol'});selectedSymbol=symbol;if(socket&&connected)socket.subscribe([symbol]);res.json({selectedSymbol,exchange:symbol.split(':')[0],historyFetch:'on-demand-only'});});
 const historyCache=new Map();
 app.get('/api/history',async(req,res)=>{
   const symbol=String(req.query.symbol||'');
