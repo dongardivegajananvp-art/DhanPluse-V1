@@ -6,7 +6,7 @@ const historyCache=new Map();
 let activeChartCandles=[],activeChartSymbol='',lastChartTickStamp=0;
 let chartLoading=false,chartReady=false,accountBusy=false,lastAccountAt=0,chartAttemptedFor='',optionsAttemptedFor='',optionsAttemptedAt=0,chartSelectionId=0;
 let gainerScanResults=[],latestGainers=[],latestGainerError='',lastGainerScanAt=0,gainerScanBusy=false;
-let mcxScanBusy=false,mcxScanTimer=null;
+let mcxScanBusy=false,mcxScanTimer=null,mcxPickerRequest=0;
 const indexNames={'NSE:NIFTY50-INDEX':'NIFTY 50','NSE:NIFTYBANK-INDEX':'BANK NIFTY','BSE:SENSEX-INDEX':'SENSEX'};
 async function api(path,opts={}){const r=await fetch(path,{headers:{'content-type':'application/json'},...opts});const j=await r.json();if(!r.ok)throw Error(j.detail||j.error||'Request failed');return j}
 function tickAge(t){const ms=Number(t.exchangeTime)*1000,age=Date.now()-ms;return Number.isFinite(ms)&&age>=-3000&&age<10000?'Fresh exchange tick':'Stale · orders blocked'}
@@ -48,6 +48,7 @@ function drawCandles(candles,plan=null){
  const liveBucket=liveFresh?Math.floor(Number(liveTick.exchangeTime)/300)*300:0;
  const liveCandle=Boolean(liveFresh&&candles[candles.length-1].time===liveBucket);
  const completed=liveCandle?candles.slice(0,-1):candles;
+ const visible=candles.slice(-50);
  const zoneSource=completed.slice(-20);
  const supplyCandle=zoneSource.length?zoneSource.reduce((a,b)=>b.high>a.high?b:a):null;
  const demandCandle=zoneSource.length?zoneSource.reduce((a,b)=>b.low<a.low?b:a):null;
@@ -56,16 +57,18 @@ function drawCandles(candles,plan=null){
  const demandBottom=demandCandle?Number(demandCandle.low):null;
  const demandTop=demandCandle?Math.min(Number(demandCandle.open),Number(demandCandle.close)):null;
  const zoneValues=[supplyTop,supplyBottom,demandTop,demandBottom].filter(Number.isFinite);
- const w=Math.max(600,el.clientWidth||800),h=360,pad=24,plotH=h-2*pad,plotW=w-2*pad;
- const lo=Math.min(...candles.map(c=>c.low),...levels.map(x=>x.value),...zoneValues);
- const hi=Math.max(...candles.map(c=>c.high),...levels.map(x=>x.value),...zoneValues);
- const range=Math.max(hi-lo,0.01),step=plotW/candles.length,body=Math.max(2,Math.min(12,step*.62)),y=v=>pad+(hi-v)/range*plotH;
- let svg='<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="FYERS live five minute candlestick chart with supply and demand zones">';
+ const pad=34,h=390,step=15,body=8,w=Math.max(640,pad*2+visible.length*step,el.clientWidth||800),plotH=h-pad*2-24,plotW=w-pad*2;
+ const lo=Math.min(...visible.map(c=>c.low),...levels.map(x=>x.value),...zoneValues);
+ const hi=Math.max(...visible.map(c=>c.high),...levels.map(x=>x.value),...zoneValues);
+ const range=Math.max(hi-lo,0.01),y=v=>pad+(hi-v)/range*plotH;
+ el.style.display='block';el.style.overflowX='auto';el.style.overflowY='hidden';el.style.height=h+'px';el.style.minHeight=h+'px';
+ let svg='<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" style="display:block;width:'+w+'px;height:'+h+'px;max-width:none" role="img" aria-label="FYERS five minute candlestick chart; latest 50 candles shown with horizontal scrolling">';
  for(let i=0;i<5;i++){const yy=pad+i*plotH/4,val=hi-i*range/4;svg+='<line x1="'+pad+'" y1="'+yy+'" x2="'+(w-pad)+'" y2="'+yy+'" stroke="#263449"/><text x="4" y="'+(yy+4)+'" fill="#8ea0b8" font-size="10">'+fmt(val)+'</text>'}
  if(supplyCandle&&supplyTop>supplyBottom){const top=y(supplyTop),bottom=y(supplyBottom);svg+='<rect x="'+pad+'" y="'+top+'" width="'+plotW+'" height="'+Math.max(1,bottom-top)+'" fill="#ef6672" fill-opacity=".13" stroke="#ef6672" stroke-opacity=".75" stroke-dasharray="5 3"/><text x="'+(w-pad-5)+'" y="'+(top+12)+'" text-anchor="end" fill="#ef8a92" font-size="11">SUPPLY ZONE</text>'}
  if(demandCandle&&demandTop>demandBottom){const top=y(demandTop),bottom=y(demandBottom);svg+='<rect x="'+pad+'" y="'+top+'" width="'+plotW+'" height="'+Math.max(1,bottom-top)+'" fill="#35c995" fill-opacity=".13" stroke="#35c995" stroke-opacity=".75" stroke-dasharray="5 3"/><text x="'+(w-pad-5)+'" y="'+(bottom-4)+'" text-anchor="end" fill="#55d9a8" font-size="11">DEMAND ZONE</text>'}
- candles.forEach((c,i)=>{const x=pad+i*step+step/2,up=c.close>=c.open,col=up?'#35c995':'#ef6672',top=y(Math.max(c.open,c.close)),bh=Math.max(1,Math.abs(y(c.open)-y(c.close)));svg+='<line x1="'+x+'" y1="'+y(c.high)+'" x2="'+x+'" y2="'+y(c.low)+'" stroke="'+col+'" stroke-width="1.2"/><rect x="'+(x-body/2)+'" y="'+top+'" width="'+body+'" height="'+bh+'" fill="'+col+'"/>'});
+ visible.forEach((c,i)=>{const x=pad+i*step+step/2,up=c.close>=c.open,col=up?'#35c995':'#ef6672',top=y(Math.max(c.open,c.close)),bh=Math.max(2,Math.abs(y(c.open)-y(c.close))),stamp=new Date(Number(c.time)*1000).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true});svg+='<g><title>'+stamp+' · O '+fmt(c.open)+' · H '+fmt(c.high)+' · L '+fmt(c.low)+' · C '+fmt(c.close)+'</title><line x1="'+x+'" y1="'+y(c.high)+'" x2="'+x+'" y2="'+y(c.low)+'" stroke="'+col+'" stroke-width="2"/><rect x="'+(x-body/2)+'" y="'+top+'" width="'+body+'" height="'+bh+'" rx="1" fill="'+col+'"/></g>'});
  if(plan){for(const item of levels){const yy=y(item.value),color=item.label==='ENTRY'?'#e9c46a':item.label==='SL'?'#ef6672':'#35c995';svg+='<line x1="'+pad+'" y1="'+yy+'" x2="'+(w-pad)+'" y2="'+yy+'" stroke="'+color+'" stroke-width="1.5" stroke-dasharray="6 4"/><text x="'+(w-pad-5)+'" y="'+(yy-4)+'" text-anchor="end" fill="'+color+'" font-size="11">'+item.label+' '+fmt(item.value)+'</text>'}}
+ for(let i=0;i<5;i++){const index=Math.round(i*(visible.length-1)/4),c=visible[index],x=pad+index*step+step/2,label=new Date(Number(c.time)*1000).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true});svg+='<text x="'+x+'" y="'+(h-5)+'" text-anchor="middle" fill="#8ea0b8" font-size="10">'+label+'</text>'}
  if(liveCandle)svg+='<text x="'+(w-pad-4)+'" y="15" text-anchor="end" fill="#35c995" font-size="11" font-weight="bold">● LIVE 5M CANDLE</text>';
  else svg+='<text x="'+(w-pad-4)+'" y="15" text-anchor="end" fill="#8ea0b8" font-size="11">LAST VERIFIED CANDLES</text>';
  svg+='</svg>';el.innerHTML=svg;
@@ -114,9 +117,33 @@ function updateOrderGate(){const t=selectedOption&&marketSnapshot.find(x=>x.symb
 async function sendOrder(side){if(!selectedOption)return;const qty=Number($('qty').value),sl=Number($('sl').value),target=Number($('target').value),summary=side+' '+qty+' '+selectedOption.symbol+'\nLive premium: '+$('premium').textContent+'\nStop loss: '+sl+'\nTarget: '+target+'\n\nConfirm this order to FYERS?';if(!window.confirm(summary))return;try{$('orderState').textContent='SENDING TO FYERS…';const requestId=crypto.randomUUID();const r=await api('/api/order',{method:'POST',body:JSON.stringify({symbol:selectedOption.symbol,side,qty,productType:$('product').value,stopLoss:sl,takeProfit:target,confirm:true,requestId})});$('orderState').textContent='FYERS ACK · '+(r.orderId||'CHECK ORDER BOOK');await refreshAccount()}catch(e){$('orderState').textContent=e.message;await refreshAccount()}}
 $('symbol').addEventListener('change',e=>selectInstrument(e.target.value));
 $('scanMcxBest').addEventListener('click',()=>scanMcxBestSetup());
-function chooseMcxProduct(product,label,buttonId){$('chooseCrudeOil').setAttribute('aria-pressed',buttonId==='chooseCrudeOil'?'true':'false');$('chooseNaturalGas').setAttribute('aria-pressed',buttonId==='chooseNaturalGas'?'true':'false');const input=$('mcxSymbol');input.disabled=false;$('loadMcx').disabled=false;input.value='MCX:'+product;input.placeholder='Enter full active '+label+' FYERS futures symbol';$('mcxContractLabel').textContent=label+' · FULL FYERS CONTRACT SYMBOL';$('mcxContractHint').textContent='Selected '+label+'. Complete the exact active contract symbol from FYERS, including its expiry and FUT suffix, then load the chart.';input.focus();$('mcxQuote').hidden=true}
-$('chooseCrudeOil').addEventListener('click',()=>chooseMcxProduct('CRUDEOIL','CRUDE OIL','chooseCrudeOil'));$('chooseNaturalGas').addEventListener('click',()=>chooseMcxProduct('NATURALGAS','NATURAL GAS','chooseNaturalGas'));
-$('loadMcx').addEventListener('click',()=>{const symbol=$('mcxSymbol').value.trim().toUpperCase();if(!/^MCX:(?:CRUDEOIL|NATURALGAS)[A-Z0-9_-]*FUT$/i.test(symbol)){$('mcxContractHint').textContent='Invalid contract. Select Crude Oil or Natural Gas and enter its full active FYERS futures symbol ending in FUT.';return}const label=symbol.startsWith('MCX:CRUDEOIL')?'CRUDE OIL':'NATURAL GAS';selectInstrument(symbol,label+' · MCX')});
+async function chooseMcxProduct(product,label,buttonId){
+ const requestId=++mcxPickerRequest;
+ $('chooseCrudeOil').setAttribute('aria-pressed',buttonId==='chooseCrudeOil'?'true':'false');
+ $('chooseNaturalGas').setAttribute('aria-pressed',buttonId==='chooseNaturalGas'?'true':'false');
+ const input=$('mcxSymbol');
+ input.disabled=true;$('loadMcx').disabled=true;
+ input.replaceChildren(new Option('Loading active FYERS contracts…',''));
+ $('mcxContractLabel').textContent=label+' · ACTIVE FYERS FUTURES';
+ $('mcxContractHint').textContent='Fetching active contracts from the official FYERS MCX Symbol Master…';
+ $('mcxQuote').hidden=true;
+ try{
+  const data=await api('/api/mcx/contracts?product='+encodeURIComponent(product));
+  if(requestId!==mcxPickerRequest)return;
+  const contracts=Array.isArray(data.contracts)?data.contracts:[];
+  if(!contracts.length)throw new Error('No active verified '+label+' futures contract is available');
+  input.replaceChildren(...contracts.map(contract=>new Option(contract.symbol+' · EXP '+contract.expiryDate,contract.symbol)));
+  input.disabled=false;$('loadMcx').disabled=false;
+  $('mcxContractHint').textContent=label+' selected. Active FYERS contracts loaded; nearest expiry is preselected. Choose another expiry if needed, then load chart.';
+ }catch(error){
+  if(requestId!==mcxPickerRequest)return;
+  input.replaceChildren(new Option('No verified active contract available',''));
+  $('mcxContractHint').textContent='CONTRACT LIST UNAVAILABLE · '+error.message+' · NO TRADE';
+ }
+}
+$('chooseCrudeOil').addEventListener('click',()=>void chooseMcxProduct('CRUDEOIL','CRUDE OIL','chooseCrudeOil'));
+$('chooseNaturalGas').addEventListener('click',()=>void chooseMcxProduct('NATURALGAS','NATURAL GAS','chooseNaturalGas'));
+$('loadMcx').addEventListener('click',()=>{const symbol=$('mcxSymbol').value.trim().toUpperCase();const root=symbol.startsWith('MCX:CRUDEOIL')?'CRUDEOIL':symbol.startsWith('MCX:NATURALGAS')?'NATURALGAS':'';const suffix=root?symbol.slice(('MCX:'+root).length):'';if(!root||suffix.length!==8||!/^[0-9]{2}[A-Z]{3}FUT/.test(suffix)){$('mcxContractHint').textContent='Invalid or unverified contract selection. Choose an active contract from the FYERS list.';return}const label=root==='CRUDEOIL'?'CRUDE OIL':'NATURAL GAS';selectInstrument(symbol,label+' · MCX')});
 $('optionUnderlying').addEventListener('change',e=>{const underlying=e.target.value;if(!underlying){clearOptionSelection();return}const chartSelect=$('symbol');let option=[...chartSelect.options].find(o=>o.value===underlying);if(!option){option=new Option(underlying.replace(/^NSE:/,'').replace(/^BSE:/,'').replace(/-EQ$/,'').replace('-INDEX',''),underlying);chartSelect.add(option)}chartSelect.value=underlying;void selectInstrument(underlying,option.text,underlying)});
 $('contract').addEventListener('change',e=>chooseOption(e.target.value));
 $('buy').addEventListener('click',()=>sendOrder('BUY'));$('sell').addEventListener('click',()=>sendOrder('SELL'));

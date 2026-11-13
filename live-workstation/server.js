@@ -307,6 +307,24 @@ async function loadMxcHistory(symbol){
   mcxOptionHistoryCache.set(symbol,result);
   return result;
 }
+app.get('/api/mcx/contracts',async(req,res)=>{
+  const product=String(req.query.product||'').trim().toUpperCase();
+  if(!['CRUDEOIL','NATURALGAS'].includes(product))return res.status(400).json({error:'Choose Crude Oil or Natural Gas'});
+  try{
+    const master=await loadMcxComMaster();
+    const now=Date.now();
+    const pattern=new RegExp('^MCX:'+product+'[0-9]{2}[A-Z]{3}FUT');
+    const contracts=Object.entries(master).filter(([symbol,row])=>pattern.test(symbol)&&symbol.length===('MCX:'+product).length+8&&symbol.endsWith('FUT')&&row&&Number(row.tradeStatus)===1)
+      .map(([symbol,row])=>({symbol,expiry:toEpochSeconds(row.expiryDate)}))
+      .filter(row=>row.expiry&&row.expiry*1000>now)
+      .sort((a,b)=>a.expiry-b.expiry||a.symbol.localeCompare(b.symbol))
+      .map(row=>({symbol:row.symbol,expiryDate:new Date(row.expiry*1000).toISOString().slice(0,10)}));
+    if(!contracts.length)return res.status(404).json({error:'No active '+product+' futures contract found in the official FYERS MCX Symbol Master'});
+    res.set('Cache-Control','no-store').json({product,contracts:contracts.slice(0,12),source:'Official FYERS MCX Symbol Master'});
+  }catch(error){
+    res.status(502).json({error:'Could not load verified FYERS MCX futures contracts',detail:String(error?.message||error).slice(0,160)});
+  }
+});
 app.get('/api/mcx/scan',async(req,res)=>{
   const future=String(req.query.symbol||'').trim().toUpperCase();
   if(!mcxFutureRoot(future))return res.status(400).json({status:'NO_TRADE',reason:'Only exact MCX Crude Oil or Natural Gas FUT contracts are supported'});
