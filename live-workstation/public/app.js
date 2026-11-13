@@ -4,14 +4,37 @@ let selected='NSE:NIFTY50-INDEX',orderMode='DISABLED',selectedOption=null,option
 const historyCache=new Map();
 let activeChartCandles=[],activeChartSymbol='',lastChartTickStamp=0;
 let chartLoading=false,chartReady=false,accountBusy=false,lastAccountAt=0,chartAttemptedFor='',optionsAttemptedFor='',optionsAttemptedAt=0,chartSelectionId=0;
+let gainerScanResults=[],latestGainers=[],latestGainerError='',lastGainerScanAt=0,gainerScanBusy=false;
 const indexNames={'NSE:NIFTY50-INDEX':'NIFTY 50','NSE:NIFTYBANK-INDEX':'BANK NIFTY','BSE:SENSEX-INDEX':'SENSEX'};
 async function api(path,opts={}){const r=await fetch(path,{headers:{'content-type':'application/json'},...opts});const j=await r.json();if(!r.ok)throw Error(j.detail||j.error||'Request failed');return j}
 function tickAge(t){const ms=Number(t.exchangeTime)*1000,age=Date.now()-ms;return Number.isFinite(ms)&&age>=-3000&&age<10000?'Fresh exchange tick':'Stale · orders blocked'}
 function renderIndices(q){const cards=$('indices').querySelectorAll('article');for(let i=0;i<3;i++){const key=Object.keys(indexNames)[i],v=q.find(x=>x.symbol===key);cards[i].querySelector('strong').textContent=v?fmt(v.price):'—';cards[i].querySelector('small').textContent=v?tickAge(v):'Waiting for exchange tick'}}
-function renderGainers(rows,error){const root=$('gainers');root.replaceChildren();const liveRows=(rows||[]).filter(r=>r.fresh===true);if(!liveRows.length){const span=document.createElement('span');span.textContent=error||((rows||[]).length?'Waiting for fresh FYERS futures ticks':'No verified F&O gainer data');root.append(span);return}for(const r of liveRows){const card=document.createElement('button');card.type='button';card.className='gainer-card';const name=String(r.underlying||r.symbol).replace(/^NSE:/,'').replace(/-EQ$/,'').replace(/\d{2}[A-Z0-9]+FUT$/,'');card.textContent=name+' · '+fmt(r.price)+' · '+(r.change>=0?'+':'')+Number(r.change).toFixed(2)+'% · LIVE TICK';card.addEventListener('click',()=>{const chartSymbol=r.underlying||r.symbol;const chartSelect=$('symbol');let option=[...chartSelect.options].find(o=>o.value===chartSymbol);if(!option){option=new Option(name,chartSymbol);chartSelect.add(option)}chartSelect.value=chartSymbol;void selectInstrument(chartSymbol,name,r.underlying||'')});root.append(card)}}
+function renderGainers(rows,error){
+ const root=$('gainers');root.replaceChildren();const liveRows=(rows||[]).filter(r=>r.fresh===true);
+ if(!liveRows.length){const span=document.createElement('span');span.textContent=error||((rows||[]).length?'Waiting for fresh FYERS futures ticks':'No verified F&O gainer data');root.append(span);return}
+ for(const r of liveRows){
+  const card=document.createElement('button');card.type='button';card.className='gainer-card';
+  const name=String(r.underlying||r.symbol).replace(/^NSE:/,'').replace(/-EQ$/,'').replace(/\d{2}[A-Z0-9]+FUT$/,'');
+  const scan=gainerScanResults.find(x=>x.underlying===r.underlying);let label='BREAKOUT SCAN PENDING';
+  if(scan?.status==='SETUP_CONFIRMED')label=scan.side+' SETUP · E '+fmt(scan.entry)+' · SL '+fmt(scan.stopLoss)+' · T '+fmt(scan.target);
+  else if(scan?.status==='WAIT')label='WAIT · NO CONFIRMED BREAKOUT';
+  else if(scan?.status)label=scan.status.replaceAll('_',' ');
+  card.textContent=name+' · '+fmt(r.price)+' · '+(r.change>=0?'+':'')+Number(r.change).toFixed(2)+'% · LIVE TICK · '+label;
+  card.title=scan?.reason||'Fresh FYERS data required; levels are underlying reference prices';
+  card.addEventListener('click',()=>{const chartSymbol=r.underlying||r.symbol;const chartSelect=$('symbol');let option=[...chartSelect.options].find(o=>o.value===chartSymbol);if(!option){option=new Option(name,chartSymbol);chartSelect.add(option)}chartSelect.value=chartSymbol;void selectInstrument(chartSymbol,name,r.underlying||'')});
+  root.append(card);
+ }
+}
+async function refreshGainerScan(){
+ if(gainerScanBusy||Date.now()-lastGainerScanAt<60000||!latestGainers.some(r=>r.fresh===true))return;
+ gainerScanBusy=true;lastGainerScanAt=Date.now();
+ try{const data=await api('/api/gainer-scan');gainerScanResults=data.results||[];renderGainers(latestGainers,latestGainerError)}
+ catch(e){gainerScanResults=latestGainers.filter(r=>r.fresh===true).map(r=>({underlying:r.underlying,status:'DATA_UNAVAILABLE_NO_TRADE',reason:e.message}));renderGainers(latestGainers,latestGainerError)}
+ finally{gainerScanBusy=false}
+}
 function render(q){renderIndices(q);updatePremium();updateLiveChartFromTick();const required=Object.keys(indexNames),freshCount=required.filter(symbol=>{const t=q.find(x=>x.symbol===symbol),age=t?Date.now()-Number(t.receivedAt):Infinity,exchangeAge=t?Date.now()/1000-Number(t.exchangeTime):Infinity;return age>=0&&age<10000&&exchangeAge>=-3&&exchangeAge<=10}).length;$('feedState').textContent='FYERS INDEX FEED · '+freshCount+'/3 FRESH';$('dot').style.background=freshCount===3?'#42d6a0':'#d69b39'}
 async function refreshAccount(){if(accountBusy||Date.now()-lastAccountAt<60000)return;accountBusy=true;lastAccountAt=Date.now();try{const a=await api('/api/account');const open=(a.positions||[]).filter(p=>Number(p.netQty)!==0);$('openCount').textContent=String(open.length);$('pnl').textContent=fmt(Number(a.overall?.pl_total??open.reduce((n,p)=>n+Number(p.pl||0),0)));const statusNames={1:'CANCELLED',2:'FILLED',4:'IN TRANSIT',5:'REJECTED',6:'PENDING',7:'EXPIRED'};$('orderState').textContent=(a.orders||[]).slice(0,1).map(o=>statusNames[Number(o.status)]||o.message||'ORDER BOOK UPDATED').join('')||'NO OPEN ORDER';$('brokerUpdate').textContent=(a.stale?'STALE · ':'')+new Date(a.updatedAt).toLocaleTimeString('en-IN');if(a.stale)$('orderState').textContent='BROKER DATA STALE · LAST VERIFIED SNAPSHOT';const rows=$('positionRows');rows.replaceChildren();if(!open.length){rows.textContent='No open FYERS positions.'}else for(const p of open){const line=document.createElement('div');line.className='position-row';line.textContent=[p.symbol,'Qty '+p.netQty,'Avg '+fmt(p.netAvg||p.avgPrice||0),'LTP '+fmt(p.ltp||0),'P&L '+fmt(p.pl||0)].join(' · ');rows.append(line)}}catch(e){$('orderState').textContent='BROKER SYNC ERROR';$('positionRows').textContent=e.message}finally{accountBusy=false}}
-async function poll(){try{const [j,h]=await Promise.all([api('/api/market'),api('/api/health')]);marketSnapshot=j.quotes||[];render(marketSnapshot);renderGainers(j.gainers,j.error);orderMode=h.orderMode||'DISABLED';updateOrderGate();if(h.authenticated&&!chartReady&&!chartLoading&&chartAttemptedFor!==selected)void selectInstrument(selected);if(h.authenticated&&!optionContracts.length&&(optionsAttemptedFor!==$('optionUnderlying').value||Date.now()-optionsAttemptedAt>=60000))void loadOptions($('optionUnderlying').value);if(h.authenticated)void refreshAccount()}catch(e){$('feedState').textContent='BACKEND DISCONNECTED';$('dot').style.background='#e45d68'}$('clock').textContent=new Date().toLocaleTimeString('en-IN')}
+async function poll(){try{const [j,h]=await Promise.all([api('/api/market'),api('/api/health')]);marketSnapshot=j.quotes||[];render(marketSnapshot);latestGainers=j.gainers||[];latestGainerError=j.error||'';renderGainers(latestGainers,latestGainerError);void refreshGainerScan();orderMode=h.orderMode||'DISABLED';updateOrderGate();if(h.authenticated&&!chartReady&&!chartLoading&&chartAttemptedFor!==selected)void selectInstrument(selected);if(h.authenticated&&!optionContracts.length&&(optionsAttemptedFor!==$('optionUnderlying').value||Date.now()-optionsAttemptedAt>=60000))void loadOptions($('optionUnderlying').value);if(h.authenticated)void refreshAccount()}catch(e){$('feedState').textContent='BACKEND DISCONNECTED';$('dot').style.background='#e45d68'}$('clock').textContent=new Date().toLocaleTimeString('en-IN')}
 function clearChartLevels(message){$('entryLine').textContent='—';$('slLine').textContent='—';$('targetLine').textContent='—';$('chartSignal').textContent=message;}
 function drawCandles(candles,plan=null){
  const el=$('chart');
