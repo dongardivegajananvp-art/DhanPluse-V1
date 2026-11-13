@@ -29,7 +29,7 @@ const pendingOrders=new Map();
 function authReady(){return Boolean(appId&&appSecret&&redirectUri&&accessToken);}
 function ensureSocket(){
   if(!authReady()||socket)return;
-  const owned= new fyersDataSocket(accessToken);
+  const owned=fyersDataSocket.getInstance(`${appId}:${accessToken}`,'',false);
   socket=owned; socketGeneration++;
   owned.on('connect',()=>{if(socket!==owned)return;connected=true;try{owned.mode(owned.FullMode);owned.subscribe(['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX',...(selectedSymbol?[selectedSymbol]:[])]);}catch(e){console.error('subscribe failed',e.message);}});
   owned.on('message',msg=>{if(socket!==owned)return;const rows=Array.isArray(msg)?msg:[msg];for(const row of rows){const symbol=row?.symbol||row?.n||row?.s;if(!symbol)continue;const price=Number(row.lp??row.ltp??row.v?.lp);const stamp=Number(row.ft??row.timestamp??row.v?.ft);if(!Number.isFinite(price)||price<=0||!Number.isFinite(stamp))continue;lastTicks.set(symbol,{symbol,price,exchangeTime:stamp,receivedAt:Date.now()});}});
