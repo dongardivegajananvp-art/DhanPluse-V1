@@ -10,7 +10,7 @@ services:
     autoDeploy: false
     envVars:
       - key: APP_ORIGIN
-        value: https://gv2vpd-live-workstation.onrender.com
+        value: https://gv2vpd-live-workstation-enhj.onrender.com
       - key: WORKSTATION_ACCESS_PASSWORD
         sync: false
       - key: FYERS_APP_ID
