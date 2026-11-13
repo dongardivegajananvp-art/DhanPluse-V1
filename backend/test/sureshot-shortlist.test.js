@@ -35,10 +35,13 @@ test("ranks the complete fresh F&O universe and includes individually fresh indi
   assert.equal(result.data.at(-1).rank, 221);
 });
 
-test("blocks incomplete F&O quote coverage", () => {
+test("ranks only independently fresh F&O quotes when universe coverage is partial", () => {
   const partial = { ...quoteSnapshot, data: quoteSnapshot.data.slice(0, 217), quotedCount: 217 };
-  assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: partial, universe, indexTicks, now }),
-    /complete_verified_fno_quote_snapshot_required/);
+  const result = buildVerifiedSureshotShortlist({ quoteSnapshot: partial, universe, indexTicks, now, limit: 250 });
+  assert.equal(result.quotedEquityCount, 217);
+  assert.equal(result.partialQuoteCoverage, true);
+  assert.equal(result.equityCandidates.length, 217);
+  assert.equal(result.candidateCount, 220);
 });
 
 test("blocks stale equity quotes but skips missing, null-change or stale index ticks", () => {
@@ -94,8 +97,9 @@ test("missing or stale index ticks do not remove any verified F&O equities", () 
 
 test("requires every expected F&O symbol exactly once with a fresh exchange timestamp", () => {
   const missing = { ...quoteSnapshot, data: quoteSnapshot.data.slice(0, -1), quotedCount: 217 };
-  assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: missing, universe, indexTicks, now }),
-    /complete_verified_fno_quote_snapshot_required/);
+  const partialResult = buildVerifiedSureshotShortlist({ quoteSnapshot: missing, universe, indexTicks, now, limit: 250 });
+  assert.equal(partialResult.quotedEquityCount, 217);
+  assert.equal(partialResult.partialQuoteCoverage, true);
   const duplicateQuote = structuredClone(quoteSnapshot);
   duplicateQuote.data[217].n = duplicateQuote.data[0].n;
   assert.throws(() => buildVerifiedSureshotShortlist({ quoteSnapshot: duplicateQuote, universe, indexTicks, now }),
