@@ -14,8 +14,14 @@ export function createRuntimeStateStore({ databaseUrl, PoolClass = Pool }) {
   const pool = configured ? new PoolClass({
     connectionString: String(databaseUrl).trim(),
     max: 2,
-    idleTimeoutMillis: 10000,
+    // Keep one lightweight connection warm for the FYERS cooldown circuit
+    // and resumable Sureshot cursor; cold reconnects must not strand the
+    // fail-closed persistence path during the opening scan.
+    min: 1,
+    idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000,
     application_name: 'gv2vpd-runtime-state'
   }) : null;
   if (pool && typeof pool.on === 'function') {

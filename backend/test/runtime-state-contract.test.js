@@ -35,3 +35,11 @@ test('Sureshot fails closed when durable runtime state is unavailable or cursor 
   assert.equal((server.match(/if \(!\(await persistSureshotScanState\(\)\)\)/g) || []).length, 2);
   assert.match(server, /verified plans withheld/);
 });
+
+
+test('durable runtime state keeps a warm PostgreSQL connection for cooldown persistence', () => {
+  assert.match(store, /min:\s*1/);
+  assert.match(store, /idleTimeoutMillis:\s*30000/);
+  assert.match(store, /keepAlive:\s*true/);
+  assert.match(store, /keepAliveInitialDelayMillis:\s*10000/);
+});
