@@ -6,7 +6,7 @@ const historyCache=new Map();
 let activeChartCandles=[],activeChartSymbol='',lastChartTickStamp=0;
 let chartLoading=false,chartReady=false,accountBusy=false,lastAccountAt=0,chartAttemptedFor='',optionsAttemptedFor='',optionsAttemptedAt=0,chartSelectionId=0;
 let gainerScanResults=[],latestGainers=[],latestGainerError='',lastGainerScanAt=0,gainerScanBusy=false;
-let mcxScanBusy=false,mcxScanTimer=null;
+let mcxScanBusy=false,mcxScanTimer=null,mcxPickerRequest=0;
 const indexNames={'NSE:NIFTY50-INDEX':'NIFTY 50','NSE:NIFTYBANK-INDEX':'BANK NIFTY','BSE:SENSEX-INDEX':'SENSEX'};
 async function api(path,opts={}){const r=await fetch(path,{headers:{'content-type':'application/json'},...opts});const j=await r.json();if(!r.ok)throw Error(j.detail||j.error||'Request failed');return j}
 function tickAge(t){const ms=Number(t.exchangeTime)*1000,age=Date.now()-ms;return Number.isFinite(ms)&&age>=-3000&&age<10000?'Fresh exchange tick':'Stale · orders blocked'}
@@ -114,9 +114,33 @@ function updateOrderGate(){const t=selectedOption&&marketSnapshot.find(x=>x.symb
 async function sendOrder(side){if(!selectedOption)return;const qty=Number($('qty').value),sl=Number($('sl').value),target=Number($('target').value),summary=side+' '+qty+' '+selectedOption.symbol+'\nLive premium: '+$('premium').textContent+'\nStop loss: '+sl+'\nTarget: '+target+'\n\nConfirm this order to FYERS?';if(!window.confirm(summary))return;try{$('orderState').textContent='SENDING TO FYERS…';const requestId=crypto.randomUUID();const r=await api('/api/order',{method:'POST',body:JSON.stringify({symbol:selectedOption.symbol,side,qty,productType:$('product').value,stopLoss:sl,takeProfit:target,confirm:true,requestId})});$('orderState').textContent='FYERS ACK · '+(r.orderId||'CHECK ORDER BOOK');await refreshAccount()}catch(e){$('orderState').textContent=e.message;await refreshAccount()}}
 $('symbol').addEventListener('change',e=>selectInstrument(e.target.value));
 $('scanMcxBest').addEventListener('click',()=>scanMcxBestSetup());
-function chooseMcxProduct(product,label,buttonId){$('chooseCrudeOil').setAttribute('aria-pressed',buttonId==='chooseCrudeOil'?'true':'false');$('chooseNaturalGas').setAttribute('aria-pressed',buttonId==='chooseNaturalGas'?'true':'false');const input=$('mcxSymbol');input.disabled=false;$('loadMcx').disabled=false;input.value='MCX:'+product;input.placeholder='Enter full active '+label+' FYERS futures symbol';$('mcxContractLabel').textContent=label+' · FULL FYERS CONTRACT SYMBOL';$('mcxContractHint').textContent='Selected '+label+'. Complete the exact active contract symbol from FYERS, including its expiry and FUT suffix, then load the chart.';input.focus();$('mcxQuote').hidden=true}
-$('chooseCrudeOil').addEventListener('click',()=>chooseMcxProduct('CRUDEOIL','CRUDE OIL','chooseCrudeOil'));$('chooseNaturalGas').addEventListener('click',()=>chooseMcxProduct('NATURALGAS','NATURAL GAS','chooseNaturalGas'));
-$('loadMcx').addEventListener('click',()=>{const symbol=$('mcxSymbol').value.trim().toUpperCase();if(!/^MCX:(?:CRUDEOIL|NATURALGAS)[A-Z0-9_-]*FUT$/i.test(symbol)){$('mcxContractHint').textContent='Invalid contract. Select Crude Oil or Natural Gas and enter its full active FYERS futures symbol ending in FUT.';return}const label=symbol.startsWith('MCX:CRUDEOIL')?'CRUDE OIL':'NATURAL GAS';selectInstrument(symbol,label+' · MCX')});
+async function chooseMcxProduct(product,label,buttonId){
+ const requestId=++mcxPickerRequest;
+ $('chooseCrudeOil').setAttribute('aria-pressed',buttonId==='chooseCrudeOil'?'true':'false');
+ $('chooseNaturalGas').setAttribute('aria-pressed',buttonId==='chooseNaturalGas'?'true':'false');
+ const input=$('mcxSymbol');
+ input.disabled=true;$('loadMcx').disabled=true;
+ input.replaceChildren(new Option('Loading active FYERS contracts…',''));
+ $('mcxContractLabel').textContent=label+' · ACTIVE FYERS FUTURES';
+ $('mcxContractHint').textContent='Fetching active contracts from the official FYERS MCX Symbol Master…';
+ $('mcxQuote').hidden=true;
+ try{
+  const data=await api('/api/mcx/contracts?product='+encodeURIComponent(product));
+  if(requestId!==mcxPickerRequest)return;
+  const contracts=Array.isArray(data.contracts)?data.contracts:[];
+  if(!contracts.length)throw new Error('No active verified '+label+' futures contract is available');
+  input.replaceChildren(...contracts.map(contract=>new Option(contract.symbol+' · EXP '+contract.expiryDate,contract.symbol)));
+  input.disabled=false;$('loadMcx').disabled=false;
+  $('mcxContractHint').textContent=label+' selected. Active FYERS contracts loaded; nearest expiry is preselected. Choose another expiry if needed, then load chart.';
+ }catch(error){
+  if(requestId!==mcxPickerRequest)return;
+  input.replaceChildren(new Option('No verified active contract available',''));
+  $('mcxContractHint').textContent='CONTRACT LIST UNAVAILABLE · '+error.message+' · NO TRADE';
+ }
+}
+$('chooseCrudeOil').addEventListener('click',()=>void chooseMcxProduct('CRUDEOIL','CRUDE OIL','chooseCrudeOil'));
+$('chooseNaturalGas').addEventListener('click',()=>void chooseMcxProduct('NATURALGAS','NATURAL GAS','chooseNaturalGas'));
+$('loadMcx').addEventListener('click',()=>{const symbol=$('mcxSymbol').value.trim().toUpperCase();if(!/^MCX:(?:CRUDEOIL|NATURALGAS)\\d{2}[A-Z]{3}FUT$/.test(symbol)){$('mcxContractHint').textContent='Invalid or unverified contract selection. Choose an active contract from the FYERS list.';return}const label=symbol.startsWith('MCX:CRUDEOIL')?'CRUDE OIL':'NATURAL GAS';selectInstrument(symbol,label+' · MCX')});
 $('optionUnderlying').addEventListener('change',e=>{const underlying=e.target.value;if(!underlying){clearOptionSelection();return}const chartSelect=$('symbol');let option=[...chartSelect.options].find(o=>o.value===underlying);if(!option){option=new Option(underlying.replace(/^NSE:/,'').replace(/^BSE:/,'').replace(/-EQ$/,'').replace('-INDEX',''),underlying);chartSelect.add(option)}chartSelect.value=underlying;void selectInstrument(underlying,option.text,underlying)});
 $('contract').addEventListener('change',e=>chooseOption(e.target.value));
 $('buy').addEventListener('click',()=>sendOrder('BUY'));$('sell').addEventListener('click',()=>sendOrder('SELL'));
