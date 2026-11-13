@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
+import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcUnderlyingBreakout, evaluateMxcOptionBreakout } from './mcx-options.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -60,6 +61,11 @@ const orderRequestPool=databaseUrl.startsWith('postgres://')||databaseUrl.starts
 const orderRequestStoreReady=orderRequestPool?orderRequestPool.query("CREATE TABLE IF NOT EXISTS gv2vpd_order_requests (request_id VARCHAR(64) PRIMARY KEY, request_hash CHAR(64) NOT NULL, status VARCHAR(32) NOT NULL, broker_order_id VARCHAR(128), response_message TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").then(()=>true).catch(error=>{console.error('Order idempotency store unavailable; order route will remain fail-closed.',String(error?.message||error).slice(0,160));return false;}):Promise.resolve(false);
 
 const optionChains=new Map();
+const mcxOptionChains=new Map();
+const mcxOptionHistoryCache=new Map();
+let mcxComMaster=null,mcxComMasterFetchedAt=0,mcxComMasterPromise=null;
+let mcxOptionCandidateSymbols=[];
+let mcxScanPromise=null;
 let nseFoMaster=null,nseFoMasterFetchedAt=0,nseFoMasterPromise=null;
 let bseFoMaster=null,bseFoMasterFetchedAt=0,bseFoMasterPromise=null;
 let fnoMoversCache={rows:[],updatedAt:0,expiresAt:0,error:'Not loaded'};
@@ -69,7 +75,7 @@ const subscribedSymbols=new Set();
 const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
 function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!socket||!connected)return {subscribed:0,removed:0};
-  const wanted=new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol]).filter(Boolean)]);
+  const wanted=new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol]).filter(Boolean)]);
   const add=[...wanted].filter(x=>force||!subscribedSymbols.has(x));
   const remove=[...subscribedSymbols].filter(x=>!wanted.has(x));
   if(remove.length&&typeof socket.unsubscribe==='function'){
@@ -141,6 +147,7 @@ async function fyersGet(url){const r=await fyersRestFetch(url,{headers:{Authoriz
 async function fyersPost(url,body){const r=await fyersRestFetch(url,{method:'POST',headers:{Authorization:appId+':'+accessToken,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(body),timeoutMs:12000});const j=await r.json().catch(()=>({}));if(!r.ok||j.s!=='ok'){const error=new Error(String(j.message||j.code||'FYERS order request failed'));error.statusCode=r.status;error.retryAfterMs=Number(j.retryAfterSeconds)*1000||fyersRetryAfterMs(r);throw error;}return j;}
 async function loadNseFoMaster(){if(nseFoMaster&&Date.now()-nseFoMasterFetchedAt<86400000)return nseFoMaster;if(nseFoMasterPromise)return nseFoMasterPromise;nseFoMasterPromise=(async()=>{const r=await fetch('https://public.fyers.in/sym_details/NSE_FO_sym_master.json',{headers:{Accept:'application/json'},signal:AbortSignal.timeout(30000)});if(!r.ok)throw new Error('FYERS NSE F&O symbol master unavailable');const master=await r.json();if(!master||typeof master!=='object'||Array.isArray(master))throw new Error('Invalid FYERS symbol master');nseFoMaster=master;nseFoMasterFetchedAt=Date.now();return master;})().finally(()=>{nseFoMasterPromise=null});return nseFoMasterPromise;}
 async function loadBseFoMaster(){if(bseFoMaster&&Date.now()-bseFoMasterFetchedAt<86400000)return bseFoMaster;if(bseFoMasterPromise)return bseFoMasterPromise;bseFoMasterPromise=(async()=>{const r=await fetch('https://public.fyers.in/sym_details/BSE_FO_sym_master.json',{headers:{Accept:'application/json'},signal:AbortSignal.timeout(30000)});if(!r.ok)throw new Error('FYERS BSE F&O symbol master unavailable');const master=await r.json();if(!master||typeof master!=='object'||Array.isArray(master))throw new Error('Invalid FYERS BSE F&O symbol master');bseFoMaster=master;bseFoMasterFetchedAt=Date.now();return master;})().finally(()=>{bseFoMasterPromise=null});return bseFoMasterPromise;}
+async function loadMcxComMaster(){if(mcxComMaster&&Date.now()-mcxComMasterFetchedAt<86400000)return mcxComMaster;if(mcxComMasterPromise)return mcxComMasterPromise;mcxComMasterPromise=(async()=>{const r=await fetch('https://public.fyers.in/sym_details/MCX_COM_sym_master.json',{headers:{Accept:'application/json'},signal:AbortSignal.timeout(30000)});if(!r.ok)throw new Error('FYERS MCX commodity Symbol Master unavailable');const master=await r.json();if(!master||typeof master!=='object'||Array.isArray(master))throw new Error('Invalid FYERS MCX commodity Symbol Master');mcxComMaster=master;mcxComMasterFetchedAt=Date.now();return mcxComMaster;})().finally(()=>{mcxComMasterPromise=null});return mcxComMasterPromise;}
 function optionMeta(symbol,master){const x=master?.[symbol];if(!x||Number(x.tradeStatus)!==1||!['CE','PE'].includes(String(x.optType||'').toUpperCase()))return null;const lotSize=Number(x.minLotSize),tickSize=Number(x.tickSize),strike=Number(x.strikePrice);if(!Number.isInteger(lotSize)||lotSize<1||!Number.isFinite(tickSize)||tickSize<=0||!Number.isFinite(strike)||strike<=0)return null;return{symbol,side:String(x.optType).toUpperCase(),strike,lotSize,tickSize,expiryDate:String(x.expiryDate||'')};}
 
 
@@ -261,7 +268,7 @@ app.get('/api/health',(_req,res)=>{
   res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:freshIndexes.length,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData: freshIndexes.length===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fyersRestCooldown:{active:fyersRestCooldownUntil>Date.now(),reason:fyersRestCooldownReason||null,retryAfterSeconds:fyersRestCooldownUntil>Date.now()?Math.ceil((fyersRestCooldownUntil-Date.now())/1000):0,consecutive429:fyersRest429Count},orderMode:'DISABLED'});
 });
 app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,underlying:row.underlyingSymbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
-app.post('/api/select-symbol',(req,res)=>{const symbol=String(req.body?.symbol||'').trim();if(!/^(NSE|BSE):[A-Z0-9&_.-]{2,48}(?:-(EQ|INDEX)|[0-9]{2}[A-Z0-9]+FUT)$/.test(symbol)&&!/^MCX:[A-Z0-9&_.-]{3,48}$/.test(symbol))return res.status(400).json({error:'Invalid FYERS NSE/BSE cash-index or MCX contract symbol'});selectedSymbol=symbol;syncSocketSubscriptions();res.json({selectedSymbol,exchange:symbol.split(':')[0],historyFetch:'on-demand-only'});});
+app.post('/api/select-symbol',(req,res)=>{const symbol=String(req.body?.symbol||'').trim();if(!/^(NSE|BSE):[A-Z0-9&_.-]{2,48}(?:-(EQ|INDEX)|[0-9]{2}[A-Z0-9]+FUT)$/.test(symbol)&&!/^MCX:[A-Z0-9&_.-]{3,48}$/.test(symbol))return res.status(400).json({error:'Invalid FYERS NSE/BSE cash-index or MCX contract symbol'});selectedSymbol=symbol;if(symbol.startsWith('MCX:')){selectedOptionSymbol='';mcxOptionCandidateSymbols=[];}syncSocketSubscriptions();res.json({selectedSymbol,exchange:symbol.split(':')[0],historyFetch:'on-demand-only'});});
 const historyCache=new Map();
 const gainerHistoryCache=new Map();
 app.get('/api/history',async(req,res)=>{
@@ -281,6 +288,81 @@ app.get('/api/history',async(req,res)=>{
     const result={symbol,resolution:'5',candles,source:'FYERS Data API',fetchedAt:new Date().toISOString()};
     historyCache.set(symbol,result);res.set('Cache-Control','no-store').json(result);
   }catch(e){res.status(502).json({error:'FYERS history request failed',detail:String(e?.message||e).slice(0,180)});}
+});
+
+
+// MCX option discovery uses the official MCX_COM Symbol Master, not the NSE/BSE option-chain endpoint.
+// Candidate contracts are subscribed first; a setup is published only after both futures and option candles/ticks pass freshness checks.
+async function loadMxcHistory(symbol){
+  const cached=mcxOptionHistoryCache.get(symbol);
+  if(cached&&isHistoryCacheFresh(cached.fetchedAt))return cached;
+  const now=Math.floor(Date.now()/1000),to=now-300,from=to-5*24*60*60;
+  const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
+  const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000});
+  const payload=await response.json().catch(()=>({}));
+  if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles))throw Object.assign(new Error(String(payload.message||payload.code||'FYERS MCX option history unavailable')),{statusCode:response.status||502});
+  const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))&&Number(c[3])>0).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
+  if(!candles.length)throw new Error('FYERS returned no valid completed MCX 5-minute candles');
+  const result={symbol,candles,fetchedAt:Date.now(),source:'FYERS Data API MCX history'};
+  mcxOptionHistoryCache.set(symbol,result);
+  return result;
+}
+app.get('/api/mcx/scan',async(req,res)=>{
+  const future=String(req.query.symbol||'').trim().toUpperCase();
+  if(!mcxFutureRoot(future))return res.status(400).json({status:'NO_TRADE',reason:'Only exact MCX Crude Oil or Natural Gas FUT contracts are supported'});
+  if(future!==selectedSymbol)return res.status(409).json({status:'NO_TRADE',reason:'Select this exact MCX futures contract in the chart first'});
+  if(!authReady())return res.status(401).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:'FYERS session unavailable'});
+  if(mcxScanPromise){try{return res.json(await mcxScanPromise)}catch(error){return res.status(502).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,180)})}}
+  mcxScanPromise=(async()=>{
+    const futureTick=lastTicks.get(future);
+    if(!freshTick(futureTick))return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Fresh MCX futures exchange tick is required'};
+    const underlyingHistory=historyCache.get(future)&&isHistoryCacheFresh(historyCache.get(future).fetchedAt)?historyCache.get(future):await loadMxcHistory(future);
+    const underlyingSetup=evaluateMxcUnderlyingBreakout(underlyingHistory.candles,futureTick);
+    if(underlyingSetup.status!=='SETUP_CONFIRMED')return{...underlyingSetup,source:'FYERS MCX futures tick + completed 5-minute candles'};
+    const master=await loadMcxComMaster();
+    const contracts=listMxcOptionContracts(master,future);
+    const candidates=pickMxcOptionCandidates(contracts,futureTick.price,underlyingSetup.side,3).map(contract=>({...contract,underlyingPrice:futureTick.price}));
+    if(!candidates.length)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'No active FYERS MCX option contracts for the nearest expiry'};
+    mcxOptionChains.set(future,{contracts:candidates,fetchedAt:Date.now()});
+    mcxOptionCandidateSymbols=candidates.map(contract=>contract.symbol);
+    syncSocketSubscriptions({reason:'mcx_option_candidate_scan'});
+    const freshCandidates=candidates.filter(contract=>freshTick(lastTicks.get(contract.symbol)));
+    if(!freshCandidates.length)return{status:'WAITING_FOR_OPTION_TICKS',reason:'Subscribed to nearest-expiry ATM CE/PE candidates; waiting for fresh option exchange ticks',side:underlyingSetup.side,candidates:candidates.map(({symbol,side,strike,expiryDate})=>({symbol,side,strike,expiry:expiryDate}))};
+    const valid=[];
+    const rejected=[];
+    for(const contract of freshCandidates){
+      try{
+        const history=await loadMxcHistory(contract.symbol);
+        const setup=evaluateMxcOptionBreakout(history.candles,lastTicks.get(contract.symbol),contract);
+        if(setup.status==='SETUP_CONFIRMED')valid.push({...setup,contract});
+        else rejected.push({symbol:contract.symbol,reason:setup.reason});
+      }catch(error){
+        if(Number(error?.statusCode)===429)throw error;
+        rejected.push({symbol:contract.symbol,reason:String(error?.message||error).slice(0,120)});
+      }
+    }
+    if(!valid.length)return{status:'NO_TRADE',reason:rejected.length?'No candidate passed fresh option-candle breakout and 1:2 risk/reward checks':'Waiting for verified option history',side:underlyingSetup.side,rejected};
+    valid.sort((a,b)=>b.score-a.score||a.contract.strikeDistance-b.contract.strikeDistance);
+    const best=valid[0];
+    selectedOptionSymbol=best.symbol;
+    syncSocketSubscriptions({reason:'mcx_best_option_selected'});
+    return{
+      status:'SETUP_CONFIRMED',
+      label:'STRONGEST VERIFIED RULE-MATCH · NOT A PROBABILITY GUARANTEE',
+      underlying:future,
+      underlyingSide:underlyingSetup.side,
+      contract:{symbol:best.symbol,side:best.side,strike:best.strike,expiry:best.expiry,lotSize:best.lotSize,tickSize:best.tickSize},
+      premium:best.premium,entry:best.entry,stopLoss:best.stopLoss,target:best.target,rr:best.rr,
+      source:'FYERS MCX Symbol Master + fresh futures/option ticks + completed 5-minute candles',
+      verifiedAt:new Date().toISOString()
+    };
+  })();
+  try{
+    const result=await mcxScanPromise;
+    res.set('Cache-Control','no-store').json(result);
+  }catch(error){
+    res.status(Number(error?.statusCode)===429?429:502).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,180)});
+  }finally{mcxScanPromise=null;}
 });
 
 
@@ -323,7 +405,7 @@ app.get('/api/gainer-scan',async(_req,res)=>{
 });
 
 app.get('/api/options',async(req,res)=>{const underlying=String(req.query.symbol||'');if(!/^(NSE|BSE):[A-Z0-9&.-]+-EQ$/.test(underlying)&&!['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'].includes(underlying))return res.status(400).json({error:'Select a valid NSE/BSE underlying'});if(!authReady())return res.status(401).json({error:'FYERS session unavailable'});const cached=optionChains.get(underlying);if(cached&&Date.now()-cached.fetchedAt<300000)return res.json(cached);try{const url=new URL(FYERS_DATA+'/options-chain-v3');url.searchParams.set('symbol',underlying);url.searchParams.set('strikecount','10');url.searchParams.set('greeks','0');const response=await fyersGet(url);const data=response.data;if(!data||!Array.isArray(data.optionsChain)||!data.optionsChain.length)throw new Error('FYERS option chain is empty');const master=underlying.startsWith('BSE:')?await loadBseFoMaster():await loadNseFoMaster();const contracts=data.optionsChain.filter(x=>['CE','PE'].includes(String(x.option_type||'').toUpperCase())&&typeof x.symbol==='string').map(x=>{const meta=optionMeta(x.symbol,master);return meta?{symbol:x.symbol,side:meta.side,strike:meta.strike,expiry:meta.expiryDate,lotSize:meta.lotSize,tickSize:meta.tickSize}:null;}).filter(Boolean);if(!contracts.length){const chainSymbols=data.optionsChain.slice(0,4).map(x=>String(x.symbol||'')).filter(Boolean);throw new Error('No active option contracts matched the FYERS Symbol Master; chainRows='+data.optionsChain.length+', masterRows='+Object.keys(master).length+', sample='+chainSymbols.join(','));}const result={underlying,contracts,expiries:data.expiryData||[],fetchedAt:Date.now(),source:'FYERS option chain + official NSE F&O Symbol Master'};optionChains.set(underlying,result);console.info('FYERS option-chain contracts verified.',JSON.stringify({underlying,contractCount:contracts.length,expiryCount:(data.expiryData||[]).length,fetchedAt:new Date(result.fetchedAt).toISOString(),cache:'MISS'}));res.json(result);}catch(e){console.error('FYERS option-chain refresh failed.',JSON.stringify({underlying,statusCode:e?.statusCode||null,retryAfterMs:e?.retryAfterMs||0,message:String(e.message||e).slice(0,180)}));res.status(e?.statusCode===429?429:502).json({error:'Option contract discovery failed closed',detail:String(e.message||e).slice(0,180),retryAfterMs:e?.retryAfterMs||0});}});
-app.post('/api/select-option',(req,res)=>{const symbol=String(req.body?.symbol||'');const valid=[...optionChains.values()].some(chain=>Date.now()-chain.fetchedAt<300000&&chain.contracts.some(c=>c.symbol===symbol));if(!valid)return res.status(400).json({error:'Option is not in a recently verified FYERS option chain'});selectedOptionSymbol=symbol;syncSocketSubscriptions();const tick=lastTicks.get(symbol),tickFresh=freshTick(tick);console.info('FYERS option contract selected.',JSON.stringify({symbol,websocketConnected:connected,tickStatus:tickFresh?'FRESH':tick?'STALE':'WAITING_FOR_TICK',exchangeTimestamp:tick?.exchangeTime?new Date(tick.exchangeTime*1000).toISOString():null}));res.json({selectedSymbol:symbol,subscribed:Boolean(socket&&connected),premiumStatus:tickFresh?'FRESH':tick?'STALE':'WAITING_FOR_TICK'});});
+app.post('/api/select-option',(req,res)=>{const symbol=String(req.body?.symbol||'');const validNse=[...optionChains.values()].some(chain=>Date.now()-chain.fetchedAt<300000&&chain.contracts.some(c=>c.symbol===symbol));const validMcx=[...mcxOptionChains.values()].some(chain=>Date.now()-chain.fetchedAt<300000&&chain.contracts.some(c=>c.symbol===symbol));if(!validNse&&!validMcx)return res.status(400).json({error:'Option is not in a recently verified FYERS option source'});selectedOptionSymbol=symbol;syncSocketSubscriptions();const tick=lastTicks.get(symbol),tickFresh=freshTick(tick);console.info('FYERS option contract selected.',JSON.stringify({symbol,websocketConnected:connected,tickStatus:tickFresh?'FRESH':tick?'STALE':'WAITING_FOR_TICK',exchangeTimestamp:tick?.exchangeTime?new Date(tick.exchangeTime*1000).toISOString():null}));res.json({selectedSymbol:symbol,subscribed:Boolean(socket&&connected),premiumStatus:tickFresh?'FRESH':tick?'STALE':'WAITING_FOR_TICK'});});
 app.get('/api/account',async(_req,res)=>{
   res.set('Cache-Control','no-store');
   if(!authReady())return res.status(401).json({error:'FYERS session unavailable'});
