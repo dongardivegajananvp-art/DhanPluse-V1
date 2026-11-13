@@ -12,7 +12,7 @@ self.addEventListener('fetch',event=>{
   event.respondWith(fetch(request).then(response=>{
    if(response.ok){const copy=response.clone();caches.open(CACHE_NAME).then(cache=>cache.put('/',copy));}
    return response;
-  }).catch(async()=> (await caches.match('/')) || (await caches.match('/offline.html'))));
+  }).catch(async()=> (await caches.match('/offline.html')) || new Response('NO LIVE DATA · NO TRADE',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8'}})));
   return;
  }
  if(APP_SHELL.includes(url.pathname)){
