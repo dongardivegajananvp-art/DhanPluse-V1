@@ -97,18 +97,48 @@ function renderMcxSetup(data){
  const note=document.createElement('small');note.textContent='FYERS verified data only · Analysis only · LIVE ORDER GATE LOCKED';root.append(note);
  selectedOption={...data.contract};optionContracts=[selectedOption];const contractSelect=$('contract');contractSelect.replaceChildren(new Option(data.contract.symbol+' · '+data.contract.side+' · '+fmt(data.contract.strike),data.contract.symbol));contractSelect.value=data.contract.symbol;contractSelect.disabled=true;$('qty').value=selectedOption.lotSize;$('qty').min=selectedOption.lotSize;$('qty').step=selectedOption.lotSize;updatePremium();
 }
+function renderMcxPaperComparison(data){
+ const root=$('mcxSetup');
+ const block=document.createElement('section');
+ block.className='mcx-paper-compare';
+ const title=document.createElement('small');
+ title.textContent='A/B STRATEGY TEST · PAPER ONLY';
+ block.append(title);
+ const strategies=data?.strategies||{};
+ for(const [key,label] of [['A_20_CANDLE_BREAKOUT','A · 20-CANDLE'],['B_EMA_TREND_PULLBACK','B · TREND PULLBACK']]){
+  const result=strategies[key]||{status:data?.status||'DATA_UNAVAILABLE_NO_TRADE',reason:data?.reason||'No verified comparison'};
+  const row=document.createElement('div');
+  row.className='mcx-paper-row';
+  const name=document.createElement('b');name.textContent=label;
+  const status=document.createElement('span');
+  status.textContent=result.status==='SETUP_CONFIRMED'?result.side+' · Entry '+fmt(result.entry)+' · SL '+fmt(result.stopLoss)+' · Target '+fmt(result.target)+' · RR 1:2':(result.status||'NO_TRADE')+' · '+(result.reason||'No setup');
+  row.append(name,status);block.append(row);
+ }
+ const note=document.createElement('small');note.textContent='Comparison only · no live orders · production 20-candle rule unchanged';block.append(note);
+ root.append(block);
+}
 async function scanMcxBestSetup(attempt=0){
  if(!selected.startsWith('MCX:')||mcxScanBusy)return;
  if(mcxScanTimer){clearTimeout(mcxScanTimer);mcxScanTimer=null}
  mcxScanBusy=true;
+ let comparison=null;
  if(attempt===0)showMcxScanMessage('Checking fresh MCX futures candles and CE/PE contracts…');
  try{
   const data=await api('/api/mcx/scan?symbol='+encodeURIComponent(selected));
-  if(data.status==='WAITING_FOR_OPTION_TICKS'&&attempt<8){showMcxScanMessage(data.reason+' · rechecking fresh ticks');mcxScanTimer=setTimeout(()=>scanMcxBestSetup(attempt+1),2000);return}
-  if(data.status==='SETUP_CONFIRMED'&&data.contract){renderMcxSetup(data);return}
-  selectedOption=null;updatePremium();showMcxScanMessage((data.status||'NO_TRADE')+' · '+(data.reason||'No MCX contract passed every verification rule'));
- }catch(error){selectedOption=null;updatePremium();showMcxScanMessage('NO TRADE · '+error.message)}
- finally{mcxScanBusy=false}
+  try{comparison=await api('/api/mcx/scan/compare?symbol='+encodeURIComponent(selected))}
+  catch(error){comparison={mode:'PAPER_ONLY',status:'DATA_UNAVAILABLE_NO_TRADE',reason:error.message,liveOrders:false}}
+  if(data.status==='WAITING_FOR_OPTION_TICKS'&&attempt<8){
+   showMcxScanMessage(data.reason+' · rechecking fresh ticks');
+   if(comparison)renderMcxPaperComparison(comparison);
+   mcxScanTimer=setTimeout(()=>scanMcxBestSetup(attempt+1),2000);return
+  }
+  if(data.status==='SETUP_CONFIRMED'&&data.contract)renderMcxSetup(data);
+  else{selectedOption=null;updatePremium();showMcxScanMessage((data.status||'NO_TRADE')+' · '+(data.reason||'No MCX contract passed every verification rule'))}
+  if(comparison)renderMcxPaperComparison(comparison);
+ }catch(error){
+  selectedOption=null;updatePremium();showMcxScanMessage('NO TRADE · '+error.message);
+  if(comparison)renderMcxPaperComparison(comparison)
+ }finally{mcxScanBusy=false}
 }
 async function loadOptions(underlying){if(!underlying||$('optionUnderlying').value!==underlying)return;optionsAttemptedFor=underlying;optionsAttemptedAt=Date.now();$('contract').replaceChildren(new Option('Loading verified contracts…',''));$('contract').disabled=true;selectedOption=null;optionContracts=[];$('premium').textContent='—';updateOrderGate();try{const data=await api('/api/options?symbol='+encodeURIComponent(underlying));if($('optionUnderlying').value!==underlying)return;optionContracts=data.contracts||[];$('contract').replaceChildren(new Option('Choose CE / PE contract',''));for(const c of optionContracts){const o=new Option(c.symbol+' · '+c.side+' · '+c.strike+' · lot '+c.lotSize,c.symbol);$('contract').add(o)}$('contract').disabled=!optionContracts.length;if(!optionContracts.length)$('contract').replaceChildren(new Option('No verified CE / PE contracts returned',''))}catch(e){if($('optionUnderlying').value!==underlying)return;$('contract').replaceChildren(new Option('Option chain unavailable · '+e.message,''));$('contract').disabled=true}}
 function updatePremium(){const symbol=selectedOption?.symbol;if(!symbol){$('premium').textContent='—';updateOrderGate();return}const t=marketSnapshot.find(x=>x.symbol===symbol);$('premium').textContent=t?fmt(t.price)+' · '+tickAge(t):'Waiting for live option tick';updateOrderGate()}

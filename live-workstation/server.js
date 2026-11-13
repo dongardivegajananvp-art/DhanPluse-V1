@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
-import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcUnderlyingBreakout, evaluateMxcOptionBreakout } from './mcx-options.js';
+import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcUnderlyingBreakout, evaluateMxcOptionBreakout, evaluateMxcTrendPullback } from './mcx-options.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -391,6 +391,46 @@ app.get('/api/mcx/scan',async(req,res)=>{
   }catch(error){
     res.status(Number(error?.statusCode)===429?429:502).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,180)});
   }finally{mcxScanPromise=null;mcxScanSymbol='';}
+});
+
+
+app.get('/api/mcx/scan/compare',async(req,res)=>{
+  res.set('Cache-Control','no-store');
+  const future=String(req.query.symbol||'').trim().toUpperCase();
+  if(!mcxFutureRoot(future))return res.status(400).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Only MCX Crude Oil or Natural Gas futures are supported'});
+  if(future!==selectedSymbol)return res.status(409).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Select the exact MCX futures contract first'});
+  if(!authReady())return res.status(401).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:'FYERS session unavailable'});
+  const tick=lastTicks.get(future);
+  if(!freshTick(tick))return res.json({mode:'PAPER_ONLY',status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Fresh MCX futures tick required',liveOrders:false});
+  try{
+    const history=historyCache.get(future)&&isHistoryCacheFresh(historyCache.get(future).fetchedAt)?historyCache.get(future):await loadMxcHistory(future);
+    if(selectedSymbol!==future||!freshTick(lastTicks.get(future)))return res.json({mode:'PAPER_ONLY',status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX symbol or tick changed during comparison',liveOrders:false});
+    const window=getCompletedCandleWindow(history.candles,tick.exchangeTime);
+    const a=evaluateMxcUnderlyingBreakout(history.candles,tick);
+    const b=evaluateMxcTrendPullback(history.candles,tick);
+    const withPlan=(setup)=>{
+      if(setup.status!=='SETUP_CONFIRMED')return setup;
+      const swing=window.completed.slice(-5);
+      const stopLoss=setup.side==='LONG'?Math.min(...swing.map(c=>Number(c.low))):Math.max(...swing.map(c=>Number(c.high)));
+      const risk=setup.side==='LONG'?setup.entry-stopLoss:stopLoss-setup.entry;
+      if(!(risk>0))return{status:'NO_TRADE',reason:'Invalid five-candle swing risk'};
+      const target=setup.side==='LONG'?setup.entry+2*risk:setup.entry-2*risk;
+      if(!(target>0))return{status:'NO_TRADE',reason:'Invalid 1:2 target'};
+      return{...setup,stopLoss,target,rr:2};
+    };
+    res.json({
+      mode:'PAPER_ONLY',
+      liveOrders:false,
+      source:'FYERS MCX futures tick + verified completed 5-minute candles',
+      verifiedAt:new Date().toISOString(),
+      strategies:{
+        A_20_CANDLE_BREAKOUT:withPlan(a),
+        B_EMA_TREND_PULLBACK:withPlan(b)
+      }
+    });
+  }catch(error){
+    res.status(Number(error?.statusCode)===429?429:502).json({mode:'PAPER_ONLY',status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,180),liveOrders:false});
+  }
 });
 
 

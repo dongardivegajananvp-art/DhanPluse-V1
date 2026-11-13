@@ -63,3 +63,44 @@ test('option breakout returns a tick-aligned minimum 1:2 plan only with fresh pr
   assert.ok(result.target > result.entry);
   assert.equal(evaluateMxcOptionBreakout(candles(), tick, contract).status, 'NO_TRADE');
 });
+
+
+import { evaluateMxcTrendPullback } from './mcx-options.js';
+
+test('trend-pullback test fails closed when 51 completed candles are unavailable', () => {
+  const tick = { price: 103, exchangeTime: Math.floor(now / 1000) + 60 };
+  assert.equal(evaluateMxcTrendPullback(candles({ breakout: true }), tick).status, 'DATA_UNAVAILABLE_NO_TRADE');
+});
+
+test('trend-pullback test requires fresh exchange tick and contiguous EMA window', () => {
+  const tick = { price: 103, exchangeTime: Math.floor(now / 1000) + 60 };
+  const longSeries = Array.from({ length: 60 }, (_, i) => ({
+    time: Math.floor(now / 300000) * 300 - 60 * 300 + i * 300,
+    open: 90 + i, high: 92 + i, low: 89 + i, close: 91 + i, volume: 1
+  }));
+  assert.equal(evaluateMxcTrendPullback(longSeries, { ...tick, exchangeTime: 1 }).status, 'DATA_UNAVAILABLE_NO_TRADE');
+  longSeries[20].time += 300;
+  assert.equal(evaluateMxcTrendPullback(longSeries, tick).status, 'DATA_UNAVAILABLE_NO_TRADE');
+});
+
+
+test('trend-pullback paper setup can confirm a rising EMA trend after a pullback and bullish reclaim', () => {
+  const start = Math.floor(now / 300000) * 300 - 60 * 300;
+  const rows = Array.from({ length: 60 }, (_, i) => ({
+    time: start + i * 300,
+    open: 100 + i * 0.5,
+    high: 101 + i * 0.5,
+    low: 99 + i * 0.5,
+    close: 100 + i * 0.5,
+    volume: 1
+  }));
+  rows[58] = { time: start + 58 * 300, open: 127, high: 129, low: 122, close: 124, volume: 1 };
+  rows[59] = { time: start + 59 * 300, open: 124.5, high: 130, low: 124, close: 129.5, volume: 1 };
+  const tick = { price: 129.6, exchangeTime: Math.floor(now / 1000) + 60 };
+  const result = evaluateMxcTrendPullback(rows, tick);
+  assert.equal(result.status, 'SETUP_CONFIRMED');
+  assert.equal(result.side, 'LONG');
+  assert.equal(result.rr, 2);
+  assert.ok(result.entry > result.stopLoss);
+  assert.ok(result.target > result.entry);
+});
