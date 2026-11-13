@@ -6,7 +6,7 @@ const AAD=Buffer.from('DhanPulse/FYERS/access-token/v1','utf8');
 
 export function createSharedTokenReader({databaseUrl,encryptionKey}){
   const url=String(databaseUrl||'').trim(),raw=String(encryptionKey||'').trim();
-  if(!/^postgres(?:ql)?:\\/\\//i.test(url)||!/^[a-f0-9]{64}$/i.test(raw))return null;
+  if(!/^postgres(?:ql)?:\/\//i.test(url)||!/^[a-f0-9]{64}$/i.test(raw))return null;
   const key=Buffer.from(raw,'hex');
   const pool=new Pool({connectionString:url,max:1,idleTimeoutMillis:10000,connectionTimeoutMillis:10000,application_name:'gv2vpd-workstation-token-reader'});
   return {
