@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
-import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcUnderlyingBreakout, evaluateMxcOptionBreakout, evaluateMxcTrendPullback } from './mcx-options.js';
+import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -482,7 +482,7 @@ app.post('/api/order',async(req,res)=>{
   let chain=null,meta=null,isMcx=false,mcxFuture='';
   if(String(symbol||'').startsWith('MCX:')){
     isMcx=true;
-    const match=String(symbol).match(/^MCX:(CRUDEOIL|NATURALGAS)([0-9]{2}[A-Z]{3})[0-9]+(?:\\.[0-9]+)?(CE|PE)$/);
+    const match=String(symbol).match(/^MCX:(CRUDEOIL|NATURALGAS)([0-9]{2}[A-Z]{3})[0-9]+(?:[.][0-9]+)?(CE|PE)$/);
     if(!match)return res.status(400).json({error:'MCX contract symbol is malformed; order blocked'});
     mcxFuture='MCX:'+match[1]+match[2]+'FUT';
     chain=mcxOptionChains.get(mcxFuture);
@@ -516,7 +516,7 @@ app.post('/api/order',async(req,res)=>{
     const values=margin.data||margin;
     const required=Number(values.margin_new_order??values.margin_total);
     const available=Number(values.margin_avail);
-    if(!Number.isFinite(required)||required<0||!Number.isFinite(available)||available<0)
+    if(!Number.isFinite(required)||required<=0||!Number.isFinite(available)||available<0)
       return res.status(503).json({error:'FYERS margin preflight returned incomplete values; order blocked'});
     if(required>available)
       return res.status(409).json({error:'Insufficient FYERS available margin; order blocked',requiredMargin:required,availableMargin:available});
