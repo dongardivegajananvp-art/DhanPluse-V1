@@ -263,7 +263,8 @@ app.get('/api/history',async(req,res)=>{
   const symbol=String(req.query.symbol||'');
   if(symbol!==selectedSymbol)return res.status(409).json({error:'Select symbol before requesting history'});
   if(!authReady())return res.status(401).json({error:'Connect FYERS first'});
-  if(historyCache.has(symbol))return res.json({...historyCache.get(symbol),cached:true});
+  const cachedHistory=historyCache.get(symbol);
+  if(cachedHistory&&isHistoryCacheFresh(cachedHistory.fetchedAt))return res.json({...cachedHistory,cached:true});
   try{
     const now=Math.floor(Date.now()/1000),to=now-300,from=to-5*24*60*60;
     const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
