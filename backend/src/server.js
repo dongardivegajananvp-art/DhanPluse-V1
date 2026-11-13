@@ -1985,7 +1985,7 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
       // consumers. A separate raw fetch here used to bypass endpoint cooldown state.
       body = await fyersReadOnlyGet(url, { priority, stage });
     } catch (error) {
-      if (Number(error.statusCode) === 429 && data.length) {
+      if (priority === "sureshot" && Number(error.statusCode) === 429 && data.length) {
         console.warn("FYERS NSE quote scan continuing with individually fresh rows after rate limit:", JSON.stringify({
           completedBatches: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE),
           universeCount: symbols.length,
