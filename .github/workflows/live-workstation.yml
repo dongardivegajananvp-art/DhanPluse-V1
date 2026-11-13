@@ -1,6 +1,11 @@
 name: Validate live trading workstation
 
 on:
+  push:
+    branches: [feature/live-trading-workstation]
+    paths:
+      - "live-workstation/**"
+      - ".github/workflows/live-workstation.yml"
   pull_request:
     paths:
       - "live-workstation/**"
