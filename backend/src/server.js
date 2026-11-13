@@ -1985,12 +1985,14 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
       // consumers. A separate raw fetch here used to bypass endpoint cooldown state.
       body = await fyersReadOnlyGet(url, { priority, stage });
     } catch (error) {
-      if (Number(error.statusCode) === 429) {
-        console.warn("FYERS stock quotes rate-limited:", JSON.stringify({
-          batchNumber: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE) + 1,
-          batchSize: batch.length,
+      if (Number(error.statusCode) === 429 && data.length) {
+        console.warn("FYERS NSE quote scan continuing with individually fresh rows after rate limit:", JSON.stringify({
+          completedBatches: Math.floor(offset / STOCK_QUOTE_BATCH_SIZE),
+          universeCount: symbols.length,
+          freshQuoteCount: data.length,
           retryAfterSeconds: Number(error.retryAfterSeconds) || null
         }));
+        break;
       }
       throw error;
     }
@@ -2046,14 +2048,6 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
       throw error;
     }
   }
-  if (missingSymbols.length > 0) {
-    const error = new Error(`Incomplete verified F&O quote coverage (${data.length}/${symbols.length}); partial rankings discarded.`);
-    error.statusCode = 503;
-    error.universeCount = symbols.length;
-    error.quotedCount = data.length;
-    error.missingCount = missingSymbols.length;
-    throw error;
-  }
   if (!data.length) {
     const error = new Error("No fresh exchange-timestamped F&O stock quotes. No stale prices shown.");
     error.statusCode = 503;
@@ -2064,19 +2058,16 @@ async function loadVerifiedFnoStockQuotes({ priority = 'normal', stage = null } 
     ok: true, source: "FYERS quotes API", verified: true, fetchedAt: new Date().toISOString(),
     marketSession: getNseSessionWindow().isRegularHours ? "OPEN" : "CLOSED",
     freshnessLimitSeconds: 30, universe: "FYERS current NSE F&O equity symbol master",
-    universeCount: symbols.length, quotedCount: data.length, data, missingSymbols
+    universeCount: symbols.length, quotedCount: data.length, data, missingSymbols,
+    partial: missingSymbols.length > 0
   };
-  if (!isCompleteFreshFnoQuoteSnapshot(result, symbols, Date.now())) {
+  if (isCompleteFreshFnoQuoteSnapshot(result, symbols, Date.now())) {
+    stockQuoteCache = { fetchedAt: Date.parse(result.fetchedAt), data: result };
+    await persistVerifiedFnoQuoteSnapshot(result, symbols);
+    syncMoversCacheFromFnoQuoteSnapshot(result, master.data.map(item => item.symbol));
+  } else {
     stockQuoteCache = { fetchedAt: 0, data: null };
-    const error = new Error("The sequential FYERS F&O quote snapshot aged beyond 30 seconds before all batches completed; the full ranking was discarded.");
-    error.statusCode = 503;
-    error.universeCount = symbols.length;
-    error.quotedCount = data.length;
-    throw error;
   }
-  stockQuoteCache = { fetchedAt: Date.parse(result.fetchedAt), data: result };
-  await persistVerifiedFnoQuoteSnapshot(result, symbols);
-  syncMoversCacheFromFnoQuoteSnapshot(result, master.data.map(item => item.symbol));
   return result;
 }
 app.get("/api/market/stock-quotes", requireDashboardSession, async (_req, res) => {
