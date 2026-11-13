@@ -282,7 +282,7 @@ app.get('/api/account',async(_req,res)=>{
   res.set('Cache-Control','no-store');
   if(!authReady())return res.status(401).json({error:'FYERS session unavailable'});
   const now=Date.now();
-  if(accountSnapshot&&now-accountSnapshotFetchedAt<20000)return res.json({...accountSnapshot,cached:true});
+  if(accountSnapshot&&now-accountSnapshotFetchedAt<60000)return res.json({...accountSnapshot,cached:true});
   if(accountFetchPromise){try{return res.json(await accountFetchPromise);}catch(e){return res.status(502).json({error:'FYERS account reconciliation unavailable',detail:String(e.message||e).slice(0,160)});}}
   if(now<accountRetryAfter){
     if(accountSnapshot)return res.json({...accountSnapshot,cached:true,stale:true,error:'FYERS account API rate limit; showing last verified account snapshot'});
@@ -295,7 +295,7 @@ app.get('/api/account',async(_req,res)=>{
       accountSnapshotFetchedAt=Date.now();
       accountFailureCount=0;
       accountRetryAfter=0;
-      console.info('FYERS broker snapshot refreshed.',JSON.stringify({positionsCount:accountSnapshot.positions.length,ordersCount:accountSnapshot.orders.length,updatedAt:accountSnapshot.updatedAt,cacheTtlMs:20000}));
+      console.info('FYERS broker snapshot refreshed.',JSON.stringify({positionsCount:accountSnapshot.positions.length,ordersCount:accountSnapshot.orders.length,updatedAt:accountSnapshot.updatedAt,cacheTtlMs:60000}));
       return accountSnapshot;
     }catch(e){
       const message=String(e.message||e).slice(0,160);
