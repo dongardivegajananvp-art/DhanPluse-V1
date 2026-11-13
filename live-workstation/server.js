@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
-import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcUnderlyingBreakout, evaluateMxcOptionBreakout } from './mcx-options.js';
+import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcUnderlyingBreakout, evaluateMxcOptionBreakout, evaluateMxcTrendPullback } from './mcx-options.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -336,7 +336,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
     const futureTick=lastTicks.get(future);
     if(!freshTick(futureTick))return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Fresh MCX futures exchange tick is required'};
     const underlyingHistory=historyCache.get(future)&&isHistoryCacheFresh(historyCache.get(future).fetchedAt)?historyCache.get(future):await loadMxcHistory(future);
-    const underlyingSetup=evaluateMxcUnderlyingBreakout(underlyingHistory.candles,futureTick);
+    const underlyingSetup=evaluateMxcTrendPullback(underlyingHistory.candles,futureTick);
     if(underlyingSetup.status!=='SETUP_CONFIRMED')return{...underlyingSetup,source:'FYERS MCX futures tick + completed 5-minute candles'};
     const master=await loadMcxComMaster();
     if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed during scan; stale result discarded'};
@@ -359,7 +359,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
         if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed during option history check'};
         const optionTick=lastTicks.get(contract.symbol);
         if(!freshTick(optionTick)){rejected.push({symbol:contract.symbol,reason:'Option tick became stale during candle verification'});continue;}
-        const setup=evaluateMxcOptionBreakout(history.candles,optionTick,contract);
+        const setup=evaluateMxcTrendPullback(history.candles,optionTick,contract);
         if(setup.status==='SETUP_CONFIRMED')valid.push({...setup,contract});
         else rejected.push({symbol:contract.symbol,reason:setup.reason});
       }catch(error){
@@ -376,11 +376,11 @@ app.get('/api/mcx/scan',async(req,res)=>{
     syncSocketSubscriptions({reason:'mcx_best_option_selected'});
     return{
       status:'SETUP_CONFIRMED',
-      label:'STRONGEST VERIFIED RULE-MATCH · NOT A PROBABILITY GUARANTEE',
+      label:'B · EMA20/EMA50 TREND-PULLBACK · VERIFIED RULE-MATCH · NOT A PROBABILITY GUARANTEE',
       underlying:future,
       underlyingSide:underlyingSetup.side,
       contract:{symbol:best.symbol,side:best.side,strike:best.strike,expiry:best.expiry,lotSize:best.lotSize,tickSize:best.tickSize},
-      premium:best.premium,entry:best.entry,stopLoss:best.stopLoss,target:best.target,rr:best.rr,
+      premium:best.premium??best.entry,entry:best.entry,stopLoss:best.stopLoss,target:best.target,rr:best.rr,strategy:best.strategy||'B_EMA20_EMA50_TREND_PULLBACK',
       source:'FYERS MCX Symbol Master + fresh futures/option ticks + completed 5-minute candles',
       verifiedAt:new Date().toISOString()
     };
@@ -479,15 +479,30 @@ app.post('/api/order',async(req,res)=>{
   const {symbol,side,qty,productType,stopLoss,takeProfit,confirm,requestId}=req.body||{};
   if(confirm!==true||typeof requestId!=='string'||!/^[a-f0-9-]{24,40}$/i.test(requestId))
     return res.status(400).json({error:'Explicit confirmation and unique requestId required'});
-  const chain=[...optionChains.values()].find(x=>Date.now()-x.fetchedAt<60000&&x.contracts.some(c=>c.symbol===symbol));
-  if(!chain)return res.status(400).json({error:'Contract identity/expiry is not verified by a fresh option chain'});
-  const master=await (symbol.startsWith('BSE:')?loadBseFoMaster():loadNseFoMaster()).catch(()=>null),meta=optionMeta(symbol,master);
+  let chain=null,meta=null,isMcx=false,mcxFuture='';
+  if(String(symbol||'').startsWith('MCX:')){
+    isMcx=true;
+    const match=String(symbol).match(/^MCX:(CRUDEOIL|NATURALGAS)([0-9]{2}[A-Z]{3})[0-9]+(?:\\.[0-9]+)?(CE|PE)$/);
+    if(!match)return res.status(400).json({error:'MCX contract symbol is malformed; order blocked'});
+    mcxFuture='MCX:'+match[1]+match[2]+'FUT';
+    chain=mcxOptionChains.get(mcxFuture);
+    if(mcxFuture!==selectedSymbol||!chain||Date.now()-chain.fetchedAt>=60000||!chain.contracts.some(c=>c.symbol===symbol))
+      return res.status(400).json({error:'Exact MCX futures/option contract is not present in the fresh selected-contract scan'});
+    const master=await loadMcxComMaster().catch(()=>null);
+    meta=master?listMxcOptionContracts(master,mcxFuture).find(c=>c.symbol===symbol):null;
+  }else{
+    chain=[...optionChains.values()].find(x=>Date.now()-x.fetchedAt<60000&&x.contracts.some(c=>c.symbol===symbol));
+    if(!chain)return res.status(400).json({error:'Contract identity/expiry is not verified by a fresh option chain'});
+    const master=await (symbol.startsWith('BSE:')?loadBseFoMaster():loadNseFoMaster()).catch(()=>null);
+    meta=optionMeta(symbol,master);
+  }
+  if(!meta)return res.status(400).json({error:'Official contract lot/tick metadata is unavailable'});
   if(!meta)return res.status(400).json({error:'Official contract lot/tick metadata is unavailable'});
   const quantity=Number(qty),sl=Number(stopLoss),tp=Number(takeProfit),maxQty=Number(process.env.MAX_ORDER_QTY||meta.lotSize*5),maxRisk=Number(process.env.MAX_ORDER_RISK_INR);
   if(!Number.isInteger(maxQty)||maxQty<meta.lotSize||!Number.isInteger(quantity)||quantity<meta.lotSize||quantity%meta.lotSize!==0||quantity>maxQty)
     return res.status(400).json({error:'Quantity must be a valid lot multiple within configured maximum'});
-  if(!['BUY','SELL'].includes(side)||!['INTRADAY','MARGIN'].includes(productType)||!Number.isFinite(sl)||!Number.isFinite(tp)||sl<=0||tp<=0||Math.abs(sl/meta.tickSize-Math.round(sl/meta.tickSize))>1e-7||Math.abs(tp/meta.tickSize-Math.round(tp/meta.tickSize))>1e-7)
-    return res.status(400).json({error:'Side, product, stop-loss or target tick-size validation failed'});
+  if(!['BUY','SELL'].includes(side)||!['INTRADAY','MARGIN'].includes(productType)||(isMcx&&(side!=='BUY'||productType!=='MARGIN'))||!Number.isFinite(sl)||!Number.isFinite(tp)||sl<=0||tp<=0||Math.abs(sl/meta.tickSize-Math.round(sl/meta.tickSize))>1e-7||Math.abs(tp/meta.tickSize-Math.round(tp/meta.tickSize))>1e-7)
+    return res.status(400).json({error:'Side/product/MCX buy-only policy or stop-loss/target tick-size validation failed'});
   const tick=lastTicks.get(symbol);
   if(!freshTick(tick))return res.status(409).json({error:'Option premium is stale or missing; order blocked'});
   const {validateRiskReward}=await import('./order-safety.js');
@@ -495,6 +510,21 @@ app.post('/api/order',async(req,res)=>{
   if(!rr.ok)return res.status(400).json({error:rr.reason||'Minimum reward-to-risk ratio 1:2 is required',riskReward:rr.rr??null});
   const riskInr=rr.risk*quantity;
   if(!Number.isFinite(riskInr)||riskInr<=0||riskInr>maxRisk)return res.status(400).json({error:'Estimated stop-loss risk exceeds the configured per-order INR risk limit'});
+  // FYERS margin preflight is mandatory for every live order, including MCX commodity options.
+  let marginCheck;
+  try{
+    const margin=await fyersPost(FYERS_API+'/multiorder/margin',{data:[{symbol,qty:quantity,side:side==='BUY'?1:-1,type:2,productType,limitPrice:0,stopPrice:0,stopLoss:sl,takeProfit:tp}]});
+    const values=margin.data||margin;
+    const required=Number(values.margin_new_order??values.margin_total);
+    const available=Number(values.margin_avail);
+    if(!Number.isFinite(required)||required<0||!Number.isFinite(available)||available<0)
+      return res.status(503).json({error:'FYERS margin preflight returned incomplete values; order blocked'});
+    if(required>available)
+      return res.status(409).json({error:'Insufficient FYERS available margin; order blocked',requiredMargin:required,availableMargin:available});
+    marginCheck={required,available};
+  }catch(error){
+    return res.status(503).json({error:'FYERS margin preflight unavailable; live order blocked',detail:String(error?.message||error).slice(0,140)});
+  }
   const body={symbol,qty:quantity,type:2,side:side==='BUY'?1:-1,productType,limitPrice:0,stopPrice:0,validity:'DAY',stopLoss:sl,takeProfit:tp,disclosedQty:0,offlineOrder:false,isSliceOrder:false,orderTag:'GV2VPDWS'};
   const requestHash=crypto.createHash('sha256').update(JSON.stringify({symbol,side,qty:quantity,productType,stopLoss:sl,takeProfit:tp})).digest('hex');
   try{
@@ -517,8 +547,25 @@ app.post('/api/order',async(req,res)=>{
   try{
     const result=await fyersPost(FYERS_API+'/orders/sync',body);
     const orderId=result.id||null;
-    await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='BROKER_ACKNOWLEDGED',broker_order_id=$2,response_message=$3,updated_at=NOW() WHERE request_id=$1",[requestId,orderId,String(result.message||'FYERS accepted order request').slice(0,500)]);
-    return res.status(202).json({accepted:true,orderId,message:result.message||'FYERS accepted order request; verify final status in FYERS orderbook',status:'BROKER_ACKNOWLEDGED',source:'FYERS sync order API'});
+    let brokerOrderStatus='ACKNOWLEDGED_NOT_RECONCILED';
+    let filledQty=null,pendingQty=null,rejectionReason='';
+    if(orderId){
+      try{
+        const book=await fyersGet(FYERS_API+'/orders?id='+encodeURIComponent(orderId));
+        const rows=book.orderBook||book.orderbook||book.orders||[];
+        const found=Array.isArray(rows)?rows.find(row=>String(row.id||row.orderNum||'')===String(orderId)):null;
+        if(found){
+          brokerOrderStatus=String(found.status??found.orderStatus??'ORDERBOOK_STATUS_UNKNOWN');
+          filledQty=Number.isFinite(Number(found.filledQty))?Number(found.filledQty):null;
+          pendingQty=Number.isFinite(Number(found.remainingQuantity??found.pendingQty))?Number(found.remainingQuantity??found.pendingQty):null;
+          rejectionReason=String(found.message||found.rejectionReason||'').slice(0,240);
+        }
+      }catch(reconcileError){
+        console.error('FYERS orderbook reconciliation deferred.',JSON.stringify({orderId,message:String(reconcileError?.message||reconcileError).slice(0,140)}));
+      }
+    }
+    await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='BROKER_ACKNOWLEDGED',broker_order_id=$2,response_message=$3,updated_at=NOW() WHERE request_id=$1",[requestId,orderId,String(result.message||'FYERS accepted order request')+' · orderbook='+brokerOrderStatus+' · margin='+marginCheck.required+'/'+marginCheck.available].slice(0,500)]);
+    return res.status(202).json({accepted:true,orderId,message:result.message||'FYERS accepted order request',status:'BROKER_ACKNOWLEDGED',brokerOrderStatus,filledQty,pendingQty,rejectionReason,margin:marginCheck,source:'FYERS sync order API + margin preflight'});
   }catch(error){
     await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='UNCERTAIN_NO_RETRY',response_message=$2,updated_at=NOW() WHERE request_id=$1",[requestId,String(error?.message||error).slice(0,500)]).catch(dbError=>console.error('Could not persist uncertain order result.',String(dbError?.message||dbError).slice(0,120)));
     return res.status(502).json({error:'FYERS order result uncertain/failed; durable request lock retained. Do not retry. Check broker orderbook.',detail:String(error?.message||error).slice(0,160)});
