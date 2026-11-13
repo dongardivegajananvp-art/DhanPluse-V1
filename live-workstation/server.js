@@ -55,7 +55,8 @@ let lastTicks=new Map();
 const nseTicks=new Map(),mcxTicks=new Map();
 const usedOrderRequestIds=new Set();
 const {Pool}=require('pg');
-const orderRequestPool=/^postgres(?:ql)?:\\/\\//i.test(String(process.env.DATABASE_URL||''))?new Pool({connectionString:process.env.DATABASE_URL,max:2,idleTimeoutMillis:10000,connectionTimeoutMillis:10000,application_name:'gv2vpd-order-idempotency'}):null;
+const databaseUrl=String(process.env.DATABASE_URL||'').trim();
+const orderRequestPool=databaseUrl.startsWith('postgres://')||databaseUrl.startsWith('postgresql://')?new Pool({connectionString:databaseUrl,max:2,idleTimeoutMillis:10000,connectionTimeoutMillis:10000,application_name:'gv2vpd-order-idempotency'}):null;
 const orderRequestStoreReady=orderRequestPool?orderRequestPool.query("CREATE TABLE IF NOT EXISTS gv2vpd_order_requests (request_id VARCHAR(64) PRIMARY KEY, request_hash CHAR(64) NOT NULL, status VARCHAR(32) NOT NULL, broker_order_id VARCHAR(128), response_message TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").then(()=>true).catch(error=>{console.error('Order idempotency store unavailable; order route will remain fail-closed.',String(error?.message||error).slice(0,160));return false;}):Promise.resolve(false);
 
 const optionChains=new Map();
