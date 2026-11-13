@@ -41,7 +41,24 @@ function ensureSocket(){
 app.get('/api/health',(_req,res)=>res.json({ok:true,authenticated:authReady(),socketConnected:connected,marketData:'exchange-timestamp-required',orderMode:process.env.LIVE_ORDERS_ENABLED==='true'?'LIVE':'DISABLED'}));
 app.get('/api/market',(_req,res)=>res.json({connected,quotes:[...lastTicks.values()]}));
 app.post('/api/select-symbol',(req,res)=>{const symbol=String(req.body?.symbol||'');if(!/^NSE:[A-Z0-9&_-]+-(EQ|INDEX)$/.test(symbol))return res.status(400).json({error:'Invalid NSE cash/index symbol'});selectedSymbol=symbol;if(socket&&connected)socket.subscribe([symbol]);res.json({selectedSymbol,historyFetch:'on-demand-only'});});
-app.get('/api/history',async(req,res)=>{const symbol=String(req.query.symbol||'');if(symbol!==selectedSymbol)return res.status(409).json({error:'Select symbol before requesting history'});if(!authReady())return res.status(401).json({error:'Connect FYERS first'});try{const {fyersData}=require('fyers-api-v3');const api=new fyersData();api.setAppId(appId);api.setRedirectUrl(redirectUri);api.setAccessToken(accessToken);const end=new Date(),start=new Date(end.getTime()-5*24*3600*1000);const result=await api.getHistory({symbol, resolution:'5', date_format:'1', range_from:start.toISOString().slice(0,10), range_to:end.toISOString().slice(0,10), cont_flag:'1'});res.json(result);}catch(e){res.status(502).json({error:'FYERS history request failed',detail:String(e?.message||e).slice(0,180)});}});
+const historyCache=new Map();
+app.get('/api/history',async(req,res)=>{
+  const symbol=String(req.query.symbol||'');
+  if(symbol!==selectedSymbol)return res.status(409).json({error:'Select symbol before requesting history'});
+  if(!authReady())return res.status(401).json({error:'Connect FYERS first'});
+  if(historyCache.has(symbol))return res.json({...historyCache.get(symbol),cached:true});
+  try{
+    const now=Math.floor(Date.now()/1000),to=now-300,from=to-5*24*60*60;
+    const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
+    const response=await fetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},signal:AbortSignal.timeout(15000)});
+    const payload=await response.json().catch(()=>({}));
+    if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles))return res.status(response.status||502).json({error:'FYERS did not return verified completed 5-minute candles',detail:String(payload.message||payload.code||'Invalid candle payload')});
+    const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))&&Number(c[3])>0).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
+    if(!candles.length)return res.status(502).json({error:'No valid completed 5-minute candles received'});
+    const result={symbol,resolution:'5',candles,source:'FYERS Data API',fetchedAt:new Date().toISOString()};
+    historyCache.set(symbol,result);res.set('Cache-Control','no-store').json(result);
+  }catch(e){res.status(502).json({error:'FYERS history request failed',detail:String(e?.message||e).slice(0,180)});}
+});
 app.post('/api/order',async(req,res)=>{if(process.env.LIVE_ORDERS_ENABLED!=='true')return res.status(423).json({error:'Live orders are disabled until broker authentication, risk controls and order tests are complete'});if(!authReady())return res.status(401).json({error:'Connect FYERS first'});const {symbol,side,qty,type,productType,limitPrice,stopLoss,takeProfit,confirm}=req.body||{};if(confirm!==true)return res.status(400).json({error:'Explicit order confirmation required'});if(!/^NSE:[A-Z0-9&_-]+(CE|PE)$/.test(String(symbol))||!['BUY','SELL'].includes(side)||!Number.isInteger(Number(qty))||Number(qty)<1||Number(qty)>Number(process.env.MAX_ORDER_QTY||1))return res.status(400).json({error:'Order validation failed'});return res.status(501).json({error:'Broker order adapter is not enabled in this build; no order was sent'});});
 app.get('/api/positions',(_req,res)=>res.json({positions:[],orders:[],source:'FYERS order/position adapter pending'}));
 app.listen(Number(process.env.PORT)||10000,'0.0.0.0',()=>console.log('GV2VPD Live Workstation listening'));
