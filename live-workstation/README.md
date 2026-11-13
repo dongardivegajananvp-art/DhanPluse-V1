@@ -25,6 +25,7 @@ The new backend SELECTs the existing AES-256-GCM encrypted `dhanpulse_fyers_auth
 - F&O gainer discovery validates the documented FYERS Futures Scan configuration and only renders movers after a fresh WebSocket tick; API failure details are preserved for diagnosis.
 - The 5-minute chart updates its active candle from the selected symbol's fresh exchange ticks without quote REST polling. It displays Entry/SL/Target only after a completed 20-candle breakout is confirmed and uses a 1:2 reference risk/reward plan; otherwise it explicitly shows WAIT / NO TRADE.
 - Order adapter uses FYERS synchronous order placement, market-protected order type, linked SL/target, explicit second confirmation, fresh premium gate, official lot/tick-size validation, max-quantity cap and duplicate request-ID protection. It never auto-retries an uncertain order.
+- Order API additionally enforces minimum 1:2 reward-to-risk against the latest option premium, rechecks premium freshness immediately before submission, and reserves request IDs in a persistent PostgreSQL table with a unique key. If the durable store is unavailable, orders fail closed; uncertain broker responses remain locked against retry. Broker acknowledgement is not treated as a confirmed fill. No live order has been tested.
 - MCX chart symbol selection and NSE/MCX tick caches remain separate. No MCX full-universe REST scan.
 
 ## WebSocket diagnostics and recovery
