@@ -25,7 +25,7 @@ The new backend SELECTs the existing AES-256-GCM encrypted `dhanpulse_fyers_auth
 
 ## Production gates still closed
 - `LIVE_ORDERS_ENABLED` must remain false until a reviewed production deployment is explicitly approved.
-- Live order gate also requires a FYERS Trading App ID ending in `200` and `FYERS_STATIC_IP_CONFIRMED=true`; the latter must only be set after the actual backend outbound static IP is allowlisted by FYERS. App-type and IP eligibility have not been confirmed.
+- Live order gate also requires a FYERS Trading App ID ending in `200`, `FYERS_STATIC_IP_CONFIRMED=true` (only after the backend outbound static IP is allowlisted by FYERS), and a positive `MAX_ORDER_RISK_INR` per-order loss cap. `MAX_ORDER_QTY` can further cap quantity. App-type and IP eligibility have not been confirmed.
 - FYERS SDK supports automatic reconnect with a retry count up to 50. The SDK documentation does not specify a strict five-second reconnect interval; this must be measured in a deployed test before claiming a 5-second SLA.
-- The code has not yet been run against the user's live FYERS session. Contract discovery, market movers, live tick timestamps, account responses, and broker order validation still need end-to-end verification.
+- The code has not yet been run against the user's live FYERS session. Contract discovery, market movers, live tick timestamps, account responses, and broker order validation still need end-to-end verification. The option-chain response is parsed from FYERS' documented `data.optionsChain` envelope and contracts are checked against the exchange-specific symbol master.
 - No live order has been sent. No merge or deployment has been performed.
