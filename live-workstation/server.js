@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import 'dotenv/config';
 import express from 'express';
@@ -31,7 +32,6 @@ function workstationBasicAuth(req,res,next){
   res.set('WWW-Authenticate','Basic realm="GV2VPD Live Workstation", charset="UTF-8"');
   return res.status(401).send('Authentication required.');
 }
-import crypto from 'node:crypto';
 app.use(workstationBasicAuth);
 app.use(express.static(new URL('./public',import.meta.url).pathname));
 
