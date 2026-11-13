@@ -126,6 +126,7 @@ test("MCX scan proceeds after a short settle when at least one contract has a fr
   });
   assert.equal(reads, 6);
   assert.equal(result.audit.freshQuoteCount, 10);
-  assert.equal(result.timedOut, true);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.partial, true);
   assert.equal(result.waitedMs, 5_000);
 });
