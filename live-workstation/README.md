@@ -1,23 +1,31 @@
 # GV2VPD Live Trading Workstation
 
-Standalone single-screen workstation in `live-workstation/`; the existing multi-tab scanner app is not modified. The workstation backend owns one FYERS Data Socket V3 connection. Browser refreshes read only the local in-memory tick cache; no 218-symbol REST scan is used.
+A separate single-screen app in `live-workstation/`. Scope is only the four workstation panels: Market Watch, 5-minute chart, option/order panel, and positions/orders. No scanner tabs or old-app UI are included.
 
-## Render service configuration
+## Deploy configuration (new service only)
 - Root directory: `live-workstation`
-- Build command: `npm install`
-- Start command: `npm start`
-- Copy these existing secret values into the new service's private environment settings: `FYERS_APP_ID`, `DATABASE_URL`, and `FYERS_TOKEN_ENCRYPTION_KEY`.
-- `APP_ORIGIN` should be the exact deployed workstation origin.
-- Never paste or commit credentials, database URLs, encryption keys, or access tokens into chat or source.
+- Build: `npm install`
+- Start: `npm start`
+- Reuse existing secret values privately: `FYERS_APP_ID`, `DATABASE_URL`, `FYERS_TOKEN_ENCRYPTION_KEY`.
+- Set `APP_ORIGIN` to the exact new workstation origin.
+- Do not paste secrets or tokens into source/chat.
 
-## Existing FYERS login reuse
-The workstation reads the already encrypted row from `dhanpulse_fyers_auth` using the same AES-256-GCM key and AAD as the existing app. It performs a SELECT only: it does not overwrite, clear, or re-authenticate the old app's token. The existing app remains unchanged. If the shared session is absent or invalid, the market stream stays disconnected. The token is held only in backend memory and is never sent to the browser.
+## Existing FYERS login
+The new backend SELECTs the existing AES-256-GCM encrypted `dhanpulse_fyers_auth` row, using the same key and AAD as the old backend. It does not write, clear, or refresh that row. The token stays server-side. The old app code and service are untouched.
 
-## Current implementation and gates
-- One SDK-managed FYERS Data Socket V3 connection with automatic SDK reconnect.
-- Index ticks are cached in memory; UI reads local cache, not FYERS REST quotes.
-- Selected instrument change requests 5-minute history once; server and browser cache the result.
-- Completed candles only (range ends one 5-minute interval before current time) and validated OHLC rows are rendered as candlesticks.
-- No F&O full-universe scan. A genuine all-F&O top-five feed still needs a broker-provided movers source or explicit bounded coverage; no fake rankings are shown.
-- Live BUY/SELL remains locked. Order submission, option contract resolution, NSE/MCX independent workflows, live broker positions/P&L reconciliation, and end-to-end tests are not yet production-ready. Do not set `LIVE_ORDERS_ENABLED=true`.
-- No order has been sent. No merge or deployment has been performed.
+## Implemented in this branch
+- One FYERS Data Socket V3 instance for the workstation; browser refreshes read local cache only.
+- NIFTY 50, BANK NIFTY, SENSEX, selected instrument, selected option, and up to five stock-futures movers share that one socket.
+- FYERS Standard Screeners configuration is cached for 24 hours; the stock-futures gainer screener is refreshed at most every 15 minutes, not a 218-symbol REST quote scan. Live % is recalculated from streamed ticks after subscription. If FYERS does not expose a valid futures gainer screener, the UI shows no verified result rather than inventing one.
+- 5-minute history is fetched only after chart instrument selection and cached per symbol.
+- CE/PE candidates come from the FYERS Option Chain API and are cross-checked against the official NSE F&O Symbol Master for active status, lot size and tick size. The selected option premium is then read from the WebSocket.
+- Positions, overall P&L and order book are read from authenticated FYERS account APIs.
+- Order adapter uses FYERS synchronous order placement, market-protected order type, linked SL/target, explicit second confirmation, fresh premium gate, official lot/tick-size validation, max-quantity cap and duplicate request-ID protection. It never auto-retries an uncertain order.
+- MCX chart symbol selection and NSE/MCX tick caches remain separate. No MCX full-universe REST scan.
+
+## Production gates still closed
+- `LIVE_ORDERS_ENABLED` must remain false until a reviewed production deployment is explicitly approved.
+- Live order gate also requires a FYERS Trading App ID ending in `200` and `FYERS_STATIC_IP_CONFIRMED=true`; the latter must only be set after the actual backend outbound static IP is allowlisted by FYERS. App-type and IP eligibility have not been confirmed.
+- FYERS SDK supports automatic reconnect with a retry count up to 50. The SDK documentation does not specify a strict five-second reconnect interval; this must be measured in a deployed test before claiming a 5-second SLA.
+- The code has not yet been run against the user's live FYERS session. Contract discovery, market movers, live tick timestamps, account responses, and broker order validation still need end-to-end verification.
+- No live order has been sent. No merge or deployment has been performed.
