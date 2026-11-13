@@ -48,6 +48,7 @@ function drawCandles(candles,plan=null){
  const liveBucket=liveFresh?Math.floor(Number(liveTick.exchangeTime)/300)*300:0;
  const liveCandle=Boolean(liveFresh&&candles[candles.length-1].time===liveBucket);
  const completed=liveCandle?candles.slice(0,-1):candles;
+ const visible=candles.slice(-50);
  const zoneSource=completed.slice(-20);
  const supplyCandle=zoneSource.length?zoneSource.reduce((a,b)=>b.high>a.high?b:a):null;
  const demandCandle=zoneSource.length?zoneSource.reduce((a,b)=>b.low<a.low?b:a):null;
@@ -56,16 +57,18 @@ function drawCandles(candles,plan=null){
  const demandBottom=demandCandle?Number(demandCandle.low):null;
  const demandTop=demandCandle?Math.min(Number(demandCandle.open),Number(demandCandle.close)):null;
  const zoneValues=[supplyTop,supplyBottom,demandTop,demandBottom].filter(Number.isFinite);
- const w=Math.max(600,el.clientWidth||800),h=360,pad=24,plotH=h-2*pad,plotW=w-2*pad;
- const lo=Math.min(...candles.map(c=>c.low),...levels.map(x=>x.value),...zoneValues);
- const hi=Math.max(...candles.map(c=>c.high),...levels.map(x=>x.value),...zoneValues);
- const range=Math.max(hi-lo,0.01),step=plotW/candles.length,body=Math.max(2,Math.min(12,step*.62)),y=v=>pad+(hi-v)/range*plotH;
- let svg='<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="FYERS live five minute candlestick chart with supply and demand zones">';
+ const pad=34,h=390,step=15,body=8,w=Math.max(640,pad*2+visible.length*step,el.clientWidth||800),plotH=h-pad*2-24,plotW=w-pad*2;
+ const lo=Math.min(...visible.map(c=>c.low),...levels.map(x=>x.value),...zoneValues);
+ const hi=Math.max(...visible.map(c=>c.high),...levels.map(x=>x.value),...zoneValues);
+ const range=Math.max(hi-lo,0.01),y=v=>pad+(hi-v)/range*plotH;
+ el.style.display='block';el.style.overflowX='auto';el.style.overflowY='hidden';el.style.height=h+'px';el.style.minHeight=h+'px';
+ let svg='<svg viewBox="0 0 '+w+' '+h+'" width="'+w+'" height="'+h+'" style="display:block;width:'+w+'px;height:'+h+'px;max-width:none" role="img" aria-label="FYERS five minute candlestick chart; latest 50 candles shown with horizontal scrolling">';
  for(let i=0;i<5;i++){const yy=pad+i*plotH/4,val=hi-i*range/4;svg+='<line x1="'+pad+'" y1="'+yy+'" x2="'+(w-pad)+'" y2="'+yy+'" stroke="#263449"/><text x="4" y="'+(yy+4)+'" fill="#8ea0b8" font-size="10">'+fmt(val)+'</text>'}
  if(supplyCandle&&supplyTop>supplyBottom){const top=y(supplyTop),bottom=y(supplyBottom);svg+='<rect x="'+pad+'" y="'+top+'" width="'+plotW+'" height="'+Math.max(1,bottom-top)+'" fill="#ef6672" fill-opacity=".13" stroke="#ef6672" stroke-opacity=".75" stroke-dasharray="5 3"/><text x="'+(w-pad-5)+'" y="'+(top+12)+'" text-anchor="end" fill="#ef8a92" font-size="11">SUPPLY ZONE</text>'}
  if(demandCandle&&demandTop>demandBottom){const top=y(demandTop),bottom=y(demandBottom);svg+='<rect x="'+pad+'" y="'+top+'" width="'+plotW+'" height="'+Math.max(1,bottom-top)+'" fill="#35c995" fill-opacity=".13" stroke="#35c995" stroke-opacity=".75" stroke-dasharray="5 3"/><text x="'+(w-pad-5)+'" y="'+(bottom-4)+'" text-anchor="end" fill="#55d9a8" font-size="11">DEMAND ZONE</text>'}
- candles.forEach((c,i)=>{const x=pad+i*step+step/2,up=c.close>=c.open,col=up?'#35c995':'#ef6672',top=y(Math.max(c.open,c.close)),bh=Math.max(1,Math.abs(y(c.open)-y(c.close)));svg+='<line x1="'+x+'" y1="'+y(c.high)+'" x2="'+x+'" y2="'+y(c.low)+'" stroke="'+col+'" stroke-width="1.2"/><rect x="'+(x-body/2)+'" y="'+top+'" width="'+body+'" height="'+bh+'" fill="'+col+'"/>'});
+ visible.forEach((c,i)=>{const x=pad+i*step+step/2,up=c.close>=c.open,col=up?'#35c995':'#ef6672',top=y(Math.max(c.open,c.close)),bh=Math.max(2,Math.abs(y(c.open)-y(c.close))),stamp=new Date(Number(c.time)*1000).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true});svg+='<g><title>'+stamp+' · O '+fmt(c.open)+' · H '+fmt(c.high)+' · L '+fmt(c.low)+' · C '+fmt(c.close)+'</title><line x1="'+x+'" y1="'+y(c.high)+'" x2="'+x+'" y2="'+y(c.low)+'" stroke="'+col+'" stroke-width="2"/><rect x="'+(x-body/2)+'" y="'+top+'" width="'+body+'" height="'+bh+'" rx="1" fill="'+col+'"/></g>'});
  if(plan){for(const item of levels){const yy=y(item.value),color=item.label==='ENTRY'?'#e9c46a':item.label==='SL'?'#ef6672':'#35c995';svg+='<line x1="'+pad+'" y1="'+yy+'" x2="'+(w-pad)+'" y2="'+yy+'" stroke="'+color+'" stroke-width="1.5" stroke-dasharray="6 4"/><text x="'+(w-pad-5)+'" y="'+(yy-4)+'" text-anchor="end" fill="'+color+'" font-size="11">'+item.label+' '+fmt(item.value)+'</text>'}}
+ for(let i=0;i<5;i++){const index=Math.round(i*(visible.length-1)/4),c=visible[index],x=pad+index*step+step/2,label=new Date(Number(c.time)*1000).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',hour12:true});svg+='<text x="'+x+'" y="'+(h-5)+'" text-anchor="middle" fill="#8ea0b8" font-size="10">'+label+'</text>'}
  if(liveCandle)svg+='<text x="'+(w-pad-4)+'" y="15" text-anchor="end" fill="#35c995" font-size="11" font-weight="bold">● LIVE 5M CANDLE</text>';
  else svg+='<text x="'+(w-pad-4)+'" y="15" text-anchor="end" fill="#8ea0b8" font-size="11">LAST VERIFIED CANDLES</text>';
  svg+='</svg>';el.innerHTML=svg;
