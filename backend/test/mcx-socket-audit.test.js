@@ -109,3 +109,23 @@ test("MCX server route imports the socket audit settle helper it invokes", async
   const serverSource = await readFile(new URL("../src/server.js", import.meta.url), "utf8");
   assert.match(serverSource, /import\s*\{[^}]*\bwaitForCompleteMcxSocketAudit\b[^}]*\}\s*from\s*[\x27"]\.\/mcx-socket-audit\.js[\x27"]/);
 });
+
+
+test("MCX scan proceeds after a short settle when at least one contract has a fresh tick", async () => {
+  let clock = now;
+  let reads = 0;
+  const { waitForCompleteMcxSocketAudit } = await import("../src/mcx-socket-audit.js");
+  const partial = { complete: false, freshQuoteCount: 10, coverage: { fresh: 10, missing: 1 } };
+  const result = await waitForCompleteMcxSocketAudit({
+    now: () => clock,
+    sleep: async (ms) => { clock += ms; },
+    timeoutMs: 60_000,
+    pollIntervalMs: 1_000,
+    minimumPartialWaitMs: 5_000,
+    getAudit: async () => { reads++; return partial; }
+  });
+  assert.equal(reads, 6);
+  assert.equal(result.audit.freshQuoteCount, 10);
+  assert.equal(result.timedOut, true);
+  assert.equal(result.waitedMs, 5_000);
+});
