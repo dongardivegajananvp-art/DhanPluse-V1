@@ -140,7 +140,7 @@ test("MCX full-universe audit reports every official future and ranks only a com
   assert.equal(audit.data[1].symbol, "MCX:NATURALGAS26NOVFUT");
 });
 
-test("MCX full-universe audit keeps stale and missing rows visible but blocks ranking", () => {
+test("MCX full-universe audit keeps stale rows visible and ranks independently fresh candidates", () => {
   const universe = [
     ...buildMcxFuturesUniverse(master, now),
     { symbol: "MCX:NATURALGAS26NOVFUT", underlying: "NATURALGAS" }
@@ -155,7 +155,8 @@ test("MCX full-universe audit keeps stale and missing rows visible but blocks ra
     }]
   });
   assert.equal(audit.complete, false);
-  assert.equal(audit.data.length, 0);
+  assert.equal(audit.data.length, 1);
+  assert.equal(audit.data[0].symbol, "MCX:CRUDEOIL26NOVFUT");
   assert.equal(audit.audit[0].status, "FRESH_QUOTE");
   assert.equal(audit.audit[1].status, "STALE_OR_INVALID_QUOTE");
   assert.equal(audit.excludedQuoteCount, 1);
