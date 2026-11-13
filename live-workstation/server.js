@@ -310,7 +310,7 @@ app.get('/api/gainer-scan',async(_req,res)=>{
   const tick=lastTicks.get(row.underlyingSymbol);
   if(!freshTick(tick)){results.push({symbol:row.symbol,underlying:row.underlyingSymbol,status:'WAITING_FOR_FRESH_TICK',reason:'Waiting for fresh cash-equity exchange tick'});continue;}
   try{const history=await loadGainerHistory(row.underlyingSymbol),setup=evaluateGainerBreakout(history.candles,tick);results.push({symbol:row.symbol,underlying:row.underlyingSymbol,price:tick.price,exchangeTime:tick.exchangeTime,candleTime:setup.candleTime||null,...setup});}
-  catch(error){results.push({symbol:row.symbol,underlying:row.underlyingSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,150)});if(Number(error?.statusCode)===429)break;}
+  catch(error){results.push({symbol:row.symbol,underlying:row.underlyingSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,150)});if(Number(error?.statusCode)===429){for(const skipped of movers.rows.slice(results.length))results.push({symbol:skipped.symbol,underlying:skipped.underlyingSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'FYERS REST cooldown; no further upstream request was sent'});break;}}
  }
  console.info('FYERS top-five breakout scan completed.',JSON.stringify({count:results.length,setups:results.filter(x=>x.status==='SETUP_CONFIRMED').length,waiting:results.filter(x=>x.status!=='SETUP_CONFIRMED').length}));
  res.json({results,source:'FYERS exchange ticks + FYERS 5-minute OHLC',scannedAt:new Date().toISOString()});
