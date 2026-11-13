@@ -54,6 +54,9 @@ let selectedOptionSymbol='';
 let lastTicks=new Map();
 const nseTicks=new Map(),mcxTicks=new Map();
 const usedOrderRequestIds=new Set();
+const {Pool}=require('pg');
+const orderRequestPool=/^postgres(?:ql)?:\\/\\//i.test(String(process.env.DATABASE_URL||''))?new Pool({connectionString:process.env.DATABASE_URL,max:2,idleTimeoutMillis:10000,connectionTimeoutMillis:10000,application_name:'gv2vpd-order-idempotency'}):null;
+const orderRequestStoreReady=orderRequestPool?orderRequestPool.query("CREATE TABLE IF NOT EXISTS gv2vpd_order_requests (request_id VARCHAR(64) PRIMARY KEY, request_hash CHAR(64) NOT NULL, status VARCHAR(32) NOT NULL, broker_order_id VARCHAR(128), response_message TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").then(()=>true).catch(error=>{console.error('Order idempotency store unavailable; order route will remain fail-closed.',String(error?.message||error).slice(0,160));return false;}):Promise.resolve(false);
 
 const optionChains=new Map();
 let nseFoMaster=null,nseFoMasterFetchedAt=0,nseFoMasterPromise=null;
@@ -357,8 +360,59 @@ app.get('/api/account',async(_req,res)=>{
 });
 
 
-app.post('/api/order',async(req,res)=>{if(process.env.LIVE_ORDERS_ENABLED!=='true'||!/200$/.test(appId)||process.env.FYERS_STATIC_IP_CONFIRMED!=='true'||!Number.isFinite(Number(process.env.MAX_ORDER_RISK_INR))||Number(process.env.MAX_ORDER_RISK_INR)<=0)return res.status(423).json({error:'Live orders require explicit enablement, Trading App ID, static-IP allowlisting and a positive MAX_ORDER_RISK_INR limit'});if(!authReady()||!connected)return res.status(503).json({error:'FYERS authenticated socket is not connected'});const {symbol,side,qty,productType,stopLoss,takeProfit,confirm,requestId}=req.body||{};if(confirm!==true||typeof requestId!=='string'||!/^[a-f0-9-]{24,40}$/i.test(requestId))return res.status(400).json({error:'Explicit confirmation and unique requestId required'});if(usedOrderRequestIds.has(requestId))return res.status(409).json({error:'This order request ID has already been used; check FYERS orderbook before any new attempt'});const chain=[...optionChains.values()].find(x=>Date.now()-x.fetchedAt<60000&&x.contracts.some(c=>c.symbol===symbol));if(!chain)return res.status(400).json({error:'Contract identity/expiry is not verified by a fresh option chain'});const tick=lastTicks.get(symbol);if(!freshTick(tick))return res.status(409).json({error:'Option premium is stale or missing; order blocked'});const master=await (symbol.startsWith('BSE:')?loadBseFoMaster():loadNseFoMaster()).catch(()=>null),meta=optionMeta(symbol,master);if(!meta)return res.status(400).json({error:'Official contract lot/tick metadata is unavailable'});const quantity=Number(qty),sl=Number(stopLoss),tp=Number(takeProfit),maxQty=Number(process.env.MAX_ORDER_QTY||meta.lotSize*5),maxRisk=Number(process.env.MAX_ORDER_RISK_INR),riskInr=Math.abs(tick.price-sl)*quantity;if(!Number.isInteger(maxQty)||maxQty<meta.lotSize||!Number.isInteger(quantity)||quantity<meta.lotSize||quantity%meta.lotSize!==0||quantity>maxQty)return res.status(400).json({error:'Quantity must be a valid lot multiple within configured maximum'});if(!['BUY','SELL'].includes(side)||!['INTRADAY','MARGIN'].includes(productType)||!Number.isFinite(sl)||!Number.isFinite(tp)||sl<=0||tp<=0||Math.abs(sl/meta.tickSize-Math.round(sl/meta.tickSize))>1e-7||Math.abs(tp/meta.tickSize-Math.round(tp/meta.tickSize))>1e-7)return res.status(400).json({error:'Side, product, stop-loss or target tick-size validation failed'});if((side==='BUY'&&!(sl<tick.price&&tp>tick.price))||(side==='SELL'&&!(tp<tick.price&&sl>tick.price)))return res.status(400).json({error:'Stop-loss and target must be on the correct side of the verified live premium'});if(!Number.isFinite(riskInr)||riskInr<=0||riskInr>maxRisk)return res.status(400).json({error:'Estimated stop-loss risk exceeds the configured per-order INR risk limit'});const body={symbol,qty:quantity,type:2,side:side==='BUY'?1:-1,productType,limitPrice:0,stopPrice:0,validity:'DAY',stopLoss:sl,takeProfit:tp,disclosedQty:0,offlineOrder:false,isSliceOrder:false,orderTag:'GV2VPDWS'};usedOrderRequestIds.add(requestId);if(usedOrderRequestIds.size>500)usedOrderRequestIds.delete(usedOrderRequestIds.values().next().value);const task=fyersPost(FYERS_API+'/orders/sync',body);try{const result=await task;res.status(202).json({accepted:true,orderId:result.id||null,message:result.message||'FYERS accepted order request',source:'FYERS sync order API'});}catch(e){res.status(502).json({error:'FYERS order result uncertain/failed; do not retry blindly. Check broker orderbook.',detail:String(e.message||e).slice(0,160)});}});
-
+app.post('/api/order',async(req,res)=>{
+  if(process.env.LIVE_ORDERS_ENABLED!=='true'||!/200$/.test(appId)||process.env.FYERS_STATIC_IP_CONFIRMED!=='true'||!Number.isFinite(Number(process.env.MAX_ORDER_RISK_INR))||Number(process.env.MAX_ORDER_RISK_INR)<=0)
+    return res.status(423).json({error:'Live orders require explicit enablement, Trading App ID, static-IP allowlisting and a positive MAX_ORDER_RISK_INR limit'});
+  if(!authReady()||!connected)return res.status(503).json({error:'FYERS authenticated socket is not connected'});
+  if(!orderRequestPool||!await orderRequestStoreReady)return res.status(503).json({error:'Durable order idempotency store unavailable; order blocked'});
+  const {symbol,side,qty,productType,stopLoss,takeProfit,confirm,requestId}=req.body||{};
+  if(confirm!==true||typeof requestId!=='string'||!/^[a-f0-9-]{24,40}$/i.test(requestId))
+    return res.status(400).json({error:'Explicit confirmation and unique requestId required'});
+  const chain=[...optionChains.values()].find(x=>Date.now()-x.fetchedAt<60000&&x.contracts.some(c=>c.symbol===symbol));
+  if(!chain)return res.status(400).json({error:'Contract identity/expiry is not verified by a fresh option chain'});
+  const master=await (symbol.startsWith('BSE:')?loadBseFoMaster():loadNseFoMaster()).catch(()=>null),meta=optionMeta(symbol,master);
+  if(!meta)return res.status(400).json({error:'Official contract lot/tick metadata is unavailable'});
+  const quantity=Number(qty),sl=Number(stopLoss),tp=Number(takeProfit),maxQty=Number(process.env.MAX_ORDER_QTY||meta.lotSize*5),maxRisk=Number(process.env.MAX_ORDER_RISK_INR);
+  if(!Number.isInteger(maxQty)||maxQty<meta.lotSize||!Number.isInteger(quantity)||quantity<meta.lotSize||quantity%meta.lotSize!==0||quantity>maxQty)
+    return res.status(400).json({error:'Quantity must be a valid lot multiple within configured maximum'});
+  if(!['BUY','SELL'].includes(side)||!['INTRADAY','MARGIN'].includes(productType)||!Number.isFinite(sl)||!Number.isFinite(tp)||sl<=0||tp<=0||Math.abs(sl/meta.tickSize-Math.round(sl/meta.tickSize))>1e-7||Math.abs(tp/meta.tickSize-Math.round(tp/meta.tickSize))>1e-7)
+    return res.status(400).json({error:'Side, product, stop-loss or target tick-size validation failed'});
+  const tick=lastTicks.get(symbol);
+  if(!freshTick(tick))return res.status(409).json({error:'Option premium is stale or missing; order blocked'});
+  const {validateRiskReward}=await import('./order-safety.js');
+  const rr=validateRiskReward({side,premium:Number(tick.price),stopLoss:sl,takeProfit:tp});
+  if(!rr.ok)return res.status(400).json({error:rr.reason||'Minimum reward-to-risk ratio 1:2 is required',riskReward:rr.rr??null});
+  const riskInr=rr.risk*quantity;
+  if(!Number.isFinite(riskInr)||riskInr<=0||riskInr>maxRisk)return res.status(400).json({error:'Estimated stop-loss risk exceeds the configured per-order INR risk limit'});
+  const body={symbol,qty:quantity,type:2,side:side==='BUY'?1:-1,productType,limitPrice:0,stopPrice:0,validity:'DAY',stopLoss:sl,takeProfit:tp,disclosedQty:0,offlineOrder:false,isSliceOrder:false,orderTag:'GV2VPDWS'};
+  const requestHash=crypto.createHash('sha256').update(JSON.stringify({symbol,side,qty:quantity,productType,stopLoss:sl,takeProfit:tp})).digest('hex');
+  try{
+    await orderRequestPool.query('INSERT INTO gv2vpd_order_requests (request_id,request_hash,status) VALUES ($1,$2,$3)',[requestId,requestHash,'SUBMITTING']);
+  }catch(error){
+    if(error?.code==='23505')return res.status(409).json({error:'Request ID already exists in durable order history; check FYERS orderbook. Duplicate submission blocked.'});
+    console.error('Durable order request reservation failed.',String(error?.message||error).slice(0,160));
+    return res.status(503).json({error:'Could not reserve durable order request ID; order blocked'});
+  }
+  const finalTick=lastTicks.get(symbol);
+  if(!freshTick(finalTick)){
+    await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='BLOCKED_STALE_PREMIUM',updated_at=NOW() WHERE request_id=$1",[requestId]).catch(()=>{});
+    return res.status(409).json({error:'Option premium became stale during validation; order blocked'});
+  }
+  const finalRr=validateRiskReward({side,premium:Number(finalTick.price),stopLoss:sl,takeProfit:tp});
+  if(!finalRr.ok||finalRr.risk*quantity>maxRisk){
+    await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='BLOCKED_PRICE_MOVED',updated_at=NOW() WHERE request_id=$1",[requestId]).catch(()=>{});
+    return res.status(409).json({error:'Live premium moved; 1:2 reward/risk or risk-cap check no longer passes. Order blocked'});
+  }
+  try{
+    const result=await fyersPost(FYERS_API+'/orders/sync',body);
+    const orderId=result.id||null;
+    await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='BROKER_ACKNOWLEDGED',broker_order_id=$2,response_message=$3,updated_at=NOW() WHERE request_id=$1",[requestId,orderId,String(result.message||'FYERS accepted order request').slice(0,500)]);
+    return res.status(202).json({accepted:true,orderId,message:result.message||'FYERS accepted order request; verify final status in FYERS orderbook',status:'BROKER_ACKNOWLEDGED',source:'FYERS sync order API'});
+  }catch(error){
+    await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='UNCERTAIN_NO_RETRY',response_message=$2,updated_at=NOW() WHERE request_id=$1",[requestId,String(error?.message||error).slice(0,500)]).catch(dbError=>console.error('Could not persist uncertain order result.',String(dbError?.message||dbError).slice(0,120)));
+    return res.status(502).json({error:'FYERS order result uncertain/failed; durable request lock retained. Do not retry. Check broker orderbook.',detail:String(error?.message||error).slice(0,160)});
+  }
+});
 const server=app.listen(Number(process.env.PORT)||10000,'0.0.0.0',()=>console.log('GV2VPD Live Workstation listening'));
 async function restoreSharedFyersSession(){if(!tokenReader){console.warn('Shared encrypted FYERS token reader is not configured; market stream remains disconnected.');return;}try{const saved=await tokenReader.read();if(!saved){console.warn('No encrypted FYERS session found in shared token store.');return;}accessToken=saved.accessToken;console.log('Existing encrypted FYERS session restored read-only; authenticatedAt='+saved.authenticatedAt);ensureSocket();}catch(error){console.error('Could not restore shared FYERS session:',String(error?.message||error).slice(0,160));}}
 void restoreSharedFyersSession();
