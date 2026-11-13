@@ -23,6 +23,12 @@ The new backend SELECTs the existing AES-256-GCM encrypted `dhanpulse_fyers_auth
 - Order adapter uses FYERS synchronous order placement, market-protected order type, linked SL/target, explicit second confirmation, fresh premium gate, official lot/tick-size validation, max-quantity cap and duplicate request-ID protection. It never auto-retries an uncertain order.
 - MCX chart symbol selection and NSE/MCX tick caches remain separate. No MCX full-universe REST scan.
 
+## WebSocket diagnostics and recovery
+- Startup, socket connect/close/error, subscription application, and accepted exchange-timestamped ticks are logged without exposing tokens or prices.
+- The authenticated `/api/health` endpoint distinguishes WebSocket transport state from fresh market ticks and reports the latest exchange timestamp.
+- During regular NSE hours, a bounded watchdog reapplies the three baseline index subscriptions on the existing socket if fresh ticks stop; it does not create another socket or poll REST quotes.
+- Socket error events alone do not mark the transport disconnected; the close event or SDK connection state controls that status.
+
 ## Production gates still closed
 - `LIVE_ORDERS_ENABLED` must remain false until a reviewed production deployment is explicitly approved.
 - Live order gate also requires a FYERS Trading App ID ending in `200`, `FYERS_STATIC_IP_CONFIRMED=true` (only after the backend outbound static IP is allowlisted by FYERS), and a positive `MAX_ORDER_RISK_INR` per-order loss cap. `MAX_ORDER_QTY` can further cap quantity. App-type and IP eligibility have not been confirmed.
