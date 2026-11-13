@@ -292,10 +292,10 @@ async function loadGainerHistory(symbol){
 }
 function evaluateGainerBreakout(candles,tick){
  if(!freshTick(tick))return{status:'WAITING_FOR_FRESH_TICK',reason:'Underlying exchange tick is not fresh'};
- const currentBucket=Math.floor(Number(tick.exchangeTime)/300)*300,completed=candles[candles.length-1]?.time===currentBucket?candles.slice(0,-1):candles;
+ const {completed,lastClosed,fresh,contiguous}=getCompletedCandleWindow(candles,tick.exchangeTime);
  if(completed.length<21)return{status:'WAITING_FOR_21_COMPLETED_CANDLES',reason:'Need at least 21 completed FYERS 5-minute candles'};
- const lastClosed=completed[completed.length-1],candleAge=Number(tick.exchangeTime)-(Number(lastClosed.time)+300);
- if(!Number.isFinite(candleAge)||candleAge< -3||candleAge>600)return{status:'STALE_CANDLES',reason:'Latest completed 5-minute candle is stale'};
+ if(!fresh)return{status:'STALE_CANDLES',reason:'Latest completed 5-minute candle is stale'};
+ if(!contiguous)return{status:'INCOMPLETE_CANDLE_WINDOW',reason:'Breakout window contains missing 5-minute candles'};
  const prior=completed.slice(-21,-1),swing=completed.slice(-5),resistance=Math.max(...prior.map(c=>c.high)),support=Math.min(...prior.map(c=>c.low));
  let plan=null;
  if(lastClosed.close>resistance&&Number(tick.price)>=lastClosed.close){const sl=Math.min(...swing.map(c=>c.low)),risk=lastClosed.close-sl;if(risk>0)plan={side:'LONG',entry:lastClosed.close,stopLoss:sl,target:lastClosed.close+2*risk,rr:'1:2'};}
