@@ -53,7 +53,7 @@ export function buildVerifiedSureshotShortlist({
     const ageMs = now - timestampMs;
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(changePct) ||
         !Number.isFinite(timestampMs) || ageMs < -5000 || ageMs > maxEquityQuoteAgeMs) {
-      throw new Error("stale_or_invalid_fno_quote_snapshot");
+      continue;
     }
     candidates.push({
       symbol,
