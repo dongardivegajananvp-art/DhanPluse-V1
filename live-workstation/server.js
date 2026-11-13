@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
+import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -513,14 +514,12 @@ app.post('/api/order',async(req,res)=>{
   let marginCheck;
   try{
     const margin=await fyersPost(FYERS_API+'/multiorder/margin',{data:[{symbol,qty:quantity,side:side==='BUY'?1:-1,type:2,productType,limitPrice:0,stopPrice:0,stopLoss:sl,takeProfit:tp}]});
-    const values=margin.data||margin;
-    const required=Number(values.margin_new_order??values.margin_total);
-    const available=Number(values.margin_avail);
-    if(!Number.isFinite(required)||required<=0||!Number.isFinite(available)||available<0)
-      return res.status(503).json({error:'FYERS margin preflight returned incomplete values; order blocked'});
-    if(required>available)
-      return res.status(409).json({error:'Insufficient FYERS available margin; order blocked',requiredMargin:required,availableMargin:available});
-    marginCheck={required,available};
+    const checked=parseFyersMarginPreflight(margin);
+    if(!checked.ok){
+      const insufficient=checked.reason==='Insufficient FYERS available margin';
+      return res.status(insufficient?409:503).json({error:checked.reason+'; order blocked',requiredMargin:checked.required??null,availableMargin:checked.available??null});
+    }
+    marginCheck={required:checked.required,available:checked.available};
   }catch(error){
     return res.status(503).json({error:'FYERS margin preflight unavailable; live order blocked',detail:String(error?.message||error).slice(0,140)});
   }
@@ -546,25 +545,30 @@ app.post('/api/order',async(req,res)=>{
   try{
     const result=await fyersPost(FYERS_API+'/orders/sync',body);
     const orderId=result.id||null;
-    let brokerOrderStatus='ACKNOWLEDGED_NOT_RECONCILED';
-    let filledQty=null,pendingQty=null,rejectionReason='';
+    let orderState={status:'ACK_UNVERIFIED',filledQty:null,remainingQty:null};
+    let rejectionReason='';
     if(orderId){
       try{
         const book=await fyersGet(FYERS_API+'/orders?id='+encodeURIComponent(orderId));
         const rows=book.orderBook||book.orderbook||book.orders||[];
         const found=Array.isArray(rows)?rows.find(row=>String(row.id||row.orderNum||'')===String(orderId)):null;
         if(found){
-          brokerOrderStatus=String(found.status??found.orderStatus??'ORDERBOOK_STATUS_UNKNOWN');
-          filledQty=Number.isFinite(Number(found.filledQty))?Number(found.filledQty):null;
-          pendingQty=Number.isFinite(Number(found.remainingQuantity??found.pendingQty))?Number(found.remainingQuantity??found.pendingQty):null;
+          orderState=classifyFyersOrder(found);
           rejectionReason=String(found.message||found.rejectionReason||'').slice(0,240);
         }
       }catch(reconcileError){
         console.error('FYERS orderbook reconciliation deferred.',JSON.stringify({orderId,message:String(reconcileError?.message||reconcileError).slice(0,140)}));
       }
     }
-    await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='BROKER_ACKNOWLEDGED',broker_order_id=$2,response_message=$3,updated_at=NOW() WHERE request_id=$1",[requestId,orderId,(String(result.message||'FYERS accepted order request')+' · orderbook='+brokerOrderStatus+' · margin='+marginCheck.required+'/'+marginCheck.available).slice(0,500)]);
-    return res.status(202).json({accepted:true,orderId,message:result.message||'FYERS accepted order request',status:'BROKER_ACKNOWLEDGED',brokerOrderStatus,filledQty,pendingQty,rejectionReason,margin:marginCheck,source:'FYERS sync order API + margin preflight'});
+    const stateMessage=orderState.status==='PARTIAL_FILL'
+      ? 'Partial fill detected; remaining quantity requires immediate manual reconciliation. No automatic retry.'
+      : orderState.status==='ACK_UNVERIFIED'
+        ? 'Order acknowledgement received but execution state is not verified. Check FYERS orderbook; do not retry.'
+        : 'FYERS orderbook state: '+orderState.status;
+    await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status=$2,broker_order_id=$3,response_message=$4,updated_at=NOW() WHERE request_id=$1",[requestId,orderState.status,orderId,(String(result.message||'FYERS accepted order request')+' · '+stateMessage+' · margin='+marginCheck.required+'/'+marginCheck.available).slice(0,500)]);
+    const executionConfirmed=orderState.status==='FILLED';
+    const requiresManualReconciliation=['PARTIAL_FILL','PENDING','TRANSIT','ACK_UNVERIFIED'].includes(orderState.status);
+    return res.status(202).json({accepted:true,submissionAccepted:true,executionConfirmed,requiresManualReconciliation,orderId,message:result.message||'FYERS accepted order request',status:orderState.status,filledQty:orderState.filledQty,remainingQty:orderState.remainingQty,rejectionReason,margin:marginCheck,source:'FYERS sync order API + margin preflight + orderbook status'});
   }catch(error){
     await orderRequestPool.query("UPDATE gv2vpd_order_requests SET status='UNCERTAIN_NO_RETRY',response_message=$2,updated_at=NOW() WHERE request_id=$1",[requestId,String(error?.message||error).slice(0,500)]).catch(dbError=>console.error('Could not persist uncertain order result.',String(dbError?.message||dbError).slice(0,120)));
     return res.status(502).json({error:'FYERS order result uncertain/failed; durable request lock retained. Do not retry. Check broker orderbook.',detail:String(error?.message||error).slice(0,160)});
