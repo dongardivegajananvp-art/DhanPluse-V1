@@ -35,7 +35,7 @@ test('expiry date-only values remain valid through the official expiry session c
 
 test('option premium tick requires fresh exchange and receive timestamps plus official tick alignment', () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
-  const fresh = { price: 123.45, exchangeTime: now / 1000 - 2, receivedAt: now };
+  const fresh = { symbol: contract.symbol, price: 123.45, exchangeTime: now / 1000 - 2, receivedAt: now };
   assert.equal(validateOptionPremiumTick(fresh, contract, now).ok, true);
   assert.equal(validateOptionPremiumTick({ ...fresh, price: 123.46 }, contract, now).ok, false);
   assert.equal(validateOptionPremiumTick({ ...fresh, exchangeTime: now / 1000 - 20 }, contract, now).ok, false);
@@ -60,7 +60,7 @@ test('option candles require 51 completed contiguous, valid and tick-aligned FYE
   offTick[10].close = 100.11;
   assert.equal(validateOptionCandles(offTick, tick, contract, now).ok, false);
   const unfinished = [...candles, { time: currentBucket, open: 100, high: 100.2, low: 99.95, close: 100.1 }];
-  assert.equal(validateOptionCandles(unfinished, tick, contract, now).ok, false);
+  const withForming = validateOptionCandles(unfinished, tick, contract, now);\n  assert.equal(withForming.ok, true);\n  assert.equal(withForming.completedCandles.length, 51);
 });
 
 test('option candle verifier rejects stale and malformed OHLC payloads', () => {
