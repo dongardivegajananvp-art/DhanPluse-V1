@@ -83,7 +83,15 @@ let fnoUniverseRows=[],fnoUniverseFetchedAt=0,fnoUniversePromise=null,fnoUnivers
 const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
 function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!socket||!connected)return {subscribed:0,removed:0};
+  if(fnoUniverseRows.length){
+    const pinned=[selectedSymbol,selectedOptionSymbol,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol])].filter(Boolean);
+    const batch=selectSubscriptionBatch({baseSymbols:BASE_SUBSCRIPTIONS,pinnedSymbols:pinned,universeSymbols:fnoUniverseRows.map(x=>x.futureSymbol),cursor:fnoUniverseCursor,limit:FYERS_DATA_SYMBOL_LIMIT});
+    const universeSet=new Set(fnoUniverseRows.map(x=>x.futureSymbol));
+    fnoScanSubscriptionSymbols=batch.symbols.filter(symbol=>universeSet.has(symbol));
+    if(reason==='scheduled_rotation'||reason==='universe_loaded')fnoUniverseCursor=batch.nextCursor;
+  }
   const wanted=new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol]).filter(Boolean),...fnoScanSubscriptionSymbols]);
+  if(wanted.size>FYERS_DATA_SYMBOL_LIMIT)return{subscribed:0,removed:0,error:'FYERS symbol subscription cap exceeded; subscriptions not changed'};
   const add=[...wanted].filter(x=>force||!subscribedSymbols.has(x));
   const remove=[...subscribedSymbols].filter(x=>!wanted.has(x));
   if(remove.length&&typeof socket.unsubscribe==='function'){
@@ -183,11 +191,6 @@ async function refreshFnoUniverse(force=false){
 }
 function rotateFnoUniverseSubscriptions(reason='scheduled_rotation'){
   if(!fnoUniverseRows.length)return{symbols:0,universe:0,limit:FYERS_DATA_SYMBOL_LIMIT};
-  const pinned=[selectedSymbol,selectedOptionSymbol,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol])].filter(Boolean);
-  const batch=selectSubscriptionBatch({baseSymbols:BASE_SUBSCRIPTIONS,pinnedSymbols:pinned,universeSymbols:fnoUniverseRows.map(x=>x.futureSymbol),cursor:fnoUniverseCursor,limit:FYERS_DATA_SYMBOL_LIMIT});
-  fnoUniverseCursor=batch.nextCursor;
-  const universeSet=new Set(fnoUniverseRows.map(x=>x.futureSymbol));
-  fnoScanSubscriptionSymbols=batch.symbols.filter(symbol=>universeSet.has(symbol));
   const result=syncSocketSubscriptions({reason});
   console.info('FYERS F&O rotating subscription window updated.',JSON.stringify({reason,activeFutureSymbols:fnoScanSubscriptionSymbols.length,universeCount:fnoUniverseRows.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,nextCursor:fnoUniverseCursor,subscribed:result.subscribed,removed:result.removed}));
   return{symbols:fnoScanSubscriptionSymbols.length,universe:fnoUniverseRows.length,limit:FYERS_DATA_SYMBOL_LIMIT,nextCursor:fnoUniverseCursor};
