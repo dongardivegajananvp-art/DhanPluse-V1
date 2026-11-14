@@ -124,7 +124,7 @@ test('ledger independently rejects chase beyond 0.5R, inconsistent 2R math and o
   assert.match((await store.saveConfirmedPlan(fixture(now,{premium:100.85}),now)).reason,/0.5R chase/i);
   assert.match((await store.saveConfirmedPlan(fixture(now,{target:103.20}),now)).reason,/exactly two times/i);
   assert.match((await store.saveConfirmedPlan(fixture(now,{rr:3}),now)).reason,/match the persisted/i);
-  assert.match((await store.saveConfirmedPlan(fixture(now,{entry:100.06}),now)).reason,/tick size/i);
+  assert.match((await store.saveConfirmedPlan(fixture(now,{premium:100.06}),now)).reason,/tick size/i);
   await store.close();
 });
 
