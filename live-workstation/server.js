@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
+import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
 import { sameStrategyConfirmation, validateOptionContractIdentity } from './strategy-candidate-guard.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
 import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
@@ -61,6 +62,7 @@ let lastSocketError='';
 let socketPayloadDiagnostics=0;
 let lastTickDiagnosticAt=new Map();
 let lastSubscriptionRecoveryAt=0;
+let lastRestQuoteRecoveryAt=0;
 let selectedSymbol='';
 let selectedOptionSymbol='';
 let lastTicks=new Map();
@@ -325,14 +327,63 @@ function isNseRegularSession(){
   const minute=Number(values.hour)*60+Number(values.minute);
   return ['Mon','Tue','Wed','Thu','Fri'].includes(values.weekday)&&minute>=555&&minute<930;
 }
+async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
+  if (!authReady() || !isNseRegularSession() || fyersRestCooldownUntil > Date.now()) return;
+  if (Date.now() - lastRestQuoteRecoveryAt < 30000) return;
+  lastRestQuoteRecoveryAt = Date.now();
+  const unique = [...new Set(staleSymbols)].filter(Boolean);
+  let accepted = 0, rejected = 0;
+  for (let i = 0; i < unique.length; i += 50) {
+    if (fyersRestCooldownUntil > Date.now()) break;
+    const batch = unique.slice(i, i + 50);
+    try {
+      const url = FYERS_DATA + '/quotes?symbols=' + encodeURIComponent(batch.join(','));
+      const response = await fyersRestFetch(url, {
+        headers: { Authorization: appId + ':' + accessToken, Accept: 'application/json' },
+        timeoutMs: 12000
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.s !== 'ok') {
+        console.warn('FYERS REST quote recovery did not return a valid response.', JSON.stringify({
+          status: response.status, retryAfterSeconds: Number(payload.retryAfterSeconds) || null,
+          requested: batch.length, message: String(payload.message || 'quote response rejected').slice(0, 120)
+        }));
+        if (response.status === 429) break;
+        continue;
+      }
+      const ticks = parseFyersQuoteTicks(payload, batch, Date.now());
+      for (const tick of ticks) {
+        const decision = acceptExchangeTick(lastTicks.get(tick.symbol), tick);
+        if (!decision.accepted) { rejected++; continue; }
+        lastTicks.set(tick.symbol, tick);
+        if (tick.symbol.startsWith('MCX:')) mcxTicks.set(tick.symbol, tick);
+        else if (tick.symbol.startsWith('NSE:') || tick.symbol.startsWith('BSE:')) nseTicks.set(tick.symbol, tick);
+        accepted++;
+      }
+      rejected += batch.length - ticks.length;
+    } catch (error) {
+      console.warn('FYERS REST quote recovery failed safely.', String(error?.message || error).slice(0, 160));
+      if (fyersRestCooldownUntil > Date.now()) break;
+    }
+  }
+  if (accepted) lastAcceptedTickAt = new Date().toISOString();
+  console.info('FYERS REST quote recovery completed.', JSON.stringify({
+    requested: unique.length, acceptedFreshExchangeTicks: accepted, rejectedOrStale: rejected,
+    at: new Date().toISOString(), cooldownActive: fyersRestCooldownUntil > Date.now()
+  }));
+}
 const socketFeedWatchdog=setInterval(()=>{
-  if(!socket||!connected||!isNseRegularSession())return;
-  const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
-  if(freshIndexes.length===BASE_SUBSCRIPTIONS.length)return;
-  if(Date.now()-lastSubscriptionRecoveryAt<30000)return;
+  if(!authReady()||!isNseRegularSession())return;
+  const monitored=[...new Set([...BASE_SUBSCRIPTIONS,...fnoScanSubscriptionSymbols,...strategyOptionSymbols,...(selectedOptionSymbol?[selectedOptionSymbol]:[])])];
+  const staleSymbols=monitored.filter(symbol=>!freshTick(lastTicks.get(symbol),15000));
+  if(!staleSymbols.length||Date.now()-lastSubscriptionRecoveryAt<30000)return;
   lastSubscriptionRecoveryAt=Date.now();
-  console.warn('FYERS index tick heartbeat missed; reapplying subscriptions on existing socket.',JSON.stringify({freshIndexCount:freshIndexes.length,requiredIndexCount:BASE_SUBSCRIPTIONS.length,recoveryAt:new Date().toISOString()}));
-  syncSocketSubscriptions({force:true,reason:'fresh_tick_watchdog'});
+  const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
+  if(socket&&connected&&freshIndexes.length<BASE_SUBSCRIPTIONS.length){
+    console.warn('FYERS index tick heartbeat missed; reapplying subscriptions on existing socket.',JSON.stringify({freshIndexCount:freshIndexes.length,requiredIndexCount:BASE_SUBSCRIPTIONS.length,recoveryAt:new Date().toISOString()}));
+    syncSocketSubscriptions({force:true,reason:'fresh_tick_watchdog'});
+  }
+  void recoverStaleSubscriptionsViaQuotes(staleSymbols);
 },5000);
 socketFeedWatchdog.unref?.();
 const automaticStrategyScanTimer=setInterval(()=>{void runAutomaticStrategyScan();},3500);
