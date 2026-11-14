@@ -41,6 +41,7 @@ export function validateOptionCandles(candles, tick, contract, now = Date.now())
   if (!Array.isArray(candles) || candles.length < 51) return { ok: false, reason: 'At least 51 completed FYERS option candles are required' };
   const rows = candles.slice();
   const exchangeTime = Number(tick?.exchangeTime);
+  if (!Number.isFinite(exchangeTime) || exchangeTime <= 0 || now / 1000 - exchangeTime < -3 || now / 1000 - exchangeTime > 10) return { ok: false, reason: 'Option candle reference tick is missing, future-dated, or stale' };
   const currentBucket = Math.floor(exchangeTime / 300) * 300;
   for (let i = 0; i < rows.length; i++) {
     const candle = rows[i];
