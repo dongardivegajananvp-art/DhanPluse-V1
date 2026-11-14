@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && node --check token-reader.js && node --check public/app.js && node --check public/chart-safety.js && node --check mcx-options.js && node --check strategy-engine.js && node --check fno-universe.js && node --check fno-universe.test.js && node --check strategy-plan-store.js && node --check strategy-scanner.js && node --check market-data-integrity.js && node --check strategy-candidate-guard.js && node --test"
+    "test": "node --check server.js && node --check token-reader.js && node --check public/app.js && node --check public/chart-safety.js && node --check mcx-options.js && node --check strategy-engine.js && node --check fno-universe.js && node --check fno-universe.test.js && node --check strategy-plan-store.js && node --check strategy-scanner.js && node --check market-data-integrity.js && node --check fyers-quote-recovery.js && node --check fyers-quote-recovery.test.js && node --check strategy-candidate-guard.js && node --test"
   },
   "engines": {
     "node": ">=20"
