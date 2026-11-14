@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFixedPremiumPlan, canAcceptStrategyTrade, detectDoublePattern, detectNineStrategySetup, evaluateNineStrategies, MAX_ACTIVE_TRADES, STRATEGIES } from './strategy-engine.js';
+import { buildFixedPremiumPlan, canAcceptStrategyTrade, detectContinuation, detectDailyTrendPullback, detectDayHighLowRetest, detectDoublePattern, detectEmaTrend, detectFlagVolume, detectNineStrategySetup, detectOpeningRange, detectTopGainerMomentum, evaluateNineStrategies, MAX_ACTIVE_TRADES, STRATEGIES } from './strategy-engine.js';
 import { buildFnoUniverse, selectSubscriptionBatch } from './fno-universe.js';
 
 function risingUnderlyingFixture(now){
@@ -204,4 +204,109 @@ test('double-bottom breakout without a neckline retest is not an entry',()=>{
   const rows=doublePatternFixture('bottom');
   rows[39]={...rows[39],open:106.2,high:107,low:106,close:106.5};
   assert.equal(detectDoublePattern(rows),null);
+});
+
+
+function flatRows(count=52, start=1794801600) {
+  return Array.from({length:count},(_,i)=>({time:start+i*300,open:100,high:101,low:99,close:100,volume:100}));
+}
+function dailyTrendRows(count=60, start=1792000000) {
+  return Array.from({length:count},(_,i)=>{const close=100+i;return{time:start+i*86400,open:close-0.5,high:close+1,low:close-1,close,volume:1000};});
+}
+function continuationRows(side='LONG') {
+  const rows=[];
+  for(let i=0;i<17;i++){
+    const close=side==='LONG'?100+i*1.2:120-i*1.2;
+    rows.push({time:1794801600+i*300,open:close-0.2,high:close+0.3,low:close-0.3,close,volume:100});
+  }
+  for(let i=0;i<12;i++){
+    const open=side==='LONG'?120.5:99.5,close=side==='LONG'?120:100;
+    rows.push({time:1794801600+(17+i)*300,open,high:side==='LONG'?121:101,low:side==='LONG'?119:99,close,volume:40});
+  }
+  const open=side==='LONG'?121:99,close=side==='LONG'?122:98;
+  rows.push({time:1794801600+29*300,open,high:side==='LONG'?122.5:99.2,low:side==='LONG'?120.8:97.5,close,volume:150});
+  return rows;
+}
+function openingRangeRows({retest=true}={}) {
+  const start=Date.parse('2026-11-16T03:45:00Z')/1000;
+  return [
+    {time:start,open:100,high:101.5,low:99,close:101,volume:100},
+    {time:start+300,open:101,high:102,low:100,close:101.5,volume:100},
+    {time:start+600,open:101,high:101.8,low:100.2,close:101,volume:100},
+    {time:start+900,open:102,high:103,low:101.5,close:102.8,volume:120},
+    {time:start+1200,open:102.8,high:103.1,low:retest?101.9:102.5,close:102.5,volume:130}
+  ];
+}
+
+test('Strategy 1 EMA20/EMA50 trend detector confirms long and short direction only',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const {rows}=risingUnderlyingFixture(now);
+  const long=detectEmaTrend(rows.slice(0,-1));
+  assert.equal(long?.strategy,'EMA20_EMA50_TREND');
+  assert.equal(long?.side,'LONG');
+  const shortRows=rows.slice(0,-1).map(c=>({...c,open:300-c.open,high:300-c.low,low:300-c.high,close:300-c.close}));
+  const short=detectEmaTrend(shortRows);
+  assert.equal(short?.side,'SHORT');
+  assert.equal(detectEmaTrend(flatRows()),null);
+});
+
+test('Strategy 2 momentum breakout requires top-gainer qualification and a completed 5m high break',()=>{
+  const rows=flatRows();
+  rows[rows.length-2]={...rows.at(-2),high:101,close:100.5};
+  rows[rows.length-1]={...rows.at(-1),open:101,high:102.5,low:100.8,close:102};
+  assert.equal(detectTopGainerMomentum(rows,false),null);
+  assert.equal(detectTopGainerMomentum(rows,true)?.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  rows[rows.length-1]={...rows.at(-1),close:100.9};
+  assert.equal(detectTopGainerMomentum(rows,true),null);
+});
+
+test('Strategy 3 daily trend pullback requires daily alignment, 5m EMA trend, touch and resume',()=>{
+  const rows=flatRows();
+  for(let i=0;i<rows.length;i++){
+    const close=100+i*0.8;
+    rows[i]={...rows[i],open:close-0.2,high:close+0.3,low:close-0.5,close};
+  }
+  const closes=rows.map(c=>c.close);
+  const calcEma=(values,p)=>{let v=values.slice(0,p).reduce((a,b)=>a+b,0)/p;const alpha=2/(p+1);for(let i=p;i<values.length;i++)v=values[i]*alpha+v*(1-alpha);return v;};
+  const e20=calcEma(closes,20);
+  rows[rows.length-2]={...rows.at(-2),open:e20,high:e20*1.001,low:e20*0.999,close:e20};
+  rows[rows.length-1]={...rows.at(-1),open:e20*1.001,high:e20*1.02,low:e20,close:e20*1.015};
+  const daily=dailyTrendRows();
+  assert.equal(detectDailyTrendPullback(rows,daily)?.strategy,'DAILY_TREND_5M_PULLBACK');
+  assert.equal(detectDailyTrendPullback(rows,daily.slice(0,30)),null);
+  assert.equal(detectDailyTrendPullback(rows,daily.map(c=>({...c,close:200-c.close,open:200-c.open,high:200-c.low,low:200-c.high}))),null);
+});
+
+test('Strategy 4 day high/low break requires retest and hold, not direct breakout',()=>{
+  const rows=openingRangeRows();
+  assert.equal(detectDayHighLowRetest(rows)?.strategy,'DAY_HIGH_LOW_BREAK_RETEST');
+  const direct=rows.map(c=>({...c}));
+  direct[4]={...direct[4],low:102.5,close:103};
+  assert.equal(detectDayHighLowRetest(direct),null);
+});
+
+test('Strategy 6 bullish and Strategy 7 bearish continuation require impulse, consolidation and directional break',()=>{
+  assert.equal(detectContinuation(continuationRows('LONG'),'LONG')?.strategy,'BULLISH_CONTINUATION');
+  assert.equal(detectContinuation(continuationRows('SHORT'),'SHORT')?.strategy,'BEARISH_CONTINUATION');
+  assert.equal(detectContinuation(continuationRows('LONG'),'SHORT'),null);
+  assert.equal(detectContinuation(continuationRows('SHORT'),'LONG'),null);
+});
+
+test('Strategy 8 flag breakout requires volume contraction then expansion with the break',()=>{
+  const rows=continuationRows('LONG');
+  const flag=rows.slice(-13,-1);
+  flag.forEach(c=>{c.volume=40;});
+  rows.slice(-30,-13).forEach(c=>{c.volume=100;});
+  rows.at(-1).volume=100;
+  assert.equal(detectFlagVolume(rows)?.strategy,'FLAG_BREAKOUT_VOLUME');
+  const noContraction=rows.map(c=>({...c,volume:100}));
+  assert.equal(detectFlagVolume(noContraction),null);
+  const noExpansion=rows.map(c=>({...c}));
+  noExpansion.at(-1).volume=50;
+  assert.equal(detectFlagVolume(noExpansion),null);
+});
+
+test('Strategy 9 opening range breakout requires 9:15-9:30 range, break then retest',()=>{
+  assert.equal(detectOpeningRange(openingRangeRows())?.strategy,'OPENING_RANGE_15M_RETEST');
+  assert.equal(detectOpeningRange(openingRangeRows({retest:false})),null);
 });
