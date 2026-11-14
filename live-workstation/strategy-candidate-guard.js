@@ -50,6 +50,7 @@ export function validateOptionCandles(candles, tick, contract, now = Date.now())
     const [time, open, high, low, close] = values;
     if (high < Math.max(open, close, low) || low > Math.min(open, close)) return { ok: false, reason: 'FYERS option candle OHLC range is inconsistent' };
     if (i && time <= Number(rows[i - 1].time)) return { ok: false, reason: 'FYERS option candle timestamps are duplicated or out of order' };
+    if (time % 300 !== 0) return { ok: false, reason: 'FYERS option candle timestamp is not aligned to a 5-minute exchange interval' };
     if (time > currentBucket) return { ok: false, reason: 'FYERS option candles contain a future interval beyond the live exchange tick' };
     if (![open, high, low, close].every(value => isTickAligned(value, contract?.tickSize))) return { ok: false, reason: 'FYERS option candle price does not align with official contract tick size' };
   }
