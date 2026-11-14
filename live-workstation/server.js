@@ -318,12 +318,12 @@ const socketFeedWatchdog=setInterval(()=>{
   syncSocketSubscriptions({force:true,reason:'fresh_tick_watchdog'});
 },5000);
 socketFeedWatchdog.unref?.();
-const automaticStrategyScanTimer=setInterval(()=>{void runAutomaticStrategyScan();},2500);
+const automaticStrategyScanTimer=setInterval(()=>{void runAutomaticStrategyScan();},3500);
 automaticStrategyScanTimer.unref?.();
 const fnoUniverseRotationTimer=setInterval(()=>{
   if(!socket||!connected||!isNseRegularSession()||!fnoUniverseRows.length)return;
   rotateFnoUniverseSubscriptions('scheduled_rotation');
-},180000);
+},360000);
 fnoUniverseRotationTimer.unref?.();
 app.get('/api/health',async(_req,res)=>{
   const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
@@ -515,7 +515,7 @@ async function processPendingStrategyCandidate(candidate){
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_rejected'});return true;
   }
   const planId=crypto.createHash('sha256').update([candidate.underlyingSymbol,candidate.contract.symbol,candidate.setup.confirmedAt,evaluated.optionCandleTime].join('|')).digest('hex').slice(0,48);
-  const saved=await strategyPlanStore.saveConfirmedPlan({planId,strategy:evaluated.strategy,underlying:candidate.underlyingSymbol,contract:candidate.contract.symbol,optionSide:candidate.contract.side,expiry:candidate.contract.expiry,strike:candidate.contract.strike,entry:evaluated.entry,stopLoss:evaluated.stopLoss,target:evaluated.target,rr:evaluated.rr,underlyingExchangeTime:currentUnderlyingTick.exchangeTime,optionExchangeTime:currentOptionTick.exchangeTime,underlyingReceivedAt:currentUnderlyingTick.receivedAt,optionReceivedAt:currentOptionTick.receivedAt,underlyingCandleTime:String(evaluated.confirmedAt),optionCandleTime:String(evaluated.optionCandleTime)});
+  const saved=await strategyPlanStore.saveConfirmedPlan({planId,strategy:evaluated.strategy,underlying:candidate.underlyingSymbol,contract:candidate.contract.symbol,optionSide:candidate.contract.side,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:currentOptionTick.price,entry:evaluated.entry,stopLoss:evaluated.stopLoss,target:evaluated.target,rr:evaluated.rr,underlyingExchangeTime:currentUnderlyingTick.exchangeTime,optionExchangeTime:currentOptionTick.exchangeTime,underlyingReceivedAt:currentUnderlyingTick.receivedAt,optionReceivedAt:currentOptionTick.receivedAt,underlyingCandleTime:String(evaluated.confirmedAt),optionCandleTime:String(evaluated.optionCandleTime)});
   if(saved.ok){
    await refreshStrategyActivePlans(true);
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'PLAN_CONFIRMED_READ_ONLY',strategy:evaluated.strategy,optionSide:candidate.contract.side,contract:candidate.contract.symbol,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:currentOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,planId:saved.planId,verifiedAt:new Date().toISOString()});
