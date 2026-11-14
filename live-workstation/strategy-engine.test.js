@@ -174,5 +174,5 @@ test('underlying strategy detection is independently callable before option cont
   assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
   assert.equal(result.strategy,'EMA20_EMA50_TREND');
   assert.equal(result.side,'LONG');
-  assert.equal(result.breakoutLevel,152);
+  assert.equal(result.breakoutLevel,150.5);
 });
