@@ -29,7 +29,7 @@ test('expiry date-only values remain valid through the official expiry session c
   const expiryMaster = { ...master, expiryDate: '2026-11-26' };
   assert.equal(validateOptionContractIdentity(expiryContract, expiryMaster, Date.parse('2026-11-26T09:59:00Z')).ok, true);
   assert.equal(validateOptionContractIdentity(expiryContract, expiryMaster, Date.parse('2026-11-26T10:01:00Z')).ok, false);
-  const numericMidnight = Date.UTC(2026, 10, 26) / 1000;
+  assert.equal(validateOptionContractIdentity({ ...expiryContract, expiry: '20261126' }, { ...expiryMaster, expiryDate: '20261126' }, Date.parse('2026-11-26T09:59:00Z')).ok, true);\n  const numericMidnight = Date.UTC(2026, 10, 26) / 1000;
   assert.equal(validateOptionContractIdentity({ ...expiryContract, expiry: numericMidnight }, { ...expiryMaster, expiryDate: numericMidnight }, Date.parse('2026-11-26T09:59:00Z')).ok, true);
 });
 
@@ -39,7 +39,7 @@ test('option premium tick requires fresh exchange and receive timestamps plus of
   assert.equal(validateOptionPremiumTick(fresh, contract, now).ok, true);
   assert.equal(validateOptionPremiumTick({ ...fresh, price: 123.46 }, contract, now).ok, false);
   assert.equal(validateOptionPremiumTick({ ...fresh, exchangeTime: now / 1000 - 20 }, contract, now).ok, false);
-  assert.equal(validateOptionPremiumTick({ ...fresh, receivedAt: now - 12000 }, contract, now).ok, false);
+  assert.equal(validateOptionPremiumTick({ ...fresh, receivedAt: now - 12000 }, contract, now).ok, false);\n  assert.equal(validateOptionPremiumTick({ ...fresh, symbol: 'NSE:OTHER26NOV2500CE' }, contract, now).ok, false);
 });
 
 test('option candles require 51 completed contiguous, valid and tick-aligned FYERS bars', () => {
@@ -77,4 +77,21 @@ test('option candle verifier rejects stale and malformed OHLC payloads', () => {
   const malformed = candles.map(c => ({ ...c }));
   malformed[5].low = 100.15;
   assert.equal(validateOptionCandles(malformed, { exchangeTime }, contract, now).ok, false);
+});
+
+
+test('option verifier allows prior-session gaps but requires the latest 51 bars to be contiguous', () => {
+  const now = Date.parse('2026-11-16T04:00:00Z');
+  const exchangeTime = now / 1000;
+  const currentBucket = Math.floor(exchangeTime / 300) * 300;
+  const priorSession = Array.from({ length: 8 }, (_, i) => ({
+    time: currentBucket - 86400 - (8 - i) * 300,
+    open: 100, high: 100.20, low: 99.95, close: 100.10
+  }));
+  const currentSession = Array.from({ length: 51 }, (_, i) => ({
+    time: currentBucket - (51 - i) * 300,
+    open: 100, high: 100.20, low: 99.95, close: 100.10
+  }));
+  assert.equal(validateOptionCandles([...priorSession, ...currentSession], { exchangeTime }, contract, now).ok, true);
+  assert.equal(validateOptionCandles(currentSession, { exchangeTime: exchangeTime + 1200 }, contract, now).ok, false);
 });
