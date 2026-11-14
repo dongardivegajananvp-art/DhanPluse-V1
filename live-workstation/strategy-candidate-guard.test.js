@@ -39,7 +39,8 @@ test('option premium tick requires fresh exchange and receive timestamps plus of
   assert.equal(validateOptionPremiumTick(fresh, contract, now).ok, true);
   assert.equal(validateOptionPremiumTick({ ...fresh, price: 123.46 }, contract, now).ok, false);
   assert.equal(validateOptionPremiumTick({ ...fresh, exchangeTime: now / 1000 - 20 }, contract, now).ok, false);
-  assert.equal(validateOptionPremiumTick({ ...fresh, receivedAt: now - 12000 }, contract, now).ok, false);\n  assert.equal(validateOptionPremiumTick({ ...fresh, symbol: 'NSE:OTHER26NOV2500CE' }, contract, now).ok, false);
+  assert.equal(validateOptionPremiumTick({ ...fresh, receivedAt: now - 12000 }, contract, now).ok, false);
+  assert.equal(validateOptionPremiumTick({ ...fresh, symbol: 'NSE:OTHER26NOV2500CE' }, contract, now).ok, false);
 });
 
 test('option candles require 51 completed contiguous, valid and tick-aligned FYERS bars', () => {
