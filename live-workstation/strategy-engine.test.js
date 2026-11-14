@@ -176,3 +176,15 @@ test('underlying strategy detection is independently callable before option cont
   assert.equal(result.side,'LONG');
   assert.equal(result.breakoutLevel,150.5);
 });
+
+test('F&O universe maps additional NSE and BSE index futures to index symbols',()=>{
+  const now=Date.parse('2026-11-14T00:00:00Z');
+  const nseMaster={
+    'NSE:FINNIFTY26NOVFUT':{tradeStatus:1,expiryDate:'2026-11-26'},
+    'NSE:MIDCPNIFTY26NOVFUT':{tradeStatus:1,expiryDate:'2026-11-26'},
+    'NSE:NIFTYNXT5026NOVFUT':{tradeStatus:1,expiryDate:'2026-11-26'}
+  };
+  const bseMaster={'BSE:BANKEX26NOVFUT':{tradeStatus:1,expiryDate:'2026-11-26'}};
+  const rows=buildFnoUniverse({nseMaster,bseMaster,now});
+  assert.deepEqual(rows.map(x=>x.underlyingSymbol),['BSE:BANKEX-INDEX','NSE:FINNIFTY-INDEX','NSE:MIDCPNIFTY-INDEX','NSE:NIFTYNXT50-INDEX']);
+});
