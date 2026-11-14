@@ -60,7 +60,9 @@ test('option candles require 51 completed contiguous, valid and tick-aligned FYE
   offTick[10].close = 100.11;
   assert.equal(validateOptionCandles(offTick, tick, contract, now).ok, false);
   const unfinished = [...candles, { time: currentBucket, open: 100, high: 100.2, low: 99.95, close: 100.1 }];
-  const withForming = validateOptionCandles(unfinished, tick, contract, now);\n  assert.equal(withForming.ok, true);\n  assert.equal(withForming.completedCandles.length, 51);
+  const withForming = validateOptionCandles(unfinished, tick, contract, now);
+  assert.equal(withForming.ok, true);
+  assert.equal(withForming.completedCandles.length, 51);
 });
 
 test('option candle verifier rejects stale and malformed OHLC payloads', () => {
