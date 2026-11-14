@@ -549,6 +549,7 @@ async function runAutomaticStrategyScan(){
    const [history,daily]=await Promise.all([loadGainerHistory(futureSymbol),loadStrategyDailyHistory(futureSymbol).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}))]);
    const currentTick=lastTicks.get(futureSymbol);
    if(!freshTick(currentTick)){setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Futures tick became stale during candle verification'});return;}
+   strategyScanLastError='';
    const isTopGainer=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<15*60*1000&&fnoMoversCache.rows[0]?.underlyingSymbol===row.underlyingSymbol;
    const setup=detectNineStrategySetup({underlyingCandles:history.candles,underlyingTick:currentTick,dailyCandles:daily.ok?daily.candles:[],isTopGainer,now:Date.now()});
    if(setup.status!=='UNDERLYING_SETUP_CONFIRMED'){
