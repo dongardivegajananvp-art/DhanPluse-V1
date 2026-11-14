@@ -11,8 +11,8 @@ function expiryEpoch(value) {
     }
     return stamp;
   }
-  const dateOnly = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(raw);
-  const compactDate = /^(\\d{4})(\\d{2})(\\d{2})$/.exec(raw);
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  const compactDate = /^(\d{4})(\d{2})(\d{2})$/.exec(raw);
   const match = dateOnly || compactDate;
   if (match) return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 10, 0, 0) / 1000;
   const parsed = Date.parse(raw);
