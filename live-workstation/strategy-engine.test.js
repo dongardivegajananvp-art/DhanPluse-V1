@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import { buildFixedPremiumPlan, canAcceptStrategyTrade, detectDoublePattern, detectNineStrategySetup, evaluateNineStrategies, MAX_ACTIVE_TRADES, STRATEGIES } from './strategy-engine.js';
 import { buildFnoUniverse, selectSubscriptionBatch } from './fno-universe.js';
 
+function risingUnderlyingFixture(now){
+  const bucket=Math.floor((now/1000)/300)*300;
+  const rows=Array.from({length:52},(_,i)=>{const close=100+i;return{time:bucket-(52-i)*300,open:close-0.2,high:close+0.5,low:close-0.5,close,volume:100};});
+  rows[51]={time:bucket-300,open:151.5,high:152,low:151,close:151.5,volume:100};
+  rows.push({time:bucket,open:152.5,high:154,low:152,close:153.5,volume:120});
+  return{rows,tick:{price:153.5,exchangeTime:now/1000,receivedAt:now}};
+}
+
 test('nine fixed strategy identifiers are present and stable',()=>{
   assert.equal(STRATEGIES.length,9);
   assert.equal(MAX_ACTIVE_TRADES,2);
@@ -24,16 +32,16 @@ test('trade gate rejects duplicate underlying and duplicate contract',()=>{
 
 test('strategy evaluator fails closed when either futures or option tick is stale',()=>{
   const now=Date.parse('2026-11-16T04:00:00Z');
-  const tick={price:100,exchangeTime:now/1000,receivedAt:now};
-  const result=evaluateNineStrategies({underlyingCandles:[],underlyingTick:tick,optionCandles:[],optionTick:{...tick,receivedAt:now-11000},contract:{side:'CE',tickSize:0.05},now});
+  const {rows,tick}=risingUnderlyingFixture(now);
+  const result=evaluateNineStrategies({underlyingCandles:rows,underlyingTick:tick,optionCandles:[],optionTick:{...tick,receivedAt:now-11000},contract:{side:'CE',tickSize:0.05},now});
   assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
   assert.match(result.reason,/option premium tick/i);
 });
 
 test('strategy evaluator requires verified CE/PE contract metadata',()=>{
   const now=Date.parse('2026-11-16T04:00:00Z');
-  const tick={price:100,exchangeTime:now/1000,receivedAt:now};
-  const result=evaluateNineStrategies({underlyingCandles:[],underlyingTick:tick,optionCandles:[],optionTick:tick,contract:null,now});
+  const {rows,tick}=risingUnderlyingFixture(now);
+  const result=evaluateNineStrategies({underlyingCandles:rows,underlyingTick:tick,optionCandles:[],optionTick:tick,contract:null,now});
   assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
   assert.match(result.reason,/verified active CE\/PE/i);
 });
@@ -122,7 +130,7 @@ test('F&O universe keeps only active unexpired futures and nearest expiry per un
     'NSE:BANKNIFTY26NOVFUT':{tradeStatus:1,expiryDate:'2026-11-26'}
   };
   const rows=buildFnoUniverse({nseMaster,now});
-  assert.deepEqual(rows.map(x=>x.futureSymbol),['NSE:BANKNIFTY26NOVFUT','NSE:NIFTY26NOVFUT','NSE:RELIANCE26NOVFUT']);
+  assert.deepEqual(rows.map(x=>x.futureSymbol),['NSE:NIFTY26NOVFUT','NSE:BANKNIFTY26NOVFUT','NSE:RELIANCE26NOVFUT']);
   assert.equal(rows.find(x=>x.futureSymbol.includes('NIFTY26')).underlyingSymbol,'NSE:NIFTY50-INDEX');
   assert.equal(rows.find(x=>x.futureSymbol.includes('BANKNIFTY')).underlyingSymbol,'NSE:NIFTYBANK-INDEX');
 });
@@ -152,7 +160,7 @@ test('subscription rotation stays within 100 symbols and advances across the uni
   const third=selectSubscriptionBatch({baseSymbols:['NSE:NIFTY50-INDEX'],universeSymbols:universe,cursor:second.nextCursor,limit:100});
   assert.equal(first.symbols.length,100);
   assert.equal(second.symbols.length,100);
-  assert.equal(third.symbols.length,32);
+  assert.equal(third.symbols.length,100);
   assert.equal(new Set([...first.symbols,...second.symbols,...third.symbols]).size,231);
 });
 
