@@ -161,13 +161,13 @@ export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, sw
   const values=[breakoutLevel,tickSize,livePremium,swingLow,atr];
   if(!values.every(finite)||values.some(v=>number(v)<=0))return{status:'NO_TRADE',reason:'Breakout, tick size, live premium, swing low and ATR must be positive'};
   const step=number(tickSize);
-  const entry=Math.ceil((number(breakoutLevel)+step-1e-9)/step)*step;
-  const stopLoss=Math.floor((number(swingLow)-0.5*number(atr)+1e-9)/step)*step;
+  const entry=Number((Math.ceil((number(breakoutLevel)+step-1e-9)/step)*step).toFixed(8));
+  const stopLoss=Number((Math.floor((number(swingLow)-0.5*number(atr)+1e-9)/step)*step).toFixed(8));
   const risk=entry-stopLoss;
   if(!(risk>=step))return{status:'NO_TRADE',reason:'Swing-low minus half ATR does not leave positive option-premium risk'};
-  if(number(livePremium)<entry)return{status:'NO_TRADE',reason:'Live option premium has not reached breakout level + one tick'};
-  if(number(livePremium)>entry+0.5*risk)return{status:'NO_TRADE',reason:'Option premium moved more than 0.5R beyond entry; chase blocked'};
-  const target=entry+2*risk;
+  if(number(livePremium)+step*1e-7<entry)return{status:'NO_TRADE',reason:'Live option premium has not reached breakout level + one tick'};
+  if(number(livePremium)>entry+0.5*risk+step*1e-7)return{status:'NO_TRADE',reason:'Option premium moved more than 0.5R beyond entry; chase blocked'};
+  const target=Number((entry+2*risk).toFixed(8));
   const liveRisk=number(livePremium)-stopLoss;
   const liveReward=target-number(livePremium);
   const liveRr=liveReward/liveRisk;
