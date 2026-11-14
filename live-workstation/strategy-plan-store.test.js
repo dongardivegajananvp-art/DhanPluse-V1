@@ -12,11 +12,11 @@ class FakePool {
       return { rows: found.map(p => ({ plan_id: p.planId })) };
     }
     if (sql.includes('INSERT INTO gv2vpd_strategy_plans')) {
-      const [planId,strategy,underlying,contract,optionSide,expiry,strike,premium,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingCandleTime,optionCandleTime] = values;
+      const [planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,underlyingCandleTime,optionCandleTime] = values;
       if (this.plans.some(p => p.status === 'ACTIVE' && (p.underlying === underlying || p.contract === contract))) {
         const error = new Error('duplicate active plan'); error.code = '23505'; throw error;
       }
-      this.plans.push({ planId,strategy,underlying,contract,optionSide,expiry,strike,premium,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingCandleTime,optionCandleTime,status:'ACTIVE' });
+      this.plans.push({ planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,underlyingCandleTime,optionCandleTime,status:'ACTIVE' });
       return { rows: [] };
     }
     if (sql.includes('SELECT plan_id,strategy')) return { rows: this.plans.filter(p => p.status === 'ACTIVE').slice(0,2).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
@@ -42,6 +42,7 @@ function fixture(now, overrides = {}) {
     optionSide: 'CE',
     expiry: '2026-11-26',
     strike: 1500,
+    tickSize: 0.05,
     entry: 100.05,
     stopLoss: 98.5,
     target: 103.15,
@@ -50,8 +51,8 @@ function fixture(now, overrides = {}) {
     optionExchangeTime: now / 1000,
     underlyingReceivedAt: now,
     optionReceivedAt: now,
-    underlyingCandleTime: '2026-11-16T04:00:00Z',
-    optionCandleTime: '2026-11-16T04:00:00Z',
+    underlyingCandleTime: String(now / 1000 - 300),
+    optionCandleTime: String(now / 1000 - 300),
     premium:100.05,
     ...overrides
   };
@@ -79,6 +80,9 @@ test('ledger persists fixed Entry/SL/Target once and lists the same immutable pl
   const listed = await store.listActivePlans();
   assert.equal(listed.plans.length,1);
   assert.deepEqual([Number(listed.plans[0].premium),Number(listed.plans[0].entry),Number(listed.plans[0].stop_loss),Number(listed.plans[0].target)],[100.05,100.05,98.5,103.15]);
+  assert.equal(Number(listed.plans[0].tickSize),0.05);
+  assert.ok(listed.plans[0].underlying_received_at);
+  assert.ok(listed.plans[0].option_received_at);
   assert.equal(typeof store.updatePlan, 'undefined');
   await store.close();
 });
@@ -110,5 +114,25 @@ test('ledger rejects plans below fixed 1:2 or with inverted Entry/SL/Target', as
   const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
   assert.match((await store.saveConfirmedPlan(fixture(now,{rr:1.99}),now)).reason,/at least 1:2/);
   assert.match((await store.saveConfirmedPlan(fixture(now,{entry:98,target:103}),now)).reason,/valid long-option risk plan/);
+  await store.close();
+});
+
+
+test('ledger independently rejects chase beyond 0.5R, inconsistent 2R math and off-tick prices', async () => {
+  const now = Date.parse('2026-11-16T04:00:00Z');
+  const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
+  assert.match((await store.saveConfirmedPlan(fixture(now,{premium:100.85}),now)).reason,/0.5R chase/i);
+  assert.match((await store.saveConfirmedPlan(fixture(now,{target:103.20}),now)).reason,/exactly two times/i);
+  assert.match((await store.saveConfirmedPlan(fixture(now,{rr:3}),now)).reason,/match the persisted/i);
+  assert.match((await store.saveConfirmedPlan(fixture(now,{entry:100.06}),now)).reason,/tick size/i);
+  await store.close();
+});
+
+test('ledger rejects expired contracts, unknown strategies and stale confirmation candles', async () => {
+  const now = Date.parse('2026-11-16T04:00:00Z');
+  const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
+  assert.match((await store.saveConfirmedPlan(fixture(now,{expiry:'2026-11-13'}),now)).reason,/expired/i);
+  assert.match((await store.saveConfirmedPlan(fixture(now,{strategy:'UNVERIFIED_STRATEGY'}),now)).reason,/allowlist/i);
+  assert.match((await store.saveConfirmedPlan(fixture(now,{optionCandleTime:String(now/1000-1200)}),now)).reason,/recent, completed/i);
   await store.close();
 });
