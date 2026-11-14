@@ -13,7 +13,7 @@ function validatePlan(plan, now) {
     if (typeof plan[key] !== 'string' || !plan[key].trim()) return key + ' is required';
   }
   if (!['CE','PE'].includes(plan.optionSide)) return 'Option side must be CE or PE';
-  for (const key of ['strike','entry','stopLoss','target','rr','underlyingExchangeTime','optionExchangeTime','underlyingReceivedAt','optionReceivedAt']) {
+  for (const key of ['strike','premium','entry','stopLoss','target','rr','underlyingExchangeTime','optionExchangeTime','underlyingReceivedAt','optionReceivedAt']) {
     if (!positive(plan[key])) return key + ' must be a positive verified value';
   }
   if (!(Number(plan.entry) > Number(plan.stopLoss) && Number(plan.target) > Number(plan.entry))) return 'Entry, stop loss and target are not a valid long-option risk plan';
@@ -49,6 +49,7 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
       option_side VARCHAR(2) NOT NULL CHECK (option_side IN ('CE','PE')),
       expiry VARCHAR(32) NOT NULL,
       strike NUMERIC(18,6) NOT NULL CHECK (strike > 0),
+      premium NUMERIC(18,6),
       entry NUMERIC(18,6) NOT NULL CHECK (entry > 0),
       stop_loss NUMERIC(18,6) NOT NULL CHECK (stop_loss > 0),
       target NUMERIC(18,6) NOT NULL CHECK (target > entry),
@@ -61,6 +62,7 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       closed_at TIMESTAMPTZ
     );
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS premium NUMERIC(18,6);
     CREATE UNIQUE INDEX IF NOT EXISTS gv2vpd_strategy_active_underlying
       ON gv2vpd_strategy_plans (underlying) WHERE status = 'ACTIVE';
     CREATE UNIQUE INDEX IF NOT EXISTS gv2vpd_strategy_active_contract
@@ -94,12 +96,12 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
         }
         await client.query(`
           INSERT INTO gv2vpd_strategy_plans (
-            plan_id,strategy,underlying,contract,option_side,expiry,strike,entry,stop_loss,target,rr,
+            plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,entry,stop_loss,target,rr,
             underlying_exchange_time,option_exchange_time,underlying_candle_time,option_candle_time
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
         `, [
           plan.planId,plan.strategy,plan.underlying,plan.contract,plan.optionSide,plan.expiry,
-          Number(plan.strike),Number(plan.entry),Number(plan.stopLoss),Number(plan.target),Number(plan.rr),
+          Number(plan.strike),Number(plan.premium),Number(plan.entry),Number(plan.stopLoss),Number(plan.target),Number(plan.rr),
           Number(plan.underlyingExchangeTime),Number(plan.optionExchangeTime),
           plan.underlyingCandleTime,plan.optionCandleTime
         ]);
@@ -117,7 +119,7 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
     async listActivePlans() {
       if (!await ready) return { ok: false, status: 'DATA_UNAVAILABLE_NO_TRADE', plans: [] };
       try {
-        const result = await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_candle_time,option_candle_time,created_at FROM gv2vpd_strategy_plans WHERE status='ACTIVE' ORDER BY created_at ASC LIMIT 2");
+        const result = await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_candle_time,option_candle_time,created_at FROM gv2vpd_strategy_plans WHERE status='ACTIVE' ORDER BY created_at ASC LIMIT 2");
         return { ok: true, plans: result.rows || [] };
       } catch (error) {
         console.error('Strategy plan read failed; new entries remain blocked.', String(error?.message || error).slice(0, 160));
