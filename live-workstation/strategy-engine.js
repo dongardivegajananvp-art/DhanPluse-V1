@@ -186,25 +186,18 @@ export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, sw
   return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:Number(liveRr.toFixed(2)),risk};
 }
 
-export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], isTopGainer=false, now=Date.now() }) {
+export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], isTopGainer=false, now=Date.now() }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
   if(!tickFresh(underlyingTick))return fail('Fresh FYERS underlying/futures tick is required');
-  if(!tickFresh(optionTick))return fail('Fresh FYERS option premium tick is required');
-  if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return fail('Verified active CE/PE contract and tick size are required');
   const u=completed(underlyingCandles,underlyingTick,'Underlying');
   if(u.error)return fail(u.error);
-  const o=completed(optionCandles,optionTick,'Option premium');
-  if(o.error)return fail(o.error);
   const rows=u.rows,last=u.last,closes=rows.map(c=>number(c.close));
   const e20=ema(closes,20),e50=ema(closes,50),prior=rows.at(-2);
   const candidates=[];
-  if(e20>e50&&number(last.close)>e20&&number(last.close)>number(prior.high))
-    candidates.push(candidate(STRATEGIES[0],'LONG',number(prior.high),last));
-  if(e20<e50&&number(last.close)<e20&&number(last.close)<number(prior.low))
-    candidates.push(candidate(STRATEGIES[0],'SHORT',number(prior.low),last));
-  if(isTopGainer&&number(last.close)>number(prior.high))
-    candidates.push(candidate(STRATEGIES[1],'LONG',number(prior.high),last));
+  if(e20>e50&&number(last.close)>e20&&number(last.close)>number(prior.high))candidates.push(candidate(STRATEGIES[0],'LONG',number(prior.high),last));
+  if(e20<e50&&number(last.close)<e20&&number(last.close)<number(prior.low))candidates.push(candidate(STRATEGIES[0],'SHORT',number(prior.low),last));
+  if(isTopGainer&&number(last.close)>number(prior.high))candidates.push(candidate(STRATEGIES[1],'LONG',number(prior.high),last));
   const dailyCloses=dailyCandles.filter(validOhlcv).map(c=>number(c.close));
   if(dailyCloses.length>=51){
     const d20=ema(dailyCloses,20),d50=ema(dailyCloses,50);
@@ -220,9 +213,21 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const orb=detectOpeningRange(rows);if(orb)candidates.push(orb);
   if(!candidates.length)return{status:'NO_TRADE',reason:'None of the nine completed-candle strategies confirmed a setup'};
   candidates.sort((a,b)=>a.confirmedAt-b.confirmedAt||STRATEGIES.indexOf(a.strategy)-STRATEGIES.indexOf(b.strategy));
-  const chosen=candidates[0];
+  return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
+}
+
+export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], isTopGainer=false, now=Date.now() }) {
+  const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
+  const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
+  const setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,isTopGainer,now});
+  if(setup.status!=='UNDERLYING_SETUP_CONFIRMED')return setup;
+  if(!tickFresh(optionTick))return fail('Fresh FYERS option premium tick is required');
+  if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return fail('Verified active CE/PE contract and tick size are required');
+  const o=completed(optionCandles,optionTick,'Option premium');
+  if(o.error)return fail(o.error);
+  const chosen=setup;
   if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return{status:'NO_TRADE',reason:'Option side does not match the verified underlying direction',strategy:chosen.strategy};
-  const premiumRows=o.rows, premiumLast=o.last, tickSize=number(contract.tickSize);
+  const premiumRows=o.rows,premiumLast=o.last,tickSize=number(contract.tickSize);
   const premiumLevel=Math.max(...premiumRows.slice(-21,-1).map(c=>number(c.high)));
   if(!(number(premiumLast.close)>premiumLevel))return{status:'NO_TRADE',reason:'Underlying setup confirmed, but option premium has no completed breakout confirmation',strategy:chosen.strategy};
   const atr=atr14(premiumRows);
