@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFixedPremiumPlan, canAcceptStrategyTrade, detectDoublePattern, evaluateNineStrategies, MAX_ACTIVE_TRADES, STRATEGIES } from './strategy-engine.js';
+import { buildFixedPremiumPlan, canAcceptStrategyTrade, detectDoublePattern, detectNineStrategySetup, evaluateNineStrategies, MAX_ACTIVE_TRADES, STRATEGIES } from './strategy-engine.js';
 import { buildFnoUniverse, selectSubscriptionBatch } from './fno-universe.js';
 
 test('nine fixed strategy identifiers are present and stable',()=>{
@@ -158,4 +158,21 @@ test('subscription rotation stays within 100 symbols and advances across the uni
 
 test('subscription planner rejects more pinned symbols than the safe plan limit',()=>{
   assert.throws(()=>selectSubscriptionBatch({baseSymbols:['A','B'],pinnedSymbols:['C'],limit:2}),/exceed/);
+});
+
+test('underlying strategy detection is independently callable before option contract discovery',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const bucket=Math.floor((now/1000)/300)*300;
+  const rows=Array.from({length:52},(_,i)=>{
+    const close=100+i;
+    return{time:bucket-(52-i)*300,open:close-0.2,high:close+0.5,low:close-0.5,close,volume:100};
+  });
+  rows[51]={time:bucket-300,open:151.5,high:152,low:151,close:151.5,volume:100};
+  rows.push({time:bucket,open:152.5,high:154,low:152,close:153.5,volume:120});
+  const tick={price:153.5,exchangeTime:now/1000,receivedAt:now};
+  const result=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,now});
+  assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
+  assert.equal(result.strategy,'EMA20_EMA50_TREND');
+  assert.equal(result.side,'LONG');
+  assert.equal(result.breakoutLevel,152);
 });
