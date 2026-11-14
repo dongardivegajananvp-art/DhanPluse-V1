@@ -55,10 +55,13 @@ test('fixed premium plan uses breakout plus one tick, ATR-buffered stop and exac
   assert.equal(plan.rr,2);
 });
 
-test('fixed premium plan blocks chase, live RR deterioration and resistance before target',()=>{
+test('fixed premium plan honors the half-R chase limit while keeping planned RR at 1:2',()=>{
   const base={breakoutLevel:100,tickSize:0.05,swingLow:99,atr:1};
   assert.match(buildFixedPremiumPlan({...base,livePremium:100.85}).reason,/0.5R/);
-  assert.match(buildFixedPremiumPlan({...base,livePremium:100.10}).reason,/1:2/);
+  const withinChase=buildFixedPremiumPlan({...base,livePremium:100.10});
+  assert.equal(withinChase.status,'SETUP_CONFIRMED');
+  assert.equal(withinChase.rr,2);
+  assert.equal(withinChase.target,103.15);
   assert.match(buildFixedPremiumPlan({...base,livePremium:100.05,priorResistances:[102]}).reason,/resistance/);
 });
 

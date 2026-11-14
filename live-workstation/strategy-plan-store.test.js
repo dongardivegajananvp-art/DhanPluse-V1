@@ -12,11 +12,11 @@ class FakePool {
       return { rows: found.map(p => ({ plan_id: p.planId })) };
     }
     if (sql.includes('INSERT INTO gv2vpd_strategy_plans')) {
-      const [planId,strategy,underlying,contract,optionSide,expiry,strike,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingCandleTime,optionCandleTime] = values;
+      const [planId,strategy,underlying,contract,optionSide,expiry,strike,premium,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingCandleTime,optionCandleTime] = values;
       if (this.plans.some(p => p.status === 'ACTIVE' && (p.underlying === underlying || p.contract === contract))) {
         const error = new Error('duplicate active plan'); error.code = '23505'; throw error;
       }
-      this.plans.push({ planId,strategy,underlying,contract,optionSide,expiry,strike,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingCandleTime,optionCandleTime,status:'ACTIVE' });
+      this.plans.push({ planId,strategy,underlying,contract,optionSide,expiry,strike,premium,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingCandleTime,optionCandleTime,status:'ACTIVE' });
       return { rows: [] };
     }
     if (sql.includes('SELECT plan_id,strategy')) return { rows: this.plans.filter(p => p.status === 'ACTIVE').slice(0,2).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
@@ -52,6 +52,7 @@ function fixture(now, overrides = {}) {
     optionReceivedAt: now,
     underlyingCandleTime: '2026-11-16T04:00:00Z',
     optionCandleTime: '2026-11-16T04:00:00Z',
+    premium:100.05,
     ...overrides
   };
 }
@@ -77,7 +78,7 @@ test('ledger persists fixed Entry/SL/Target once and lists the same immutable pl
   assert.deepEqual([saved.entry,saved.stopLoss,saved.target,saved.rr],[100.05,98.5,103.15,2]);
   const listed = await store.listActivePlans();
   assert.equal(listed.plans.length,1);
-  assert.deepEqual([Number(listed.plans[0].entry),Number(listed.plans[0].stop_loss),Number(listed.plans[0].target)],[100.05,98.5,103.15]);
+  assert.deepEqual([Number(listed.plans[0].premium),Number(listed.plans[0].entry),Number(listed.plans[0].stop_loss),Number(listed.plans[0].target)],[100.05,100.05,98.5,103.15]);
   assert.equal(typeof store.updatePlan, 'undefined');
   await store.close();
 });

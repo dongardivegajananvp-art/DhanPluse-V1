@@ -18,3 +18,13 @@
 #chart svg{max-width:none!important;}
 
 .connect-button{border:1px solid #42d6a0;background:#102a2b;color:#a8f1d8;border-radius:6px;padding:8px 11px;font-size:9px;font-weight:800;letter-spacing:.5px;cursor:pointer;white-space:nowrap}.connect-button:disabled{opacity:.6;cursor:wait}.feed{flex-wrap:wrap}@media(max-width:520px){.feed{gap:7px}.feed small{margin-left:2px}.connect-button{font-size:8px;padding:7px 8px}}
+
+
+.strategy-desk{background:#101a29;border:1px solid #28384d;border-radius:10px;padding:14px;margin:14px 0;color:#e7edf6}
+.strategy-coverage{color:#a9bbd0;font-size:10px;line-height:1.6;margin:8px 0 12px;overflow-wrap:anywhere}
+.strategy-results{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px}
+.strategy-result{display:flex;flex-direction:column;gap:7px;background:#0b1421;border:1px solid #25364a;border-radius:7px;padding:10px;min-width:0}
+.strategy-result b{color:#d8e6f5;font-size:10px;letter-spacing:.35px}
+.strategy-result span{color:#91a6bf;font-size:10px;line-height:1.55;overflow-wrap:anywhere}
+.strategy-active-head{margin:14px 0 8px;color:#b8c9dc;font-size:10px;font-weight:800;letter-spacing:.7px}
+.strategy-disclaimer{display:block;color:#d5a955;font-size:9px;line-height:1.5;margin-top:10px}

@@ -178,12 +178,12 @@ export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, sw
   if(number(livePremium)+step*1e-7<entry)return{status:'NO_TRADE',reason:'Live option premium has not reached breakout level + one tick'};
   if(number(livePremium)>entry+0.5*risk+step*1e-7)return{status:'NO_TRADE',reason:'Option premium moved more than 0.5R beyond entry; chase blocked'};
   const target=Number((entry+2*risk).toFixed(8));
-  const liveRisk=number(livePremium)-stopLoss;
-  const liveReward=target-number(livePremium);
-  const liveRr=liveReward/liveRisk;
-  if(!(liveRisk>0&&liveReward>0&&liveRr>=2-1e-9))return{status:'NO_TRADE',reason:'Live option premium no longer supports fixed 1:2 reward/risk'};
+  // RR is measured from the fixed planned Entry. Live premium is allowed to move
+  // up to +0.5R, as explicitly specified; beyond that the setup is chased.
+  const plannedRr=(target-entry)/risk;
+  if(!(Number.isFinite(plannedRr)&&plannedRr>=2-1e-9))return{status:'NO_TRADE',reason:'Fixed Entry/SL/Target do not preserve the required 1:2 reward/risk'};
   if(priorResistances.some(level=>finite(level)&&number(level)>entry&&number(level)<target))return{status:'NO_TRADE',reason:'Verified resistance lies before the fixed 2R target'};
-  return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:Number(liveRr.toFixed(2)),risk};
+  return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:Number(plannedRr.toFixed(2)),risk};
 }
 
 export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], isTopGainer=false, now=Date.now() }) {
