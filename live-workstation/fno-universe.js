@@ -60,10 +60,13 @@ export function selectFairSubscriptionBatch({ baseSymbols = [], pinnedSymbols = 
     if (!fixed.includes(symbol)) selected.push(symbol);
   }
   const pinnedUniverseCount = universe.filter(symbol => fixed.includes(symbol)).length;
+  const pinnedUniverseSymbols = universe.filter(symbol => fixed.includes(symbol));
+  const activeUniverseSymbols = [...pinnedUniverseSymbols, ...selected];
   return {
-    symbols: [...fixed, ...selected], fnoSymbols: selected,
+    symbols: [...fixed, ...selected], fnoSymbols: activeUniverseSymbols,
     nextCursor: (start + scannedCount) % universe.length, scannedCount,
-    rotatingCount: selected.length, universeCount: universe.length, pinnedUniverseCount
+    rotatingCount: selected.length, universeCount: universe.length, pinnedUniverseCount,
+    pinnedUniverseSymbols
   };
 }
 
