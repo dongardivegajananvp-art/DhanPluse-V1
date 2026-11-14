@@ -48,6 +48,15 @@ function atr14(candles) {
 function istDayKey(seconds) {
   return new Date((seconds + 19800) * 1000).toISOString().slice(0,10);
 }
+function isTradingCandleContiguous(previousTime, currentTime) {
+  if (currentTime - previousTime === INTERVAL_SECONDS) return true;
+  const localParts = value => {
+    const date = new Date((Number(value) + 19800) * 1000);
+    return { day: date.toISOString().slice(0, 10), minute: date.getUTCHours() * 60 + date.getUTCMinutes() };
+  };
+  const previous = localParts(previousTime), current = localParts(currentTime);
+  return previous.minute === 925 && current.minute === 555 && current.day > previous.day;
+}
 function completed(candles, tick, label) {
   if (!Array.isArray(candles) || candles.some(c => !validOhlcv(c))) {
     return { error: label + ' candles are missing or malformed' };
@@ -56,8 +65,8 @@ function completed(candles, tick, label) {
   if (!window.fresh) return { error: label + ' latest completed candle is stale' };
   if (window.completed.length < 51) return { error: label + ' requires at least 51 contiguous completed 5-minute candles' };
   const required=window.completed.slice(-51);
-  if (!required.every((c,i)=>i===0||number(c.time)-number(required[i-1].time)===INTERVAL_SECONDS))
-    return { error: label + ' 51-candle strategy window contains a missing 5-minute interval' };
+  if (!required.every((c,i)=>i===0||isTradingCandleContiguous(number(required[i-1].time),number(c.time))))
+    return { error: label + ' 51-candle strategy window contains a missing 5-minute interval inside a trading session' };
   return { rows: window.completed, last: window.lastClosed };
 }
 function pivotHigh(rows, i, width=2) {
