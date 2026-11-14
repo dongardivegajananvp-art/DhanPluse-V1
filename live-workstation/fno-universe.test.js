@@ -26,7 +26,8 @@ test('rotates every eligible symbol in bounded windows without duplicates', () =
       universeSymbols: universe, cursor, limit: 100
     });
     assert.equal(batch.symbols.length, 100);
-    batch.fnoSymbols.forEach(x => { assert.equal(seen.has(x), false); seen.add(x); });
+    assert.equal(new Set(batch.fnoSymbols).size, batch.fnoSymbols.length);
+    batch.fnoSymbols.forEach(x => seen.add(x));
     cursor = batch.nextCursor;
   }
   assert.equal(seen.size, 205);
