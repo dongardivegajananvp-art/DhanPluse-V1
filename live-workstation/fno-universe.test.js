@@ -49,7 +49,7 @@ test('changing pinned symbols does not re-index or starve the rotating universe'
 });
 
 test('pinned contracts reduce rotating capacity and overflow fails explicitly', () => {
-  const batch = selectSubscriptionBatch({
+  const batch = selectFairSubscriptionBatch({
     baseSymbols: ['NSE:NIFTY50-INDEX'],
     pinnedSymbols: ['NSE:RELIANCE25NOVFUT'],
     universeSymbols: ['NSE:RELIANCE25NOVFUT', 'NSE:TCS25NOVFUT', 'NSE:INFY25NOVFUT'],
