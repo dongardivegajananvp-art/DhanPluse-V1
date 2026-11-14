@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
-import { acceptExchangeTick, summarizeFeedFreshness } from './market-data-integrity.js';
+import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
 import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
 import { buildFnoUniverse, selectSubscriptionBatch } from './fno-universe.js';
@@ -95,6 +95,7 @@ let strategyScanLastError='';
 let strategyScanLastResults=[];
 let strategyActivePlans=[];
 let strategyActivePlansLoadedAt=0;
+let strategyLedgerRuntimeReady=false;
 const FYERS_DATA_SYMBOL_LIMIT=100;
 let fnoUniverseRows=[],fnoUniverseFetchedAt=0,fnoUniversePromise=null,fnoUniverseCursor=0,fnoScanSubscriptionSymbols=[],fnoUniverseError='Not loaded';
 const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
@@ -496,9 +497,10 @@ function setStrategyScanResult(item){
  strategyScanLastResults=[item,...strategyScanLastResults.filter(x=>(x.underlying||x.futureSymbol)!==key)].sort((a,b)=>Number(b.status==='PLAN_CONFIRMED_READ_ONLY')-Number(a.status==='PLAN_CONFIRMED_READ_ONLY')||Number(b.rr||0)-Number(a.rr||0)||String(b.verifiedAt||b.updatedAt||'').localeCompare(String(a.verifiedAt||a.updatedAt||''))).slice(0,3);
 }
 async function refreshStrategyActivePlans(force=false){
- if(!strategyPlanStore)return{ok:false,plans:[]};
+ if(!strategyPlanStore){strategyLedgerRuntimeReady=false;return{ok:false,plans:[]};}
  if(!force&&Date.now()-strategyActivePlansLoadedAt<10000)return{ok:true,plans:strategyActivePlans};
  const result=await strategyPlanStore.listActivePlans();
+ strategyLedgerRuntimeReady=Boolean(result.ok);
  if(!result.ok)return result;
  strategyActivePlans=result.plans||[];strategyActivePlansLoadedAt=Date.now();
  const restored=new Set(strategyActivePlans.map(x=>x.contract).filter(Boolean));
@@ -577,7 +579,9 @@ async function runAutomaticStrategyScan(){
  finally{strategyScanBusy=false;}
 }
 function strategyScanSnapshot(){
- return{enabled:true,mode:'AUTOMATIC_READ_ONLY',marketSession:isNseRegularSession()?'OPEN':'CLOSED',lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),orderMode:'DISABLED'};
+ const freshFutureTicks=fnoScanSubscriptionSymbols.filter(symbol=>freshTick(lastTicks.get(symbol))).length;
+ const runtime=getScannerRuntimeState({authenticated:authReady(),socketConnected:connected,marketOpen:isNseRegularSession(),ledgerReady:strategyLedgerRuntimeReady,universeCount:fnoUniverseRows.length,activeSubscriptions:fnoScanSubscriptionSymbols.length,freshFutureTicks});
+ return{enabled:true,mode:'AUTOMATIC_READ_ONLY',runtimeState:runtime.state,blocker:runtime.blocker,marketSession:isNseRegularSession()?'OPEN':'CLOSED',lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),orderMode:'DISABLED'};
 }
 
 async function loadGainerHistory(symbol){
