@@ -103,7 +103,12 @@ function detectContinuation(rows, side) {
   const floor=Math.min(...prior.map(c=>number(c.low)));
   const breakout=side==='LONG'?number(last.close)>ceiling&&number(last.close)>number(last.open):number(last.close)<floor&&number(last.close)<number(last.open);
   if(!breakout)return null;
-  const pattern=range/move<0.45?'PENNANT':'FLAG';
+  const first=prior.slice(0,6),second=prior.slice(6);
+  const firstHigh=Math.max(...first.map(c=>number(c.high))),secondHigh=Math.max(...second.map(c=>number(c.high)));
+  const firstLow=Math.min(...first.map(c=>number(c.low))),secondLow=Math.min(...second.map(c=>number(c.low)));
+  const ascendingTriangle=side==='LONG'&&Math.abs(ceiling-firstHigh)/ceiling<=0.003&&secondLow>firstLow;
+  const descendingTriangle=side==='SHORT'&&Math.abs(floor-firstLow)/floor<=0.003&&secondHigh<firstHigh;
+  const pattern=ascendingTriangle?'ASCENDING_TRIANGLE':descendingTriangle?'DESCENDING_TRIANGLE':range/move<0.45?'PENNANT':'FLAG';
   return candidate(side==='LONG'?'BULLISH_CONTINUATION':'BEARISH_CONTINUATION',side,side==='LONG'?ceiling:floor,last,{pattern});
 }
 function detectFlagVolume(rows) {
@@ -143,18 +148,19 @@ function detectOpeningRange(rows) {
 }
 function detectDayHighLowRetest(rows) {
   const key=istDayKey(number(rows.at(-1).time));
-  const days=[...new Set(rows.map(c=>istDayKey(number(c.time))))];
-  const previousKey=days.length>1?days.at(-2):'';
-  const previousDay=rows.filter(c=>istDayKey(number(c.time))===previousKey);
   const day=rows.filter(c=>istDayKey(number(c.time))===key);
-  if(previousDay.length<1||day.length<3)return null;
-  const prior=day.slice(0,-1),last=day.at(-1);
-  const high=Math.max(...previousDay.map(c=>number(c.high)));
-  const low=Math.min(...previousDay.map(c=>number(c.low)));
-  const brokeHigh=prior.some(c=>number(c.close)>high);
-  const brokeLow=prior.some(c=>number(c.close)<low);
-  if(brokeHigh&&number(last.low)<=high*1.002&&number(last.close)>high)return candidate('DAY_HIGH_LOW_BREAK_RETEST','LONG',high,last);
-  if(brokeLow&&number(last.high)>=low*0.998&&number(last.close)<low)return candidate('DAY_HIGH_LOW_BREAK_RETEST','SHORT',low,last);
+  if(day.length<4)return null;
+  const last=day.at(-1),prior=day.slice(0,-1);
+  for(let i=1;i<prior.length;i++){
+    const level=Math.max(...day.slice(0,i).map(c=>number(c.high)));
+    if(number(prior[i].close)>level&&number(last.low)<=level*1.002&&number(last.close)>level)
+      return candidate('DAY_HIGH_LOW_BREAK_RETEST','LONG',level,last);
+  }
+  for(let i=1;i<prior.length;i++){
+    const level=Math.min(...day.slice(0,i).map(c=>number(c.low)));
+    if(number(prior[i].close)<level&&number(last.high)>=level*0.998&&number(last.close)<level)
+      return candidate('DAY_HIGH_LOW_BREAK_RETEST','SHORT',level,last);
+  }
   return null;
 }
 export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, swingLow, atr, priorResistances=[] }) {
