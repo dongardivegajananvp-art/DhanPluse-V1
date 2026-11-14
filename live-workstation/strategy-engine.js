@@ -47,7 +47,10 @@ function completed(candles, tick, label) {
   }
   const window = getCompletedCandleWindow(candles, tick.exchangeTime);
   if (!window.fresh) return { error: label + ' latest completed candle is stale' };
-  if (!window.contiguous || window.completed.length < 51) return { error: label + ' requires at least 51 contiguous completed 5-minute candles' };
+  if (window.completed.length < 51) return { error: label + ' requires at least 51 contiguous completed 5-minute candles' };
+  const required=window.completed.slice(-51);
+  if (!required.every((c,i)=>i===0||number(c.time)-number(required[i-1].time)===INTERVAL_SECONDS))
+    return { error: label + ' 51-candle strategy window contains a missing 5-minute interval' };
   return { rows: window.completed, last: window.lastClosed };
 }
 function pivotHigh(rows, i, width=2) {
