@@ -54,7 +54,7 @@ function renderStrategyScanner(data){
   const title=document.createElement('b');title.textContent=(item.strategy||'STRATEGY CHECK').replaceAll('_',' ')+' · '+String(item.status||'WAIT').replaceAll('_',' ');
   const detail=document.createElement('span');
   const contract=item.contract?item.contract+' · '+(item.optionSide||'')+' · '+(item.expiry||'')+' · STRIKE '+(item.strike??'—'):'';
-  const levels=item.entry!==undefined?'ENTRY '+fmt(item.entry)+' · SL '+fmt(item.stopLoss)+' · TARGET '+fmt(item.target)+' · RR '+item.rr:'';
+  const levels=item.entry!==undefined?'PREMIUM '+fmt(item.premium)+' · ENTRY '+fmt(item.entry)+' · SL '+fmt(item.stopLoss)+' · TARGET '+fmt(item.target)+' · RR '+item.rr:'';
   detail.textContent=[item.underlying||item.futureSymbol||'',contract,levels,item.reason||''].filter(Boolean).join(' | ');
   card.append(title,detail);results.append(card);
  }
@@ -64,7 +64,7 @@ function renderStrategyScanner(data){
  for(const plan of plans){
   const card=document.createElement('article');card.className='strategy-result';
   const title=document.createElement('b');title.textContent=String(plan.strategy||'STRATEGY').replaceAll('_',' ')+' · '+(plan.underlying||'');
-  const detail=document.createElement('span');detail.textContent=[plan.contract,plan.option_side,plan.expiry,'STRIKE '+plan.strike,'ENTRY '+fmt(plan.entry),'SL '+fmt(plan.stop_loss),'TARGET '+fmt(plan.target),'RR '+plan.rr].filter(Boolean).join(' | ');
+  const detail=document.createElement('span');detail.textContent=[plan.contract,plan.option_side,plan.expiry,'STRIKE '+plan.strike,'PREMIUM '+fmt(plan.premium),'ENTRY '+fmt(plan.entry),'SL '+fmt(plan.stop_loss),'TARGET '+fmt(plan.target),'RR '+plan.rr].filter(Boolean).join(' | ');
   card.append(title,detail);active.append(card);
  }
 }
