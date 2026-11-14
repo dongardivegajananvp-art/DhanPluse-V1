@@ -2,22 +2,64 @@ import { Pool } from 'pg';
 
 const ACTIVE_LIMIT = 2;
 const FRESH_MS = 10_000;
+const MAX_CANDLE_AGE_SECONDS = 900;
+const STRATEGIES = new Set([
+  'EMA20_EMA50_TREND','TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK',
+  'DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION',
+  'BEARISH_CONTINUATION','FLAG_BREAKOUT_VOLUME','OPENING_RANGE_15M_RETEST'
+]);
 
 function positive(value) {
   return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) > 0;
 }
-
+function epochSeconds(value) {
+  if (value === null || value === undefined || value === '') return 0;
+  const raw = String(value).trim();
+  const compact = /^(\\d{4})(\\d{2})(\\d{2})$/.exec(raw);
+  const dateOnly = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(raw);
+  const match = compact || dateOnly;
+  if (match) {
+    const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);
+    const date=new Date(Date.UTC(year,month-1,day));
+    if(date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return 0;
+    return Date.UTC(year,month-1,day,10,0,0)/1000;
+  }
+  const numeric=Number(value);
+  if(Number.isFinite(numeric)&&numeric>0)return numeric>1e12?numeric/1000:numeric;
+  const parsed=Date.parse(raw);
+  return Number.isFinite(parsed)&&parsed>0?parsed/1000:0;
+}
+function tickAligned(value, tickSize) {
+  const price=Number(value),step=Number(tickSize);
+  if(!positive(price)||!positive(step))return false;
+  return Math.abs(price/step-Math.round(price/step))<=1e-6;
+}
 function validatePlan(plan, now) {
   if (!plan || typeof plan !== 'object') return 'Confirmed strategy plan is required';
   for (const key of ['planId','strategy','underlying','contract','optionSide','expiry','underlyingCandleTime','optionCandleTime']) {
     if (typeof plan[key] !== 'string' || !plan[key].trim()) return key + ' is required';
   }
+  if (!STRATEGIES.has(plan.strategy)) return 'Strategy identifier is not in the fixed nine-strategy allowlist';
   if (!['CE','PE'].includes(plan.optionSide)) return 'Option side must be CE or PE';
-  for (const key of ['strike','premium','entry','stopLoss','target','rr','underlyingExchangeTime','optionExchangeTime','underlyingReceivedAt','optionReceivedAt']) {
+  for (const key of ['strike','premium','tickSize','entry','stopLoss','target','rr','underlyingExchangeTime','optionExchangeTime','underlyingReceivedAt','optionReceivedAt']) {
     if (!positive(plan[key])) return key + ' must be a positive verified value';
   }
-  if (!(Number(plan.entry) > Number(plan.stopLoss) && Number(plan.target) > Number(plan.entry))) return 'Entry, stop loss and target are not a valid long-option risk plan';
-  if (Number(plan.rr) < 2) return 'Fixed reward/risk must be at least 1:2';
+  const expiry=epochSeconds(plan.expiry);
+  if(!expiry||expiry*1000<=now)return 'Option contract expiry is missing, malformed or expired';
+  const candleTimes=['underlyingCandleTime','optionCandleTime'].map(key=>epochSeconds(plan[key]));
+  if(candleTimes.some(time=>!time||time*1000>now+3000||now/1000-time>MAX_CANDLE_AGE_SECONDS))
+    return 'Underlying and option confirmation candles must be recent, completed timestamps';
+  const entry=Number(plan.entry),stop=Number(plan.stopLoss),target=Number(plan.target);
+  if (!(entry > stop && target > entry)) return 'Entry, stop loss and target are not a valid long-option risk plan';
+  const risk=entry-stop,reward=target-entry,expectedTarget=entry+2*risk;
+  const tolerance=Math.max(Number(plan.tickSize)*1e-6,1e-8);
+  if(Math.abs(target-expectedTarget)>tolerance)return 'Target must remain exactly two times the fixed Entry-to-SL risk';
+  const calculatedRr=reward/risk;
+  if(Number(plan.rr)<2||Math.abs(Number(plan.rr)-calculatedRr)>1e-4)return 'Fixed reward/risk must match the persisted Entry, SL and Target at 1:2';
+  if(Number(plan.premium)<entry-tolerance||Number(plan.premium)>entry+0.5*risk+tolerance)
+    return 'Verified option premium must be at Entry or within the maximum 0.5R chase allowance';
+  for(const key of ['premium','entry','stopLoss','target'])if(!tickAligned(plan[key],plan.tickSize))
+    return key+' does not align with the official option tick size';
   for (const key of ['underlyingReceivedAt','optionReceivedAt']) {
     const age = now - Number(plan[key]);
     if (age < 0 || age > FRESH_MS) return 'Both underlying and option ticks must be fresh within 10 seconds';
@@ -50,12 +92,15 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
       expiry VARCHAR(32) NOT NULL,
       strike NUMERIC(18,6) NOT NULL CHECK (strike > 0),
       premium NUMERIC(18,6),
+      tick_size NUMERIC(18,6),
       entry NUMERIC(18,6) NOT NULL CHECK (entry > 0),
       stop_loss NUMERIC(18,6) NOT NULL CHECK (stop_loss > 0),
       target NUMERIC(18,6) NOT NULL CHECK (target > entry),
       rr NUMERIC(8,4) NOT NULL CHECK (rr >= 2),
       underlying_exchange_time DOUBLE PRECISION NOT NULL,
       option_exchange_time DOUBLE PRECISION NOT NULL,
+      underlying_received_at TIMESTAMPTZ,
+      option_received_at TIMESTAMPTZ,
       underlying_candle_time VARCHAR(40) NOT NULL,
       option_candle_time VARCHAR(40) NOT NULL,
       status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CLOSED','CANCELLED')),
@@ -63,6 +108,9 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
       closed_at TIMESTAMPTZ
     );
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS premium NUMERIC(18,6);
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS tick_size NUMERIC(18,6);
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS underlying_received_at TIMESTAMPTZ;
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS option_received_at TIMESTAMPTZ;
     CREATE UNIQUE INDEX IF NOT EXISTS gv2vpd_strategy_active_underlying
       ON gv2vpd_strategy_plans (underlying) WHERE status = 'ACTIVE';
     CREATE UNIQUE INDEX IF NOT EXISTS gv2vpd_strategy_active_contract
@@ -96,13 +144,14 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
         }
         await client.query(`
           INSERT INTO gv2vpd_strategy_plans (
-            plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,entry,stop_loss,target,rr,
-            underlying_exchange_time,option_exchange_time,underlying_candle_time,option_candle_time
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+            plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,
+            underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,underlying_candle_time,option_candle_time
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
         `, [
           plan.planId,plan.strategy,plan.underlying,plan.contract,plan.optionSide,plan.expiry,
-          Number(plan.strike),Number(plan.premium),Number(plan.entry),Number(plan.stopLoss),Number(plan.target),Number(plan.rr),
+          Number(plan.strike),Number(plan.premium),Number(plan.tickSize),Number(plan.entry),Number(plan.stopLoss),Number(plan.target),Number(plan.rr),
           Number(plan.underlyingExchangeTime),Number(plan.optionExchangeTime),
+          new Date(Number(plan.underlyingReceivedAt)).toISOString(),new Date(Number(plan.optionReceivedAt)).toISOString(),
           plan.underlyingCandleTime,plan.optionCandleTime
         ]);
         await client.query('COMMIT');
@@ -119,7 +168,7 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
     async listActivePlans() {
       if (!await ready) return { ok: false, status: 'DATA_UNAVAILABLE_NO_TRADE', plans: [] };
       try {
-        const result = await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_candle_time,option_candle_time,created_at FROM gv2vpd_strategy_plans WHERE status='ACTIVE' ORDER BY created_at ASC LIMIT 2");
+        const result = await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,underlying_candle_time,option_candle_time,created_at FROM gv2vpd_strategy_plans WHERE status='ACTIVE' ORDER BY created_at ASC LIMIT 2");
         return { ok: true, plans: result.rows || [] };
       } catch (error) {
         console.error('Strategy plan read failed; new entries remain blocked.', String(error?.message || error).slice(0, 160));
