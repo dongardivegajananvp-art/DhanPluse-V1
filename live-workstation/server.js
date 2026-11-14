@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
+import { sameStrategyConfirmation, validateOptionContractIdentity } from './strategy-candidate-guard.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
 import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
 import { buildFnoUniverse, selectSubscriptionBatch } from './fno-universe.js';
@@ -525,10 +526,25 @@ async function processPendingStrategyCandidate(candidate){
  const optionTick=lastTicks.get(candidate.contract.symbol),underlyingTick=lastTicks.get(candidate.futureSymbol);
  if(!freshTick(optionTick)||!freshTick(underlyingTick))return false;
  try{
-  const history=await loadGainerHistory(candidate.contract.symbol);
+  const officialMaster=candidate.underlyingSymbol.startsWith('BSE:')?await loadBseFoMaster():await loadNseFoMaster();
+  const officialContract=optionMeta(candidate.contract.symbol,officialMaster);
+  const identity=validateOptionContractIdentity(candidate.contract,officialContract,Date.now());
+  if(!identity.ok){
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason:identity.reason,strategy:candidate.setup.strategy});
+   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_contract_rejected'});return true;
+  }
+  const [underlyingHistory,optionHistory]=await Promise.all([
+   loadGainerHistory(candidate.futureSymbol,{force:true}),
+   loadGainerHistory(candidate.contract.symbol,{force:true})
+  ]);
   const currentOptionTick=lastTicks.get(candidate.contract.symbol),currentUnderlyingTick=lastTicks.get(candidate.futureSymbol);
   if(!freshTick(currentOptionTick)||!freshTick(currentUnderlyingTick))return false;
-  const evaluated=evaluateNineStrategies({underlyingCandles:candidate.underlyingCandles,underlyingTick:currentUnderlyingTick,optionCandles:history.candles,optionTick:currentOptionTick,contract:candidate.contract,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now()});
+  const refreshedSetup=detectNineStrategySetup({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now()});
+  if(refreshedSetup.status!=='UNDERLYING_SETUP_CONFIRMED'||!sameStrategyConfirmation(candidate.setup,refreshedSetup)){
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason:'Underlying strategy confirmation changed or expired while waiting for the option tick',strategy:candidate.setup.strategy});
+   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_underlying_recheck_failed'});return true;
+  }
+  const evaluated=evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,optionCandles:optionHistory.candles,optionTick:currentOptionTick,contract:candidate.contract,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now()});
   if(evaluated.status!=='SETUP_CONFIRMED'){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:evaluated.status,reason:evaluated.reason||'Option premium confirmation did not pass',strategy:candidate.setup.strategy,updatedAt:new Date().toISOString()});
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_rejected'});return true;
@@ -596,8 +612,8 @@ function strategyScanSnapshot(){
  return{enabled:true,mode:'AUTOMATIC_READ_ONLY',runtimeState:runtime.state,blocker:runtime.blocker,marketSession:isNseRegularSession()?'OPEN':'CLOSED',lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),orderMode:'DISABLED'};
 }
 
-async function loadGainerHistory(symbol){
- const cached=gainerHistoryCache.get(symbol);if(cached&&Date.now()-cached.cachedAt<300000)return cached;
+async function loadGainerHistory(symbol,{force=false}={}){
+ const cached=gainerHistoryCache.get(symbol);if(!force&&cached&&Date.now()-cached.cachedAt<300000)return cached;
  const now=Math.floor(Date.now()/1000),to=now-300,from=to-5*24*60*60;
  const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
  const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000});
