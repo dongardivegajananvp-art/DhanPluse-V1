@@ -11,6 +11,7 @@ test('freshness requires both recent receipt and recent exchange timestamp', () 
   assert.equal(exchangeTickFreshness(fresh('NSE:ABC', 2), now).status, 'FRESH');
   assert.equal(exchangeTickFreshness(fresh('NSE:ABC', 25), now).status, 'STALE');
   assert.equal(exchangeTickFreshness({ ...fresh('NSE:ABC', 2), receivedAt: now - 20000 }, now).status, 'STALE');
+  assert.equal(exchangeTickFreshness({ ...fresh('NSE:ABC', 2), exchangeTime: 9e12 }, now).status, 'INVALID');
 });
 
 test('rejects future and out-of-order exchange timestamps', () => {
