@@ -580,7 +580,7 @@ app.post('/api/order',async(req,res)=>{
 });
 app.get('/api/fyers/auth/start',(req,res)=>{
   if(!appId||!appSecret||!redirectUri||!tokenReader)return res.status(503).json({error:'FYERS reconnect is not configured on this workstation.',detail:{hasAppId:Boolean(appId),hasAppSecret:Boolean(appSecret),hasRedirect:Boolean(redirectUri),secureTokenStore:Boolean(tokenReader)}});
-  const external=String(process.env.RENDER_EXTERNAL_URL||'').replace(/\\/$/,'');
+  const external=String(process.env.RENDER_EXTERNAL_URL||'').replace(/\/$/,'');
   const expectedCallback=external+'/api/fyers/auth/callback';
   if(!external||redirectUri!==expectedCallback)return res.status(503).json({error:'FYERS callback URL is not configured for this GV2VPD workstation.',detail:'Set FYERS_REDIRECT_URI to '+expectedCallback+' and register the exact same URL in the FYERS Developer App.'});
   const now=Date.now();for(const [key,value] of pendingAuthStates){if(now-value.createdAt>AUTH_STATE_TTL_MS)pendingAuthStates.delete(key);}
