@@ -19,7 +19,7 @@ class FakePool {
       this.plans.push({ planId,strategy,underlying,contract,optionSide,expiry,strike,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingCandleTime,optionCandleTime,status:'ACTIVE' });
       return { rows: [] };
     }
-    if (sql.includes('SELECT plan_id,strategy')) return { rows: this.plans.filter(p => p.status === 'ACTIVE').slice(0,2) };
+    if (sql.includes('SELECT plan_id,strategy')) return { rows: this.plans.filter(p => p.status === 'ACTIVE').slice(0,2).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
     if (sql.includes('UPDATE gv2vpd_strategy_plans')) {
       const p = this.plans.find(x => x.planId === values[0] && x.status === 'ACTIVE');
       if (!p) return { rows: [] };
