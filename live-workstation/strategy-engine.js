@@ -13,6 +13,12 @@ const STRATEGIES = Object.freeze([
   'FLAG_BREAKOUT_VOLUME',
   'OPENING_RANGE_15M_RETEST'
 ]);
+// When multiple setups confirm on the same completed candle, prefer the more specific pattern over the broad EMA trend fallback.
+const STRATEGY_TIE_PRIORITY = Object.freeze([
+  'TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
+  'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION','BEARISH_CONTINUATION',
+  'FLAG_BREAKOUT_VOLUME','OPENING_RANGE_15M_RETEST','EMA20_EMA50_TREND'
+]);
 
 function finite(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)); }
 function number(value) { return Number(value); }
@@ -235,7 +241,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const flag=detectFlagVolume(rows);if(flag)candidates.push(flag);
   const orb=detectOpeningRange(rows);if(orb)candidates.push(orb);
   if(!candidates.length)return{status:'NO_TRADE',reason:'None of the nine completed-candle strategies confirmed a setup'};
-  candidates.sort((a,b)=>a.confirmedAt-b.confirmedAt||STRATEGIES.indexOf(a.strategy)-STRATEGIES.indexOf(b.strategy));
+  candidates.sort((a,b)=>a.confirmedAt-b.confirmedAt||STRATEGY_TIE_PRIORITY.indexOf(a.strategy)-STRATEGY_TIE_PRIORITY.indexOf(b.strategy));
   return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
 }
 
