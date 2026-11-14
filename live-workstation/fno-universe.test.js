@@ -56,6 +56,8 @@ test('pinned contracts reduce rotating capacity and overflow fails explicitly', 
     cursor: 0, limit: 3
   });
   assert.deepEqual(batch.symbols, ['NSE:NIFTY50-INDEX', 'NSE:RELIANCE25NOVFUT', 'NSE:TCS25NOVFUT']);
+  assert.deepEqual(batch.fnoSymbols, ['NSE:RELIANCE25NOVFUT', 'NSE:TCS25NOVFUT']);
+  assert.equal(batch.pinnedUniverseCount, 1);
   assert.throws(() => selectFairSubscriptionBatch({
     baseSymbols: ['NSE:NIFTY50-INDEX'], pinnedSymbols: ['NSE:A','NSE:B','NSE:C'],
     universeSymbols: [], limit: 3
