@@ -6,7 +6,7 @@ import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
 import { sameStrategyConfirmation, validateOptionContractIdentity } from './strategy-candidate-guard.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
 import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
-import { buildFnoUniverse, selectSubscriptionBatch } from './fno-universe.js';
+import { buildFnoUniverse, selectFairSubscriptionBatch, summarizeFnoCoverage } from './fno-universe.js';
 import { createStrategyPlanStore } from './strategy-plan-store.js';
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
 import { selectNearestOptionContract, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
@@ -104,13 +104,14 @@ let fnoUniverseRows=[],fnoUniverseFetchedAt=0,fnoUniversePromise=null,fnoUnivers
 const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
 function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!socket||!connected)return {subscribed:0,removed:0};
+  let subscriptionError='';
+  let pendingFnoCursor=null;
   if(fnoUniverseRows.length){
     const pinned=[selectedSymbol,selectedOptionSymbol,...strategyOptionSymbols,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol])].filter(Boolean);
     try{
-      const batch=selectSubscriptionBatch({baseSymbols:BASE_SUBSCRIPTIONS,pinnedSymbols:pinned,universeSymbols:fnoUniverseRows.map(x=>x.futureSymbol),cursor:fnoUniverseCursor,limit:FYERS_DATA_SYMBOL_LIMIT});
-      const universeSet=new Set(fnoUniverseRows.map(x=>x.futureSymbol));
-      fnoScanSubscriptionSymbols=batch.symbols.filter(symbol=>universeSet.has(symbol));
-      if(reason==='scheduled_rotation'||reason==='universe_loaded')fnoUniverseCursor=batch.nextCursor;
+      const batch=selectFairSubscriptionBatch({baseSymbols:BASE_SUBSCRIPTIONS,pinnedSymbols:pinned,universeSymbols:fnoUniverseRows.map(x=>x.futureSymbol),cursor:fnoUniverseCursor,limit:FYERS_DATA_SYMBOL_LIMIT});
+      fnoScanSubscriptionSymbols=batch.fnoSymbols;
+      if(reason==='scheduled_rotation'||reason==='universe_loaded')pendingFnoCursor=batch.nextCursor;
     }catch(error){
       fnoScanSubscriptionSymbols=[];
       fnoUniverseError='F&O subscription window unavailable: '+String(error?.message||error).slice(0,140);
@@ -125,18 +126,21 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   }
   const add=[...wanted].filter(x=>force||!subscribedSymbols.has(x));
   const remove=[...subscribedSymbols].filter(x=>!wanted.has(x));
-  if(remove.length&&typeof socket.unsubscribe==='function'){
-    try{socket.unsubscribe(remove);for(const symbol of remove)subscribedSymbols.delete(symbol);}
-    catch(e){console.error('FYERS unsubscribe failed',String(e?.message||e).slice(0,160));}
+  if(remove.length){
+    if(typeof socket.unsubscribe!=='function')subscriptionError='FYERS socket unsubscribe is unavailable; rotation cannot be confirmed safely';
+    else try{socket.unsubscribe(remove);for(const symbol of remove)subscribedSymbols.delete(symbol);}
+    catch(e){subscriptionError='FYERS unsubscribe failed: '+String(e?.message||e).slice(0,140);console.error(subscriptionError);}
   }
-  if(add.length){
+  if(!subscriptionError&&add.length){
     try{
       socket.mode(socket.FullMode);
       socket.subscribe(add);
       for(const symbol of add)subscribedSymbols.add(symbol);
-      console.info('FYERS market subscriptions applied.',JSON.stringify({reason,count:add.length,symbols:add}));
-    }catch(e){console.error('FYERS subscribe failed.',JSON.stringify({reason,message:String(e?.message||e).slice(0,180),count:add.length}));}
+      console.info('FYERS market subscriptions requested.',JSON.stringify({reason,count:add.length,symbols:add}));
+    }catch(e){subscriptionError='FYERS subscribe failed: '+String(e?.message||e).slice(0,140);console.error(subscriptionError);}
   }
+  if(subscriptionError){fnoScanSubscriptionSymbols=[];fnoUniverseError=subscriptionError;return{subscribed:0,removed:remove.length,error:subscriptionError};}
+  if(pendingFnoCursor!==null)fnoUniverseCursor=pendingFnoCursor;
   if(reason==='scheduled_rotation'||reason==='universe_loaded'){lastFnoRotationAt=new Date().toISOString();fnoRotationCount+=1;}
   if(!fnoUniverseError.startsWith('BSE F&O master unavailable'))fnoUniverseError='';
   return {subscribed:add.length,removed:remove.length};
@@ -398,9 +402,10 @@ app.get('/api/health',async(_req,res)=>{
   const now=Date.now();
   const indexFeed=summarizeFeedFreshness(BASE_SUBSCRIPTIONS,lastTicks,now);
   const fnoFeed=summarizeFeedFreshness(fnoScanSubscriptionSymbols,lastTicks,now);
+  const fnoUniverseCoverage=summarizeFnoCoverage(fnoUniverseRows.map(row=>row.futureSymbol),fnoScanSubscriptionSymbols,fnoUniverseRows.filter(row=>freshTick(lastTicks.get(row.futureSymbol))).map(row=>row.futureSymbol));
   const strategyLedgerReady=strategyPlanStore?await strategyPlanStore.ready:false;
   const latestExchangeTime=[...lastTicks.values()].reduce((latest,tick)=>Math.max(latest,Number(tick.exchangeTime)||0),0);
-  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,activeWindowFreshnessPercent:fnoFeed.coveragePercent,windowCoveragePercent:fnoUniverseRows.length?Math.round(fnoScanSubscriptionSymbols.length/fnoUniverseRows.length*1000)/10:0,lastRotationAt:lastFnoRotationAt,rotationCount:fnoRotationCount,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:{active:fyersRestCooldownUntil>Date.now(),reason:fyersRestCooldownReason||null,retryAfterSeconds:fyersRestCooldownUntil>Date.now()?Math.ceil((fyersRestCooldownUntil-Date.now())/1000):0,consecutive429:fyersRest429Count},orderMode:'DISABLED'});
+  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,requestedFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,activeWindowFreshnessPercent:fnoFeed.coveragePercent,windowCoveragePercent:fnoUniverseCoverage.requestedCoveragePercent,freshUniverseCoveragePercent:fnoUniverseCoverage.freshUniverseCoveragePercent,notRequestedFutureCount:fnoUniverseCoverage.notRequestedCount,freshUniverseFutureCount:fnoUniverseCoverage.freshUniverseCount,coverage:fnoUniverseCoverage,lastRotationAt:lastFnoRotationAt,rotationCount:fnoRotationCount,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:{active:fyersRestCooldownUntil>Date.now(),reason:fyersRestCooldownReason||null,retryAfterSeconds:fyersRestCooldownUntil>Date.now()?Math.ceil((fyersRestCooldownUntil-Date.now())/1000):0,consecutive429:fyersRest429Count},orderMode:'DISABLED'});
 });
 app.get('/api/strategy-scan',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.status(401).json({error:'FYERS session unavailable',...strategyScanSnapshot()});await refreshStrategyActivePlans();res.json(strategyScanSnapshot());});
 app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,underlying:row.underlyingSymbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
