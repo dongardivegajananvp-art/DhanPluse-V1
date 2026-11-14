@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFixedPremiumPlan, canAcceptStrategyTrade, evaluateNineStrategies, MAX_ACTIVE_TRADES, STRATEGIES } from './strategy-engine.js';
+import { buildFixedPremiumPlan, canAcceptStrategyTrade, detectDoublePattern, evaluateNineStrategies, MAX_ACTIVE_TRADES, STRATEGIES } from './strategy-engine.js';
 
 test('nine fixed strategy identifiers are present and stable',()=>{
   assert.equal(STRATEGIES.length,9);
@@ -67,4 +67,45 @@ test('strategy evaluator rejects a gap anywhere in the required 51-candle window
   const result=evaluateNineStrategies({underlyingCandles:rows,underlyingTick:tick,optionCandles:[],optionTick:tick,contract:{side:'CE',tickSize:0.05},now});
   assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
   assert.match(result.reason,/missing 5-minute interval/);
+});
+
+function doublePatternFixture(kind) {
+  const rows=Array.from({length:40},(_,i)=>({time:1794801600+i*300,open:100,high:101,low:99,close:100,volume:10}));
+  if(kind==='top'){
+    for(const i of [8,18])rows[i]={...rows[i],open:105,high:110,low:104,close:105};
+    rows[13]={...rows[13],open:100,high:102,low:95,close:100};
+    rows[24]={...rows[24],open:96,high:97,low:93,close:94};
+    for(const i of [37,38,39])rows[i]={...rows[i],open:94.5,high:i===39?95.2:95,low:93.5,close:94.5};
+  }else{
+    for(const i of [8,18])rows[i]={...rows[i],open:95,high:96,low:90,close:95};
+    rows[13]={...rows[13],open:100,high:105,low:98,close:100};
+    rows[24]={...rows[24],open:104,high:107,low:103,close:106};
+    for(const i of [37,38,39])rows[i]={...rows[i],open:105.5,high:106,low:i===39?104.8:105,close:105.5};
+  }
+  return rows;
+}
+
+test('double-top SHORT requires an actual underside neckline retest and rejection',()=>{
+  const result=detectDoublePattern(doublePatternFixture('top'));
+  assert.equal(result?.pattern,'DOUBLE_TOP');
+  assert.equal(result?.side,'SHORT');
+  assert.equal(result?.breakoutLevel,95);
+});
+
+test('double-bottom LONG requires an actual topside neckline retest and hold',()=>{
+  const result=detectDoublePattern(doublePatternFixture('bottom'));
+  assert.equal(result?.pattern,'DOUBLE_BOTTOM');
+  assert.equal(result?.side,'LONG');
+  assert.equal(result?.breakoutLevel,105);
+});
+
+test('strategy evaluator rejects null candle fields as malformed rather than numeric zero',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const bucket=Math.floor((now/1000)/300)*300;
+  const rows=Array.from({length:52},(_,i)=>({time:bucket-(52-i)*300,open:100,high:101,low:99,close:100,volume:10}));
+  rows[12]={...rows[12],time:null};
+  const tick={price:100,exchangeTime:now/1000,receivedAt:now};
+  const result=evaluateNineStrategies({underlyingCandles:rows,underlyingTick:tick,optionCandles:[],optionTick:tick,contract:{side:'CE',tickSize:0.05},now});
+  assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(result.reason,/missing or malformed/i);
 });
