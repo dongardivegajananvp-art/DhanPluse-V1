@@ -89,7 +89,7 @@ export function detectDoublePattern(rows) {
     if(j-i<4||Math.abs(l1-l2)/Math.max(l1,l2)>0.003)continue;
     const neck=Math.max(...rows.slice(i,j+1).map(x=>number(x.high)));
     const hadBreak=rows.slice(j+1,-1).some(x=>number(x.close)>neck);
-    if(hadBreak&&number(last.high)>=neck*0.998&&number(last.close)>neck&&prior.some(x=>number(x.close)>neck))
+    if(hadBreak&&number(last.low)<=neck*1.002&&number(last.close)>neck&&prior.some(x=>number(x.close)>neck))
       return candidate('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','LONG',neck,last,{pattern:'DOUBLE_BOTTOM'});
   }
   return null;
