@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
+import { acceptExchangeTick, summarizeFeedFreshness } from './market-data-integrity.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
 import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
 import { buildFnoUniverse, selectSubscriptionBatch } from './fno-universe.js';
@@ -261,6 +262,8 @@ function ensureSocket(){
         const stamp=toEpochSeconds(row.exch_feed_time??row.last_traded_time??row.ltt??row.tt??value.exch_feed_time??value.last_traded_time??value.ltt??value.tt);
         if(!symbol||!Number.isFinite(price)||price<=0||!Number.isFinite(stamp)||stamp<=0)continue;
         const previousCloseRaw=row.prev_close_price??row.prevClose??row.prev_close??value.prev_close_price??value.prevClose??value.prev_close;const previousClose=Number(previousCloseRaw);const tick={symbol,price,previousClose:Number.isFinite(previousClose)&&previousClose>0?previousClose:null,exchangeTime:stamp,receivedAt:Date.now()};
+        const tickAcceptance=acceptExchangeTick(lastTicks.get(symbol),tick);
+        if(!tickAcceptance.accepted){if(tickAcceptance.reason==='OUT_OF_ORDER_EXCHANGE_TIMESTAMP'||tickAcceptance.reason==='FUTURE_EXCHANGE_TIMESTAMP'){console.warn('FYERS tick rejected by monotonic timestamp guard.',JSON.stringify({symbol,reason:tickAcceptance.reason,exchangeTimestamp:new Date(stamp*1000).toISOString()}));}continue;}
         lastTicks.set(symbol,tick);
         if(symbol.startsWith('MCX:'))mcxTicks.set(symbol,tick);
         else if(symbol.startsWith('NSE:')||symbol.startsWith('BSE:'))nseTicks.set(symbol,tick);
@@ -326,10 +329,12 @@ const fnoUniverseRotationTimer=setInterval(()=>{
 },360000);
 fnoUniverseRotationTimer.unref?.();
 app.get('/api/health',async(_req,res)=>{
-  const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
-  const latestExchangeTime=[...lastTicks.values()].reduce((latest,tick)=>Math.max(latest,Number(tick.exchangeTime)||0),0);
+  const now=Date.now();
+  const indexFeed=summarizeFeedFreshness(BASE_SUBSCRIPTIONS,lastTicks,now);
+  const fnoFeed=summarizeFeedFreshness(fnoScanSubscriptionSymbols,lastTicks,now);
   const strategyLedgerReady=strategyPlanStore?await strategyPlanStore.ready:false;
-  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:freshIndexes.length,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData: freshIndexes.length===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:{active:fyersRestCooldownUntil>Date.now(),reason:fyersRestCooldownReason||null,retryAfterSeconds:fyersRestCooldownUntil>Date.now()?Math.ceil((fyersRestCooldownUntil-Date.now())/1000):0,consecutive429:fyersRest429Count},orderMode:'DISABLED'});
+  const latestExchangeTime=[...lastTicks.values()].reduce((latest,tick)=>Math.max(latest,Number(tick.exchangeTime)||0),0);
+  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,coveragePercent:fnoFeed.coveragePercent,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:{active:fyersRestCooldownUntil>Date.now(),reason:fyersRestCooldownReason||null,retryAfterSeconds:fyersRestCooldownUntil>Date.now()?Math.ceil((fyersRestCooldownUntil-Date.now())/1000):0,consecutive429:fyersRest429Count},orderMode:'DISABLED'});
 });
 app.get('/api/strategy-scan',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.status(401).json({error:'FYERS session unavailable',...strategyScanSnapshot()});await refreshStrategyActivePlans();res.json(strategyScanSnapshot());});
 app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,underlying:row.underlyingSymbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
