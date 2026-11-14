@@ -488,7 +488,7 @@ async function loadStrategyOptionContracts(underlying){
 }
 function setStrategyScanResult(item){
  const key=item.underlying||item.futureSymbol||'scanner';
- strategyScanLastResults=[item,...strategyScanLastResults.filter(x=>(x.underlying||x.futureSymbol)!==key)].slice(0,3);
+ strategyScanLastResults=[item,...strategyScanLastResults.filter(x=>(x.underlying||x.futureSymbol)!==key)].sort((a,b)=>Number(b.status==='PLAN_CONFIRMED_READ_ONLY')-Number(a.status==='PLAN_CONFIRMED_READ_ONLY')||Number(b.rr||0)-Number(a.rr||0)||String(b.verifiedAt||b.updatedAt||'').localeCompare(String(a.verifiedAt||a.updatedAt||''))).slice(0,3);
 }
 async function refreshStrategyActivePlans(force=false){
  if(!strategyPlanStore)return{ok:false,plans:[]};
@@ -549,7 +549,7 @@ async function runAutomaticStrategyScan(){
    const [history,daily]=await Promise.all([loadGainerHistory(futureSymbol),loadStrategyDailyHistory(futureSymbol).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}))]);
    const currentTick=lastTicks.get(futureSymbol);
    if(!freshTick(currentTick)){setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Futures tick became stale during candle verification'});return;}
-   const isTopGainer=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<15*60*1000&&fnoMoversCache.rows.some(x=>x.underlyingSymbol===row.underlyingSymbol);
+   const isTopGainer=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<15*60*1000&&fnoMoversCache.rows[0]?.underlyingSymbol===row.underlyingSymbol;
    const setup=detectNineStrategySetup({underlyingCandles:history.candles,underlyingTick:currentTick,dailyCandles:daily.ok?daily.candles:[],isTopGainer,now:Date.now()});
    if(setup.status!=='UNDERLYING_SETUP_CONFIRMED'){
     if(setup.status==='DATA_UNAVAILABLE_NO_TRADE')setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:setup.status,reason:setup.reason,dailyDataStatus:daily.reason||'verified'});
