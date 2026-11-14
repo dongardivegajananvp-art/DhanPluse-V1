@@ -157,6 +157,25 @@ function detectDayHighLowRetest(rows) {
   if(brokeLow&&number(last.high)>=low*0.998&&number(last.close)<low)return candidate('DAY_HIGH_LOW_BREAK_RETEST','SHORT',low,last);
   return null;
 }
+export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, swingLow, atr, priorResistances=[] }) {
+  const values=[breakoutLevel,tickSize,livePremium,swingLow,atr];
+  if(!values.every(finite)||values.some(v=>number(v)<=0))return{status:'NO_TRADE',reason:'Breakout, tick size, live premium, swing low and ATR must be positive'};
+  const step=number(tickSize);
+  const entry=Math.ceil((number(breakoutLevel)+step-1e-9)/step)*step;
+  const stopLoss=Math.floor((number(swingLow)-0.5*number(atr)+1e-9)/step)*step;
+  const risk=entry-stopLoss;
+  if(!(risk>=step))return{status:'NO_TRADE',reason:'Swing-low minus half ATR does not leave positive option-premium risk'};
+  if(number(livePremium)<entry)return{status:'NO_TRADE',reason:'Live option premium has not reached breakout level + one tick'};
+  if(number(livePremium)>entry+0.5*risk)return{status:'NO_TRADE',reason:'Option premium moved more than 0.5R beyond entry; chase blocked'};
+  const target=entry+2*risk;
+  const liveRisk=number(livePremium)-stopLoss;
+  const liveReward=target-number(livePremium);
+  const liveRr=liveReward/liveRisk;
+  if(!(liveRisk>0&&liveReward>0&&liveRr>=2-1e-9))return{status:'NO_TRADE',reason:'Live option premium no longer supports fixed 1:2 reward/risk'};
+  if(priorResistances.some(level=>finite(level)&&number(level)>entry&&number(level)<target))return{status:'NO_TRADE',reason:'Verified resistance lies before the fixed 2R target'};
+  return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:Number(liveRr.toFixed(2)),risk};
+}
+
 export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], isTopGainer=false, now=Date.now() }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
@@ -196,24 +215,15 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const premiumRows=o.rows, premiumLast=o.last, tickSize=number(contract.tickSize);
   const premiumLevel=Math.max(...premiumRows.slice(-21,-1).map(c=>number(c.high)));
   if(!(number(premiumLast.close)>premiumLevel))return{status:'NO_TRADE',reason:'Underlying setup confirmed, but option premium has no completed breakout confirmation',strategy:chosen.strategy};
-  const entry=Math.ceil((premiumLevel+tickSize-1e-9)/tickSize)*tickSize;
   const atr=atr14(premiumRows);
   if(!Number.isFinite(atr)||atr<=0)return fail('Option premium ATR(14) is unavailable');
   const swing=premiumRows.slice(-5);
-  const rawStop=chosen.side==='LONG'?Math.min(...swing.map(c=>number(c.low)))-0.5*atr:Math.min(...swing.map(c=>number(c.low)))-0.5*atr;
-  const stopLoss=Math.floor((rawStop+1e-9)/tickSize)*tickSize;
-  const risk=entry-stopLoss;
-  if(!(risk>=tickSize))return{status:'NO_TRADE',reason:'Option premium swing/ATR stop does not leave positive BUY risk',strategy:chosen.strategy};
-  const live=number(optionTick.price);
-  if(live<entry)return{status:'NO_TRADE',reason:'Live option premium has not reached breakout level + one tick',strategy:chosen.strategy};
-  if(live>entry+0.5*risk)return{status:'NO_TRADE',reason:'Option premium moved more than 0.5R beyond entry; chase blocked',strategy:chosen.strategy};
-  const target=entry+2*risk;
+  const swingLow=Math.min(...swing.map(c=>number(c.low)));
   const olderPremiumRows=premiumRows.slice(0,-21);
-  const resistance=olderPremiumRows.filter((c,i,a)=>i>1&&i<a.length-2&&pivotHigh(a,i,1)).map(c=>number(c.high)).filter(v=>v>entry&&v<target);
-  if(resistance.length)return{status:'NO_TRADE',reason:'Verified option premium resistance lies before the fixed 2R target',strategy:chosen.strategy};
-  const rr=(target-entry)/risk;
-  if(!(rr>=2))return{status:'NO_TRADE',reason:'Live option premium cannot support fixed 1:2 reward/risk',strategy:chosen.strategy};
-  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry,stopLoss,target,rr:Number(rr.toFixed(2)),atr14:Number(atr.toFixed(4)),confirmedAt:chosen.confirmedAt,optionCandleTime:premiumLast.time,contract:contract.symbol};
+  const resistances=olderPremiumRows.filter((c,i,a)=>i>1&&i<a.length-2&&pivotHigh(a,i,1)).map(c=>number(c.high));
+  const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow,atr,priorResistances:resistances});
+  if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy};
+  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,rr:plan.rr,atr14:Number(atr.toFixed(4)),confirmedAt:chosen.confirmedAt,optionCandleTime:premiumLast.time,contract:contract.symbol};
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {
   if(!Array.isArray(activeTrades)||!candidateTrade||!candidateTrade.underlying||!candidateTrade.contract)return{ok:false,reason:'Active trade state or candidate identity is invalid'};
