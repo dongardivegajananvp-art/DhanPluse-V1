@@ -3,6 +3,8 @@ import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
 import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
+import { buildFnoUniverse, selectSubscriptionBatch } from './fno-universe.js';
+import { createStrategyPlanStore } from './strategy-plan-store.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -62,6 +64,7 @@ const nseTicks=new Map(),mcxTicks=new Map();
 const usedOrderRequestIds=new Set();
 const {Pool}=require('pg');
 const databaseUrl=String(process.env.DATABASE_URL||'').trim();
+const strategyPlanStore=createStrategyPlanStore({databaseUrl});
 const orderRequestPool=databaseUrl.startsWith('postgres://')||databaseUrl.startsWith('postgresql://')?new Pool({connectionString:databaseUrl,max:2,idleTimeoutMillis:10000,connectionTimeoutMillis:10000,application_name:'gv2vpd-order-idempotency'}):null;
 const orderRequestStoreReady=orderRequestPool?orderRequestPool.query("CREATE TABLE IF NOT EXISTS gv2vpd_order_requests (request_id VARCHAR(64) PRIMARY KEY, request_hash CHAR(64) NOT NULL, status VARCHAR(32) NOT NULL, broker_order_id VARCHAR(128), response_message TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").then(()=>true).catch(error=>{console.error('Order idempotency store unavailable; order route will remain fail-closed.',String(error?.message||error).slice(0,160));return false;}):Promise.resolve(false);
 
@@ -77,10 +80,20 @@ let fnoMoversCache={rows:[],updatedAt:0,expiresAt:0,error:'Not loaded'};
 let fnoMoversPromise=null,screenerConfigCache=null,screenerConfigFetchedAt=0,screenerConfigPromise=null;
 let accountSnapshot=null,accountSnapshotFetchedAt=0,accountFetchPromise=null,accountRetryAfter=0,accountFailureCount=0;
 const subscribedSymbols=new Set();
+const FYERS_DATA_SYMBOL_LIMIT=100;
+let fnoUniverseRows=[],fnoUniverseFetchedAt=0,fnoUniversePromise=null,fnoUniverseCursor=0,fnoScanSubscriptionSymbols=[],fnoUniverseError='Not loaded';
 const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
 function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!socket||!connected)return {subscribed:0,removed:0};
-  const wanted=new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol]).filter(Boolean)]);
+  if(fnoUniverseRows.length){
+    const pinned=[selectedSymbol,selectedOptionSymbol,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol])].filter(Boolean);
+    const batch=selectSubscriptionBatch({baseSymbols:BASE_SUBSCRIPTIONS,pinnedSymbols:pinned,universeSymbols:fnoUniverseRows.map(x=>x.futureSymbol),cursor:fnoUniverseCursor,limit:FYERS_DATA_SYMBOL_LIMIT});
+    const universeSet=new Set(fnoUniverseRows.map(x=>x.futureSymbol));
+    fnoScanSubscriptionSymbols=batch.symbols.filter(symbol=>universeSet.has(symbol));
+    if(reason==='scheduled_rotation'||reason==='universe_loaded')fnoUniverseCursor=batch.nextCursor;
+  }
+  const wanted=new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol]).filter(Boolean),...fnoScanSubscriptionSymbols]);
+  if(wanted.size>FYERS_DATA_SYMBOL_LIMIT)return{subscribed:0,removed:0,error:'FYERS symbol subscription cap exceeded; subscriptions not changed'};
   const add=[...wanted].filter(x=>force||!subscribedSymbols.has(x));
   const remove=[...subscribedSymbols].filter(x=>!wanted.has(x));
   if(remove.length&&typeof socket.unsubscribe==='function'){
@@ -161,6 +174,29 @@ async function loadScreenerConfig(){if(screenerConfigCache&&Date.now()-screenerC
 function screenerIds(value){return Array.isArray(value)?value.map(item=>typeof item==='string'?item:String(item?.id||'')).filter(Boolean):[];}
 async function loadFnoMovers(){if(fnoMoversCache.expiresAt>Date.now())return fnoMoversCache;if(fnoMoversPromise)return fnoMoversPromise;fnoMoversPromise=(async()=>{try{const config=await loadScreenerConfig(),data=config.data||{};const screeners=Array.isArray(data.screeners_standard)?data.screeners_standard:[];const candidates=screeners.filter(x=>String(x.category||'').toLowerCase().includes('futures')&&/(gain|gainer)/i.test(String(x.id||'')+' '+String(x.name||'')));const screener=candidates.find(x=>{const allowed=new Set(x.supported_params||[]);const universeIds=screenerIds(data.universe_groups?.[x.universe_group]);const columnIds=screenerIds(data.column_groups?.[x.column_group]);return allowed.has('universe')&&allowed.has('fields')&&universeIds.includes('fw002')&&['t0_close_ltp','t0_per_change'].every(id=>columnIds.includes(id));});if(!screener){const summary=candidates.map(x=>({id:x.id,category:x.category,universe_group:x.universe_group,column_group:x.column_group,supported_params:x.supported_params}));throw new Error('No FYERS Futures Scan gainer screener accepts fw002 + live price/change fields. Candidates: '+JSON.stringify(summary).slice(0,260));}const allowed=new Set(screener.supported_params||[]),params=new URLSearchParams({screener_id:screener.id});params.set('universe','fw002');params.set('fields','t0_close_ltp,t0_per_change');if(allowed.has('order_by'))params.set('order_by','t0_per_change');if(allowed.has('order'))params.set('order','desc');if(allowed.has('timeframe')&&(x=>x.includes('t0'))(screener.allowed_timeframes||[]))params.set('timeframe','t0');const result=await fyersGet(FYERS_API+'/screeners/standard?'+params.toString());const d=result.data||{},header=Array.isArray(d.header)?d.header:[],idx=Object.fromEntries(header.map((item,i)=>[item.unique_key,i]));if(!Number.isInteger(idx.symbolticker)||!Number.isInteger(idx.t0_close_ltp)||!Number.isInteger(idx.t0_per_change))throw new Error('FYERS screener response missing symbolticker / t0_close_ltp / t0_per_change columns');const master=await loadNseFoMaster();const byUnderlying=new Map();for(const row of (Array.isArray(d.body)?d.body:[])){const symbol=String(row[idx.symbolticker]||''),price=Number(row[idx.t0_close_ltp]),change=Number(row[idx.t0_per_change]);if(!/^NSE:.+FUT$/.test(symbol)||!Number.isFinite(price)||price<=0||!Number.isFinite(change)||1+change/100<=0)continue;const expiry=toEpochSeconds(master?.[symbol]?.expiryDate);if(!expiry||expiry*1000<Date.now())continue;const underlying=symbol.replace(/\d{2}[A-Z]{3}FUT$/,'');if(underlying===symbol)continue;const optionUnderlying=underlying==='NSE:NIFTY50'?'NSE:NIFTY50-INDEX':underlying==='NSE:BANKNIFTY'?'NSE:NIFTYBANK-INDEX':underlying+'-EQ';const candidate={symbol,underlying,underlyingSymbol:optionUnderlying,expiry,basePrice:price/(1+change/100),price,change,exchangeTime:Number(d.last_update_time||d.fetch_time||0),source:'FYERS Standard Screener'};const previous=byUnderlying.get(underlying);if(!previous||candidate.expiry<previous.expiry)byUnderlying.set(underlying,candidate);}const rows=[...byUnderlying.values()].sort((a,b)=>b.change-a.change).slice(0,5);if(!rows.length)throw new Error('FYERS stock-futures gainer screener returned no valid NSE futures rows');const updatedAt=Number(d.last_update_time||d.fetch_time||0)*1000;if(!Number.isFinite(updatedAt)||updatedAt<=0)throw new Error('FYERS screener response did not include a valid exchange refresh timestamp');fnoMoversCache={rows,updatedAt,expiresAt:Date.now()+15*60*1000,error:''};syncSocketSubscriptions();console.info('FYERS stock-futures gainers loaded.',JSON.stringify({screenerId:screener.id,count:rows.length,updatedAt:new Date(updatedAt).toISOString()}));return fnoMoversCache;}catch(e){const message=String(e?.message||e).replace(/\\s+/g,' ').slice(0,260);console.error('FYERS stock-futures gainers unavailable.',JSON.stringify({message,statusCode:e?.statusCode||null,retryAfterMs:e?.retryAfterMs||0}));const retryDelay=Math.max(15000,Math.min(FYERS_REST_MAX_COOLDOWN_MS,Number(e?.retryAfterMs)||30000));fnoMoversCache={rows:[],updatedAt:0,expiresAt:Date.now()+retryDelay,error:message};syncSocketSubscriptions();return fnoMoversCache;}})().finally(()=>{fnoMoversPromise=null});return fnoMoversPromise;}
 
+async function refreshFnoUniverse(force=false){
+  if(!force&&fnoUniverseRows.length&&Date.now()-fnoUniverseFetchedAt<6*60*60*1000)return fnoUniverseRows;
+  if(fnoUniversePromise)return fnoUniversePromise;
+  fnoUniversePromise=(async()=>{
+    const [nseResult,bseResult]=await Promise.allSettled([loadNseFoMaster(),loadBseFoMaster()]);
+    if(nseResult.status!=='fulfilled')throw nseResult.reason;
+    const bseMaster=bseResult.status==='fulfilled'?bseResult.value:{};
+    const rows=buildFnoUniverse({nseMaster:nseResult.value,bseMaster,now:Date.now()});
+    if(!rows.length)throw new Error('Official FYERS Symbol Masters returned no active, unexpired F&O futures');
+    fnoUniverseRows=rows;
+    fnoUniverseFetchedAt=Date.now();
+    fnoUniverseError=bseResult.status==='rejected'?'BSE F&O master unavailable; NSE universe only: '+String(bseResult.reason?.message||bseResult.reason).slice(0,120):'';
+    console.info('Verified FYERS F&O universe loaded.',JSON.stringify({underlyings:rows.length,nse:rows.filter(x=>x.exchange==='NSE').length,bse:rows.filter(x=>x.exchange==='BSE').length,loadedAt:new Date(fnoUniverseFetchedAt).toISOString()}));
+    return rows;
+  })().finally(()=>{fnoUniversePromise=null;});
+  return fnoUniversePromise;
+}
+function rotateFnoUniverseSubscriptions(reason='scheduled_rotation'){
+  if(!fnoUniverseRows.length)return{symbols:0,universe:0,limit:FYERS_DATA_SYMBOL_LIMIT};
+  const result=syncSocketSubscriptions({reason});
+  console.info('FYERS F&O rotating subscription window updated.',JSON.stringify({reason,activeFutureSymbols:fnoScanSubscriptionSymbols.length,universeCount:fnoUniverseRows.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,nextCursor:fnoUniverseCursor,subscribed:result.subscribed,removed:result.removed}));
+  return{symbols:fnoScanSubscriptionSymbols.length,universe:fnoUniverseRows.length,limit:FYERS_DATA_SYMBOL_LIMIT,nextCursor:fnoUniverseCursor};
+}
 function authReady(){return Boolean(appId&&accessToken);}
 function ensureSocket(){
   if(!authReady()||socket)return;
@@ -180,6 +216,7 @@ function ensureSocket(){
       try{
         owned.mode(owned.FullMode);
         syncSocketSubscriptions({force:true,reason:'socket_connect'});
+        void refreshFnoUniverse().then(()=>rotateFnoUniverseSubscriptions('universe_loaded')).catch(error=>console.warn('FYERS F&O universe unavailable; scanner remains fail-closed.',String(error?.message||error).slice(0,180)));
       }catch(e){console.error('FYERS initial subscription restore failed.',String(e?.message||e).slice(0,180));}
     });
     owned.on('message',raw=>{
@@ -267,10 +304,16 @@ const socketFeedWatchdog=setInterval(()=>{
   syncSocketSubscriptions({force:true,reason:'fresh_tick_watchdog'});
 },5000);
 socketFeedWatchdog.unref?.();
-app.get('/api/health',(_req,res)=>{
+const fnoUniverseRotationTimer=setInterval(()=>{
+  if(!socket||!connected||!isNseRegularSession()||!fnoUniverseRows.length)return;
+  rotateFnoUniverseSubscriptions('scheduled_rotation');
+},180000);
+fnoUniverseRotationTimer.unref?.();
+app.get('/api/health',async(_req,res)=>{
   const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
   const latestExchangeTime=[...lastTicks.values()].reduce((latest,tick)=>Math.max(latest,Number(tick.exchangeTime)||0),0);
-  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:freshIndexes.length,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData: freshIndexes.length===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fyersRestCooldown:{active:fyersRestCooldownUntil>Date.now(),reason:fyersRestCooldownReason||null,retryAfterSeconds:fyersRestCooldownUntil>Date.now()?Math.ceil((fyersRestCooldownUntil-Date.now())/1000):0,consecutive429:fyersRest429Count},orderMode:'DISABLED'});
+  const strategyLedgerReady=strategyPlanStore?await strategyPlanStore.ready:false;
+  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:freshIndexes.length,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData: freshIndexes.length===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'NOT_CONNECTED'},fyersRestCooldown:{active:fyersRestCooldownUntil>Date.now(),reason:fyersRestCooldownReason||null,retryAfterSeconds:fyersRestCooldownUntil>Date.now()?Math.ceil((fyersRestCooldownUntil-Date.now())/1000):0,consecutive429:fyersRest429Count},orderMode:'DISABLED'});
 });
 app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,underlying:row.underlyingSymbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
 app.post('/api/select-symbol',(req,res)=>{const symbol=String(req.body?.symbol||'').trim();if(!/^(NSE|BSE):[A-Z0-9&_.-]{2,48}(?:-(EQ|INDEX)|[0-9]{2}[A-Z0-9]+FUT)$/.test(symbol)&&!/^MCX:[A-Z0-9&_.-]{3,48}$/.test(symbol))return res.status(400).json({error:'Invalid FYERS NSE/BSE cash-index or MCX contract symbol'});const instrumentChanged=symbol!==selectedSymbol;selectedSymbol=symbol;if(instrumentChanged){selectedOptionSymbol='';mcxOptionCandidateSymbols=[];}syncSocketSubscriptions();res.json({selectedSymbol,exchange:symbol.split(':')[0],historyFetch:'on-demand-only'});});
