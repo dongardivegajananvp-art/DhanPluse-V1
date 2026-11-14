@@ -578,15 +578,23 @@ app.post('/api/order',async(req,res)=>{
     return res.status(502).json({error:'FYERS order result uncertain/failed; durable request lock retained. Do not retry. Check broker orderbook.',detail:String(error?.message||error).slice(0,160)});
   }
 });
-app.get('/api/fyers/auth/start',(req,res)=>{
-  if(!appId||!appSecret||!redirectUri||!tokenReader)return res.status(503).json({error:'FYERS reconnect is not configured on this workstation.',detail:{hasAppId:Boolean(appId),hasAppSecret:Boolean(appSecret),hasRedirect:Boolean(redirectUri),secureTokenStore:Boolean(tokenReader)}});
+function createFyersAuthorizationUrl(){
+  if(!appId||!appSecret||!redirectUri||!tokenReader){const error=new Error('FYERS reconnect is not configured on this workstation.');error.status=503;error.detail={hasAppId:Boolean(appId),hasAppSecret:Boolean(appSecret),hasRedirect:Boolean(redirectUri),secureTokenStore:Boolean(tokenReader)};throw error;}
   const external=String(process.env.RENDER_EXTERNAL_URL||'').replace(/\/$/,'');
   const expectedCallback=external+'/api/fyers/auth/callback';
-  if(!external||redirectUri!==expectedCallback)return res.status(503).json({error:'FYERS callback URL is not configured for this GV2VPD workstation.',detail:'Set FYERS_REDIRECT_URI to '+expectedCallback+' and register the exact same URL in the FYERS Developer App.'});
+  if(!external||redirectUri!==expectedCallback){const error=new Error('FYERS callback URL is not configured for this GV2VPD workstation.');error.status=503;error.detail='Set FYERS_REDIRECT_URI to '+expectedCallback+' and register the exact same URL in the FYERS Developer App.';throw error;}
   const now=Date.now();for(const [key,value] of pendingAuthStates){if(now-value.createdAt>AUTH_STATE_TTL_MS)pendingAuthStates.delete(key);}
   const state=crypto.randomBytes(24).toString('hex');pendingAuthStates.set(state,{createdAt:now});
   const url=new URL('https://api-t1.fyers.in/api/v3/generate-authcode');url.searchParams.set('client_id',appId);url.searchParams.set('redirect_uri',redirectUri);url.searchParams.set('response_type','code');url.searchParams.set('state',state);
-  res.set('Cache-Control','no-store').json({authorizationUrl:url.toString()});
+  return url.toString();
+}
+app.get('/api/fyers/auth/redirect',(req,res)=>{
+  try{res.set('Cache-Control','no-store').redirect(302,createFyersAuthorizationUrl());}
+  catch(error){res.status(error.status||503).json({error:error.message,detail:error.detail||null});}
+});
+app.get('/api/fyers/auth/start',(req,res)=>{
+  try{res.set('Cache-Control','no-store').json({authorizationUrl:createFyersAuthorizationUrl()});}
+  catch(error){res.status(error.status||503).json({error:error.message,detail:error.detail||null});}
 });
 
 app.get('/api/fyers/auth/callback',async(req,res)=>{
