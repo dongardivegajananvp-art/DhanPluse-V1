@@ -25,7 +25,13 @@ function epochSeconds(value) {
     return Date.UTC(year,month-1,day,10,0,0)/1000;
   }
   const numeric=Number(value);
-  if(Number.isFinite(numeric)&&numeric>0)return numeric>1e12?numeric/1000:numeric;
+  if(Number.isFinite(numeric)&&numeric>0){
+    const stamp=numeric>1e12?numeric/1000:numeric;
+    const date=new Date(stamp*1000);
+    if(date.getUTCHours()===0&&date.getUTCMinutes()===0&&date.getUTCSeconds()===0)
+      return Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate(),10,0,0)/1000;
+    return stamp;
+  }
   const parsed=Date.parse(raw);
   return Number.isFinite(parsed)&&parsed>0?parsed/1000:0;
 }
@@ -49,6 +55,8 @@ function validatePlan(plan, now) {
   const candleTimes=['underlyingCandleTime','optionCandleTime'].map(key=>epochSeconds(plan[key]));
   if(candleTimes.some(time=>!time||time*1000>now+3000||now/1000-time>MAX_CANDLE_AGE_SECONDS))
     return 'Underlying and option confirmation candles must be recent, completed timestamps';
+  if(Number(plan.underlyingExchangeTime)<candleTimes[0]+300-3||Number(plan.optionExchangeTime)<candleTimes[1]+300-3)
+    return 'Underlying and option exchange ticks must follow the completed confirmation candles';
   const entry=Number(plan.entry),stop=Number(plan.stopLoss),target=Number(plan.target);
   if (!(entry > stop && target > entry)) return 'Entry, stop loss and target are not a valid long-option risk plan';
   const risk=entry-stop,reward=target-entry,expectedTarget=entry+2*risk;
