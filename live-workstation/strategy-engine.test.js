@@ -323,7 +323,7 @@ function pullbackUnderlyingFixture(now) {
   const alpha=2/21;
   for(let i=20;i<values.length;i++)e20=values[i]*alpha+e20*(1-alpha);
   rows[50]={...rows[50],open:e20,high:e20*1.02,low:e20*0.98,close:e20};
-  rows[51]={...rows[51],open:e20*1.02,high:e20*1.04,low:e20*1.01,close:e20*1.03};
+  rows[51]={...rows[51],open:e20*1.04,high:e20*1.06,low:e20*1.03,close:e20*1.05};
   return{rows,tick:{price:rows[51].close,exchangeTime:now/1000,receivedAt:now}};
 }
 
