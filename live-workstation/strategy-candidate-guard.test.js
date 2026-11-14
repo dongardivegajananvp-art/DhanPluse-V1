@@ -29,7 +29,8 @@ test('expiry date-only values remain valid through the official expiry session c
   const expiryMaster = { ...master, expiryDate: '2026-11-26' };
   assert.equal(validateOptionContractIdentity(expiryContract, expiryMaster, Date.parse('2026-11-26T09:59:00Z')).ok, true);
   assert.equal(validateOptionContractIdentity(expiryContract, expiryMaster, Date.parse('2026-11-26T10:01:00Z')).ok, false);
-  assert.equal(validateOptionContractIdentity({ ...expiryContract, expiry: '20261126' }, { ...expiryMaster, expiryDate: '20261126' }, Date.parse('2026-11-26T09:59:00Z')).ok, true);\n  const numericMidnight = Date.UTC(2026, 10, 26) / 1000;
+  assert.equal(validateOptionContractIdentity({ ...expiryContract, expiry: '20261126' }, { ...expiryMaster, expiryDate: '20261126' }, Date.parse('2026-11-26T09:59:00Z')).ok, true);
+  const numericMidnight = Date.UTC(2026, 10, 26) / 1000;
   assert.equal(validateOptionContractIdentity({ ...expiryContract, expiry: numericMidnight }, { ...expiryMaster, expiryDate: numericMidnight }, Date.parse('2026-11-26T09:59:00Z')).ok, true);
 });
 
