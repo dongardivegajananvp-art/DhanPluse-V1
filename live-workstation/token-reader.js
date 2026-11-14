@@ -19,6 +19,12 @@ export function createSharedTokenReader({databaseUrl,encryptionKey}){
       if(!accessToken)return null;
       return {accessToken,authenticatedAt:new Date(row.authenticated_at).toISOString()};
     },
+    async save(accessToken,authenticatedAt){
+      const token=String(accessToken||'').trim();if(!token)throw new Error('Refusing to persist an empty FYERS access token.');
+      const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',key,iv);cipher.setAAD(AAD);
+      const encrypted=Buffer.concat([cipher.update(token,'utf8'),cipher.final()]);
+      await pool.query('INSERT INTO dhanpulse_fyers_auth (id,encrypted_token,iv,auth_tag,authenticated_at,updated_at) VALUES (1,$1,$2,$3,$4::timestamptz,NOW()) ON CONFLICT (id) DO UPDATE SET encrypted_token=EXCLUDED.encrypted_token,iv=EXCLUDED.iv,auth_tag=EXCLUDED.auth_tag,authenticated_at=EXCLUDED.authenticated_at,updated_at=NOW()',[encrypted.toString('base64'),iv.toString('base64'),cipher.getAuthTag().toString('base64'),authenticatedAt]);
+    },
     close(){return pool.end();}
   };
 }
