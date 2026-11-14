@@ -9,7 +9,7 @@ let gainerScanResults=[],latestGainers=[],latestGainerError='',lastGainerScanAt=
 let mcxScanBusy=false,mcxScanTimer=null,mcxPickerRequest=0;
 const indexNames={'NSE:NIFTY50-INDEX':'NIFTY 50','NSE:NIFTYBANK-INDEX':'BANK NIFTY','BSE:SENSEX-INDEX':'SENSEX'};
 async function api(path,opts={}){const r=await fetch(path,{headers:{'content-type':'application/json'},...opts});const j=await r.json();if(!r.ok)throw Error(j.detail||j.error||'Request failed');return j}
-async function startFyersConnect(){const button=$('fyersConnect');button.disabled=true;button.textContent='OPENING FYERS…';try{const data=await api('/api/fyers/auth/start');if(!data.authorizationUrl)throw Error('FYERS authorization URL was not returned');window.location.assign(data.authorizationUrl)}catch(error){button.disabled=false;button.textContent='CONNECT / RECONNECT FYERS';$('feedState').textContent='FYERS RECONNECT BLOCKED · '+error.message;button.title=error.message}}
+function startFyersConnect(){const button=$('fyersConnect');button.disabled=true;button.textContent='OPENING FYERS…';$('feedState').textContent='OPENING FYERS AUTHORIZATION';window.location.assign('/api/fyers/auth/redirect')}
 const authUrl=new URL(window.location.href);if(authUrl.searchParams.get('fyers_connected')==='1'){authUrl.searchParams.delete('fyers_connected');history.replaceState({},'',authUrl.pathname+authUrl.search+authUrl.hash);$('feedState').textContent='FYERS LOGIN COMPLETE · VERIFYING FEED';$('fyersConnect').textContent='FYERS CONNECTED · CHECK FEED'}
 $('fyersConnect').addEventListener('click',()=>void startFyersConnect());
 function tickAge(t){const ms=Number(t.exchangeTime)*1000,age=Date.now()-ms;return Number.isFinite(ms)&&age>=-3000&&age<10000?'Fresh exchange tick':'Stale · orders blocked'}
