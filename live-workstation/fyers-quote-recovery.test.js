@@ -26,5 +26,6 @@ test('rejects missing, invalid, stale and future quote timestamps', () => {
 
 test('rejects non-ok rows and malformed response envelopes', () => {
   assert.deepEqual(parseFyersQuoteTicks({ d: [{ ...row('NSE:A'), s: 'error' }] }, ['NSE:A'], now), []);
-  assert.deepEqual(parseFyersQuoteTicks({ s: 'error' }, ['NSE:A'], now), []);
+  assert.deepEqual(parseFyersQuoteTicks({ s: 'error', d: [row('NSE:A')] }, ['NSE:A'], now), []);
+  assert.deepEqual(parseFyersQuoteTicks({ s: 'ok', d: [{ ...row('NSE:A'), v: { ...row('NSE:A').v, symbol: 'NSE:OTHER' } }] }, ['NSE:A'], now), []);
 });
