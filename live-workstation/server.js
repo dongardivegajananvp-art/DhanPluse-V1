@@ -352,15 +352,16 @@ async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
         continue;
       }
       const ticks = parseFyersQuoteTicks(payload, batch, Date.now());
+      let monotonicRejected = 0;
       for (const tick of ticks) {
         const decision = acceptExchangeTick(lastTicks.get(tick.symbol), tick);
-        if (!decision.accepted) { rejected++; continue; }
+        if (!decision.accepted) { monotonicRejected++; continue; }
         lastTicks.set(tick.symbol, tick);
         if (tick.symbol.startsWith('MCX:')) mcxTicks.set(tick.symbol, tick);
         else if (tick.symbol.startsWith('NSE:') || tick.symbol.startsWith('BSE:')) nseTicks.set(tick.symbol, tick);
         accepted++;
       }
-      rejected += batch.length - ticks.length;
+      rejected += batch.length - ticks.length + monotonicRejected;
     } catch (error) {
       console.warn('FYERS REST quote recovery failed safely.', String(error?.message || error).slice(0, 160));
       if (fyersRestCooldownUntil > Date.now()) break;
