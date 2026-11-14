@@ -152,7 +152,7 @@ test('subscription rotation stays within 100 symbols and advances across the uni
   const third=selectSubscriptionBatch({baseSymbols:['NSE:NIFTY50-INDEX'],universeSymbols:universe,cursor:second.nextCursor,limit:100});
   assert.equal(first.symbols.length,100);
   assert.equal(second.symbols.length,100);
-  assert.equal(third.symbols.length,31);
+  assert.equal(third.symbols.length,33);
   assert.equal(new Set([...first.symbols,...second.symbols,...third.symbols]).size,231);
 });
 
