@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { acceptExchangeTick, exchangeTickFreshness, summarizeFeedFreshness } from './market-data-integrity.js';
+import { acceptExchangeTick, exchangeTickFreshness, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
 
 const now = Date.parse('2026-11-16T04:00:00.000Z');
 const fresh = (symbol, secondsAgo = 2) => ({
@@ -36,4 +36,19 @@ test('keeps per-symbol fresh, stale and missing coverage distinct', () => {
   assert.equal(summary.missingCount, 1);
   assert.equal(summary.coveragePercent, 33.3);
   assert.equal(summary.staleOrMissingSamples.length, 2);
+});
+
+test('scanner runtime reports explicit blockers instead of implying readiness', () => {
+  assert.equal(getScannerRuntimeState({
+    authenticated: true, socketConnected: true, marketOpen: false, ledgerReady: true,
+    universeCount: 200, activeSubscriptions: 97, freshFutureTicks: 0
+  }).state, 'MARKET_CLOSED');
+  assert.equal(getScannerRuntimeState({
+    authenticated: true, socketConnected: true, marketOpen: true, ledgerReady: true,
+    universeCount: 200, activeSubscriptions: 97, freshFutureTicks: 0
+  }).state, 'WAITING_FOR_FRESH_FNO_TICKS');
+  assert.equal(getScannerRuntimeState({
+    authenticated: true, socketConnected: true, marketOpen: true, ledgerReady: false,
+    universeCount: 200, activeSubscriptions: 97, freshFutureTicks: 1
+  }).state, 'BLOCKED_LEDGER_UNAVAILABLE');
 });
