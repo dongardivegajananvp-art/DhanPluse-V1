@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canAcceptStrategyTrade, evaluateNineStrategies, MAX_ACTIVE_TRADES, STRATEGIES } from './strategy-engine.js';
+import { buildFixedPremiumPlan, canAcceptStrategyTrade, evaluateNineStrategies, MAX_ACTIVE_TRADES, STRATEGIES } from './strategy-engine.js';
 
 test('nine fixed strategy identifiers are present and stable',()=>{
   assert.equal(STRATEGIES.length,9);
@@ -35,4 +35,20 @@ test('strategy evaluator requires verified CE/PE contract metadata',()=>{
   const result=evaluateNineStrategies({underlyingCandles:[],underlyingTick:tick,optionCandles:[],optionTick:tick,contract:null,now});
   assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
   assert.match(result.reason,/verified active CE\/PE/i);
+});
+
+test('fixed premium plan uses breakout plus one tick, ATR-buffered stop and exact 2R target',()=>{
+  const plan=buildFixedPremiumPlan({breakoutLevel:100,tickSize:0.05,livePremium:100.05,swingLow:99,atr:1});
+  assert.equal(plan.status,'SETUP_CONFIRMED');
+  assert.equal(plan.entry,100.05);
+  assert.equal(plan.stopLoss,98.5);
+  assert.equal(plan.target,103.15);
+  assert.equal(plan.rr,2);
+});
+
+test('fixed premium plan blocks chase, live RR deterioration and resistance before target',()=>{
+  const base={breakoutLevel:100,tickSize:0.05,swingLow:99,atr:1};
+  assert.match(buildFixedPremiumPlan({...base,livePremium:100.85}).reason,/0.5R/);
+  assert.match(buildFixedPremiumPlan({...base,livePremium:100.10}).reason,/1:2/);
+  assert.match(buildFixedPremiumPlan({...base,livePremium:100.05,priorResistances:[102]}).reason,/resistance/);
 });
