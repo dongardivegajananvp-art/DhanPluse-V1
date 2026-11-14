@@ -13,6 +13,12 @@ const STRATEGIES = Object.freeze([
   'FLAG_BREAKOUT_VOLUME',
   'OPENING_RANGE_15M_RETEST'
 ]);
+// When multiple setups confirm on the same completed candle, prefer the more specific pattern over the broad EMA trend fallback.
+const STRATEGY_TIE_PRIORITY = Object.freeze([
+  'TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
+  'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION','BEARISH_CONTINUATION',
+  'FLAG_BREAKOUT_VOLUME','OPENING_RANGE_15M_RETEST','EMA20_EMA50_TREND'
+]);
 
 function finite(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)); }
 function number(value) { return Number(value); }
@@ -42,6 +48,15 @@ function atr14(candles) {
 function istDayKey(seconds) {
   return new Date((seconds + 19800) * 1000).toISOString().slice(0,10);
 }
+function isTradingCandleContiguous(previousTime, currentTime) {
+  if (currentTime - previousTime === INTERVAL_SECONDS) return true;
+  const localParts = value => {
+    const date = new Date((Number(value) + 19800) * 1000);
+    return { day: date.toISOString().slice(0, 10), minute: date.getUTCHours() * 60 + date.getUTCMinutes() };
+  };
+  const previous = localParts(previousTime), current = localParts(currentTime);
+  return previous.minute === 925 && current.minute === 555 && current.day > previous.day;
+}
 function completed(candles, tick, label) {
   if (!Array.isArray(candles) || candles.some(c => !validOhlcv(c))) {
     return { error: label + ' candles are missing or malformed' };
@@ -50,8 +65,8 @@ function completed(candles, tick, label) {
   if (!window.fresh) return { error: label + ' latest completed candle is stale' };
   if (window.completed.length < 51) return { error: label + ' requires at least 51 contiguous completed 5-minute candles' };
   const required=window.completed.slice(-51);
-  if (!required.every((c,i)=>i===0||number(c.time)-number(required[i-1].time)===INTERVAL_SECONDS))
-    return { error: label + ' 51-candle strategy window contains a missing 5-minute interval' };
+  if (!required.every((c,i)=>i===0||isTradingCandleContiguous(number(required[i-1].time),number(c.time))))
+    return { error: label + ' 51-candle strategy window contains a missing 5-minute interval inside a trading session' };
   return { rows: window.completed, last: window.lastClosed };
 }
 function pivotHigh(rows, i, width=2) {
@@ -94,7 +109,7 @@ export function detectDoublePattern(rows) {
   }
   return null;
 }
-function detectContinuation(rows, side) {
+export function detectContinuation(rows, side) {
   const last=rows.at(-1), prior=rows.slice(-13,-1);
   const impulse=rows.slice(-30,-13);
   if(prior.length!==12||impulse.length<10)return null;
@@ -115,7 +130,7 @@ function detectContinuation(rows, side) {
   const pattern=ascendingTriangle?'ASCENDING_TRIANGLE':descendingTriangle?'DESCENDING_TRIANGLE':range/move<0.45?'PENNANT':'FLAG';
   return candidate(side==='LONG'?'BULLISH_CONTINUATION':'BEARISH_CONTINUATION',side,side==='LONG'?ceiling:floor,last,{pattern});
 }
-function detectFlagVolume(rows) {
+export function detectFlagVolume(rows) {
   const last=rows.at(-1), flag=rows.slice(-13,-1), impulse=rows.slice(-30,-13);
   const volumes=flag.map(c=>number(c.volume)).filter(Number.isFinite);
   const priorVol=rows.slice(-30,-13).map(c=>number(c.volume)).filter(Number.isFinite);
@@ -130,7 +145,7 @@ function detectFlagVolume(rows) {
   if(impulseDown&&number(last.close)<low&&number(last.volume)>=avgFlag*1.5)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last);
   return null;
 }
-function detectOpeningRange(rows) {
+export function detectOpeningRange(rows) {
   const key=istDayKey(number(rows.at(-1).time));
   const day=rows.filter(c=>istDayKey(number(c.time))===key);
   if(day.length<5)return null;
@@ -150,7 +165,7 @@ function detectOpeningRange(rows) {
   if(brokeLow&&number(last.high)>=low*0.998&&number(last.close)<low)return candidate('OPENING_RANGE_15M_RETEST','SHORT',low,last);
   return null;
 }
-function detectDayHighLowRetest(rows) {
+export function detectDayHighLowRetest(rows) {
   const key=istDayKey(number(rows.at(-1).time));
   const day=rows.filter(c=>istDayKey(number(c.time))===key);
   if(day.length<4)return null;
@@ -186,25 +201,48 @@ export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, sw
   return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:Number(plannedRr.toFixed(2)),risk};
 }
 
+export function detectEmaTrend(rows) {
+  if (!Array.isArray(rows) || rows.length < 51) return null;
+  const last=rows.at(-1), closes=rows.map(c=>number(c.close));
+  const e20=ema(closes,20),e50=ema(closes,50);
+  if(e20>e50&&number(last.close)>e20)
+    return candidate(STRATEGIES[0],'LONG',e20,last);
+  if(e20<e50&&number(last.close)<e20)
+    return candidate(STRATEGIES[0],'SHORT',e20,last);
+  return null;
+}
+export function detectTopGainerMomentum(rows, isTopGainer=false) {
+  if (!isTopGainer || !Array.isArray(rows) || rows.length < 2) return null;
+  const last=rows.at(-1),prior=rows.at(-2);
+  return number(last.close)>number(prior.high)
+    ? candidate(STRATEGIES[1],'LONG',number(prior.high),last)
+    : null;
+}
+export function detectDailyTrendPullback(rows, dailyCandles=[]) {
+  if (!Array.isArray(rows) || rows.length < 51 || !Array.isArray(dailyCandles)) return null;
+  const dailyCloses=dailyCandles.filter(validOhlcv).map(c=>number(c.close));
+  if(dailyCloses.length<51)return null;
+  const d20=ema(dailyCloses,20),d50=ema(dailyCloses,50);
+  const closes=rows.map(c=>number(c.close)),e20=ema(closes,20),e50=ema(closes,50);
+  const last=rows.at(-1),p=rows.at(-2),touch=number(p.low)<=e20*1.003&&number(p.high)>=e20*0.997;
+  if(d20>d50&&e20>e50&&touch&&number(last.close)>number(p.high))
+    return candidate(STRATEGIES[2],'LONG',number(p.high),last);
+  if(d20<d50&&e20<e50&&touch&&number(last.close)<number(p.low))
+    return candidate(STRATEGIES[2],'SHORT',number(p.low),last);
+  return null;
+}
+
 export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], isTopGainer=false, now=Date.now() }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
   if(!tickFresh(underlyingTick))return fail('Fresh FYERS underlying/futures tick is required');
   const u=completed(underlyingCandles,underlyingTick,'Underlying');
   if(u.error)return fail(u.error);
-  const rows=u.rows,last=u.last,closes=rows.map(c=>number(c.close));
-  const e20=ema(closes,20),e50=ema(closes,50),prior=rows.at(-2);
+  const rows=u.rows,last=u.last;
   const candidates=[];
-  if(e20>e50&&number(last.close)>e20&&number(last.close)>number(prior.high))candidates.push(candidate(STRATEGIES[0],'LONG',number(prior.high),last));
-  if(e20<e50&&number(last.close)<e20&&number(last.close)<number(prior.low))candidates.push(candidate(STRATEGIES[0],'SHORT',number(prior.low),last));
-  if(isTopGainer&&number(last.close)>number(prior.high))candidates.push(candidate(STRATEGIES[1],'LONG',number(prior.high),last));
-  const dailyCloses=dailyCandles.filter(validOhlcv).map(c=>number(c.close));
-  if(dailyCloses.length>=51){
-    const d20=ema(dailyCloses,20),d50=ema(dailyCloses,50);
-    const p=rows.at(-2),touch=number(p.low)<=e20*1.003&&number(p.high)>=e20*0.997;
-    if(d20>d50&&e20>e50&&touch&&number(last.close)>number(p.high))candidates.push(candidate(STRATEGIES[2],'LONG',number(p.high),last));
-    if(d20<d50&&e20<e50&&touch&&number(last.close)<number(p.low))candidates.push(candidate(STRATEGIES[2],'SHORT',number(p.low),last));
-  }
+  const emaTrend=detectEmaTrend(rows);if(emaTrend)candidates.push(emaTrend);
+  const momentum=detectTopGainerMomentum(rows,isTopGainer);if(momentum)candidates.push(momentum);
+  const dailyPullback=detectDailyTrendPullback(rows,dailyCandles);if(dailyPullback)candidates.push(dailyPullback);
   const dayRetest=detectDayHighLowRetest(rows);if(dayRetest)candidates.push(dayRetest);
   const double=detectDoublePattern(rows);if(double)candidates.push(double);
   const bull=detectContinuation(rows,'LONG');if(bull)candidates.push(bull);
@@ -212,7 +250,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const flag=detectFlagVolume(rows);if(flag)candidates.push(flag);
   const orb=detectOpeningRange(rows);if(orb)candidates.push(orb);
   if(!candidates.length)return{status:'NO_TRADE',reason:'None of the nine completed-candle strategies confirmed a setup'};
-  candidates.sort((a,b)=>a.confirmedAt-b.confirmedAt||STRATEGIES.indexOf(a.strategy)-STRATEGIES.indexOf(b.strategy));
+  candidates.sort((a,b)=>a.confirmedAt-b.confirmedAt||STRATEGY_TIE_PRIORITY.indexOf(a.strategy)-STRATEGY_TIE_PRIORITY.indexOf(b.strategy));
   return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
 }
 

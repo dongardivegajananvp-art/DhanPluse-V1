@@ -99,3 +99,19 @@ test('option verifier allows prior-session gaps but requires the latest 51 bars 
   assert.equal(validateOptionCandles([...priorSession, ...currentSession], { exchangeTime }, contract, now).ok, true);
   assert.equal(validateOptionCandles(currentSession, { exchangeTime: exchangeTime + 1200 }, contract, now).ok, false);
 });
+
+
+test('option candle window treats a Friday-to-Monday session boundary as a valid trading gap', () => {
+  const previousSessionStart = Date.parse('2026-11-13T05:50:00Z') / 1000;
+  const previousSession = Array.from({ length: 50 }, (_, i) => ({
+    time: previousSessionStart + i * 300,
+    open: 100, high: 100.20, low: 99.95, close: 100.10
+  }));
+  const mondayOpen = Date.parse('2026-11-16T03:45:00Z') / 1000;
+  const now = Date.parse('2026-11-16T03:50:30Z');
+  const currentSession = [{ time: mondayOpen, open: 100, high: 100.20, low: 99.95, close: 100.10 }];
+  const tick = { symbol: contract.symbol, price: 100.10, exchangeTime: now / 1000, receivedAt: now };
+  const result = validateOptionCandles([...previousSession, ...currentSession], tick, contract, now);
+  assert.equal(result.ok, true);
+  assert.equal(result.completedCandles.length, 51);
+});
