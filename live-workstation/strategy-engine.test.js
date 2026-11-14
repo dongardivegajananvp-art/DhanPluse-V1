@@ -241,10 +241,13 @@ function openingRangeRows({retest=true}={}) {
 test('Strategy 1 EMA20/EMA50 trend detector confirms long and short direction only',()=>{
   const now=Date.parse('2026-11-16T04:00:30Z');
   const {rows}=risingUnderlyingFixture(now);
-  const long=detectEmaTrend(rows.slice(0,-1));
+  const longRows=rows.slice(0,-1);
+  longRows[longRows.length-2]={...longRows.at(-2),high:200};
+  const long=detectEmaTrend(longRows);
   assert.equal(long?.strategy,'EMA20_EMA50_TREND');
   assert.equal(long?.side,'LONG');
   const shortRows=rows.slice(0,-1).map(c=>({...c,open:300-c.open,high:300-c.low,low:300-c.high,close:300-c.close}));
+  shortRows[shortRows.length-2]={...shortRows.at(-2),low:100};
   const short=detectEmaTrend(shortRows);
   assert.equal(short?.side,'SHORT');
   assert.equal(detectEmaTrend(flatRows()),null);
