@@ -42,6 +42,7 @@ import { createPaperTradingStore } from './paper-trading-store.js';
 import { reconcilePaperSocketSubscriptions } from './paper-socket-subscriptions.js';
 import { createVerifiedPlanRegistry } from './verified-plan-registry.js';
 import { decodeFyersSocketMessage, summarizeFyersSocketMessage } from './fyers-socket-message.js';
+import { pruneExpiredMap } from './bounded-runtime-map.js';
 
 const require = createRequire(import.meta.url);
 const { fyersDataSocket } = require('fyers-api-v3');
@@ -131,8 +132,10 @@ function recordDiagnostic(level, event, detail = {}) {
   if (diagnostics.length > 200) diagnostics.splice(0, diagnostics.length - 200);
 }
 const AUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const MAX_PENDING_AUTH_STATES = 128;
 const dashboardSessions = new Map();
 const DASHBOARD_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const MAX_DASHBOARD_SESSIONS = 256;
 let marketSocket = null;
 let marketSocketGeneration = 0;
 let marketSocketStartedAt = 0;
@@ -914,6 +917,11 @@ app.get('/health', (_req, res) => {
     },
     tradingDataReady: nseRegularSessionNow() ? nseFeedFresh : false,
     orderPlacementEnabled: false,
+    memory: (() => {
+      const usage = process.memoryUsage();
+      const toMb = value => Number((value / (1024 * 1024)).toFixed(1));
+      return { rssMb: toMb(usage.rss), heapUsedMb: toMb(usage.heapUsed), heapTotalMb: toMb(usage.heapTotal), externalMb: toMb(usage.external), arrayBuffersMb: toMb(usage.arrayBuffers || 0) };
+    })(),
     timestamp: new Date().toISOString()
   });
 });
@@ -1051,6 +1059,7 @@ function requireDashboardSession(req, res, next) {
   const header = String(req.get('authorization') || '');
   const match = /^Bearer ([a-f0-9]{64})$/.exec(header);
   const token = match ? match[1] : '';
+  pruneExpiredMap(dashboardSessions, { now: Date.now(), ttlMs: DASHBOARD_SESSION_TTL_MS, maxEntries: MAX_DASHBOARD_SESSIONS });
   const session = token ? dashboardSessions.get(token) : null;
   const persistedSessionValid = Boolean(token && accessToken && fyersTokenStore.configured &&
     token === createDashboardSessionToken());
@@ -1060,6 +1069,7 @@ function requireDashboardSession(req, res, next) {
   }
   if (!session && persistedSessionValid) {
     dashboardSessions.set(token, { createdAt: Date.now(), lastSeenAt: Date.now() });
+    pruneExpiredMap(dashboardSessions, { now: Date.now(), ttlMs: DASHBOARD_SESSION_TTL_MS, maxEntries: MAX_DASHBOARD_SESSIONS });
   } else if (session) {
     session.lastSeenAt = Date.now();
   }
@@ -1080,11 +1090,10 @@ app.get('/api/fyers/auth/start', (_req, res) => {
     return res.status(503).json({ error: 'FYERS environment settings are incomplete.', detail: { hasAppId: !!appId, hasRedirect: !!redirectUri } });
   }
   const now = Date.now();
-  for (const [key, value] of pendingAuthStates) {
-    if (now - value.createdAt > AUTH_STATE_TTL_MS) pendingAuthStates.delete(key);
-  }
+  pruneExpiredMap(pendingAuthStates, { now, ttlMs: AUTH_STATE_TTL_MS, maxEntries: MAX_PENDING_AUTH_STATES });
   const state = crypto.randomBytes(24).toString('hex');
   pendingAuthStates.set(state, { createdAt: now });
+  pruneExpiredMap(pendingAuthStates, { now, ttlMs: AUTH_STATE_TTL_MS, maxEntries: MAX_PENDING_AUTH_STATES });
   const url = new URL('https://api-t1.fyers.in/api/v3/generate-authcode');
   url.searchParams.set('client_id', appId);
   url.searchParams.set('redirect_uri', redirectUri);
@@ -1139,6 +1148,7 @@ app.post('/api/fyers/auth/exchange', async (req, res) => {
     // remains verifiable after a backend restart without exposing the FYERS token.
     const dashboardSessionToken = createDashboardSessionToken();
     dashboardSessions.set(dashboardSessionToken, { createdAt: Date.now(), lastSeenAt: Date.now() });
+    pruneExpiredMap(dashboardSessions, { now: Date.now(), ttlMs: DASHBOARD_SESSION_TTL_MS, maxEntries: MAX_DASHBOARD_SESSIONS });
     restQuoteCache = null;
     restQuoteFetchedAt = 0;
     startMarketDataStream(accessToken, 'fyers_oauth_callback');
