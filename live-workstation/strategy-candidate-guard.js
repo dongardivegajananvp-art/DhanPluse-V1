@@ -1,6 +1,8 @@
 function expiryEpoch(value) {
   if (value === null || value === undefined || value === '') return 0;
   const raw = String(value).trim();
+  const compactDate = /^(\d{4})(\d{2})(\d{2})$/.exec(raw);
+  if (compactDate) return Date.UTC(Number(compactDate[1]), Number(compactDate[2]) - 1, Number(compactDate[3]), 10, 0, 0) / 1000;
   const numeric = Number(value);
   let stamp = 0;
   if (Number.isFinite(numeric) && numeric > 0) {
@@ -12,8 +14,7 @@ function expiryEpoch(value) {
     return stamp;
   }
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
-  const compactDate = /^(\d{4})(\d{2})(\d{2})$/.exec(raw);
-  const match = dateOnly || compactDate;
+  const match = dateOnly;
   if (match) return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 10, 0, 0) / 1000;
   const parsed = Date.parse(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed / 1000 : 0;
@@ -39,19 +40,22 @@ export function validateOptionPremiumTick(tick, contract, now = Date.now(), maxA
 export function validateOptionCandles(candles, tick, contract, now = Date.now()) {
   if (!Array.isArray(candles) || candles.length < 51) return { ok: false, reason: 'At least 51 completed FYERS option candles are required' };
   const rows = candles.slice();
+  const exchangeTime = Number(tick?.exchangeTime);
+  const currentBucket = Math.floor(exchangeTime / 300) * 300;
   for (let i = 0; i < rows.length; i++) {
     const candle = rows[i];
     const values = ['time', 'open', 'high', 'low', 'close'].map(key => Number(candle?.[key]));
     if (!values.every(Number.isFinite) || values[0] <= 0 || values.slice(1).some(value => value <= 0)) return { ok: false, reason: 'FYERS option candles contain missing or invalid OHLC values' };
     const [time, open, high, low, close] = values;
     if (high < Math.max(open, close, low) || low > Math.min(open, close)) return { ok: false, reason: 'FYERS option candle OHLC range is inconsistent' };
-    if (i && time - Number(rows[i - 1].time) !== 300) return { ok: false, reason: 'FYERS option candles are not contiguous 5-minute intervals' };
+    if (i && time <= Number(rows[i - 1].time)) return { ok: false, reason: 'FYERS option candle timestamps are duplicated or out of order' };
+    if (time > currentBucket) return { ok: false, reason: 'FYERS option candles contain a future interval beyond the live exchange tick' };
     if (![open, high, low, close].every(value => isTickAligned(value, contract?.tickSize))) return { ok: false, reason: 'FYERS option candle price does not align with official contract tick size' };
   }
-  const exchangeTime = Number(tick?.exchangeTime);
-  const currentBucket = Math.floor(exchangeTime / 300) * 300;
   const completed = Number(rows.at(-1).time) === currentBucket ? rows.slice(0, -1) : rows;
   if (completed.length < 51) return { ok: false, reason: 'FYERS option candle window includes an unfinished candle or has fewer than 51 completed candles' };
+  const required = completed.slice(-51);
+  if (!required.every((candle, index) => index === 0 || Number(candle.time) - Number(required[index - 1].time) === 300)) return { ok: false, reason: 'Latest 51 FYERS option candles are not contiguous 5-minute intervals' };
   const latest = completed.at(-1);
   const age = exchangeTime - (Number(latest.time) + 300);
   if (!Number.isFinite(exchangeTime) || age < -3 || age > 600 || now / 1000 - (Number(latest.time) + 300) > 900) return { ok: false, reason: 'Latest completed FYERS option candle is stale or ahead of the exchange tick' };
