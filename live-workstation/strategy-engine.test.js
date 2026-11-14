@@ -310,3 +310,38 @@ test('Strategy 9 opening range breakout requires 9:15-9:30 range, break then ret
   assert.equal(detectOpeningRange(openingRangeRows())?.strategy,'OPENING_RANGE_15M_RETEST');
   assert.equal(detectOpeningRange(openingRangeRows({retest:false})),null);
 });
+
+
+function pullbackUnderlyingFixture(now) {
+  const bucket=Math.floor((now/1000)/300)*300;
+  const rows=Array.from({length:52},(_,i)=>{
+    const close=100+i*0.8;
+    return{time:bucket-(52-i)*300,open:close-0.2,high:close+0.3,low:close-0.5,close,volume:100};
+  });
+  const values=rows.map(c=>c.close);
+  let e20=values.slice(0,20).reduce((a,b)=>a+b,0)/20;
+  const alpha=2/21;
+  for(let i=20;i<values.length;i++)e20=values[i]*alpha+e20*(1-alpha);
+  rows[50]={...rows[50],open:e20,high:e20*1.02,low:e20*0.98,close:e20};
+  rows[51]={...rows[51],open:e20*1.02,high:e20*1.04,low:e20*1.01,close:e20*1.03};
+  return{rows,tick:{price:rows[51].close,exchangeTime:now/1000,receivedAt:now}};
+}
+
+test('simultaneous confirmations prefer a specific setup over the broad EMA trend fallback',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const momentum=risingUnderlyingFixture(now);
+  const topGainer=detectNineStrategySetup({underlyingCandles:momentum.rows,underlyingTick:momentum.tick,isTopGainer:true,now});
+  assert.equal(topGainer.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  const pullback=pullbackUnderlyingFixture(now);
+  const daily=dailyTrendRows(60,Math.floor(now/86400000)*86400-60*86400);
+  const dailySetup=detectNineStrategySetup({underlyingCandles:pullback.rows,underlyingTick:pullback.tick,dailyCandles:daily,now});
+  assert.equal(dailySetup.strategy,'DAILY_TREND_5M_PULLBACK');
+});
+
+test('first-confirmed candle time wins before the same-candle specificity tie-break',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const {rows,tick}=risingUnderlyingFixture(now);
+  const result=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,isTopGainer:true,now});
+  assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
+  assert.equal(result.confirmedAt,rows[rows.length-2].time);
+});
