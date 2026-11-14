@@ -556,7 +556,8 @@ async function loadStrategyOptionContracts(underlying){
  if(!data||!Array.isArray(data.optionsChain)||!data.optionsChain.length)throw new Error('FYERS option chain is empty');
  const master=underlying.startsWith('BSE:')?await loadBseFoMaster():await loadNseFoMaster();
  const contracts=data.optionsChain.filter(x=>['CE','PE'].includes(String(x.option_type||'').toUpperCase())&&typeof x.symbol==='string').map(x=>{
-  const meta=optionMeta(x.symbol,master);return meta?{symbol:x.symbol,side:meta.side,strike:meta.strike,expiry:meta.expiryDate,lotSize:meta.lotSize,tickSize:meta.tickSize}:null;
+  const meta=optionMeta(x.symbol,master);
+  return meta&&meta.side===String(x.option_type).toUpperCase()?{symbol:x.symbol,side:meta.side,strike:meta.strike,expiry:meta.expiryDate,lotSize:meta.lotSize,tickSize:meta.tickSize}:null;
  }).filter(Boolean);
  if(!contracts.length)throw new Error('No active option contracts matched the official FYERS Symbol Master');
  optionChains.set(underlying,{underlying,contracts,expiries:data.expiryData||[],fetchedAt:Date.now(),source:'FYERS option chain + official Symbol Master'});
@@ -619,6 +620,12 @@ async function processPendingStrategyCandidate(candidate){
   if(evaluated.status!=='SETUP_CONFIRMED'){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:evaluated.status,reason:evaluated.reason||'Option premium confirmation did not pass',strategy:candidate.setup.strategy,updatedAt:new Date().toISOString()});
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_rejected'});return true;
+  }
+  const finalOptionTick=lastTicks.get(candidate.contract.symbol),finalUnderlyingTick=lastTicks.get(candidate.futureSymbol);
+  const finalPremiumCheck=validateOptionPremiumTick(finalOptionTick,candidate.contract,Date.now());
+  if(!freshTick(finalUnderlyingTick)||!finalPremiumCheck.ok){
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:!freshTick(finalUnderlyingTick)?'Underlying exchange tick became stale before plan persistence':finalPremiumCheck.reason,strategy:candidate.setup.strategy});
+   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_final_tick_recheck_failed'});return true;
   }
   const planId=crypto.createHash('sha256').update([candidate.underlyingSymbol,candidate.contract.symbol,candidate.setup.confirmedAt,evaluated.optionCandleTime].join('|')).digest('hex').slice(0,48);
   const saved=await strategyPlanStore.saveConfirmedPlan({planId,strategy:evaluated.strategy,underlying:candidate.underlyingSymbol,contract:candidate.contract.symbol,optionSide:candidate.contract.side,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:currentOptionTick.price,entry:evaluated.entry,stopLoss:evaluated.stopLoss,target:evaluated.target,rr:evaluated.rr,underlyingExchangeTime:currentUnderlyingTick.exchangeTime,optionExchangeTime:currentOptionTick.exchangeTime,underlyingReceivedAt:currentUnderlyingTick.receivedAt,optionReceivedAt:currentOptionTick.receivedAt,underlyingCandleTime:String(evaluated.confirmedAt),optionCandleTime:String(evaluated.optionCandleTime)});
