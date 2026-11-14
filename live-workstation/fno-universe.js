@@ -12,7 +12,11 @@ function underlyingFor(exchange, root) {
   const normalized = String(root || '').toUpperCase();
   if (exchange === 'NSE' && normalized === 'NIFTY') return 'NSE:NIFTY50-INDEX';
   if (exchange === 'NSE' && normalized === 'BANKNIFTY') return 'NSE:NIFTYBANK-INDEX';
+  if (exchange === 'NSE' && normalized === 'FINNIFTY') return 'NSE:FINNIFTY-INDEX';
+  if (exchange === 'NSE' && normalized === 'MIDCPNIFTY') return 'NSE:MIDCPNIFTY-INDEX';
+  if (exchange === 'NSE' && normalized === 'NIFTYNXT50') return 'NSE:NIFTYNXT50-INDEX';
   if (exchange === 'BSE' && normalized === 'SENSEX') return 'BSE:SENSEX-INDEX';
+  if (exchange === 'BSE' && normalized === 'BANKEX') return 'BSE:BANKEX-INDEX';
   return exchange + ':' + normalized + '-EQ';
 }
 
