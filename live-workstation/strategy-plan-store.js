@@ -31,7 +31,7 @@ function validatePlan(plan, now) {
 
 export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) {
   const url = String(databaseUrl || '').trim();
-  if (!/^postgres(?:ql)?:\\/\\//i.test(url)) return null;
+  if (!/^postgres(?:ql)?:\/\//i.test(url)) return null;
   const pool = new PoolClass({
     connectionString: url,
     max: 2,
