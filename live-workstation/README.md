@@ -7,12 +7,18 @@ A separate single-screen app in `live-workstation/`. Scope is only the four work
 - Root directory: `live-workstation`
 - Build: `npm install`
 - Start: `npm start`
-- Reuse existing secret values privately: `FYERS_APP_ID`, `DATABASE_URL`, `FYERS_TOKEN_ENCRYPTION_KEY`.
+- Reuse existing secret values privately: `FYERS_APP_ID`, `FYERS_APP_SECRET`, `DATABASE_URL`, `FYERS_TOKEN_ENCRYPTION_KEY`.
 - Set `APP_ORIGIN` to the exact new workstation origin.
+- Set `FYERS_REDIRECT_URI` to `https://gv2vpd-live-workstation-enhj.onrender.com/api/fyers/auth/callback` and register that exact callback URL in the same FYERS Developer App. The callback must match character-for-character.
 - Do not paste secrets or tokens into source/chat.
 
 ## Existing FYERS login
-The new backend SELECTs the existing AES-256-GCM encrypted `dhanpulse_fyers_auth` row, using the same key and AAD as the old backend. It does not write, clear, or refresh that row. The token stays server-side. The old app code and service are untouched.
+The workstation reads and writes the existing AES-256-GCM encrypted `dhanpulse_fyers_auth` row using the same key and AAD as the existing FYERS token store. OAuth uses a one-time cryptographically random state (10-minute expiry), validates the authorization code server-side, and only activates a token after encrypted PostgreSQL persistence succeeds. Tokens never enter browser storage or frontend responses. The old app code and service are untouched.
+
+## FYERS reconnect
+- The header has a visible Connect / Reconnect FYERS control. It starts the official FYERS OAuth authorization flow and returns to the existing workstation callback.
+- The callback route is the only unauthenticated workstation route; it requires the one-time state created by an authenticated start request, has a 10-minute expiry, validates the code with FYERS, and stores the access token encrypted before starting the socket.
+- No auto-order, order-gate, or live-order setting is changed by reconnecting.
 
 ## Implemented in this branch
 - One FYERS Data Socket V3 instance for the workstation; browser refreshes read local cache only.
