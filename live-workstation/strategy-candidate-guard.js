@@ -29,6 +29,7 @@ function isTickAligned(value, tickSize) {
 export function validateOptionPremiumTick(tick, contract, now = Date.now(), maxAgeMs = 10_000) {
   const receivedAt = Number(tick?.receivedAt), exchangeTime = Number(tick?.exchangeTime);
   if (!tick || !Number.isFinite(Number(tick.price)) || Number(tick.price) <= 0) return { ok: false, reason: 'Option premium is missing or non-positive' };
+  if (contract?.symbol && tick.symbol !== contract.symbol) return { ok: false, reason: 'Option premium tick symbol does not match the verified contract' };
   if (!Number.isFinite(receivedAt) || now - receivedAt < 0 || now - receivedAt > maxAgeMs) return { ok: false, reason: 'Option premium receive timestamp is missing, future-dated, or stale' };
   if (!Number.isFinite(exchangeTime) || exchangeTime <= 0 || now / 1000 - exchangeTime < -3 || now / 1000 - exchangeTime > maxAgeMs / 1000) return { ok: false, reason: 'Option premium exchange timestamp is missing, future-dated, or stale' };
   if (!isTickAligned(tick.price, contract?.tickSize)) return { ok: false, reason: 'Option premium does not align with the official contract tick size' };
