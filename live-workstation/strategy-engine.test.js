@@ -196,3 +196,9 @@ test('F&O universe maps additional NSE and BSE index futures to index symbols',(
   const rows=buildFnoUniverse({nseMaster,bseMaster,now});
   assert.deepEqual(rows.map(x=>x.underlyingSymbol),['BSE:BANKEX-INDEX','NSE:FINNIFTY-INDEX','NSE:MIDCPNIFTY-INDEX','NSE:NIFTYNXT50-INDEX']);
 });
+
+test('double-bottom breakout without a neckline retest is not an entry',()=>{
+  const rows=doublePatternFixture('bottom');
+  rows[39]={...rows[39],open:106.2,high:107,low:106,close:106.5};
+  assert.equal(detectDoublePattern(rows),null);
+});
