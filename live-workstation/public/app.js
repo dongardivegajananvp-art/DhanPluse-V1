@@ -49,12 +49,13 @@ function renderStrategyScanner(data){
  results.replaceChildren();
  const rows=Array.isArray(data.topSetups)?data.topSetups:[];
  if(!rows.length){const card=document.createElement('article');card.className='strategy-result';card.textContent=session==='OPEN'?'No confirmed setup yet. Waiting for verified futures ticks, completed candles and option confirmation.':'MARKET CLOSED · Live scan paused. Last-known prices cannot create a live signal.';results.append(card)}
- for(const item of rows){
+ for(let index=0;index<rows.length;index++){
+  const item=rows[index];
   const card=document.createElement('article');card.className='strategy-result';
-  const title=document.createElement('b');title.textContent=(item.strategy||'STRATEGY CHECK').replaceAll('_',' ')+' · '+String(item.status||'WAIT').replaceAll('_',' ');
+  const title=document.createElement('b');title.textContent=(index===0&&item.status==='PLAN_CONFIRMED_READ_ONLY'?'#1 BEST SETUP · ':'#'+(index+1)+' · ')+(item.strategy||'STRATEGY CHECK').replaceAll('_',' ')+' · '+String(item.status||'WAIT').replaceAll('_',' ');
   const detail=document.createElement('span');
   const contract=item.contract?item.contract+' · '+(item.optionSide||'')+' · '+(item.expiry||'')+' · STRIKE '+(item.strike??'—'):'';
-  const levels=item.entry!==undefined?'PREMIUM '+fmt(item.premium)+' · ENTRY '+fmt(item.entry)+' · SL '+fmt(item.stopLoss)+' · TARGET '+fmt(item.target)+' · RR '+item.rr:'';
+  const levels=item.entry!==undefined?'PREMIUM '+fmt(item.premium)+' · ENTRY '+fmt(item.entry)+' · SL '+fmt(item.stopLoss)+' · TARGET '+fmt(item.target)+' · RR '+item.rr+(item.verifiedAt?' · '+new Date(item.verifiedAt).toLocaleTimeString('en-IN'):''):'';
   detail.textContent=[item.underlying||item.futureSymbol||'',contract,levels,item.reason||''].filter(Boolean).join(' | ');
   card.append(title,detail);results.append(card);
  }
