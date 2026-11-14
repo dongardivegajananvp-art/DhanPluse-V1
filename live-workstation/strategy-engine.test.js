@@ -57,12 +57,12 @@ test('strategy evaluator rejects a gap anywhere in the required 51-candle window
   const now=Date.parse('2026-11-16T04:00:30Z');
   const bucket=Math.floor((now/1000)/300)*300;
   const rows=[];
-  for(let i=0;i<51;i++){
+  for(let i=0;i<52;i++){
     if(i===8)continue;
     const price=100+i;
-    rows.push({time:bucket-(51-i)*300,open:price,high:price+1,low:price-1,close:price,volume:10});
+    rows.push({time:bucket-(52-i)*300,open:price,high:price+1,low:price-1,close:price,volume:10});
   }
-  rows.push({time:bucket,open:151,high:152,low:150,close:151,volume:0});
+  rows.push({time:bucket,open:152,high:153,low:151,close:152,volume:0});
   const tick={price:151,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({underlyingCandles:rows,underlyingTick:tick,optionCandles:[],optionTick:tick,contract:{side:'CE',tickSize:0.05},now});
   assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
