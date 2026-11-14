@@ -194,12 +194,12 @@ export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, sw
 
 export function detectEmaTrend(rows) {
   if (!Array.isArray(rows) || rows.length < 51) return null;
-  const last=rows.at(-1), prior=rows.at(-2), closes=rows.map(c=>number(c.close));
+  const last=rows.at(-1), closes=rows.map(c=>number(c.close));
   const e20=ema(closes,20),e50=ema(closes,50);
-  if(e20>e50&&number(last.close)>e20&&number(last.close)>number(prior.high))
-    return candidate(STRATEGIES[0],'LONG',number(prior.high),last);
-  if(e20<e50&&number(last.close)<e20&&number(last.close)<number(prior.low))
-    return candidate(STRATEGIES[0],'SHORT',number(prior.low),last);
+  if(e20>e50&&number(last.close)>e20)
+    return candidate(STRATEGIES[0],'LONG',e20,last);
+  if(e20<e50&&number(last.close)<e20)
+    return candidate(STRATEGIES[0],'SHORT',e20,last);
   return null;
 }
 export function detectTopGainerMomentum(rows, isTopGainer=false) {
