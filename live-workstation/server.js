@@ -622,16 +622,18 @@ async function processPendingStrategyCandidate(candidate){
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_rejected'});return true;
   }
   const finalOptionTick=lastTicks.get(candidate.contract.symbol),finalUnderlyingTick=lastTicks.get(candidate.futureSymbol);
+  const finalIdentity=validateOptionContractIdentity(candidate.contract,officialContract,Date.now());
   const finalPremiumCheck=validateOptionPremiumTick(finalOptionTick,candidate.contract,Date.now());
-  if(!freshTick(finalUnderlyingTick)||!finalPremiumCheck.ok){
-   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:!freshTick(finalUnderlyingTick)?'Underlying exchange tick became stale before plan persistence':finalPremiumCheck.reason,strategy:candidate.setup.strategy});
+  if(!finalIdentity.ok||!freshTick(finalUnderlyingTick)||!finalPremiumCheck.ok){
+   const reason=!finalIdentity.ok?finalIdentity.reason:!freshTick(finalUnderlyingTick)?'Underlying exchange tick became stale before plan persistence':finalPremiumCheck.reason;
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason,strategy:candidate.setup.strategy});
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_final_tick_recheck_failed'});return true;
   }
   const planId=crypto.createHash('sha256').update([candidate.underlyingSymbol,candidate.contract.symbol,candidate.setup.confirmedAt,evaluated.optionCandleTime].join('|')).digest('hex').slice(0,48);
   const saved=await strategyPlanStore.saveConfirmedPlan({planId,strategy:evaluated.strategy,underlying:candidate.underlyingSymbol,contract:candidate.contract.symbol,optionSide:candidate.contract.side,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:finalOptionTick.price,entry:evaluated.entry,stopLoss:evaluated.stopLoss,target:evaluated.target,rr:evaluated.rr,underlyingExchangeTime:finalUnderlyingTick.exchangeTime,optionExchangeTime:finalOptionTick.exchangeTime,underlyingReceivedAt:finalUnderlyingTick.receivedAt,optionReceivedAt:finalOptionTick.receivedAt,underlyingCandleTime:String(evaluated.confirmedAt),optionCandleTime:String(evaluated.optionCandleTime)});
   if(saved.ok){
    await refreshStrategyActivePlans(true);
-   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'PLAN_CONFIRMED_READ_ONLY',strategy:evaluated.strategy,optionSide:candidate.contract.side,contract:candidate.contract.symbol,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:currentOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,planId:saved.planId,verifiedAt:new Date().toISOString()});
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'PLAN_CONFIRMED_READ_ONLY',strategy:evaluated.strategy,optionSide:candidate.contract.side,contract:candidate.contract.symbol,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:finalOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,planId:saved.planId,verifiedAt:new Date().toISOString()});
   }else setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:saved.status||'NO_TRADE',reason:saved.reason,strategy:evaluated.strategy});
   strategyPendingCandidates.delete(candidate.key);if(!strategyActivePlans.some(plan=>plan.contract===candidate.contract.symbol))strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_processed'});return true;
  }catch(error){
