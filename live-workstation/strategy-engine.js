@@ -14,10 +14,11 @@ const STRATEGIES = Object.freeze([
   'OPENING_RANGE_15M_RETEST'
 ]);
 
-function finite(value) { return Number.isFinite(Number(value)); }
+function finite(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)); }
 function number(value) { return Number(value); }
 function validOhlcv(c) {
   return c && ['time','open','high','low','close'].every(k => finite(c[k])) &&
+    number(c.time) > 0 && number(c.open) > 0 && number(c.high) > 0 && number(c.low) > 0 && number(c.close) > 0 &&
     number(c.high) >= Math.max(number(c.open), number(c.close), number(c.low)) &&
     number(c.low) <= Math.min(number(c.open), number(c.close));
 }
@@ -67,7 +68,7 @@ function candidate(strategy, side, level, candle, details={}) {
   if (!finite(level) || number(level)<=0) return null;
   return { strategy, side, breakoutLevel:number(level), confirmedAt:number(candle.time), confirmationClose:number(candle.close), ...details };
 }
-function detectDoublePattern(rows) {
+export function detectDoublePattern(rows) {
   const start=Math.max(2,rows.length-45), end=rows.length-3;
   const highs=[],lows=[];
   for(let i=start;i<end;i++){
@@ -80,7 +81,7 @@ function detectDoublePattern(rows) {
     if(j-i<4||Math.abs(h1-h2)/Math.max(h1,h2)>0.003)continue;
     const neck=Math.min(...rows.slice(i,j+1).map(x=>number(x.low)));
     const hadBreak=rows.slice(j+1,-1).some(x=>number(x.close)<neck);
-    if(hadBreak&&number(last.low)<=neck*1.002&&number(last.close)<neck&&prior.some(x=>number(x.close)<neck))
+    if(hadBreak&&number(last.high)>=neck*0.998&&number(last.close)<neck&&prior.some(x=>number(x.close)<neck))
       return candidate('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','SHORT',neck,last,{pattern:'DOUBLE_TOP'});
   }
   for(let a=0;a<lows.length;a++)for(let b=a+1;b<lows.length;b++){
