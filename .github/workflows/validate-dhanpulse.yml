@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -86,7 +88,25 @@ jobs:
           npm audit --json > /tmp/dhanpulse-full-audit.json || audit_status=$?
           node --input-type=commonjs -e 'const fs=require("node:fs"); const p="/tmp/dhanpulse-full-audit.json"; if(!fs.existsSync(p)){console.log("Full audit report unavailable; npm audit command did not produce JSON."); process.exit(0)} const a=JSON.parse(fs.readFileSync(p,"utf8")); console.log("Full dependency audit totals:",JSON.stringify(a.metadata?.vulnerabilities||{})); for(const [name,v] of Object.entries(a.vulnerabilities||{})){console.log(JSON.stringify({package:name,severity:v.severity,range:v.range,fixAvailable:v.fixAvailable,via:(v.via||[]).map(x=>typeof x==="string"?x:{name:x.name,title:x.title,url:x.url,range:x.range})}))}'
           echo "Full audit command exit code: ${audit_status:-0} (diagnostic only; production audit remains enforced above)."
+      - name: Determine whether legacy backend checks apply
+        id: scope
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          changed_files="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          echo "$changed_files"
+          if grep -Eq '^(backend|site)/' <<< "$changed_files"; then
+            echo "check_legacy_backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "check_legacy_backend=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping legacy DhanPulse backend health/CORS probe: this PR does not change backend/ or site/."
+          fi
       - name: Verify production backend health and CORS
+        if: github.event_name != 'pull_request' || steps.scope.outputs.check_legacy_backend == 'true'
         env:
           BACKEND_URL: https://dhanpluse-v1.onrender.com
           PRODUCTION_ORIGIN: https://dongardivegajananvp-art.github.io
