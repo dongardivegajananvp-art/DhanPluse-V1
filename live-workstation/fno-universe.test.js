@@ -8,7 +8,7 @@ const now = Date.parse('2026-11-14T00:00:00Z');
 test('builds one nearest active FYERS futures contract per underlying', () => {
   const nseMaster = {
     'NSE:RELIANCE25NOVFUT': { tradeStatus: 1, expiryDate: expiry('2026-11-25') },
-    'NSE:RELIANCE30DEC FUT': { tradeStatus: 1, expiryDate: expiry('2026-12-30') },
+    'NSE:RELIANCE30DECFUT': { tradeStatus: 1, expiryDate: expiry('2026-12-30') },
     'NSE:INFY25NOVFUT': { tradeStatus: 0, expiryDate: expiry('2026-11-25') },
     'NSE:TCS30OCTFUT': { tradeStatus: 1, expiryDate: expiry('2026-10-30') }
   };
