@@ -65,3 +65,17 @@ export function summarizeFeedFreshness(symbols, ticks, now = Date.now()) {
     staleOrMissingSamples: rows.filter(row => row.status !== 'FRESH').slice(0, 8)
   };
 }
+
+export function getScannerRuntimeState({
+  authenticated, socketConnected, marketOpen, ledgerReady,
+  universeCount, activeSubscriptions, freshFutureTicks
+}) {
+  if (!authenticated) return { state: 'BLOCKED_FYERS_SESSION', blocker: 'FYERS authentication is unavailable' };
+  if (!socketConnected) return { state: 'WAITING_FOR_WEBSOCKET', blocker: 'FYERS WebSocket is not connected' };
+  if (!marketOpen) return { state: 'MARKET_CLOSED', blocker: 'NSE regular market session is closed; live scan is paused' };
+  if (!ledgerReady) return { state: 'BLOCKED_LEDGER_UNAVAILABLE', blocker: 'Persistent strategy plan ledger has not passed its readiness check' };
+  if (!universeCount) return { state: 'WAITING_FOR_FNO_UNIVERSE', blocker: 'Official FYERS F&O universe is not loaded' };
+  if (!activeSubscriptions) return { state: 'WAITING_FOR_SUBSCRIPTIONS', blocker: 'No active F&O futures subscription window is available' };
+  if (!freshFutureTicks) return { state: 'WAITING_FOR_FRESH_FNO_TICKS', blocker: 'No active-window F&O future has a fresh exchange tick' };
+  return { state: 'READY_OR_SCANNING', blocker: null };
+}
