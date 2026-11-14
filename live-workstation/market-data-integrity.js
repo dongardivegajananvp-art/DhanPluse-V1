@@ -1,12 +1,13 @@
 const DEFAULT_MAX_AGE_MS = 15_000;
 const MAX_FUTURE_SKEW_SECONDS = 3;
+const MAX_DATE_EPOCH_SECONDS = 8_640_000_000_000;
 
 export function exchangeTickFreshness(tick, now = Date.now(), maxAgeMs = DEFAULT_MAX_AGE_MS) {
   if (!tick || typeof tick !== 'object') return { status: 'MISSING', ageMs: null, exchangeAgeSeconds: null };
   const price = Number(tick.price);
   const exchangeTime = Number(tick.exchangeTime);
   const receivedAt = Number(tick.receivedAt);
-  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(exchangeTime) || exchangeTime <= 0 ||
+  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(exchangeTime) || exchangeTime <= 0 || exchangeTime > MAX_DATE_EPOCH_SECONDS ||
       !Number.isFinite(receivedAt) || receivedAt <= 0) {
     return { status: 'INVALID', ageMs: null, exchangeAgeSeconds: null };
   }
@@ -42,7 +43,7 @@ export function summarizeFeedFreshness(symbols, ticks, now = Date.now()) {
     return {
       symbol,
       status: freshness.status,
-      exchangeTimestamp: Number.isFinite(Number(tick?.exchangeTime))
+      exchangeTimestamp: Number.isFinite(Number(tick?.exchangeTime)) && Number(tick.exchangeTime) > 0 && Number(tick.exchangeTime) <= MAX_DATE_EPOCH_SECONDS
         ? new Date(Number(tick.exchangeTime) * 1000).toISOString()
         : null,
       exchangeAgeSeconds: Number.isFinite(freshness.exchangeAgeSeconds)
