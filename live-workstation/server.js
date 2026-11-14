@@ -3,7 +3,7 @@ import {createSharedTokenReader} from './token-reader.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
 import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
-import { sameStrategyConfirmation, validateOptionContractIdentity } from './strategy-candidate-guard.js';
+import { sameStrategyConfirmation, validateOptionCandles, validateOptionContractIdentity, validateOptionPremiumTick } from './strategy-candidate-guard.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
 import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
 import { buildFnoUniverse, selectFairSubscriptionBatch, summarizeFnoCoverage } from './fno-universe.js';
@@ -596,6 +596,20 @@ async function processPendingStrategyCandidate(candidate){
   ]);
   const currentOptionTick=lastTicks.get(candidate.contract.symbol),currentUnderlyingTick=lastTicks.get(candidate.futureSymbol);
   if(!freshTick(currentOptionTick)||!freshTick(currentUnderlyingTick))return false;
+  if(underlyingHistory.symbol!==candidate.futureSymbol||optionHistory.symbol!==candidate.contract.symbol){
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'FYERS history response symbol identity does not match the requested underlying/option contract',strategy:candidate.setup.strategy});
+   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_history_identity_failed'});return true;
+  }
+  const premiumCheck=validateOptionPremiumTick(currentOptionTick,candidate.contract,Date.now());
+  if(!premiumCheck.ok){
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:premiumCheck.reason,strategy:candidate.setup.strategy});
+   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_option_tick_rejected'});return true;
+  }
+  const candleCheck=validateOptionCandles(optionHistory.candles,currentOptionTick,candidate.contract,Date.now());
+  if(!candleCheck.ok){
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:candleCheck.reason,strategy:candidate.setup.strategy});
+   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_option_candles_rejected'});return true;
+  }
   const refreshedSetup=detectNineStrategySetup({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now()});
   if(refreshedSetup.status!=='UNDERLYING_SETUP_CONFIRMED'||!sameStrategyConfirmation(candidate.setup,refreshedSetup)){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason:'Underlying strategy confirmation changed or expired while waiting for the option tick',strategy:candidate.setup.strategy});
