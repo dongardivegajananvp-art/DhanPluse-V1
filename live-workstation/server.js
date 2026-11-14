@@ -305,7 +305,7 @@ socketFeedWatchdog.unref?.();
 const fnoUniverseRotationTimer=setInterval(()=>{
   if(!socket||!connected||!isNseRegularSession()||!fnoUniverseRows.length)return;
   rotateFnoUniverseSubscriptions('scheduled_rotation');
-},300000);
+},180000);
 fnoUniverseRotationTimer.unref?.();
 app.get('/api/health',(_req,res)=>{
   const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
