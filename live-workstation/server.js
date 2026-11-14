@@ -105,12 +105,13 @@ const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-
 function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!socket||!connected)return {subscribed:0,removed:0};
   let subscriptionError='';
+  let pendingFnoCursor=null;
   if(fnoUniverseRows.length){
     const pinned=[selectedSymbol,selectedOptionSymbol,...strategyOptionSymbols,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol])].filter(Boolean);
     try{
       const batch=selectFairSubscriptionBatch({baseSymbols:BASE_SUBSCRIPTIONS,pinnedSymbols:pinned,universeSymbols:fnoUniverseRows.map(x=>x.futureSymbol),cursor:fnoUniverseCursor,limit:FYERS_DATA_SYMBOL_LIMIT});
       fnoScanSubscriptionSymbols=batch.fnoSymbols;
-      if(reason==='scheduled_rotation'||reason==='universe_loaded')fnoUniverseCursor=batch.nextCursor;
+      if(reason==='scheduled_rotation'||reason==='universe_loaded')pendingFnoCursor=batch.nextCursor;
     }catch(error){
       fnoScanSubscriptionSymbols=[];
       fnoUniverseError='F&O subscription window unavailable: '+String(error?.message||error).slice(0,140);
@@ -139,6 +140,7 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
     }catch(e){subscriptionError='FYERS subscribe failed: '+String(e?.message||e).slice(0,140);console.error(subscriptionError);}
   }
   if(subscriptionError){fnoScanSubscriptionSymbols=[];fnoUniverseError=subscriptionError;return{subscribed:0,removed:remove.length,error:subscriptionError};}
+  if(pendingFnoCursor!==null)fnoUniverseCursor=pendingFnoCursor;
   if(reason==='scheduled_rotation'||reason==='universe_loaded'){lastFnoRotationAt=new Date().toISOString();fnoRotationCount+=1;}
   if(!fnoUniverseError.startsWith('BSE F&O master unavailable'))fnoUniverseError='';
   return {subscribed:add.length,removed:remove.length};
