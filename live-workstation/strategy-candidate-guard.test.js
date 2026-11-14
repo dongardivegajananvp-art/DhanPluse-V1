@@ -58,6 +58,8 @@ test('option candles require 51 completed contiguous, valid and tick-aligned FYE
   const gap = candles.map(c => ({ ...c }));
   gap[20].time += 300;
   assert.equal(validateOptionCandles(gap, tick, contract, now).ok, false);
+  const offBoundary = candles.map(c => ({ ...c, time: c.time + 60 }));
+  assert.equal(validateOptionCandles(offBoundary, tick, contract, now).ok, false);
   const offTick = candles.map(c => ({ ...c }));
   offTick[10].close = 100.11;
   assert.equal(validateOptionCandles(offTick, tick, contract, now).ok, false);
