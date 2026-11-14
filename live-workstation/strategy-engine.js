@@ -32,7 +32,7 @@ function atr14(candles) {
   if (candles.length < 15) return NaN;
   const rows = candles.slice(-14);
   const ranges = rows.map((c, i) => {
-    const prev = candles[candles.length - 15 + i - 1];
+    const prev = candles[candles.length - 15 + i];
     const pc = prev ? number(prev.close) : number(c.close);
     return Math.max(number(c.high)-number(c.low), Math.abs(number(c.high)-pc), Math.abs(number(c.low)-pc));
   });
@@ -143,13 +143,16 @@ function detectOpeningRange(rows) {
 }
 function detectDayHighLowRetest(rows) {
   const key=istDayKey(number(rows.at(-1).time));
+  const days=[...new Set(rows.map(c=>istDayKey(number(c.time))))];
+  const previousKey=days.length>1?days.at(-2):'';
+  const previousDay=rows.filter(c=>istDayKey(number(c.time))===previousKey);
   const day=rows.filter(c=>istDayKey(number(c.time))===key);
-  if(day.length<4)return null;
+  if(previousDay.length<1||day.length<3)return null;
   const prior=day.slice(0,-1),last=day.at(-1);
-  const high=Math.max(...prior.slice(0,-1).map(c=>number(c.high)));
-  const low=Math.min(...prior.slice(0,-1).map(c=>number(c.low)));
-  const brokeHigh=prior.slice(0,-1).some(c=>number(c.close)>high);
-  const brokeLow=prior.slice(0,-1).some(c=>number(c.close)<low);
+  const high=Math.max(...previousDay.map(c=>number(c.high)));
+  const low=Math.min(...previousDay.map(c=>number(c.low)));
+  const brokeHigh=prior.some(c=>number(c.close)>high);
+  const brokeLow=prior.some(c=>number(c.close)<low);
   if(brokeHigh&&number(last.low)<=high*1.002&&number(last.close)>high)return candidate('DAY_HIGH_LOW_BREAK_RETEST','LONG',high,last);
   if(brokeLow&&number(last.high)>=low*0.998&&number(last.close)<low)return candidate('DAY_HIGH_LOW_BREAK_RETEST','SHORT',low,last);
   return null;
@@ -189,10 +192,11 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   if(!candidates.length)return{status:'NO_TRADE',reason:'None of the nine completed-candle strategies confirmed a setup'};
   candidates.sort((a,b)=>a.confirmedAt-b.confirmedAt||STRATEGIES.indexOf(a.strategy)-STRATEGIES.indexOf(b.strategy));
   const chosen=candidates[0];
+  if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return{status:'NO_TRADE',reason:'Option side does not match the verified underlying direction',strategy:chosen.strategy};
   const premiumRows=o.rows, premiumLast=o.last, tickSize=number(contract.tickSize);
   const premiumLevel=Math.max(...premiumRows.slice(-21,-1).map(c=>number(c.high)));
   if(!(number(premiumLast.close)>premiumLevel))return{status:'NO_TRADE',reason:'Underlying setup confirmed, but option premium has no completed breakout confirmation',strategy:chosen.strategy};
-  const entry=Math.round((premiumLevel+tickSize)/tickSize)*tickSize;
+  const entry=Math.ceil((premiumLevel+tickSize-1e-9)/tickSize)*tickSize;
   const atr=atr14(premiumRows);
   if(!Number.isFinite(atr)||atr<=0)return fail('Option premium ATR(14) is unavailable');
   const swing=premiumRows.slice(-5);
@@ -203,8 +207,9 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const live=number(optionTick.price);
   if(live<entry)return{status:'NO_TRADE',reason:'Live option premium has not reached breakout level + one tick',strategy:chosen.strategy};
   if(live>entry+0.5*risk)return{status:'NO_TRADE',reason:'Option premium moved more than 0.5R beyond entry; chase blocked',strategy:chosen.strategy};
-  const target=Math.ceil((entry+2*risk-1e-9)/tickSize)*tickSize;
-  const resistance=premiumRows.slice(-21,-1).filter((c,i,a)=>i>1&&i<a.length-2&&pivotHigh(a,i,1)).map(c=>number(c.high)).filter(v=>v>entry&&v<target);
+  const target=entry+2*risk;
+  const olderPremiumRows=premiumRows.slice(0,-21);
+  const resistance=olderPremiumRows.filter((c,i,a)=>i>1&&i<a.length-2&&pivotHigh(a,i,1)).map(c=>number(c.high)).filter(v=>v>entry&&v<target);
   if(resistance.length)return{status:'NO_TRADE',reason:'Verified option premium resistance lies before the fixed 2R target',strategy:chosen.strategy};
   const rr=(target-entry)/risk;
   if(!(rr>=2))return{status:'NO_TRADE',reason:'Live option premium cannot support fixed 1:2 reward/risk',strategy:chosen.strategy};
@@ -212,7 +217,7 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {
   if(!Array.isArray(activeTrades)||!candidateTrade||!candidateTrade.underlying||!candidateTrade.contract)return{ok:false,reason:'Active trade state or candidate identity is invalid'};
-  if(!Number.isInteger(maxActive)||maxActive<1)return{ok:false,reason:'Maximum active trade limit is invalid'};
+  if(!Number.isInteger(maxActive)||maxActive<1||maxActive>MAX_ACTIVE_TRADES)return{ok:false,reason:'Maximum active trade limit cannot exceed two'};
   if(activeTrades.length>=maxActive)return{ok:false,reason:'Maximum of two simultaneous strategy trades reached'};
   const duplicate=activeTrades.some(t=>t&&((t.underlying&&t.underlying===candidateTrade.underlying)||(t.contract&&t.contract===candidateTrade.contract)));
   if(duplicate)return{ok:false,reason:'Duplicate underlying or option contract already has an active trade'};
