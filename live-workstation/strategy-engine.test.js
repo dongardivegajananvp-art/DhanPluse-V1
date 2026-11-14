@@ -66,5 +66,5 @@ test('strategy evaluator rejects a gap anywhere in the required 51-candle window
   const tick={price:151,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({underlyingCandles:rows,underlyingTick:tick,optionCandles:[],optionTick:tick,contract:{side:'CE',tickSize:0.05},now});
   assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
-  assert.match(result.reason,/51 contiguous completed 5-minute candles/);
+  assert.match(result.reason,/missing 5-minute interval/);
 });
