@@ -37,7 +37,7 @@ export function validateOptionPremiumTick(tick, contract, now = Date.now(), maxA
 
 export function validateOptionCandles(candles, tick, contract, now = Date.now()) {
   if (!Array.isArray(candles) || candles.length < 51) return { ok: false, reason: 'At least 51 completed FYERS option candles are required' };
-  const rows = candles.slice().sort((a, b) => Number(a?.time) - Number(b?.time));
+  const rows = candles.slice();
   for (let i = 0; i < rows.length; i++) {
     const candle = rows[i];
     const values = ['time', 'open', 'high', 'low', 'close'].map(key => Number(candle?.[key]));
