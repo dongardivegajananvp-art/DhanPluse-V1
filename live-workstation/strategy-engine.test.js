@@ -269,8 +269,8 @@ test('Strategy 3 daily trend pullback requires daily alignment, 5m EMA trend, to
   const closes=rows.map(c=>c.close);
   const calcEma=(values,p)=>{let v=values.slice(0,p).reduce((a,b)=>a+b,0)/p;const alpha=2/(p+1);for(let i=p;i<values.length;i++)v=values[i]*alpha+v*(1-alpha);return v;};
   const e20=calcEma(closes,20);
-  rows[rows.length-2]={...rows.at(-2),open:e20,high:e20*1.001,low:e20*0.999,close:e20};
-  rows[rows.length-1]={...rows.at(-1),open:e20*1.001,high:e20*1.02,low:e20,close:e20*1.015};
+  rows[rows.length-2]={...rows.at(-2),open:e20,high:e20*1.02,low:e20*0.98,close:e20};
+  rows[rows.length-1]={...rows.at(-1),open:e20*1.02,high:e20*1.04,low:e20*1.01,close:e20*1.03};
   const daily=dailyTrendRows();
   assert.equal(detectDailyTrendPullback(rows,daily)?.strategy,'DAILY_TREND_5M_PULLBACK');
   assert.equal(detectDailyTrendPullback(rows,daily.slice(0,30)),null);
