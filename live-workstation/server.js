@@ -520,7 +520,7 @@ async function processPendingStrategyCandidate(candidate){
    await refreshStrategyActivePlans(true);
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'PLAN_CONFIRMED_READ_ONLY',strategy:evaluated.strategy,optionSide:candidate.contract.side,contract:candidate.contract.symbol,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:currentOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,planId:saved.planId,verifiedAt:new Date().toISOString()});
   }else setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:saved.status||'NO_TRADE',reason:saved.reason,strategy:evaluated.strategy});
-  strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_processed'});return true;
+  strategyPendingCandidates.delete(candidate.key);if(!strategyActivePlans.some(plan=>plan.contract===candidate.contract.symbol))strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_processed'});return true;
  }catch(error){
   if(Number(error?.statusCode)===429){strategyScanLastError='FYERS REST cooldown; scanner paused without another upstream request';return false;}
   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,160),strategy:candidate.setup.strategy});
