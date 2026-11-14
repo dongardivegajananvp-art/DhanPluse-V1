@@ -348,3 +348,18 @@ test('first-confirmed candle time wins before the same-candle specificity tie-br
   assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
   assert.equal(result.confirmedAt,rows[rows.length-2].time);
 });
+
+
+test('strategy candle gate accepts a normal Friday-to-Monday session boundary',()=>{
+  const previousSessionStart=Date.parse('2026-11-13T05:50:00Z')/1000;
+  const previousSession=Array.from({length:50},(_,i)=>({
+    time:previousSessionStart+i*300,open:100,high:101,low:99,close:100,volume:100
+  }));
+  const mondayOpen=Date.parse('2026-11-16T03:45:00Z')/1000;
+  const now=Date.parse('2026-11-16T03:50:30Z');
+  const rows=[...previousSession,{time:mondayOpen,open:100,high:101,low:99,close:100,volume:100}];
+  const tick={price:100,exchangeTime:now/1000,receivedAt:now};
+  const result=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,now});
+  assert.equal(result.status,'NO_TRADE');
+  assert.match(result.reason,/None of the nine/);
+});
