@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildFixedPremiumPlan, canAcceptStrategyTrade, detectDoublePattern, evaluateNineStrategies, MAX_ACTIVE_TRADES, STRATEGIES } from './strategy-engine.js';
+import { buildFnoUniverse, selectSubscriptionBatch } from './fno-universe.js';
 
 test('nine fixed strategy identifiers are present and stable',()=>{
   assert.equal(STRATEGIES.length,9);
@@ -108,4 +109,53 @@ test('strategy evaluator rejects null candle fields as malformed rather than num
   const result=evaluateNineStrategies({underlyingCandles:rows,underlyingTick:tick,optionCandles:[],optionTick:tick,contract:{side:'CE',tickSize:0.05},now});
   assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
   assert.match(result.reason,/missing or malformed/i);
+});
+
+test('F&O universe keeps only active unexpired futures and nearest expiry per underlying',()=>{
+  const now=Date.parse('2026-11-14T00:00:00Z');
+  const nseMaster={
+    'NSE:RELIANCE26NOVFUT':{tradeStatus:1,expiryDate:'2026-11-26'},
+    'NSE:RELIANCE31DECFUT':{tradeStatus:1,expiryDate:'2026-12-31'},
+    'NSE:TCS26NOVFUT':{tradeStatus:0,expiryDate:'2026-11-26'},
+    'NSE:INFY29OCTFUT':{tradeStatus:1,expiryDate:'2026-10-29'},
+    'NSE:NIFTY26NOVFUT':{tradeStatus:1,expiryDate:'2026-11-26'},
+    'NSE:BANKNIFTY26NOVFUT':{tradeStatus:1,expiryDate:'2026-11-26'}
+  };
+  const rows=buildFnoUniverse({nseMaster,now});
+  assert.deepEqual(rows.map(x=>x.futureSymbol),['NSE:BANKNIFTY26NOVFUT','NSE:NIFTY26NOVFUT','NSE:RELIANCE26NOVFUT']);
+  assert.equal(rows.find(x=>x.futureSymbol.includes('NIFTY26')).underlyingSymbol,'NSE:NIFTY50-INDEX');
+  assert.equal(rows.find(x=>x.futureSymbol.includes('BANKNIFTY')).underlyingSymbol,'NSE:NIFTYBANK-INDEX');
+});
+
+test('F&O universe includes the BSE SENSEX future and maps it to the index',()=>{
+  const now=Date.parse('2026-11-14T00:00:00Z');
+  const rows=buildFnoUniverse({bseMaster:{'BSE:SENSEX26NOVFUT':{tradeStatus:1,expiryDate:'2026-11-26'}},now});
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].underlyingSymbol,'BSE:SENSEX-INDEX');
+});
+
+test('subscription batch reserves base and pinned symbols before rotating universe',()=>{
+  const result=selectSubscriptionBatch({
+    baseSymbols:['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'],
+    pinnedSymbols:['NSE:RELIANCE26NOVFUT','NSE:RELIANCE26NOVFUT','NSE:RELIANCE26NOV1500CE'],
+    universeSymbols:['NSE:RELIANCE26NOVFUT','NSE:TCS26NOVFUT','NSE:INFY26NOVFUT'],
+    limit:5
+  });
+  assert.deepEqual(result.symbols,['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX','NSE:RELIANCE26NOVFUT','NSE:RELIANCE26NOV1500CE']);
+  assert.equal(result.rotatingCount,0);
+});
+
+test('subscription rotation stays within 100 symbols and advances across the universe',()=>{
+  const universe=Array.from({length:230},(_,i)=>'NSE:STOCK'+i+'26NOVFUT');
+  const first=selectSubscriptionBatch({baseSymbols:['NSE:NIFTY50-INDEX'],universeSymbols:universe,limit:100});
+  const second=selectSubscriptionBatch({baseSymbols:['NSE:NIFTY50-INDEX'],universeSymbols:universe,cursor:first.nextCursor,limit:100});
+  const third=selectSubscriptionBatch({baseSymbols:['NSE:NIFTY50-INDEX'],universeSymbols:universe,cursor:second.nextCursor,limit:100});
+  assert.equal(first.symbols.length,100);
+  assert.equal(second.symbols.length,100);
+  assert.equal(third.symbols.length,31);
+  assert.equal(new Set([...first.symbols,...second.symbols,...third.symbols]).size,231);
+});
+
+test('subscription planner rejects more pinned symbols than the safe plan limit',()=>{
+  assert.throws(()=>selectSubscriptionBatch({baseSymbols:['A','B'],pinnedSymbols:['C'],limit:2}),/exceed/);
 });
