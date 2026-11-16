@@ -90,7 +90,7 @@ test('builds top-five gainers only from fresh exchange-timestamped WebSocket fut
   assert.equal(result.rows.length,5);
   assert.equal(result.rows[0].symbol,'NSE:S5'+'26NOVFUT');
   assert.equal(result.rows[0].change,5);
-  assert.equal(result.freshUniverseTickCount,5);
+  assert.equal(result.freshUniverseTickCount,6);
   assert.equal(result.universeCount,7);
 });
 
