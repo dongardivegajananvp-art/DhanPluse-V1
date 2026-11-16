@@ -213,7 +213,7 @@ export function createFyersDataApiBudget({
 
         // A prior queued request may have opened the circuit while this one waited.
         if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
-        if (cooldownUntil > now()) return { response: makeCooldownResponse() };
+        if (cooldownBlocksPath(target.pathname, now())) return { response: makeCooldownResponse() };
 
         time = now();
         requestTimes.push(time);
