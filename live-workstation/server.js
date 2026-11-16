@@ -574,6 +574,11 @@ async function recoverFyersRestEndpoint(pathname){
 }
 const socketFeedWatchdog=setInterval(()=>{
   if(!authReady())return;
+  // FYERS REST recovery is exchange-session independent: MCX can be active while NSE is closed.
+  const restStatus=fetchWithFyersBudget.getStatus();
+  if(restStatus.recoveryProbeRequired){
+    void recoverFyersRestEndpoint(restStatus.recoveryProbePathname);
+  }
   if(socket&&!connected&&lastSocketConnectAttemptAt&&Date.now()-Date.parse(lastSocketConnectAttemptAt)>30000){
     scheduleSocketRecovery('socket_connect_timeout');
     return;
@@ -582,10 +587,6 @@ const socketFeedWatchdog=setInterval(()=>{
   const monitored=[...new Set([...BASE_SUBSCRIPTIONS,...fnoScanSubscriptionSymbols,...strategyOptionSymbols,...(selectedOptionSymbol?[selectedOptionSymbol]:[])])];
   const staleSymbols=monitored.filter(symbol=>!freshTick(lastTicks.get(symbol),10000));
   const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),10000));
-  const restStatus=fetchWithFyersBudget.getStatus();
-  if(restStatus.recoveryProbeRequired){
-    void recoverFyersRestEndpoint(restStatus.recoveryProbePathname);
-  }
   if(socket&&connected){
     if(freshIndexes.length<BASE_SUBSCRIPTIONS.length){
       if(!indexFeedStaleSince)indexFeedStaleSince=Date.now();
