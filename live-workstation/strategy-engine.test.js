@@ -65,7 +65,7 @@ test('fixed premium plan honors the half-R chase limit while keeping planned RR 
   assert.match(buildFixedPremiumPlan({...base,livePremium:100.05,priorResistances:[102]}).reason,/resistance/);
 });
 
-test('strategy evaluator rejects a gap anywhere in the required 51-candle window',()=>{
+test('a gap in the older EMA50 window does not block a fresh two-candle top-gainer breakout',()=>{
   const now=Date.parse('2026-11-16T04:00:30Z');
   const bucket=Math.floor((now/1000)/300)*300;
   const rows=[];
@@ -74,11 +74,26 @@ test('strategy evaluator rejects a gap anywhere in the required 51-candle window
     const price=100+i;
     rows.push({time:bucket-(52-i)*300,open:price,high:price+1,low:price-1,close:price,volume:10});
   }
+  rows[rows.length-1]={...rows.at(-1),open:151.5,high:152,low:151,close:151.5,volume:100};
   rows.push({time:bucket,open:152,high:153,low:151,close:152,volume:0});
-  const tick={price:151,exchangeTime:now/1000,receivedAt:now};
-  const result=evaluateNineStrategies({underlyingCandles:rows,underlyingTick:tick,optionCandles:[],optionTick:tick,contract:{side:'CE',tickSize:0.05},now});
+  const tick={price:152,exchangeTime:now/1000,receivedAt:now};
+  const result=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,isTopGainer:true,now});
+  assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
+  assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  assert.equal(result.side,'LONG');
+  assert.equal(result.breakoutLevel,151);
+});
+
+test('top-gainer momentum still blocks when its own latest two-candle window has a gap',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const bucket=Math.floor((now/1000)/300)*300;
+  const rows=Array.from({length:52},(_,i)=>{const close=100+i;return{time:bucket-(52-i)*300,open:close,high:close+1,low:close-1,close,volume:10};});
+  rows[51]={...rows[51],time:rows[51].time-300};
+  rows.push({time:bucket,open:152,high:153,low:151,close:152,volume:0});
+  const tick={price:152,exchangeTime:now/1000,receivedAt:now};
+  const result=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,isTopGainer:true,now});
   assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
-  assert.match(result.reason,/missing 5-minute interval/);
+  assert.match(result.reason,/TOP_GAINER_MOMENTUM_BREAKOUT/);
 });
 
 function doublePatternFixture(kind) {
@@ -361,5 +376,6 @@ test('strategy candle gate accepts a normal Friday-to-Monday session boundary',(
   const tick={price:100,exchangeTime:now/1000,receivedAt:now};
   const result=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,now});
   assert.equal(result.status,'NO_TRADE');
-  assert.match(result.reason,/None of the nine/);
+  assert.match(result.reason,/No eligible strategy confirmed/);
+  assert.ok(result.evaluatedStrategies.includes('EMA20_EMA50_TREND'));
 });

@@ -57,16 +57,24 @@ function isTradingCandleContiguous(previousTime, currentTime) {
   const previous = localParts(previousTime), current = localParts(currentTime);
   return previous.minute === 925 && current.minute === 555 && current.day > previous.day;
 }
+function contiguousWindow(rows, count) {
+  if (!Array.isArray(rows) || rows.length < count) return false;
+  const required = rows.slice(-count);
+  return required.every((candle, index) => index === 0 ||
+    isTradingCandleContiguous(number(required[index - 1].time), number(candle.time)));
+}
+function currentSessionRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) return [];
+  const key = istDayKey(number(rows.at(-1).time));
+  return rows.filter(candle => istDayKey(number(candle.time)) === key);
+}
 function completed(candles, tick, label) {
   if (!Array.isArray(candles) || candles.some(c => !validOhlcv(c))) {
     return { error: label + ' candles are missing or malformed' };
   }
   const window = getCompletedCandleWindow(candles, tick.exchangeTime);
   if (!window.fresh) return { error: label + ' latest completed candle is stale' };
-  if (window.completed.length < 51) return { error: label + ' requires at least 51 contiguous completed 5-minute candles' };
-  const required=window.completed.slice(-51);
-  if (!required.every((c,i)=>i===0||isTradingCandleContiguous(number(required[i-1].time),number(c.time))))
-    return { error: label + ' 51-candle strategy window contains a missing 5-minute interval inside a trading session' };
+  if (window.completed.length < 2) return { error: label + ' requires at least two completed 5-minute candles' };
   return { rows: window.completed, last: window.lastClosed };
 }
 function pivotHigh(rows, i, width=2) {
@@ -239,17 +247,29 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   const u=completed(underlyingCandles,underlyingTick,'Underlying');
   if(u.error)return fail(u.error);
   const rows=u.rows,last=u.last;
-  const candidates=[];
-  const emaTrend=detectEmaTrend(rows);if(emaTrend)candidates.push(emaTrend);
-  const momentum=detectTopGainerMomentum(rows,isTopGainer);if(momentum)candidates.push(momentum);
-  const dailyPullback=detectDailyTrendPullback(rows,dailyCandles);if(dailyPullback)candidates.push(dailyPullback);
-  const dayRetest=detectDayHighLowRetest(rows);if(dayRetest)candidates.push(dayRetest);
-  const double=detectDoublePattern(rows);if(double)candidates.push(double);
-  const bull=detectContinuation(rows,'LONG');if(bull)candidates.push(bull);
-  const bear=detectContinuation(rows,'SHORT');if(bear)candidates.push(bear);
-  const flag=detectFlagVolume(rows);if(flag)candidates.push(flag);
-  const orb=detectOpeningRange(rows);if(orb)candidates.push(orb);
-  if(!candidates.length)return{status:'NO_TRADE',reason:'None of the nine completed-candle strategies confirmed a setup'};
+  const candidates=[], evaluated=[], blocked=[];
+  const consider=(name,eligible,detect)=>{
+    if(!eligible){blocked.push(name);return;}
+    evaluated.push(name);
+    const result=detect();if(result)candidates.push(result);
+  };
+  // Each strategy validates only the candle history it actually consumes.
+  // A gap in an older EMA50 window must not disable a valid two-candle momentum breakout.
+  consider('EMA20_EMA50_TREND',contiguousWindow(rows,51),()=>detectEmaTrend(rows));
+  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&contiguousWindow(rows,2),()=>detectTopGainerMomentum(rows,isTopGainer));
+  consider('DAILY_TREND_5M_PULLBACK',contiguousWindow(rows,51)&&Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=51,()=>detectDailyTrendPullback(rows,dailyCandles));
+  const sessionRows=currentSessionRows(rows);
+  const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length);
+  consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows));
+  consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',contiguousWindow(rows,48),()=>detectDoublePattern(rows));
+  consider('BULLISH_CONTINUATION',contiguousWindow(rows,30),()=>detectContinuation(rows,'LONG'));
+  consider('BEARISH_CONTINUATION',contiguousWindow(rows,30),()=>detectContinuation(rows,'SHORT'));
+  consider('FLAG_BREAKOUT_VOLUME',contiguousWindow(rows,30),()=>detectFlagVolume(rows));
+  consider('OPENING_RANGE_15M_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectOpeningRange(rows));
+  if(!candidates.length){
+    if(!evaluated.length)return fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', '));
+    return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked};
+  }
   candidates.sort((a,b)=>a.confirmedAt-b.confirmedAt||STRATEGY_TIE_PRIORITY.indexOf(a.strategy)-STRATEGY_TIE_PRIORITY.indexOf(b.strategy));
   return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
 }
@@ -263,6 +283,7 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return fail('Verified active CE/PE contract and tick size are required');
   const o=completed(optionCandles,optionTick,'Option premium');
   if(o.error)return fail(o.error);
+  if(!contiguousWindow(o.rows,51))return fail('Option premium requires 51 contiguous completed 5-minute candles for breakout, ATR and resistance verification');
   const chosen=setup;
   if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return{status:'NO_TRADE',reason:'Option side does not match the verified underlying direction',strategy:chosen.strategy};
   const premiumRows=o.rows,premiumLast=o.last,tickSize=number(contract.tickSize);
