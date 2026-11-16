@@ -94,3 +94,14 @@ test('breakout without the one following confirmation candle remains WAIT', () =
   ];
   assert.equal(evaluateThreeCandleBreakout(bars, 102).status, 'WAIT');
 });
+
+test('default candle window preserves 21-bar continuity for existing MCX checks', () => {
+  const exchangeTime = 1_800_000_000;
+  const bucket = Math.floor(exchangeTime / 300) * 300;
+  const candles = Array.from({ length: 21 }, (_, index) => ({
+    time: bucket - 300 * (21 - index)
+  }));
+  assert.equal(getCompletedCandleWindow(candles, exchangeTime).contiguous, true);
+  candles[10].time += 300;
+  assert.equal(getCompletedCandleWindow(candles, exchangeTime).contiguous, false);
+});
