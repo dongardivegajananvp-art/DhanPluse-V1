@@ -7,7 +7,7 @@ import { shouldRestartSilentIndexFeed } from './socket-feed-watchdog.js';
 import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute } from './scanner-schedule.js';
 import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { historyRetryDelayMs, shouldAttemptHistoryRetry } from './history-retry-policy.js';
-import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
+import { acceptExchangeTick, exchangeTickFreshness, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
 import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
 import { sameStrategyConfirmation, validateOptionCandles, validateOptionContractIdentity, validateOptionPremiumTick } from './strategy-candidate-guard.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
@@ -74,6 +74,7 @@ let lastFreshIndexTickAt=null;
 let socketPayloadDiagnostics=0;
 let lastTickDiagnosticAt=new Map();
 const indexTickGapSamples=new Map();
+const mcxTickGapSamples=new Map();
 let lastSubscriptionRecoveryAt=0;
 let lastRestQuoteRecoveryAt=0;
 let selectedSymbol='';
@@ -367,13 +368,18 @@ function ensureSocket(){
           lastFreshIndexTickAt=new Date().toISOString();
           socketRecoveryAttempts=0;
         }
-        if(symbol.startsWith('MCX:'))mcxTicks.set(symbol,tick);
-        else if(symbol.startsWith('NSE:')||symbol.startsWith('BSE:'))nseTicks.set(symbol,tick);
+        if(symbol.startsWith('MCX:')){
+          mcxTicks.set(symbol,tick);
+          const previousGaps=mcxTickGapSamples.get(symbol)||{lastReceivedAt:0,samples:[]};
+          const receiveGapMs=previousGaps.lastReceivedAt?tick.receivedAt-previousGaps.lastReceivedAt:null;
+          const samples=receiveGapMs!==null&&receiveGapMs>=0?[...previousGaps.samples,receiveGapMs].slice(-20):previousGaps.samples;
+          mcxTickGapSamples.set(symbol,{lastReceivedAt:tick.receivedAt,samples});
+        }else if(symbol.startsWith('NSE:')||symbol.startsWith('BSE:'))nseTicks.set(symbol,tick);
         accepted++;
         const lastLog=lastTickDiagnosticAt.get(symbol)||0;
         if(Date.now()-lastLog>=30000){
           const ageSeconds=Number((Date.now()/1000-stamp).toFixed(1));
-          const gapStats=BASE_SUBSCRIPTIONS.includes(symbol)?(indexTickGapSamples.get(symbol)||{samples:[]}):{samples:[]};
+          const gapStats=BASE_SUBSCRIPTIONS.includes(symbol)?(indexTickGapSamples.get(symbol)||{samples:[]}):symbol.startsWith('MCX:')?(mcxTickGapSamples.get(symbol)||{samples:[]}):{samples:[]};
           const gaps=gapStats.samples;
           const avgReceiveGapSeconds=gaps.length?Number((gaps.reduce((sum,value)=>sum+value,0)/gaps.length/1000).toFixed(2)):null;
           const maxReceiveGapSeconds=gaps.length?Number((Math.max(...gaps)/1000).toFixed(2)):null;
@@ -578,7 +584,10 @@ app.get('/api/health',async(_req,res)=>{
   const fnoUniverseCoverage=summarizeFnoCoverage(fnoUniverseRows.map(row=>row.futureSymbol),fnoScanSubscriptionSymbols,fnoUniverseRows.filter(row=>freshTick(lastTicks.get(row.futureSymbol))).map(row=>row.futureSymbol));
   const strategyLedgerReady=strategyPlanStore?await strategyPlanStore.ready:false;
   const latestExchangeTime=[...lastTicks.values()].reduce((latest,tick)=>Math.max(latest,Number(tick.exchangeTime)||0),0);
-  res.set('Cache-Control','no-store').json({ok:true,startupState,startupError:startUpErrorSafe(startupError),restBudgetReady:fyersRestBudgetReady,sharedSessionRestored,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketConnectAttemptAt,lastSocketRecoveryAt,socketRecoveryAttempts,socketRecoveryPending:Boolean(socketRecoveryTimer),indexFeedStaleSince:indexFeedStaleSince?new Date(indexFeedStaleSince).toISOString():null,lastFreshIndexTickAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,requestedFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,activeWindowFreshnessPercent:fnoFeed.coveragePercent,windowCoveragePercent:fnoUniverseCoverage.requestedCoveragePercent,freshUniverseCoveragePercent:fnoUniverseCoverage.freshUniverseCoveragePercent,notRequestedFutureCount:fnoUniverseCoverage.notRequestedCount,freshUniverseFutureCount:fnoUniverseCoverage.freshUniverseCount,coverage:fnoUniverseCoverage,lastRotationAt:lastFnoRotationAt,rotationCount:fnoRotationCount,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:(()=>{const status=fetchWithFyersBudget.getStatus();return{active:status.cooldownActive,reason:status.cooldownReason||null,retryAfterSeconds:status.retryAfterSeconds,blockedUntil:status.blockedUntil,recoveryProbeRequired:status.recoveryProbeRequired,recoveryProbePathname:status.recoveryProbePathname||null,blockedPathname:status.blockedPathname||null,recoveryProbeUrlAvailable:Boolean(status.recoveryProbeUrl),recoveryProbeInFlight:restRecoveryProbeInFlight,lastRecoveryProbeAt:lastRestRecoveryProbeAt?new Date(lastRestRecoveryProbeAt).toISOString():null,consecutive429:status.consecutiveCloudflareBlocks+status.consecutiveRateLimitBlocks,persistenceReady:fyersRestBudgetReady,persistenceHealthy:status.cooldownPersistenceHealthy,queuedRequests:status.queuedRequests};})(),orderMode:'DISABLED'});
+  const mcxRequiredSymbols=[...new Set([...(mcxFutureRoot(selectedSymbol)?[selectedSymbol]:[]),...mcxOptionCandidateSymbols])];
+  const mcxFeed=summarizeFeedFreshness(mcxRequiredSymbols,lastTicks,now);
+  const mcxFeedDetails=mcxRequiredSymbols.map(symbol=>{const tick=lastTicks.get(symbol);const freshness=exchangeTickFreshness(tick,now);const gaps=mcxTickGapSamples.get(symbol)?.samples||[];return{symbol,status:freshness.status,subscribed:subscribedSymbols.has(symbol),exchangeTimestamp:tick?.exchangeTime?new Date(tick.exchangeTime*1000).toISOString():null,receiveGapSampleCount:gaps.length,avgReceiveGapSeconds:gaps.length?Number((gaps.reduce((a,b)=>a+b,0)/gaps.length/1000).toFixed(2)):null,maxReceiveGapSeconds:gaps.length?Number((Math.max(...gaps)/1000).toFixed(2)):null};});
+  res.set('Cache-Control','no-store').json({ok:true,startupState,startupError:startUpErrorSafe(startupError),restBudgetReady:fyersRestBudgetReady,sharedSessionRestored,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketConnectAttemptAt,lastSocketRecoveryAt,socketRecoveryAttempts,socketRecoveryPending:Boolean(socketRecoveryTimer),indexFeedStaleSince:indexFeedStaleSince?new Date(indexFeedStaleSince).toISOString():null,lastFreshIndexTickAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',mcxFeed:{state:!mcxFutureRoot(selectedSymbol)?'NOT_SELECTED':mcxFeed.freshCount===1?'FUTURE_FRESH':mcxFeed.staleCount?'FUTURE_STALE':'WAITING_FOR_FUTURE_TICK',selectedFuture:mcxFutureRoot(selectedSymbol)?selectedSymbol:null,selectedFutureSubscribed:mcxFutureRoot(selectedSymbol)?subscribedSymbols.has(selectedSymbol):false,requiredCount:mcxFeed.requiredCount,freshCount:mcxFeed.freshCount,staleCount:mcxFeed.staleCount,missingCount:mcxFeed.missingCount,coveragePercent:mcxFeed.coveragePercent,symbols:mcxFeedDetails},fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,requestedFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,activeWindowFreshnessPercent:fnoFeed.coveragePercent,windowCoveragePercent:fnoUniverseCoverage.requestedCoveragePercent,freshUniverseCoveragePercent:fnoUniverseCoverage.freshUniverseCoveragePercent,notRequestedFutureCount:fnoUniverseCoverage.notRequestedCount,freshUniverseFutureCount:fnoUniverseCoverage.freshUniverseCount,coverage:fnoUniverseCoverage,lastRotationAt:lastFnoRotationAt,rotationCount:fnoRotationCount,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:(()=>{const status=fetchWithFyersBudget.getStatus();return{active:status.cooldownActive,reason:status.cooldownReason||null,retryAfterSeconds:status.retryAfterSeconds,blockedUntil:status.blockedUntil,recoveryProbeRequired:status.recoveryProbeRequired,recoveryProbePathname:status.recoveryProbePathname||null,blockedPathname:status.blockedPathname||null,recoveryProbeUrlAvailable:Boolean(status.recoveryProbeUrl),recoveryProbeInFlight:restRecoveryProbeInFlight,lastRecoveryProbeAt:lastRestRecoveryProbeAt?new Date(lastRestRecoveryProbeAt).toISOString():null,consecutive429:status.consecutiveCloudflareBlocks+status.consecutiveRateLimitBlocks,persistenceReady:fyersRestBudgetReady,persistenceHealthy:status.cooldownPersistenceHealthy,queuedRequests:status.queuedRequests};})(),orderMode:'DISABLED'});
 });
 app.get('/api/strategy-scan',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.status(401).json({error:'FYERS session unavailable',...strategyScanSnapshot()});await refreshStrategyActivePlans();res.json(strategyScanSnapshot());});
 app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,underlying:row.underlyingSymbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
@@ -650,23 +659,31 @@ app.get('/api/mcx/scan',async(req,res)=>{
   mcxScanSymbol=future;
   mcxScanPromise=(async()=>{
     const futureTick=lastTicks.get(future);
-    if(!freshTick(futureTick))return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Fresh MCX futures exchange tick is required'};
+    if(!freshTick(futureTick))return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Fresh MCX futures exchange tick is required',feedState:subscribedSymbols.has(future)?'SUBSCRIBED_WAITING_FOR_TICK':'FUTURE_NOT_SUBSCRIBED'};
     const underlyingHistory=historyCache.get(future)&&isHistoryCacheFresh(historyCache.get(future).fetchedAt)?historyCache.get(future):await loadMxcHistory(future);
-    const underlyingSetup=evaluateMxcTrendPullback(underlyingHistory.candles,futureTick);
-    if(underlyingSetup.status!=='SETUP_CONFIRMED')return{...underlyingSetup,source:'FYERS MCX futures tick + completed 5-minute candles'};
+    const dailyHistory=await loadStrategyDailyHistory(future,{priority:10}).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}));
+    const dailyCandles=dailyHistory?.ok?dailyHistory.candles:[];
+    const now=Date.now();
+    const underlyingSetup=detectNineStrategySetup({
+      underlyingCandles:underlyingHistory.candles,underlyingTick:futureTick,dailyCandles,isTopGainer:false,now,
+      sessionStartMinute:540,sessionCloseMinute:1435
+    });
+    if(underlyingSetup.status!=='UNDERLYING_SETUP_CONFIRMED')return{...underlyingSetup,source:'FYERS MCX futures tick + completed 5-minute candles',dailyHistoryStatus:dailyHistory?.ok?'VERIFIED':'UNAVAILABLE'};
     const master=await loadMcxComMaster();
     if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed during scan; stale result discarded'};
     const futureMeta=master?.[future];
-    if(!futureMeta||Number(futureMeta.tradeStatus)!==1)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Exact MCX futures contract is not active in the official FYERS Symbol Master'};
+    if(!futureMeta||Number(futureMeta.tradeStatus)!==1||!toEpochSeconds(futureMeta.expiryDate)||toEpochSeconds(futureMeta.expiryDate)*1000<=Date.now())
+      return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Exact MCX futures contract/expiry is not active in the official FYERS Symbol Master'};
     const contracts=listMxcOptionContracts(master,future);
     const candidates=pickMxcOptionCandidates(contracts,futureTick.price,underlyingSetup.side,3).map(contract=>({...contract,underlyingPrice:futureTick.price}));
     if(!candidates.length)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'No active FYERS MCX option contracts for the nearest expiry'};
     if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed during scan; stale candidates discarded'};
     mcxOptionChains.set(future,{contracts:candidates,fetchedAt:Date.now()});
     mcxOptionCandidateSymbols=candidates.map(contract=>contract.symbol);
-    syncSocketSubscriptions({reason:'mcx_option_candidate_scan'});
+    const subscription=syncSocketSubscriptions({reason:'mcx_option_candidate_scan'});
+    if(subscription.error)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:subscription.error};
     const freshCandidates=candidates.filter(contract=>freshTick(lastTicks.get(contract.symbol)));
-    if(freshCandidates.length!==candidates.length)return{status:'WAITING_FOR_OPTION_TICKS',reason:'Fresh option exchange ticks '+freshCandidates.length+'/'+candidates.length+'; waiting to compare every nearest-strike candidate',side:underlyingSetup.side,candidates:candidates.map(({symbol,side,strike,expiryDate})=>({symbol,side,strike,expiry:expiryDate}))};
+    if(freshCandidates.length!==candidates.length)return{status:'WAITING_FOR_OPTION_TICKS',reason:'Fresh option exchange ticks '+freshCandidates.length+'/'+candidates.length+'; waiting to compare every nearest-strike candidate',side:underlyingSetup.side,strategy:underlyingSetup.strategy,candidates:candidates.map(({symbol,side,strike,expiryDate})=>({symbol,side,strike,expiry:expiryDate,subscribed:subscribedSymbols.has(symbol)}))};
     const valid=[];
     const rejected=[];
     for(const contract of freshCandidates){
@@ -675,9 +692,13 @@ app.get('/api/mcx/scan',async(req,res)=>{
         if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed during option history check'};
         const optionTick=lastTicks.get(contract.symbol);
         if(!freshTick(optionTick)){rejected.push({symbol:contract.symbol,reason:'Option tick became stale during candle verification'});continue;}
-        const setup=evaluateMxcTrendPullback(history.candles,optionTick,contract);
-        if(setup.status==='SETUP_CONFIRMED')valid.push({...setup,contract});
-        else rejected.push({symbol:contract.symbol,reason:setup.reason});
+        const evaluated=evaluateNineStrategies({
+          underlyingCandles:underlyingHistory.candles,underlyingTick:lastTicks.get(future),
+          optionCandles:history.candles,optionTick,contract,dailyCandles,isTopGainer:false,now:Date.now(),
+          sessionStartMinute:540,sessionCloseMinute:1435
+        });
+        if(evaluated.status==='SETUP_CONFIRMED')valid.push({...evaluated,contract});
+        else rejected.push({symbol:contract.symbol,reason:evaluated.reason||evaluated.status,strategy:evaluated.strategy||underlyingSetup.strategy});
       }catch(error){
         if(Number(error?.statusCode)===429)throw error;
         rejected.push({symbol:contract.symbol,reason:String(error?.message||error).slice(0,120)});
@@ -685,19 +706,19 @@ app.get('/api/mcx/scan',async(req,res)=>{
     }
     if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed before setup confirmation'};
     if(!freshTick(lastTicks.get(future)))return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX futures tick became stale during option verification'};
-    if(!valid.length)return{status:'NO_TRADE',reason:rejected.length?'No candidate passed fresh option-candle breakout and 1:2 risk/reward checks':'Waiting for verified option history',side:underlyingSetup.side,rejected};
-    valid.sort((a,b)=>b.score-a.score||a.contract.strikeDistance-b.contract.strikeDistance);
+    if(!valid.length)return{status:'NO_TRADE',reason:rejected.length?'No candidate passed the nine-strategy underlying confirmation, fresh option-candle confirmation and 1:2 risk/reward checks':'Waiting for verified option history',side:underlyingSetup.side,strategy:underlyingSetup.strategy,rejected};
+    valid.sort((a,b)=>b.rr-a.rr||a.contract.strikeDistance-b.contract.strikeDistance);
     const best=valid[0];
-    selectedOptionSymbol=best.symbol;
+    selectedOptionSymbol=best.contract.symbol;
     syncSocketSubscriptions({reason:'mcx_best_option_selected'});
     return{
       status:'SETUP_CONFIRMED',
-      label:'B · EMA20/EMA50 TREND-PULLBACK · VERIFIED RULE-MATCH · NOT A PROBABILITY GUARANTEE',
+      label:'MCX · NINE-STRATEGY ENGINE · VERIFIED RULE-MATCH · READ-ONLY',
       underlying:future,
       underlyingSide:underlyingSetup.side,
-      contract:{symbol:best.symbol,side:best.side,strike:best.strike,expiry:best.expiry,lotSize:best.lotSize,tickSize:best.tickSize},
-      premium:best.premium??best.entry,entry:best.entry,stopLoss:best.stopLoss,target:best.target,rr:best.rr,strategy:best.strategy||'B_EMA20_EMA50_TREND_PULLBACK',
-      source:'FYERS MCX Symbol Master + fresh futures/option ticks + completed 5-minute candles',
+      contract:{symbol:best.contract.symbol,side:best.contract.side,strike:best.contract.strike,expiry:best.contract.expiryDate,lotSize:best.contract.lotSize,tickSize:best.contract.tickSize},
+      premium:lastTicks.get(best.contract.symbol).price,entry:best.entry,stopLoss:best.stopLoss,target:best.target,rr:best.rr,strategy:best.strategy,
+      source:'FYERS MCX Symbol Master + fresh futures/option ticks + completed 5-minute candles + nine-strategy engine',
       verifiedAt:new Date().toISOString()
     };
   })();
@@ -708,7 +729,6 @@ app.get('/api/mcx/scan',async(req,res)=>{
     res.status(Number(error?.statusCode)===429?429:502).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,180)});
   }finally{mcxScanPromise=null;mcxScanSymbol='';}
 });
-
 
 
 async function loadStrategyDailyHistory(symbol,{priority=10}={}){
