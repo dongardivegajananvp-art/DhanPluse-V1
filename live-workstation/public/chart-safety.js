@@ -1,5 +1,12 @@
 export const HISTORY_CACHE_TTL_MS = 60_000;
 
+export function isFreshExchangeTick(tick, now = Date.now(), maxAgeMs = 10_000) {
+  if (!tick || !Number.isFinite(Number(tick.receivedAt)) || !Number.isFinite(Number(tick.exchangeTime))) return false;
+  const receivedAge = now - Number(tick.receivedAt);
+  const exchangeAge = now / 1000 - Number(tick.exchangeTime);
+  return receivedAge >= 0 && receivedAge < maxAgeMs && exchangeAge >= -3 && exchangeAge <= maxAgeMs / 1000;
+}
+
 export function isHistoryCacheFresh(fetchedAt, now = Date.now(), ttlMs = HISTORY_CACHE_TTL_MS) {
   const stamp = typeof fetchedAt === 'number' ? fetchedAt : Date.parse(String(fetchedAt || ''));
   return Number.isFinite(stamp) && stamp <= now && now - stamp < ttlMs;
