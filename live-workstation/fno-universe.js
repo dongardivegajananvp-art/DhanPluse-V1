@@ -112,7 +112,7 @@ export function buildLiveFnoMovers({ universeRows = [], tickBySymbol = new Map()
     if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(previousClose) || previousClose <= 0 ||
         !Number.isFinite(receivedAge) || receivedAge < 0 || receivedAge > maxAgeMs ||
         !exchangeTime || exchangeAge < -3 || exchangeAge > 10) continue;
-    const change = (price / previousClose - 1) * 100;
+    const change = Math.round((price / previousClose - 1) * 10000) / 100;
     if (!Number.isFinite(change)) continue;
     rows.push({
       symbol: item.futureSymbol,
