@@ -1,8 +1,21 @@
+export function isValidFyersRecoveryPayload(pathname, payload) {
+  if (!payload || typeof payload !== 'object' || payload.s !== 'ok') return false;
+  if (pathname === '/data/quotes') return Array.isArray(payload.d) && payload.d.length > 0;
+  if (pathname === '/data/history') return Array.isArray(payload.candles) && payload.candles.length > 0;
+  if (pathname === '/data/options-chain-v3') {
+    return Array.isArray(payload.data?.optionsChain) && payload.data.optionsChain.length > 0;
+  }
+  // Other FYERS v3 endpoints may be recovered only after an explicit successful
+  // FYERS envelope; an HTTP 200 HTML/error page must never clear the circuit.
+  return true;
+}
+
 export function canClearFyersDataApiCooldown({
-  responseOk, blockedPathname, responsePathname, requestGeneration, currentGeneration
+  responseOk, responseValid, blockedPathname, responsePathname, requestGeneration, currentGeneration
 }) {
   return Boolean(
     responseOk &&
+    responseValid === true &&
     blockedPathname === responsePathname &&
     requestGeneration === currentGeneration
   );
@@ -222,11 +235,18 @@ export function createFyersDataApiBudget({
         const timeoutSignal = AbortSignal.timeout(Math.max(1, Number(timeoutMs) || 12_000));
         const signal = callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal;
         const response = await fetchImpl(url, { ...fetchInit, signal });
+        let recoveryResponseValid = false;
+        if (response.ok && cooldownPathname === target.pathname &&
+            requestCooldownGeneration === cooldownGeneration) {
+          const recoveryPayload = await response.clone().json().catch(() => null);
+          recoveryResponseValid = isValidFyersRecoveryPayload(target.pathname, recoveryPayload);
+        }
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
           await activateCooldown(response, body, target.pathname);
         } else if (canClearFyersDataApiCooldown({
           responseOk: response.ok,
+          responseValid: recoveryResponseValid,
           blockedPathname: cooldownPathname,
           responsePathname: target.pathname,
           requestGeneration: requestCooldownGeneration,
