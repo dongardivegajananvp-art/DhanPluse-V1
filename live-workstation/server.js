@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
-import { createFyersDataApiBudget } from '../backend/src/fyers-data-api-budget.js';
+import { createFyersDataApiBudget } from './fyers-rest-budget.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
 import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
