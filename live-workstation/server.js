@@ -1128,8 +1128,8 @@ async function startWorkstation(){
     await refreshStrategyActivePlans(true);
     if(strategyOptionSymbols.size)syncSocketSubscriptions({reason:'strategy_plans_restored'});
   }catch(error){console.warn('Strategy plan restore unavailable; new entries remain blocked.',String(error?.message||error).slice(0,160));}
-  startupState=restReady&&sessionReady?'INITIALIZED':'DEGRADED';
-  startupError=[!restReady?'REST_BUDGET_NOT_READY':'',!sessionReady?'FYERS_SESSION_NOT_RESTORED':''].filter(Boolean).join(',');
+  startupState=restReady&&sessionReady&&strategyLedgerRuntimeReady?'INITIALIZED':'DEGRADED';
+  startupError=[!restReady?'REST_BUDGET_NOT_READY':'',!sessionReady?'FYERS_SESSION_NOT_RESTORED':'',!strategyLedgerRuntimeReady?'STRATEGY_LEDGER_NOT_READY':''].filter(Boolean).join(',');
   console.info('GV2VPD startup readiness resolved.',JSON.stringify({startupState,restBudgetReady:restReady,sharedSessionRestored:sessionReady,authenticated:authReady(),socketConnected:connected,at:new Date().toISOString()}));
 }
 void startWorkstation();
