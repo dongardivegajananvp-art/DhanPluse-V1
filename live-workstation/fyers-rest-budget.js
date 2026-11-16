@@ -5,7 +5,11 @@ export function isValidFyersRecoveryPayload(pathname, payload) {
   if (pathname === '/data/options-chain-v3') {
     return Array.isArray(payload.data?.optionsChain) && payload.data.optionsChain.length > 0;
   }
-  if (pathname.startsWith('/api/v3/')) return Boolean(payload.data && typeof payload.data === 'object');
+  if (pathname === '/api/v3/screeners/config') return Array.isArray(payload.data?.screeners_standard);
+  if (pathname === '/api/v3/screeners/standard') {
+    return Array.isArray(payload.data?.header) && Array.isArray(payload.data?.body);
+  }
+  if (pathname === '/api/v3/positions') return Boolean(payload.data && typeof payload.data === 'object');
   return false;
 }
 
