@@ -35,16 +35,6 @@ function ema(values, period) {
   for (let i = period; i < values.length; i++) result = values[i] * alpha + result * (1 - alpha);
   return result;
 }
-function atr14(candles) {
-  if (candles.length < 15) return NaN;
-  const rows = candles.slice(-14);
-  const ranges = rows.map((c, i) => {
-    const prev = candles[candles.length - 15 + i];
-    const pc = prev ? number(prev.close) : number(c.close);
-    return Math.max(number(c.high)-number(c.low), Math.abs(number(c.high)-pc), Math.abs(number(c.low)-pc));
-  });
-  return ranges.reduce((a,b)=>a+b,0)/ranges.length;
-}
 function istDayKey(seconds) {
   return new Date((seconds + 19800) * 1000).toISOString().slice(0,10);
 }
