@@ -41,7 +41,7 @@ test('three-candle breakout window rejects missing 5-minute intervals', () => {
     time: bucket - 300 * (3 - index)
   }));
   candles[1].time += 300;
-  const result = getCompletedCandleWindow(candles, exchangeTime);
+  const result = getCompletedCandleWindow(candles, exchangeTime, 600, 3);
   assert.equal(result.fresh, true);
   assert.equal(result.contiguous, false);
 });
@@ -52,7 +52,7 @@ test('three consecutive completed 5-minute candles are accepted', () => {
   const candles = Array.from({ length: 3 }, (_, index) => ({
     time: bucket - 300 * (3 - index)
   }));
-  const result = getCompletedCandleWindow(candles, exchangeTime);
+  const result = getCompletedCandleWindow(candles, exchangeTime, 600, 3);
   assert.equal(result.contiguous, true);
 });
 
