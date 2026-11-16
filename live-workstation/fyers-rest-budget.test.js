@@ -97,18 +97,19 @@ test('after cooldown only the previously blocked endpoint can perform the single
   clock += 60_001;
 
   const otherEndpoint = await request('https://api-t1.fyers.in/api/v3/positions');
-  assert.equal(otherEndpoint.status, 200);
-  assert.equal(sent, 1, 'normal traffic can resume after the provider retry window');
-  assert.equal(cleared, false, 'another endpoint does not clear the blocked endpoint circuit history');
+  assert.equal(otherEndpoint.status, 429);
+  assert.equal(sent, 0, 'other endpoints stay locally blocked after the cooldown expires');
+  assert.equal(cleared, false, 'another endpoint cannot clear the blocked endpoint circuit');
+  assert.equal(request.getStatus().recoveryProbeRequired, true);
 
   const recoveryProbe = await request('https://api-t1.fyers.in/api/v3/screeners/standard');
   assert.equal(recoveryProbe.status, 200);
-  assert.equal(sent, 2);
+  assert.equal(sent, 1);
   assert.equal(cleared, true, 'the originally blocked endpoint clears only after its own successful probe');
 
   const normalTraffic = await request('https://api-t1.fyers.in/api/v3/orders');
   assert.equal(normalTraffic.status, 200);
-  assert.equal(sent, 3);
+  assert.equal(sent, 2);
 });
 
 test('queue overflow is rejected locally instead of accumulating REST backlog', async () => {
@@ -132,4 +133,39 @@ test('queue overflow is rejected locally instead of accumulating REST backlog', 
   assert.equal(sent, 1);
   release();
   assert.equal((await first).status, 200);
+});
+
+
+test('expired cooldown survives restart and still requires the original endpoint probe', async () => {
+  let clock = 4_000_000;
+  let sent = 0;
+  const persisted = {
+    blockedUntil: new Date(clock + 1000).toISOString(),
+    cooldownReason: 'CLOUDFLARE_1015',
+    cooldownPathname: '/data/quotes',
+    cooldownGeneration: 3,
+    consecutiveCloudflareBlocks: 2,
+    consecutiveRateLimitBlocks: 0
+  };
+  const restarted = createFyersDataApiBudget({
+    allApiPaths: true,
+    now: () => clock,
+    fetchImpl: async () => {
+      sent += 1;
+      return new Response(JSON.stringify({ s: 'ok' }), { status: 200 });
+    }
+  });
+  assert.equal(restarted.restoreStatus(persisted), true);
+  clock += 2000;
+
+  const wrongPath = await restarted('https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX');
+  assert.equal(wrongPath.status, 429);
+  assert.equal(sent, 0);
+  assert.equal(restarted.getStatus().recoveryProbeRequired, true);
+
+  const originalPathProbe = await restarted('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ANIFTY50-INDEX');
+  assert.equal(originalPathProbe.status, 200);
+  assert.equal(sent, 1);
+  assert.equal(restarted.getStatus().cooldownActive, false);
+  assert.equal(restarted.getStatus().recoveryProbeRequired, false);
 });
