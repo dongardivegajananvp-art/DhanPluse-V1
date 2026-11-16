@@ -156,7 +156,7 @@ let fyersRestCooldownUntil=0;
 let fyersRestCooldownReason='';
 let fyersRestCooldownPath='';
 let fyersRest429Count=0;
-const FYERS_REST_MIN_INTERVAL_MS=1500;
+const FYERS_REST_MIN_INTERVAL_MS=4000;
 const FYERS_REST_MAX_COOLDOWN_MS=60*60*1000;
 function fyersRetryAfterMs(response){const raw=String(response.headers?.get?.('retry-after')||'').trim();if(!raw)return 0;const seconds=Number(raw);if(Number.isFinite(seconds)&&seconds>=0)return seconds*1000;const date=Date.parse(raw);return Number.isFinite(date)?Math.max(0,date-Date.now()):0;}
 function fyersCooldownResponse(){const retryAfterMs=Math.max(1,fyersRestCooldownUntil-Date.now()),retryAfterSeconds=Math.max(1,Math.ceil(retryAfterMs/1000));return new Response(JSON.stringify({s:'error',message:'FYERS REST cooldown active; no upstream request was sent.',retryAfterSeconds,cooldownReason:fyersRestCooldownReason}),{status:429,headers:{'content-type':'application/json','retry-after':String(retryAfterSeconds),'x-gv2vpd-fyers-cooldown':'active'}});}
@@ -384,11 +384,20 @@ const socketFeedWatchdog=setInterval(()=>{
   if(!staleSymbols.length||Date.now()-lastSubscriptionRecoveryAt<30000)return;
   lastSubscriptionRecoveryAt=Date.now();
   const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
-  if(socket&&connected&&freshIndexes.length<BASE_SUBSCRIPTIONS.length){
-    console.warn('FYERS index tick heartbeat missed; reapplying subscriptions on existing socket.',JSON.stringify({freshIndexCount:freshIndexes.length,requiredIndexCount:BASE_SUBSCRIPTIONS.length,recoveryAt:new Date().toISOString()}));
-    syncSocketSubscriptions({force:true,reason:'fresh_tick_watchdog'});
+  if(socket&&connected){
+    if(freshIndexes.length<BASE_SUBSCRIPTIONS.length){
+      console.warn('FYERS index tick heartbeat missed; reapplying subscriptions on existing socket.',JSON.stringify({freshIndexCount:freshIndexes.length,requiredIndexCount:BASE_SUBSCRIPTIONS.length,recoveryAt:new Date().toISOString()}));
+      syncSocketSubscriptions({force:true,reason:'fresh_tick_watchdog'});
+    }
+    // A connected WebSocket is the primary market-data channel. Never fan out
+    // REST quote recovery across dozens of rotating symbols while it is healthy.
+    return;
   }
-  void recoverStaleSubscriptionsViaQuotes(staleSymbols);
+  // Disconnected fallback is deliberately narrow: indexes plus the selected chart
+  // instrument only. The old 50-symbol batches caused Cloudflare 1015 rate limits.
+  const recoverySymbols=[...new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[])])]
+    .filter(symbol=>staleSymbols.includes(symbol)).slice(0,4);
+  if(recoverySymbols.length)void recoverStaleSubscriptionsViaQuotes(recoverySymbols);
 },5000);
 socketFeedWatchdog.unref?.();
 const automaticStrategyScanTimer=setInterval(()=>{void runAutomaticStrategyScan();},3500);
@@ -592,8 +601,8 @@ async function processPendingStrategyCandidate(candidate){
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_contract_rejected'});return true;
   }
   const [underlyingHistory,optionHistory]=await Promise.all([
-   loadGainerHistory(candidate.futureSymbol,{force:true}),
-   loadGainerHistory(candidate.contract.symbol,{force:true})
+   loadGainerHistory(candidate.futureSymbol),
+   loadGainerHistory(candidate.contract.symbol)
   ]);
   const currentOptionTick=lastTicks.get(candidate.contract.symbol),currentUnderlyingTick=lastTicks.get(candidate.futureSymbol);
   if(!freshTick(currentOptionTick)||!freshTick(currentUnderlyingTick))return false;
