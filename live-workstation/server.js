@@ -128,7 +128,11 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!socket||!connected)return {subscribed:0,removed:0};
   let subscriptionError='';
   let pendingFnoCursor=null;
-  if(fnoUniverseRows.length){
+  // When an MCX future is selected, isolate the live socket to that MCX future
+  // and its verified option candidates. NSE indices/F&O rotation are irrelevant
+  // to the MCX workstation view and can consume the Standard-plan symbol budget.
+  const mcxOnlyMode=Boolean(mcxFutureRoot(selectedSymbol));
+  if(!mcxOnlyMode&&fnoUniverseRows.length){
     const pinned=[selectedSymbol,selectedOptionSymbol,...strategyOptionSymbols,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol])].filter(Boolean);
     try{
       const batch=selectFairSubscriptionBatch({baseSymbols:BASE_SUBSCRIPTIONS,pinnedSymbols:pinned,universeSymbols:fnoUniverseRows.map(x=>x.futureSymbol),cursor:fnoUniverseCursor,limit:FYERS_DATA_SYMBOL_LIMIT});
@@ -139,8 +143,12 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
       fnoUniverseError='F&O subscription window unavailable: '+String(error?.message||error).slice(0,140);
       return{subscribed:0,removed:0,error:fnoUniverseError};
     }
+  }else if(mcxOnlyMode){
+    fnoScanSubscriptionSymbols=[];
   }
-  const wanted=new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...strategyOptionSymbols,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol]).filter(Boolean),...fnoScanSubscriptionSymbols]);
+  const wanted=mcxOnlyMode
+    ?new Set([selectedSymbol,selectedOptionSymbol,...mcxOptionCandidateSymbols].filter(Boolean))
+    :new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...strategyOptionSymbols,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol]).filter(Boolean),...fnoScanSubscriptionSymbols]);
   if(wanted.size>FYERS_DATA_SYMBOL_LIMIT){
     fnoScanSubscriptionSymbols=[];
     fnoUniverseError='FYERS account-wide subscription reserve exceeded; F&O scan window held fail-closed';
@@ -169,7 +177,7 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
       socket.mode(socket.FullMode);
       socket.subscribe(add);
       for(const symbol of add)subscribedSymbols.add(symbol);
-      console.info('FYERS market subscriptions requested.',JSON.stringify({reason,count:add.length,totalWanted:wanted.size,accountWideReserve:FYERS_DATA_SYMBOL_LIMIT,symbols:add}));
+      console.info('FYERS market subscriptions requested.',JSON.stringify({reason,marketMode:mcxOnlyMode?'MCX_ONLY':'NSE_FNO',count:add.length,totalWanted:wanted.size,accountWideReserve:FYERS_DATA_SYMBOL_LIMIT,symbols:add}));
     }catch(e){subscriptionError='FYERS subscribe failed: '+String(e?.message||e).slice(0,140);console.error(subscriptionError);}
   }
   if(subscriptionError){fnoScanSubscriptionSymbols=[];fnoUniverseError=subscriptionError;return{subscribed:0,removed:remove.length,error:subscriptionError};}
@@ -434,7 +442,8 @@ async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
   lastRestQuoteRecoveryAt = Date.now();
   // After a persisted quote-path block expires, probe only the original endpoint
   // with the three required indexes; never fan out the whole stale F&O window.
-  const unique = [...new Set(quoteRecoveryProbe ? BASE_SUBSCRIPTIONS : staleSymbols)].filter(Boolean);
+  const quoteProbeSymbols=mcxFutureRoot(selectedSymbol)?[selectedSymbol]:BASE_SUBSCRIPTIONS;
+  const unique = [...new Set(quoteRecoveryProbe ? quoteProbeSymbols : staleSymbols)].filter(Boolean);
   let accepted = 0, rejected = 0;
   for (let i = 0; i < unique.length; i += 50) {
     const currentRestStatus = fetchWithFyersBudget.getStatus();
@@ -488,7 +497,8 @@ async function recoverFyersRestEndpoint(pathname){
   let url='';
   const now=Math.floor(Date.now()/1000);
   if(pathname==='/data/history'){
-    const params=new URLSearchParams({symbol:'NSE:NIFTY50-INDEX',resolution:'5',date_format:'0',range_from:String(now-2*86400),range_to:String(now-300),cont_flag:'1'});
+    const probeSymbol=mcxFutureRoot(selectedSymbol)?selectedSymbol:'NSE:NIFTY50-INDEX';
+    const params=new URLSearchParams({symbol:probeSymbol,resolution:'5',date_format:'0',range_from:String(now-2*86400),range_to:String(now-300),cont_flag:'1'});
     url=FYERS_DATA+'/history?'+params.toString();
   }else if(pathname==='/data/options-chain-v3'){
     const params=new URLSearchParams({symbol:'NSE:NIFTY50-INDEX',strikecount:'1',greeks:'0'});
