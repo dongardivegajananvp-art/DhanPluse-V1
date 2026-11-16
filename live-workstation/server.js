@@ -79,6 +79,34 @@ let lastSubscriptionRecoveryAt=0;
 let lastRestQuoteRecoveryAt=0;
 let selectedSymbol='';
 let selectedOptionSymbol='';
+async function restoreSelectedMcxInstrument(){
+  if(!orderRequestPool||!(await fyersCooldownStoreReady))return false;
+  try{
+    const result=await orderRequestPool.query('SELECT state_value FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-selected-mcx-instrument']);
+    let saved=result.rows?.[0]?.state_value??null;
+    if(typeof saved==='string'){try{saved=JSON.parse(saved);}catch{saved=null;}}
+    const symbol=String(saved?.symbol||'').trim().toUpperCase();
+    if(!mcxFutureRoot(symbol))return false;
+    selectedSymbol=symbol;
+    console.info('Persisted MCX instrument restored before WebSocket startup.',JSON.stringify({selectedSymbol,restoredAt:new Date().toISOString()}));
+    return true;
+  }catch(error){
+    console.error('Persisted MCX instrument restore failed; MCX selection remains unset.',String(error?.message||error).slice(0,160));
+    return false;
+  }
+}
+async function persistSelectedMcxInstrument(symbol){
+  if(!orderRequestPool||!(await fyersCooldownStoreReady))throw new Error('Durable MCX selection store unavailable; instrument selection was not activated');
+  if(mcxFutureRoot(symbol)){
+    await orderRequestPool.query(
+      `INSERT INTO gv2vpd_runtime_state (state_key,state_value,updated_at) VALUES ($1,$2::jsonb,NOW())
+       ON CONFLICT (state_key) DO UPDATE SET state_value=EXCLUDED.state_value,updated_at=NOW()`,
+      ['gv2vpd-live-workstation-selected-mcx-instrument',JSON.stringify({symbol,updatedAt:new Date().toISOString()})]
+    );
+  }else{
+    await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-selected-mcx-instrument']);
+  }
+}
 let lastTicks=new Map();
 const nseTicks=new Map(),mcxTicks=new Map();
 const usedOrderRequestIds=new Set();
@@ -603,7 +631,23 @@ app.get('/api/health',async(_req,res)=>{
 });
 app.get('/api/strategy-scan',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.status(401).json({error:'FYERS session unavailable',...strategyScanSnapshot()});await refreshStrategyActivePlans();res.json(strategyScanSnapshot());});
 app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,underlying:row.underlyingSymbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
-app.post('/api/select-symbol',(req,res)=>{const symbol=String(req.body?.symbol||'').trim();if(!/^(NSE|BSE):[A-Z0-9&_.-]{2,48}(?:-(EQ|INDEX)|[0-9]{2}[A-Z0-9]+FUT)$/.test(symbol)&&!/^MCX:[A-Z0-9&_.-]{3,48}$/.test(symbol))return res.status(400).json({error:'Invalid FYERS NSE/BSE cash-index or MCX contract symbol'});const instrumentChanged=symbol!==selectedSymbol;selectedSymbol=symbol;if(instrumentChanged){selectedOptionSymbol='';mcxOptionCandidateSymbols=[];}syncSocketSubscriptions();res.json({selectedSymbol,exchange:symbol.split(':')[0],historyFetch:'on-demand-only'});});
+app.post('/api/select-symbol',async(req,res)=>{
+  const symbol=String(req.body?.symbol||'').trim().toUpperCase();
+  if(!/^(NSE|BSE):[A-Z0-9&_.-]{2,48}(?:-(EQ|INDEX)|[0-9]{2}[A-Z0-9]+FUT)$/.test(symbol)&&!/^MCX:[A-Z0-9&_.-]{3,48}$/.test(symbol))return res.status(400).json({error:'Invalid FYERS NSE/BSE cash-index or MCX contract symbol'});
+  const previousSymbol=selectedSymbol;
+  try{
+    await persistSelectedMcxInstrument(symbol);
+  }catch(error){
+    return res.status(503).json({error:String(error?.message||error).slice(0,180),selectedSymbol:previousSymbol||null});
+  }
+  const instrumentChanged=symbol!==selectedSymbol;
+  selectedSymbol=symbol;
+  if(instrumentChanged){selectedOptionSymbol='';mcxOptionCandidateSymbols=[];}
+  const subscription=syncSocketSubscriptions();
+  if(subscription.error)return res.status(503).json({error:subscription.error,selectedSymbol});
+  console.info('GV2VPD chart instrument selected and MCX mode persisted.',JSON.stringify({selectedSymbol,marketMode:mcxFutureRoot(selectedSymbol)?'MCX_ONLY':'NSE_FNO',persisted:mcxFutureRoot(selectedSymbol),at:new Date().toISOString()}));
+  res.json({selectedSymbol,exchange:symbol.split(':')[0],historyFetch:'on-demand-only',marketMode:mcxFutureRoot(selectedSymbol)?'MCX_ONLY':'NSE_FNO'});
+});
 const historyCache=new Map();
 const gainerHistoryCache=new Map();
 const gainerHistoryRetry=new Map();
@@ -1168,7 +1212,9 @@ async function restoreSharedFyersSession(){
 }
 async function startWorkstation(){
   startupState='STARTING';
-  const [restReady,sessionReady]=await Promise.all([initializeFyersRestBudget(),restoreSharedFyersSession()]);
+  const restReady=await initializeFyersRestBudget();
+  await restoreSelectedMcxInstrument();
+  const sessionReady=await restoreSharedFyersSession();
   try{
     await refreshStrategyActivePlans(true);
     if(strategyOptionSymbols.size)syncSocketSubscriptions({reason:'strategy_plans_restored'});
