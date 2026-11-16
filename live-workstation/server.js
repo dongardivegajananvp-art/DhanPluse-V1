@@ -181,8 +181,24 @@ async function initializeFyersRestBudget(){
     if(typeof saved==='string'){try{saved=JSON.parse(saved);}catch{saved=null;}}
     if(saved&&fetchWithFyersBudget.restoreStatus(saved)){
       console.warn('FYERS REST cooldown restored from PostgreSQL; all API endpoints remain paused.',JSON.stringify(fetchWithFyersBudget.getStatus()));
-    }else if(saved){
-      await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-fyers-rest-cooldown']);
+    }else{
+      if(saved)await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-fyers-rest-cooldown']);
+      // One-time deployment bridge: preserve a known active provider block across
+      // the first restart onto the durable-cooldown release. Never probe FYERS
+      // during the provider's Retry-After window just because the old process
+      // held its cooldown only in memory.
+      const startupUntil=Date.parse(String(process.env.FYERS_REST_STARTUP_COOLDOWN_UNTIL||''));
+      if(Number.isFinite(startupUntil)&&startupUntil>Date.now()&&startupUntil-Date.now()<=FYERS_REST_MAX_COOLDOWN_MS){
+        const seed={blockedUntil:new Date(startupUntil).toISOString(),cooldownUntil:startupUntil,cooldownReason:'CLOUDFLARE_1015',cooldownPathname:'/data/quotes',cooldownGeneration:1,consecutiveCloudflareBlocks:1,consecutiveRateLimitBlocks:0};
+        if(fetchWithFyersBudget.restoreStatus(seed)){
+          await orderRequestPool.query(
+            `INSERT INTO gv2vpd_runtime_state (state_key,state_value,updated_at) VALUES ($1,$2::jsonb,NOW())
+             ON CONFLICT (state_key) DO UPDATE SET state_value=EXCLUDED.state_value,updated_at=NOW()`,
+            ['gv2vpd-live-workstation-fyers-rest-cooldown',JSON.stringify(seed)]
+          );
+          console.warn('FYERS REST startup cooldown seeded and persisted before deployment recovery.',JSON.stringify(fetchWithFyersBudget.getStatus()));
+        }
+      }
     }
     fyersRestBudgetReady=true;
     console.info('FYERS REST budget ready.',JSON.stringify({allApiPaths:true,minIntervalMs:FYERS_REST_MIN_INTERVAL_MS,maxRequestsPerMinute:15,maxQueuedRequests:24,persistence:'POSTGRESQL',restoredCooldown:Boolean(saved&&fetchWithFyersBudget.getStatus().cooldownActive)}));
