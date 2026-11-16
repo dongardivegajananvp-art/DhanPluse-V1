@@ -209,3 +209,37 @@ test('same-endpoint HTTP 200 with an FYERS error envelope does not clear the rec
   assert.equal(request.getStatus().cooldownActive, true);
   assert.equal(request.getStatus().recoveryProbePathname, '/data/history');
 });
+
+
+test('priority queue runs live and option verification requests ahead of scanner history backlog', async () => {
+  let releaseFirst;
+  const firstGate = new Promise(resolve => { releaseFirst = resolve; });
+  const sent = [];
+  const request = createFyersDataApiBudget({
+    allApiPaths: true,
+    minIntervalMs: 0,
+    maxRequestsPerMinute: 15,
+    sleep: async () => {},
+    fetchImpl: async url => {
+      const path = new URL(url).pathname;
+      sent.push(path);
+      if (sent.length === 1) await firstGate;
+      return new Response(JSON.stringify({ s: 'ok', d: [] }), { status: 200 });
+    }
+  });
+
+  const active = request('https://api-t1.fyers.in/api/v3/orders', { priority: 1 });
+  await new Promise(resolve => setImmediate(resolve));
+  const scannerHistory = request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ', { priority: 10 });
+  const optionChain = request('https://api-t1.fyers.in/data/options-chain-v3?symbol=NSE%3ANIFTY50-INDEX', { priority: 80 });
+  const liveQuotes = request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ANIFTY50-INDEX', { priority: 100 });
+  releaseFirst();
+  const results = await Promise.all([active, scannerHistory, optionChain, liveQuotes]);
+  assert.ok(results.every(response => response.status === 200));
+  assert.deepEqual(sent, [
+    '/api/v3/orders',
+    '/data/quotes',
+    '/data/options-chain-v3',
+    '/data/history'
+  ]);
+});
