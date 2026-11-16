@@ -48,7 +48,7 @@ export function validateOptionPremiumTick(tick, contract, now = Date.now(), maxA
 }
 
 export function validateOptionCandles(candles, tick, contract, now = Date.now()) {
-  if (!Array.isArray(candles) || candles.length < 21) return { ok: false, reason: 'At least 21 completed FYERS option candles are required for the premium breakout/ATR window' };
+  if (!Array.isArray(candles) || candles.length < 3) return { ok: false, reason: 'Three completed FYERS option candles are required: prior level, breakout, and one confirmation/retest candle' };
   const rows = candles.slice();
   const exchangeTime = Number(tick?.exchangeTime);
   if (!Number.isFinite(exchangeTime) || exchangeTime <= 0 || now / 1000 - exchangeTime < -3 || now / 1000 - exchangeTime > 10) return { ok: false, reason: 'Option candle reference tick is missing, future-dated, or stale' };
@@ -65,13 +65,13 @@ export function validateOptionCandles(candles, tick, contract, now = Date.now())
     if (![open, high, low, close].every(value => isTickAligned(value, contract?.tickSize))) return { ok: false, reason: 'FYERS option candle price does not align with official contract tick size' };
   }
   const completed = Number(rows.at(-1).time) === currentBucket ? rows.slice(0, -1) : rows;
-  if (completed.length < 21) return { ok: false, reason: 'FYERS option candle window includes an unfinished candle or has fewer than 21 completed candles' };
-  const required = completed.slice(-21);
-  if (!required.every((candle, index) => index === 0 || isTradingCandleContiguous(Number(required[index - 1].time), Number(candle.time)))) return { ok: false, reason: 'Latest 21 FYERS option candles contain a missing 5-minute interval inside a trading session' };
+  if (completed.length < 3) return { ok: false, reason: 'FYERS option candle window includes an unfinished candle or has fewer than 3 completed candles' };
+  const required = completed.slice(-3);
+  if (!required.every((candle, index) => index === 0 || isTradingCandleContiguous(Number(required[index - 1].time), Number(candle.time)))) return { ok: false, reason: 'Latest 3 FYERS option candles contain a missing 5-minute interval inside a trading session' };
   const latest = completed.at(-1);
   const age = exchangeTime - (Number(latest.time) + 300);
   if (!Number.isFinite(exchangeTime) || age < -3 || age > 600 || now / 1000 - (Number(latest.time) + 300) > 900) return { ok: false, reason: 'Latest completed FYERS option candle is stale or ahead of the exchange tick' };
-  return { ok: true, reason: '', completedCandles: completed.slice(-21), latestCompletedTime: Number(latest.time) };
+  return { ok: true, reason: '', completedCandles: completed.slice(-3), latestCompletedTime: Number(latest.time) };
 }
 
 export function validateOptionContractIdentity(candidate, official, now = Date.now()) {
