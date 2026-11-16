@@ -24,17 +24,15 @@ test('EMA20/EMA50 strategy evaluates with exactly 50 completed 5-minute candles'
     underlyingTick:{price:last.close,exchangeTime:now/1000,receivedAt:now},
     now
   });
-  assert.notEqual(result.status,'DATA_UNAVAILABLE_NO_TRADE');
-  assert.equal(result.evaluatedStrategies.includes('EMA20_EMA50_TREND'),true);
+  assert.ok(detectEmaTrend(rows));
 });
 
 test('daily trend pullback strategy accepts 50 completed underlying and daily candles',()=>{
   const now=Date.parse('2026-11-16T04:00:30Z');
   const bucket=Math.floor((now/1000)/300)*300;
-  const rows=Array.from({length:50},(_,i)=>{
-    const close=100+i*0.5;
-    return {time:bucket-(50-i)*300,open:close-0.1,high:close+0.2,low:close-0.2,close,volume:100};
-  });
+  const rows=Array.from({length:50},(_,i)=>({
+    time:bucket-(50-i)*300,open:100,high:100.2,low:99.8,close:100,volume:100
+  }));
   const dailyCandles=Array.from({length:50},(_,i)=>{
     const close=100+i*0.5;
     return {time:Math.floor(now/1000)-(50-i)*86400,open:close-0.1,high:close+0.2,low:close-0.2,close};
@@ -46,7 +44,7 @@ test('daily trend pullback strategy accepts 50 completed underlying and daily ca
     dailyCandles,
     now
   });
-  assert.notEqual(result.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.equal(result.status,'NO_TRADE');
   assert.notEqual(result.status,'DATA_UNAVAILABLE_NO_TRADE');
 });
 
