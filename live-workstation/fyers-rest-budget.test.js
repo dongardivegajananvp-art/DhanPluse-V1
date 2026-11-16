@@ -78,7 +78,7 @@ test('after cooldown only the previously blocked endpoint can perform the single
     sleep: async ms => { clock += ms; },
     fetchImpl: async () => {
       sent += 1;
-      return new Response(JSON.stringify({ s: 'ok' }), { status: 200 });
+      return new Response(JSON.stringify({ s: 'ok', data: { header: [], body: [] } }), { status: 200 });
     },
     onCooldownChange: async state => {
       if (state.cooldownUntil === 0) cleared = true;
@@ -178,6 +178,10 @@ test('recovery payload validation is endpoint-specific and rejects HTTP-200 erro
   assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'ok', candles: [] }), false);
   assert.equal(isValidFyersRecoveryPayload('/data/options-chain-v3', { s: 'ok', data: { optionsChain: [{ symbol: 'NSE:TESTCE' }] } }), true);
   assert.equal(isValidFyersRecoveryPayload('/data/options-chain-v3', { s: 'ok', data: { optionsChain: [] } }), false);
+  assert.equal(isValidFyersRecoveryPayload('/api/v3/screeners/config', { s: 'ok', data: { screeners_standard: [] } }), true);
+  assert.equal(isValidFyersRecoveryPayload('/api/v3/screeners/standard', { s: 'ok', data: { header: [], body: [] } }), true);
+  assert.equal(isValidFyersRecoveryPayload('/api/v3/screeners/standard', { s: 'ok', data: {} }), false);
+  assert.equal(isValidFyersRecoveryPayload('/api/v3/positions', { s: 'ok', data: {} }), true);
   assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'error', message: 'invalid symbol' }), false);
 });
 
@@ -242,4 +246,52 @@ test('priority queue runs live and option verification requests ahead of scanner
     '/data/options-chain-v3',
     '/data/history'
   ]);
+});
+
+
+test('expired screener cooldown restores and probes only the persisted safe GET URL', async () => {
+  let clock = 6_000_000;
+  const sentUrls = [];
+  const request = createFyersDataApiBudget({
+    allApiPaths: true,
+    now: () => clock,
+    sleep: async ms => { clock += ms; },
+    fetchImpl: async url => {
+      sentUrls.push(String(url));
+      return new Response(JSON.stringify({ s: 'ok', data: { header: [], body: [] } }), { status: 200 });
+    },
+    onCooldownChange: async () => true
+  });
+  const probeUrl = 'https://api-t1.fyers.in/api/v3/screeners/standard?screener_id=futures-gainers&universe=fw002&fields=t0_close_ltp%2Ct0_per_change';
+  const persisted = {
+    blockedUntil: new Date(clock - 1).toISOString(),
+    cooldownReason: 'CLOUDFLARE_1015',
+    cooldownPathname: '/api/v3/screeners/standard',
+    cooldownProbeUrl: probeUrl,
+    cooldownProbeMethod: 'GET',
+    cooldownGeneration: 11,
+    consecutiveCloudflareBlocks: 1,
+    consecutiveRateLimitBlocks: 0
+  };
+  assert.equal(request.restoreStatus(persisted), true);
+  assert.equal(request.getStatus().blockedPathname, '/api/v3/screeners/standard');
+  assert.equal(request.getStatus().recoveryProbeUrl, probeUrl);
+  const response = await request(probeUrl);
+  assert.equal(response.status, 200);
+  assert.deepEqual(sentUrls, [probeUrl]);
+  assert.equal(request.getStatus().cooldownActive, false);
+});
+
+test('unsafe or mismatched persisted probe URLs are never restored', () => {
+  let clock = 7_000_000;
+  const request = createFyersDataApiBudget({ allApiPaths: true, now: () => clock });
+  const state = {
+    blockedUntil: new Date(clock - 1).toISOString(),
+    cooldownPathname: '/api/v3/screeners/standard',
+    cooldownProbeUrl: 'https://evil.example/api/v3/screeners/standard',
+    cooldownProbeMethod: 'GET',
+    cooldownGeneration: 12
+  };
+  assert.equal(request.restoreStatus(state), true);
+  assert.equal(request.getStatus().recoveryProbeUrl, null);
 });
