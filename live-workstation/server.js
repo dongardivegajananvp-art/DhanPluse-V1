@@ -165,10 +165,10 @@ const fetchWithFyersBudget=createFyersDataApiBudget({
       await orderRequestPool.query(
         `INSERT INTO gv2vpd_runtime_state (state_key,state_value,updated_at) VALUES ($1,$2::jsonb,NOW())
          ON CONFLICT (state_key) DO UPDATE SET state_value=EXCLUDED.state_value,updated_at=NOW()`,
-        ['fyers-data-api-cooldown',JSON.stringify(value)]
+        ['gv2vpd-live-workstation-fyers-rest-cooldown',JSON.stringify(value)]
       );
     }else{
-      await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['fyers-data-api-cooldown']);
+      await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-fyers-rest-cooldown']);
     }
     return true;
   }
@@ -176,13 +176,13 @@ const fetchWithFyersBudget=createFyersDataApiBudget({
 async function initializeFyersRestBudget(){
   try{
     if(!orderRequestPool||!(await fyersCooldownStoreReady))throw new Error('Durable PostgreSQL cooldown store is unavailable');
-    const result=await orderRequestPool.query('SELECT state_value FROM gv2vpd_runtime_state WHERE state_key=$1',['fyers-data-api-cooldown']);
+    const result=await orderRequestPool.query('SELECT state_value FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-fyers-rest-cooldown']);
     let saved=result.rows?.[0]?.state_value??null;
     if(typeof saved==='string'){try{saved=JSON.parse(saved);}catch{saved=null;}}
     if(saved&&fetchWithFyersBudget.restoreStatus(saved)){
       console.warn('FYERS REST cooldown restored from PostgreSQL; all API endpoints remain paused.',JSON.stringify(fetchWithFyersBudget.getStatus()));
     }else if(saved){
-      await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['fyers-data-api-cooldown']);
+      await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-fyers-rest-cooldown']);
     }
     fyersRestBudgetReady=true;
     console.info('FYERS REST budget ready.',JSON.stringify({allApiPaths:true,minIntervalMs:FYERS_REST_MIN_INTERVAL_MS,maxRequestsPerMinute:15,maxQueuedRequests:24,persistence:'POSTGRESQL',restoredCooldown:Boolean(saved&&fetchWithFyersBudget.getStatus().cooldownActive)}));
