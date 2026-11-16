@@ -210,7 +210,7 @@ export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, sw
 }
 
 export function detectEmaTrend(rows) {
-  if (!Array.isArray(rows) || rows.length < 51) return null;
+  if (!Array.isArray(rows) || rows.length < 50) return null;
   const last=rows.at(-1), closes=rows.map(c=>number(c.close));
   const e20=ema(closes,20),e50=ema(closes,50);
   if(e20>e50&&number(last.close)>e20)
@@ -227,9 +227,9 @@ export function detectTopGainerMomentum(rows, isTopGainer=false) {
     : null;
 }
 export function detectDailyTrendPullback(rows, dailyCandles=[]) {
-  if (!Array.isArray(rows) || rows.length < 51 || !Array.isArray(dailyCandles)) return null;
+  if (!Array.isArray(rows) || rows.length < 50 || !Array.isArray(dailyCandles)) return null;
   const dailyCloses=dailyCandles.filter(validOhlcv).map(c=>number(c.close));
-  if(dailyCloses.length<51)return null;
+  if(dailyCloses.length<50)return null;
   const d20=ema(dailyCloses,20),d50=ema(dailyCloses,50);
   const closes=rows.map(c=>number(c.close)),e20=ema(closes,20),e50=ema(closes,50);
   const last=rows.at(-1),p=rows.at(-2),touch=number(p.low)<=e20*1.003&&number(p.high)>=e20*0.997;
@@ -255,9 +255,9 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   };
   // Each strategy validates only the candle history it actually consumes.
   // A gap in an older EMA50 window must not disable a valid two-candle momentum breakout.
-  consider('EMA20_EMA50_TREND',contiguousWindow(rows,51),()=>detectEmaTrend(rows));
+  consider('EMA20_EMA50_TREND',contiguousWindow(rows,50),()=>detectEmaTrend(rows));
   consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&contiguousWindow(rows,2),()=>detectTopGainerMomentum(rows,isTopGainer));
-  consider('DAILY_TREND_5M_PULLBACK',contiguousWindow(rows,51)&&Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=51,()=>detectDailyTrendPullback(rows,dailyCandles));
+  consider('DAILY_TREND_5M_PULLBACK',contiguousWindow(rows,50)&&Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50,()=>detectDailyTrendPullback(rows,dailyCandles));
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length);
   consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows));
