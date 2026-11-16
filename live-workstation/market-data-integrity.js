@@ -1,4 +1,4 @@
-const DEFAULT_MAX_AGE_MS = 15_000;
+const DEFAULT_MAX_AGE_MS = 10_000;
 const MAX_FUTURE_SKEW_SECONDS = 3;
 const MAX_DATE_EPOCH_SECONDS = 8_640_000_000_000;
 
@@ -16,7 +16,7 @@ export function exchangeTickFreshness(tick, now = Date.now(), maxAgeMs = DEFAULT
   if (exchangeAgeSeconds < -MAX_FUTURE_SKEW_SECONDS) {
     return { status: 'FUTURE', ageMs, exchangeAgeSeconds };
   }
-  if (ageMs < 0 || ageMs > maxAgeMs || exchangeAgeSeconds > 10) {
+  if (ageMs < 0 || ageMs > maxAgeMs || exchangeAgeSeconds > maxAgeMs / 1000) {
     return { status: 'STALE', ageMs, exchangeAgeSeconds };
   }
   return { status: 'FRESH', ageMs, exchangeAgeSeconds };

@@ -52,3 +52,19 @@ test('scanner runtime reports explicit blockers instead of implying readiness', 
     universeCount: 200, activeSubscriptions: 97, freshFutureTicks: 1
   }).state, 'BLOCKED_LEDGER_UNAVAILABLE');
 });
+
+test('feed freshness defaults to the same 10-second threshold as actionable ticks', () => {
+  const fixedNow = Date.parse('2026-11-16T04:00:00.000Z');
+  const freshTick = fresh('NSE:TEST', 9);
+  const staleTick = fresh('NSE:TEST', 10.5);
+  assert.equal(exchangeTickFreshness(freshTick, fixedNow).status, 'FRESH');
+  assert.equal(exchangeTickFreshness(staleTick, fixedNow).status, 'STALE');
+  assert.equal(summarizeFeedFreshness(['NSE:TEST'], new Map([['NSE:TEST', staleTick]]), fixedNow).freshCount, 0);
+});
+
+test('explicit max age applies consistently to receipt and exchange timestamps', () => {
+  const fixedNow = Date.parse('2026-11-16T04:00:00.000Z');
+  const tick = fresh('NSE:TEST', 14);
+  assert.equal(exchangeTickFreshness(tick, fixedNow, 15_000).status, 'FRESH');
+  assert.equal(exchangeTickFreshness(tick, fixedNow, 10_000).status, 'STALE');
+});
