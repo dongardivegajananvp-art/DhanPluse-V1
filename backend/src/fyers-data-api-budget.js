@@ -15,6 +15,8 @@ export function canClearFyersDataApiCooldown({
 // instead, including for requests that were already waiting in the queue.
 export function createFyersDataApiBudget({
   fetchImpl = fetch,
+  allApiPaths = false,
+  maxQueuedRequests = 24,
   now = () => Date.now(),
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   maxRequestsPerMinute = 15,
@@ -88,6 +90,19 @@ export function createFyersDataApiBudget({
     });
   }
 
+  function makeQueueFullResponse() {
+    return new Response(JSON.stringify({
+      s: 'error', message: 'FYERS REST request budget queue is full; no upstream request was sent.'
+    }), { status: 503, headers: { 'content-type': 'application/json', 'x-fyers-budget': 'queue-full' } });
+  }
+
+  function makeRecoveryProbePendingResponse() {
+    return new Response(JSON.stringify({
+      s: 'error', message: 'FYERS cooldown elapsed; waiting for one controlled probe to the previously blocked endpoint.',
+      retryAfterSeconds: 1, cooldownPathname
+    }), { status: 503, headers: { 'content-type': 'application/json', 'retry-after': '1', 'x-fyers-budget': 'probe-pending' } });
+  }
+
   function makePersistenceFailureResponse() {
     return new Response(JSON.stringify({
       s: 'error', message: 'FYERS cooldown could not be durably persisted; Data API requests are blocked fail-closed.'
@@ -132,7 +147,7 @@ export function createFyersDataApiBudget({
 
   async function run(url, init = {}) {
     const target = url instanceof URL ? new URL(url.toString()) : new URL(String(url));
-    if (target.hostname !== 'api-t1.fyers.in' || !target.pathname.startsWith('/data/')) {
+    if (target.hostname !== 'api-t1.fyers.in' || (!allApiPaths && !target.pathname.startsWith('/data/'))) {
       return fetchImpl(url, init);
     }
 
@@ -162,6 +177,7 @@ export function createFyersDataApiBudget({
 
     if (!cooldownPersistenceHealthy) return makePersistenceFailureResponse();
     if (cooldownUntil > currentTime) return makeCooldownResponse();
+    if (cooldownPathname && target.pathname !== cooldownPathname && cooldownUntil <= currentTime) return makeRecoveryProbePendingResponse();
 
     const pending = inFlightKey && inFlight.get(inFlightKey);
     if (pending) {
@@ -170,6 +186,7 @@ export function createFyersDataApiBudget({
       return result.response.clone();
     }
 
+    if (queuedRequests >= maxQueuedRequests) return makeQueueFullResponse();
     const requestPromise = (async () => {
       queuedRequests += 1;
       const current = queue.then(async () => {
@@ -178,6 +195,7 @@ export function createFyersDataApiBudget({
         // arrives must be stopped locally instead of hitting the same WAF.
         if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
         if (cooldownUntil > now()) return { response: makeCooldownResponse() };
+        if (cooldownPathname && target.pathname !== cooldownPathname && cooldownUntil <= now()) return { response: makeRecoveryProbePendingResponse() };
 
         let time = now();
         while (true) {
@@ -195,6 +213,7 @@ export function createFyersDataApiBudget({
         // A prior queued request may have opened the circuit while this one waited.
         if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
         if (cooldownUntil > now()) return { response: makeCooldownResponse() };
+        if (cooldownPathname && target.pathname !== cooldownPathname && cooldownUntil <= now()) return { response: makeRecoveryProbePendingResponse() };
 
         time = now();
         requestTimes.push(time);
@@ -267,7 +286,7 @@ export function createFyersDataApiBudget({
   run.restoreStatus = state => {
     const until = Date.parse(String(state?.blockedUntil || ''));
     if (!Number.isFinite(until) || until <= now() || until - now() > maxCooldownMs ||
-        !['/data/quotes', '/data/history', '/data/options-chain-v3'].includes(state?.cooldownPathname)) return false;
+        !(String(state?.cooldownPathname || '').startsWith('/data/') || (allApiPaths && String(state?.cooldownPathname || '').startsWith('/api/v3/')))) return false;
     cooldownPersistenceHealthy = true;
     cooldownUntil = until;
     cooldownReason = String(state.cooldownReason || 'RESTORED_COOLDOWN').slice(0, 40);
