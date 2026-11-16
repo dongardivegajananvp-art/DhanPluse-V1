@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { createFyersDataApiBudget } from './fyers-rest-budget.js';
 import { socketRecoveryDelayMs } from './socket-recovery-policy.js';
+import { shouldRestartSilentIndexFeed } from './socket-feed-watchdog.js';
 import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute } from './scanner-schedule.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
@@ -66,6 +67,8 @@ let lastSocketConnectAttemptAt=null;
 let lastSocketRecoveryAt=null;
 let socketRecoveryAttempts=0;
 let socketRecoveryTimer=null;
+let indexFeedStaleSince=0;
+let lastFreshIndexTickAt=null;
 let socketPayloadDiagnostics=0;
 let lastTickDiagnosticAt=new Map();
 let lastSubscriptionRecoveryAt=0;
@@ -301,7 +304,6 @@ function ensureSocket(){
       if(socket!==owned)return;
       connected=true;
       if(socketRecoveryTimer){clearTimeout(socketRecoveryTimer);socketRecoveryTimer=null;}
-      socketRecoveryAttempts=0;
       socketConnectCount+=1;
       lastSocketConnectAt=new Date().toISOString();
       lastSocketError='';
@@ -450,18 +452,32 @@ const socketFeedWatchdog=setInterval(()=>{
   if(!isNseRegularSession())return;
   const monitored=[...new Set([...BASE_SUBSCRIPTIONS,...fnoScanSubscriptionSymbols,...strategyOptionSymbols,...(selectedOptionSymbol?[selectedOptionSymbol]:[])])];
   const staleSymbols=monitored.filter(symbol=>!freshTick(lastTicks.get(symbol),15000));
-  if(!staleSymbols.length||Date.now()-lastSubscriptionRecoveryAt<30000)return;
-  lastSubscriptionRecoveryAt=Date.now();
   const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
   if(socket&&connected){
     if(freshIndexes.length<BASE_SUBSCRIPTIONS.length){
-      console.warn('FYERS index tick heartbeat missed; reapplying subscriptions on existing socket.',JSON.stringify({freshIndexCount:freshIndexes.length,requiredIndexCount:BASE_SUBSCRIPTIONS.length,recoveryAt:new Date().toISOString()}));
-      syncSocketSubscriptions({force:true,reason:'fresh_tick_watchdog'});
-    }
-    // A connected WebSocket is the primary market-data channel. Never fan out
-    // REST quote recovery across dozens of rotating symbols while it is healthy.
+      if(!indexFeedStaleSince)indexFeedStaleSince=Date.now();
+      if(shouldRestartSilentIndexFeed({marketOpen:true,socketConnected:true,freshIndexCount:freshIndexes.length,requiredIndexCount:BASE_SUBSCRIPTIONS.length,staleSince:indexFeedStaleSince,now:Date.now()})){
+        const previous=socket;
+        socket=null;
+        connected=false;
+        subscribedSymbols.clear();
+        if(subscriptionTransitionTimer){clearTimeout(subscriptionTransitionTimer);subscriptionTransitionTimer=null;}
+        try{if(previous&&typeof previous.close==='function')previous.close();}catch{}
+        console.warn('FYERS connected socket had no fresh index heartbeat; supervised socket restart requested.',JSON.stringify({freshIndexCount:freshIndexes.length,requiredIndexCount:BASE_SUBSCRIPTIONS.length,staleDurationMs:Date.now()-indexFeedStaleSince,at:new Date().toISOString()}));
+        scheduleSocketRecovery('silent_index_feed');
+        return;
+      }
+      if(Date.now()-lastSubscriptionRecoveryAt>=30000){
+        lastSubscriptionRecoveryAt=Date.now();
+        console.warn('FYERS index tick heartbeat missed; reapplying subscriptions before socket restart threshold.',JSON.stringify({freshIndexCount:freshIndexes.length,requiredIndexCount:BASE_SUBSCRIPTIONS.length,recoveryAt:new Date().toISOString()}));
+        syncSocketSubscriptions({force:true,reason:'fresh_tick_watchdog'});
+      }
+    }else indexFeedStaleSince=0;
+    // Never fan out REST quote recovery while the WebSocket transport is connected.
     return;
   }
+  if(!staleSymbols.length||Date.now()-lastSubscriptionRecoveryAt<30000)return;
+  lastSubscriptionRecoveryAt=Date.now();
   // Disconnected fallback is deliberately narrow: indexes plus the selected chart
   // instrument only. The old 50-symbol batches caused Cloudflare 1015 rate limits.
   const recoverySymbols=[...new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[])])]
@@ -483,7 +499,7 @@ app.get('/api/health',async(_req,res)=>{
   const fnoUniverseCoverage=summarizeFnoCoverage(fnoUniverseRows.map(row=>row.futureSymbol),fnoScanSubscriptionSymbols,fnoUniverseRows.filter(row=>freshTick(lastTicks.get(row.futureSymbol))).map(row=>row.futureSymbol));
   const strategyLedgerReady=strategyPlanStore?await strategyPlanStore.ready:false;
   const latestExchangeTime=[...lastTicks.values()].reduce((latest,tick)=>Math.max(latest,Number(tick.exchangeTime)||0),0);
-  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketConnectAttemptAt,lastSocketRecoveryAt,socketRecoveryAttempts,socketRecoveryPending:Boolean(socketRecoveryTimer),lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,requestedFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,activeWindowFreshnessPercent:fnoFeed.coveragePercent,windowCoveragePercent:fnoUniverseCoverage.requestedCoveragePercent,freshUniverseCoveragePercent:fnoUniverseCoverage.freshUniverseCoveragePercent,notRequestedFutureCount:fnoUniverseCoverage.notRequestedCount,freshUniverseFutureCount:fnoUniverseCoverage.freshUniverseCount,coverage:fnoUniverseCoverage,lastRotationAt:lastFnoRotationAt,rotationCount:fnoRotationCount,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:(()=>{const status=fetchWithFyersBudget.getStatus();return{active:status.cooldownActive,reason:status.cooldownReason||null,retryAfterSeconds:status.retryAfterSeconds,blockedUntil:status.blockedUntil,consecutive429:status.consecutiveCloudflareBlocks+status.consecutiveRateLimitBlocks,persistenceReady:fyersRestBudgetReady,persistenceHealthy:status.cooldownPersistenceHealthy,queuedRequests:status.queuedRequests};})(),orderMode:'DISABLED'});
+  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketConnectAttemptAt,lastSocketRecoveryAt,socketRecoveryAttempts,socketRecoveryPending:Boolean(socketRecoveryTimer),indexFeedStaleSince:indexFeedStaleSince?new Date(indexFeedStaleSince).toISOString():null,lastFreshIndexTickAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,requestedFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,activeWindowFreshnessPercent:fnoFeed.coveragePercent,windowCoveragePercent:fnoUniverseCoverage.requestedCoveragePercent,freshUniverseCoveragePercent:fnoUniverseCoverage.freshUniverseCoveragePercent,notRequestedFutureCount:fnoUniverseCoverage.notRequestedCount,freshUniverseFutureCount:fnoUniverseCoverage.freshUniverseCount,coverage:fnoUniverseCoverage,lastRotationAt:lastFnoRotationAt,rotationCount:fnoRotationCount,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:(()=>{const status=fetchWithFyersBudget.getStatus();return{active:status.cooldownActive,reason:status.cooldownReason||null,retryAfterSeconds:status.retryAfterSeconds,blockedUntil:status.blockedUntil,consecutive429:status.consecutiveCloudflareBlocks+status.consecutiveRateLimitBlocks,persistenceReady:fyersRestBudgetReady,persistenceHealthy:status.cooldownPersistenceHealthy,queuedRequests:status.queuedRequests};})(),orderMode:'DISABLED'});
 });
 app.get('/api/strategy-scan',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.status(401).json({error:'FYERS session unavailable',...strategyScanSnapshot()});await refreshStrategyActivePlans();res.json(strategyScanSnapshot());});
 app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,underlying:row.underlyingSymbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
