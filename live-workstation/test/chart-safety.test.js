@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isHistoryCacheFresh } from '../public/chart-safety.js';
+import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isFreshExchangeTick, isHistoryCacheFresh } from '../public/chart-safety.js';
 
 test('history cache expires instead of remaining valid indefinitely', () => {
   const now = 1_800_000_000_000;
@@ -104,4 +104,15 @@ test('default candle window preserves 21-bar continuity for existing MCX checks'
   assert.equal(getCompletedCandleWindow(candles, exchangeTime).contiguous, true);
   candles[10].time += 300;
   assert.equal(getCompletedCandleWindow(candles, exchangeTime).contiguous, false);
+});
+
+test('index freshness requires both recent receipt and fresh exchange timestamp', () => {
+  const now = 1_800_000_000_000;
+  const tick = { receivedAt: now - 1_000, exchangeTime: now / 1000 - 1 };
+  assert.equal(isFreshExchangeTick(tick, now), true);
+  assert.equal(isFreshExchangeTick({ ...tick, receivedAt: now - 11_000 }, now), false);
+  assert.equal(isFreshExchangeTick({ ...tick, exchangeTime: now / 1000 - 11 }, now), false);
+  assert.equal(isFreshExchangeTick({ ...tick, receivedAt: now + 1 }, now), false);
+  assert.equal(isFreshExchangeTick({ ...tick, exchangeTime: now / 1000 + 4 }, now), false);
+  assert.equal(isFreshExchangeTick({ exchangeTime: tick.exchangeTime }, now), false);
 });
