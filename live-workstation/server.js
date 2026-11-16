@@ -426,7 +426,9 @@ async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
   const unique = [...new Set(quoteRecoveryProbe ? BASE_SUBSCRIPTIONS : staleSymbols)].filter(Boolean);
   let accepted = 0, rejected = 0;
   for (let i = 0; i < unique.length; i += 50) {
-    if (fetchWithFyersBudget.getStatus().cooldownActive) break;
+    const currentRestStatus = fetchWithFyersBudget.getStatus();
+    if (currentRestStatus.cooldownActive &&
+        !(currentRestStatus.recoveryProbeRequired && currentRestStatus.recoveryProbePathname === '/data/quotes')) break;
     const batch = unique.slice(i, i + 50);
     try {
       const url = FYERS_DATA + '/quotes?symbols=' + encodeURIComponent(batch.join(','));
