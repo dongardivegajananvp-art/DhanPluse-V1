@@ -601,8 +601,8 @@ async function processPendingStrategyCandidate(candidate){
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_contract_rejected'});return true;
   }
   const [underlyingHistory,optionHistory]=await Promise.all([
-   loadGainerHistory(candidate.futureSymbol,{force:true}),
-   loadGainerHistory(candidate.contract.symbol,{force:true})
+   loadGainerHistory(candidate.futureSymbol),
+   loadGainerHistory(candidate.contract.symbol)
   ]);
   const currentOptionTick=lastTicks.get(candidate.contract.symbol),currentUnderlyingTick=lastTicks.get(candidate.futureSymbol);
   if(!freshTick(currentOptionTick)||!freshTick(currentUnderlyingTick))return false;
