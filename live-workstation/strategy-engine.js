@@ -280,12 +280,12 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const premiumLevel=number(prior.high);
   const breakoutOccurred=number(breakout.close)>premiumLevel;
   const confirmedAfterBreakout=number(confirmation.close)>premiumLevel;
-  const retestHeld=number(confirmation.low)<=premiumLevel*1.002&&confirmedAfterBreakout;
-  if(!breakoutOccurred||(!confirmedAfterBreakout&&!retestHeld))return{status:'NO_TRADE',reason:'Option premium breakout must be followed by one completed candle confirming above or retesting and holding the breakout level',strategy:chosen.strategy};
-  const swingLow=Math.min(number(breakout.low),number(confirmation.low));
+  if(!breakoutOccurred||!confirmedAfterBreakout)return{status:'NO_TRADE',reason:'Option premium breakout must be followed by one completed candle confirming above or retesting and holding the breakout level',strategy:chosen.strategy};
+  const confirmationType=number(confirmation.low)<=premiumLevel*1.002?'ONE_CANDLE_RETEST':'ONE_CANDLE_HOLD';
+  const swingLow=number(confirmation.low);
   const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow});
   if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy};
-  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:premiumLast.time,optionConfirmation:'ONE_CANDLE_AFTER_BREAKOUT',contract:contract.symbol};
+  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:premiumLast.time,optionConfirmation:confirmationType,contract:contract.symbol};
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {
   if(!Array.isArray(activeTrades)||!candidateTrade||!candidateTrade.underlying||!candidateTrade.contract)return{ok:false,reason:'Active trade state or candidate identity is invalid'};
