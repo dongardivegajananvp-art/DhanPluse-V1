@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createStrategyPlanStore } from './strategy-plan-store.js';
+import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy-plan-store.js';
 
 class FakePool {
   constructor() { this.plans = []; this.closed = false; }
@@ -135,4 +135,32 @@ test('ledger rejects expired contracts, unknown strategies and stale confirmatio
   assert.match((await store.saveConfirmedPlan(fixture(now,{strategy:'UNVERIFIED_STRATEGY'}),now)).reason,/allowlist/i);
   assert.match((await store.saveConfirmedPlan(fixture(now,{optionCandleTime:String(now/1000-1200)}),now)).reason,/recent, completed/i);
   await store.close();
+});
+
+test('active plan lifecycle remains pending on stale or missing option ticks', () => {
+  const now = Date.parse('2026-11-16T04:00:00Z');
+  const plan = { expiry: '2026-11-26', stop_loss: 98.5, target: 103.15 };
+  assert.equal(evaluateActivePlanLifecycle(plan, null, now).status, 'STALE_REVALIDATION_REQUIRED');
+  assert.equal(evaluateActivePlanLifecycle(plan, { price: 97, receivedAt: now - 11_000, exchangeTime: now / 1000 }, now).status, 'STALE_REVALIDATION_REQUIRED');
+});
+
+test('active plan lifecycle closes only on a fresh exact-contract stop or target quote', () => {
+  const now = Date.parse('2026-11-16T04:00:00Z');
+  const plan = { expiry: '2026-11-26', stop_loss: 98.5, target: 103.15 };
+  const tick = price => ({ price, receivedAt: now, exchangeTime: now / 1000 });
+  assert.equal(evaluateActivePlanLifecycle(plan, tick(98.5), now).status, 'STOP_LOSS_HIT');
+  assert.equal(evaluateActivePlanLifecycle(plan, tick(103.2), now).status, 'TARGET_HIT');
+  assert.equal(evaluateActivePlanLifecycle(plan, tick(101), now).status, 'ACTIVE');
+});
+
+test('active plan lifecycle closes expired contracts even without a live quote', () => {
+  const now = Date.parse('2026-11-27T04:00:00Z');
+  const plan = { expiry: '2026-11-26', stop_loss: 98.5, target: 103.15 };
+  assert.equal(evaluateActivePlanLifecycle(plan, null, now).status, 'EXPIRED');
+});
+
+test('active plan lifecycle fails closed when persisted risk values are malformed', () => {
+  const now = Date.parse('2026-11-16T04:00:00Z');
+  const plan = { expiry: '2026-11-26', stop_loss: 0, target: 103.15 };
+  assert.equal(evaluateActivePlanLifecycle(plan, { price: 100, receivedAt: now, exchangeTime: now / 1000 }, now).status, 'REVALIDATION_REQUIRED');
 });
