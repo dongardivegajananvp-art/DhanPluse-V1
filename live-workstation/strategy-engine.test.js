@@ -468,7 +468,7 @@ test('strategy candle gate accepts a normal Friday-to-Monday session boundary',(
 
 
 test('MCX nine-strategy session uses 09:00 opening range rather than NSE 09:15',()=>{
-  const now=Date.parse('2026-11-16T03:51:00Z');
+  const now=Date.parse('2026-11-16T04:56:00Z');
   const base=Math.floor(Date.parse('2026-11-16T03:30:00Z')/1000);
   const rows=[
     {time:base,open:100,high:101,low:99,close:100,volume:100},
@@ -493,7 +493,7 @@ test('MCX overnight candle continuity accepts 23:50 to next-session 09:00 with M
     time:start+i*300,open:100,high:101,low:99,close:100,volume:100
   }));
   rows.push({time:Math.floor(Date.parse('2026-11-16T03:30:00Z')/1000),open:100,high:101,low:99,close:100,volume:100});
-  const now=Date.parse('2026-11-16T03:31:00Z');
+  const now=Date.parse('2026-11-16T03:36:00Z');
   const tick={price:100,exchangeTime:now/1000,receivedAt:now};
   const mcx=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,now,sessionStartMinute:540,sessionCloseMinute:1435});
   assert.equal(mcx.status,'NO_TRADE');
