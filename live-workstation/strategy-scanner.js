@@ -35,7 +35,7 @@ export function completedDailyCandles(candles, now = Date.now(), maxAgeSeconds =
     Number(c.time) > 0 && Number(c.open) > 0 && Number(c.high) >= Math.max(Number(c.open), Number(c.close), Number(c.low)) &&
     Number(c.low) <= Math.min(Number(c.open), Number(c.close)) && istDay(c.time) < today)
     .sort((a,b) => Number(a.time) - Number(b.time));
-  if (rows.length < 51) return { candles: rows, ok: false, reason: 'At least 51 completed daily FYERS candles are required' };
+  if (rows.length < 50) return { candles: rows, ok: false, reason: 'At least 50 completed daily FYERS candles are required' };
   const latest = Number(rows.at(-1).time);
   const age = now / 1000 - latest;
   if (age < 0 || age > maxAgeSeconds) return { candles: rows, ok: false, reason: 'Latest completed daily FYERS candle is stale' };
