@@ -5,6 +5,7 @@ import { socketRecoveryDelayMs } from './socket-recovery-policy.js';
 import { shouldRestartSilentIndexFeed } from './socket-feed-watchdog.js';
 import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute } from './scanner-schedule.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
+import { historyRetryDelayMs, shouldAttemptHistoryRetry } from './history-retry-policy.js';
 import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
 import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
 import { sameStrategyConfirmation, validateOptionCandles, validateOptionContractIdentity, validateOptionPremiumTick } from './strategy-candidate-guard.js';
@@ -511,6 +512,8 @@ app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!
 app.post('/api/select-symbol',(req,res)=>{const symbol=String(req.body?.symbol||'').trim();if(!/^(NSE|BSE):[A-Z0-9&_.-]{2,48}(?:-(EQ|INDEX)|[0-9]{2}[A-Z0-9]+FUT)$/.test(symbol)&&!/^MCX:[A-Z0-9&_.-]{3,48}$/.test(symbol))return res.status(400).json({error:'Invalid FYERS NSE/BSE cash-index or MCX contract symbol'});const instrumentChanged=symbol!==selectedSymbol;selectedSymbol=symbol;if(instrumentChanged){selectedOptionSymbol='';mcxOptionCandidateSymbols=[];}syncSocketSubscriptions();res.json({selectedSymbol,exchange:symbol.split(':')[0],historyFetch:'on-demand-only'});});
 const historyCache=new Map();
 const gainerHistoryCache=new Map();
+const gainerHistoryRetry=new Map();
+const gainerHistoryFailures=new Map();
 app.get('/api/history',async(req,res)=>{
   const symbol=String(req.query.symbol||'');
   if(symbol!==selectedSymbol)return res.status(409).json({error:'Select symbol before requesting history'});
@@ -797,15 +800,33 @@ function strategyScanSnapshot(){
 }
 
 async function loadGainerHistory(symbol,{force=false}={}){
- const cached=gainerHistoryCache.get(symbol);if(!force&&cached&&Date.now()-cached.cachedAt<300000)return cached;
- const now=Math.floor(Date.now()/1000),to=now-300,from=to-5*24*60*60;
+ const nowMs=Date.now(),cached=gainerHistoryCache.get(symbol);
+ if(!force&&cached&&nowMs-cached.cachedAt<300000)return cached;
+ const retry=gainerHistoryRetry.get(symbol);
+ if(!force&&retry&&!shouldAttemptHistoryRetry(retry.retryAt,nowMs)){
+  const error=new Error(retry.reason+'; symbol history retry deferred');
+  error.statusCode=retry.statusCode||503;error.retryAfterMs=retry.retryAt-nowMs;throw error;
+ }
+ const now=Math.floor(nowMs/1000),to=now-300,from=to-5*24*60*60;
  const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
- const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000});
- const payload=await response.json().catch(()=>({}));
- if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles)){const error=new Error('FYERS did not return verified 5-minute candles for top gainer');error.statusCode=response.status;error.retryAfterMs=Number(payload.retryAfterSeconds)*1000||fyersRetryAfterMs(response);throw error;}
- const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))&&Number(c[3])>0).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
- if(!candles.length)throw new Error('No valid FYERS 5-minute candles for top gainer');
- const result={symbol,candles,source:'FYERS Data API',cachedAt:Date.now(),fetchedAt:new Date().toISOString()};gainerHistoryCache.set(symbol,result);return result;
+ let response,payload;
+ try{
+  response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000});
+  payload=await response.json().catch(()=>({}));
+  if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles)){
+   const error=new Error('FYERS 5-minute history unavailable ('+(response.status||'invalid payload')+'): '+String(payload.message||payload.code||'invalid candle response').slice(0,120));
+   error.statusCode=response.status||502;error.retryAfterMs=Number(payload.retryAfterSeconds)*1000||fyersRetryAfterMs(response);throw error;
+  }
+  const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))&&Number(c[3])>0).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
+  if(!candles.length)throw Object.assign(new Error('FYERS returned no valid 5-minute OHLC rows'),{statusCode:502});
+  const result={symbol,candles,source:'FYERS Data API',cachedAt:Date.now(),fetchedAt:new Date().toISOString()};
+  gainerHistoryCache.set(symbol,result);gainerHistoryRetry.delete(symbol);gainerHistoryFailures.delete(symbol);return result;
+ }catch(error){
+  const attempts=(gainerHistoryFailures.get(symbol)||0)+1;gainerHistoryFailures.set(symbol,attempts);
+  const delay=historyRetryDelayMs({statusCode:error.statusCode,retryAfterMs:error.retryAfterMs,attempt:attempts});
+  gainerHistoryRetry.set(symbol,{retryAt:Date.now()+delay,statusCode:error.statusCode||502,reason:String(error.message||error).slice(0,160)});
+  throw error;
+ }
 }
 function evaluateGainerBreakout(candles,tick){
  if(!freshTick(tick))return{status:'WAITING_FOR_FRESH_TICK',reason:'Underlying exchange tick is not fresh'};
