@@ -67,7 +67,7 @@ export function validateOptionCandles(candles, tick, contract, now = Date.now())
   const completed = Number(rows.at(-1).time) === currentBucket ? rows.slice(0, -1) : rows;
   if (completed.length < 21) return { ok: false, reason: 'FYERS option candle window includes an unfinished candle or has fewer than 21 completed candles' };
   const required = completed.slice(-21);
-  if (!required.every((candle, index) => index === 0 || isTradingCandleContiguous(Number(required[index - 1].time), Number(candle.time)))) return { ok: false, reason: 'Latest 51 FYERS option candles contain a missing 5-minute interval inside a trading session' };
+  if (!required.every((candle, index) => index === 0 || isTradingCandleContiguous(Number(required[index - 1].time), Number(candle.time)))) return { ok: false, reason: 'Latest 21 FYERS option candles contain a missing 5-minute interval inside a trading session' };
   const latest = completed.at(-1);
   const age = exchangeTime - (Number(latest.time) + 300);
   if (!Number.isFinite(exchangeTime) || age < -3 || age > 600 || now / 1000 - (Number(latest.time) + 300) > 900) return { ok: false, reason: 'Latest completed FYERS option candle is stale or ahead of the exchange tick' };
