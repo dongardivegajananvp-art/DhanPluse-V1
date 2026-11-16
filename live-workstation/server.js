@@ -245,7 +245,7 @@ async function fyersRestFetch(url,init={}){
 }
 
 function toEpochSeconds(value){if(value===null||value===undefined||value==='')return 0;const n=Number(value);if(Number.isFinite(n)&&n>0)return n>1e12?n/1000:n;const parsed=Date.parse(String(value));return Number.isFinite(parsed)&&parsed>0?parsed/1000:0;}
-async function fyersGet(url){const r=await fyersRestFetch(url,{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:12000});const raw=await r.text();let j={};try{j=raw?JSON.parse(raw):{};}catch{throw new Error('FYERS returned non-JSON response (HTTP '+r.status+')');}if(!r.ok||j.s==='error'){const error=new Error('FYERS HTTP '+r.status+' · '+String(j.message||j.code||j.data?.error||'request rejected').replace(/\\s+/g,' ').slice(0,180));error.statusCode=r.status;error.retryAfterMs=Number(j.retryAfterSeconds)*1000||fyersRetryAfterMs(r);throw error;}return j;}
+async function fyersGet(url,{priority}={}){const r=await fyersRestFetch(url,{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:12000,priority});const raw=await r.text();let j={};try{j=raw?JSON.parse(raw):{};}catch{throw new Error('FYERS returned non-JSON response (HTTP '+r.status+')');}if(!r.ok||j.s==='error'){const error=new Error('FYERS HTTP '+r.status+' · '+String(j.message||j.code||j.data?.error||'request rejected').replace(/\\s+/g,' ').slice(0,180));error.statusCode=r.status;error.retryAfterMs=Number(j.retryAfterSeconds)*1000||fyersRetryAfterMs(r);throw error;}return j;}
 async function fyersPost(url,body){const r=await fyersRestFetch(url,{method:'POST',headers:{Authorization:appId+':'+accessToken,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(body),timeoutMs:12000});const j=await r.json().catch(()=>({}));if(!r.ok||j.s!=='ok'){const error=new Error(String(j.message||j.code||'FYERS order request failed'));error.statusCode=r.status;error.retryAfterMs=Number(j.retryAfterSeconds)*1000||fyersRetryAfterMs(r);throw error;}return j;}
 async function loadNseFoMaster(){if(nseFoMaster&&Date.now()-nseFoMasterFetchedAt<86400000)return nseFoMaster;if(nseFoMasterPromise)return nseFoMasterPromise;nseFoMasterPromise=(async()=>{const r=await fetch('https://public.fyers.in/sym_details/NSE_FO_sym_master.json',{headers:{Accept:'application/json'},signal:AbortSignal.timeout(30000)});if(!r.ok)throw new Error('FYERS NSE F&O symbol master unavailable');const master=await r.json();if(!master||typeof master!=='object'||Array.isArray(master))throw new Error('Invalid FYERS symbol master');nseFoMaster=master;nseFoMasterFetchedAt=Date.now();return master;})().finally(()=>{nseFoMasterPromise=null});return nseFoMasterPromise;}
 async function loadBseFoMaster(){if(bseFoMaster&&Date.now()-bseFoMasterFetchedAt<86400000)return bseFoMaster;if(bseFoMasterPromise)return bseFoMasterPromise;bseFoMasterPromise=(async()=>{const r=await fetch('https://public.fyers.in/sym_details/BSE_FO_sym_master.json',{headers:{Accept:'application/json'},signal:AbortSignal.timeout(30000)});if(!r.ok)throw new Error('FYERS BSE F&O symbol master unavailable');const master=await r.json();if(!master||typeof master!=='object'||Array.isArray(master))throw new Error('Invalid FYERS BSE F&O symbol master');bseFoMaster=master;bseFoMasterFetchedAt=Date.now();return master;})().finally(()=>{bseFoMasterPromise=null});return bseFoMasterPromise;}
@@ -591,7 +591,7 @@ app.get('/api/history',async(req,res)=>{
   try{
     const now=Math.floor(Date.now()/1000),to=now-300,from=to-5*24*60*60;
     const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
-    const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000});
+    const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000,priority:95,priority});
     const payload=await response.json().catch(()=>({}));
     if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles))return res.status(response.ok?502:(response.status||502)).json({error:'FYERS did not return verified completed 5-minute candles',detail:String(payload.message||payload.code||'Invalid candle payload'),retryAfterMs:Number(payload.retryAfterSeconds)*1000||fyersRetryAfterMs(response)});
     const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))&&Number(c[3])>0).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
@@ -609,7 +609,7 @@ async function loadMxcHistory(symbol){
   if(cached&&isHistoryCacheFresh(cached.fetchedAt))return cached;
   const now=Math.floor(Date.now()/1000),to=now-300,from=to-5*24*60*60;
   const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
-  const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000});
+  const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000,priority});
   const payload=await response.json().catch(()=>({}));
   if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles))throw Object.assign(new Error(String(payload.message||payload.code||'FYERS MCX option history unavailable')),{statusCode:response.status||502});
   const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))&&Number(c[3])>0).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
@@ -706,7 +706,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
 
 
 
-async function loadStrategyDailyHistory(symbol){
+async function loadStrategyDailyHistory(symbol,{priority=10}={}){
  const cached=strategyDailyHistoryCache.get(symbol);
  if(cached&&Date.now()-cached.cachedAt<6*60*60*1000)return cached;
  const now=Math.floor(Date.now()/1000),params=new URLSearchParams({symbol,resolution:'D',date_format:'0',range_from:String(now-365*86400),range_to:String(now),cont_flag:'1'});
@@ -722,7 +722,7 @@ async function loadStrategyOptionContracts(underlying){
  const cached=optionChains.get(underlying);
  if(cached&&Date.now()-cached.fetchedAt<300000)return cached.contracts;
  const url=new URL(FYERS_DATA+'/options-chain-v3');url.searchParams.set('symbol',underlying);url.searchParams.set('strikecount','10');url.searchParams.set('greeks','0');
- const response=await fyersGet(url),data=response.data;
+ const response=await fyersGet(url,{priority:80}),data=response.data;
  if(!data||!Array.isArray(data.optionsChain)||!data.optionsChain.length)throw new Error('FYERS option chain is empty');
  const master=underlying.startsWith('BSE:')?await loadBseFoMaster():await loadNseFoMaster();
  const contracts=data.optionsChain.filter(x=>['CE','PE'].includes(String(x.option_type||'').toUpperCase())&&typeof x.symbol==='string').map(x=>{
@@ -778,8 +778,8 @@ async function processPendingStrategyCandidate(candidate){
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_contract_rejected'});return true;
   }
   const [underlyingHistory,optionHistory]=await Promise.all([
-   loadGainerHistory(candidate.futureSymbol),
-   loadGainerHistory(candidate.contract.symbol)
+   loadGainerHistory(candidate.futureSymbol,{priority:75}),
+   loadGainerHistory(candidate.contract.symbol,{priority:75})
   ]);
   const currentOptionTick=lastTicks.get(candidate.contract.symbol),currentUnderlyingTick=lastTicks.get(candidate.futureSymbol);
   if(!freshTick(currentOptionTick)||!freshTick(currentUnderlyingTick))return false;
@@ -852,7 +852,7 @@ async function runAutomaticStrategyScan(){
    if(Date.now()-(strategyScanLastAttempt.get(futureSymbol)||0)<45000)continue;
    const futureTick=lastTicks.get(futureSymbol);if(!freshTick(futureTick))continue;
    strategyScanLastAttempt.set(futureSymbol,Date.now());strategyScanLastAt=new Date().toISOString();strategyScanLastSymbol=futureSymbol;
-   const [history,daily]=await Promise.all([loadGainerHistory(futureSymbol),loadStrategyDailyHistory(futureSymbol).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}))]);
+   const [history,daily]=await Promise.all([loadGainerHistory(futureSymbol,{priority:10}),loadStrategyDailyHistory(futureSymbol,{priority:10}).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}))]);
    const currentTick=lastTicks.get(futureSymbol);
    if(!freshTick(currentTick)){setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Futures tick became stale during candle verification'});return;}
    strategyScanLastError='';
@@ -883,7 +883,7 @@ function strategyScanSnapshot(){
  return{enabled:true,mode:'AUTOMATIC_READ_ONLY',scanIntervalMs:STRATEGY_SCAN_INTERVAL_MS,rotationIntervalMs:FNO_ROTATION_INTERVAL_MS,estimatedScannerHistoryRequestsPerMinute:estimateScannerRestRequestsPerMinute(),runtimeState:runtime.state,blocker:runtime.blocker,marketSession:isNseRegularSession()?'OPEN':'CLOSED',lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),orderMode:'DISABLED'};
 }
 
-async function loadGainerHistory(symbol,{force=false}={}){
+async function loadGainerHistory(symbol,{force=false,priority=20}={}){
  const nowMs=Date.now(),cached=gainerHistoryCache.get(symbol);
  if(!force&&cached&&nowMs-cached.cachedAt<300000)return cached;
  const retry=gainerHistoryRetry.get(symbol);
