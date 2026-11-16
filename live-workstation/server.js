@@ -830,7 +830,7 @@ async function loadGainerHistory(symbol,{force=false}={}){
 }
 function evaluateGainerBreakout(candles,tick){
  if(!freshTick(tick))return{status:'WAITING_FOR_FRESH_TICK',reason:'Underlying exchange tick is not fresh'};
- const {completed,fresh,contiguous}=getCompletedCandleWindow(candles,tick.exchangeTime);
+ const {completed,fresh,contiguous}=getCompletedCandleWindow(candles,tick.exchangeTime,600,3);
  if(!fresh)return{status:'STALE_CANDLES',reason:'Latest completed 5-minute candle is stale'};
  if(completed.length<3)return{status:'WAITING_FOR_THREE_COMPLETED_CANDLES',reason:'Need reference, breakout and one completed confirmation candle'};
  if(!contiguous)return{status:'INCOMPLETE_CANDLE_WINDOW',reason:'Latest three breakout confirmation candles contain a missing 5-minute interval'};
