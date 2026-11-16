@@ -346,6 +346,11 @@ function ensureSocket(){
         const tickAcceptance=acceptExchangeTick(lastTicks.get(symbol),tick);
         if(!tickAcceptance.accepted){if(tickAcceptance.reason==='OUT_OF_ORDER_EXCHANGE_TIMESTAMP'||tickAcceptance.reason==='FUTURE_EXCHANGE_TIMESTAMP'){console.warn('FYERS tick rejected by monotonic timestamp guard.',JSON.stringify({symbol,reason:tickAcceptance.reason,exchangeTimestamp:new Date(stamp*1000).toISOString()}));}continue;}
         lastTicks.set(symbol,tick);
+        if(BASE_SUBSCRIPTIONS.every(indexSymbol=>freshTick(lastTicks.get(indexSymbol),15000))){
+          indexFeedStaleSince=0;
+          lastFreshIndexTickAt=new Date().toISOString();
+          socketRecoveryAttempts=0;
+        }
         if(symbol.startsWith('MCX:'))mcxTicks.set(symbol,tick);
         else if(symbol.startsWith('NSE:')||symbol.startsWith('BSE:'))nseTicks.set(symbol,tick);
         accepted++;
