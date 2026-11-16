@@ -1,8 +1,24 @@
+export function isValidFyersRecoveryPayload(pathname, payload) {
+  if (!payload || typeof payload !== 'object' || payload.s !== 'ok') return false;
+  if (pathname === '/data/quotes') return Array.isArray(payload.d) && payload.d.length > 0;
+  if (pathname === '/data/history') return Array.isArray(payload.candles) && payload.candles.length > 0;
+  if (pathname === '/data/options-chain-v3') {
+    return Array.isArray(payload.data?.optionsChain) && payload.data.optionsChain.length > 0;
+  }
+  if (pathname === '/api/v3/screeners/config') return Array.isArray(payload.data?.screeners_standard);
+  if (pathname === '/api/v3/screeners/standard') {
+    return Array.isArray(payload.data?.header) && Array.isArray(payload.data?.body);
+  }
+  if (pathname === '/api/v3/positions') return Boolean(payload.data && typeof payload.data === 'object');
+  return false;
+}
+
 export function canClearFyersDataApiCooldown({
-  responseOk, blockedPathname, responsePathname, requestGeneration, currentGeneration
+  responseOk, responseValid, blockedPathname, responsePathname, requestGeneration, currentGeneration
 }) {
   return Boolean(
     responseOk &&
+    responseValid === true &&
     blockedPathname === responsePathname &&
     requestGeneration === currentGeneration
   );
@@ -33,7 +49,9 @@ export function createFyersDataApiBudget({
   maxCooldownMs = 60 * 60_000,
   onCooldownChange = null
 } = {}) {
-  let queue = Promise.resolve();
+  const waitingQueue = [];
+  let queueActive = false;
+  let queueSequence = 0;
   let requestTimes = [];
   let lastRequestAt = 0;
   let consecutiveCloudflareBlocks = 0;
@@ -44,12 +62,48 @@ export function createFyersDataApiBudget({
   // Cloudflare-blocked endpoint/IP path has recovered. The generation also
   // prevents a request that began before a 1015 from clearing that newer block.
   let cooldownPathname = null;
+  let cooldownProbeUrl = null;
+  let cooldownProbeMethod = null;
   let cooldownGeneration = 0;
   let cooldownPersistenceHealthy = true;
   let queuedRequests = 0;
   let pendingRequests = 0;
   const responseCache = new Map();
   const inFlight = new Map();
+
+  function defaultRequestPriority(pathname) {
+    if (pathname === '/data/quotes') return 100;
+    if (pathname === '/api/v3/positions') return 90;
+    if (pathname === '/data/options-chain-v3') return 80;
+    if (pathname === '/data/history') return 40;
+    if (pathname.startsWith('/api/v3/screeners/')) return 20;
+    return 30;
+  }
+
+  function enqueue(task, priority) {
+    return new Promise((resolve, reject) => {
+      waitingQueue.push({ task, priority, sequence: queueSequence++, resolve, reject });
+      queuedRequests = waitingQueue.length;
+      void drainQueue();
+    });
+  }
+
+  async function drainQueue() {
+    if (queueActive) return;
+    queueActive = true;
+    try {
+      while (waitingQueue.length) {
+        waitingQueue.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
+        const item = waitingQueue.shift();
+        queuedRequests = waitingQueue.length;
+        try { item.resolve(await item.task()); }
+        catch (error) { item.reject(error); }
+      }
+    } finally {
+      queueActive = false;
+      if (waitingQueue.length) void drainQueue();
+    }
+  }
 
   function cacheTtl(target) {
     if (target.pathname === '/data/history') return historyCacheMs;
@@ -111,7 +165,7 @@ export function createFyersDataApiBudget({
     }), { status: 503, headers: { 'content-type': 'application/json', 'x-dhanpulse-cooldown': 'persistence-failed' } });
   }
 
-  async function activateCooldown(response, body, pathname) {
+  async function activateCooldown(response, body, pathname, requestUrl, method) {
     const server = String(response.headers?.get?.('server') || '');
     const cfRay = String(response.headers?.get?.('cf-ray') || '');
     const cloudflare1015 =
@@ -133,11 +187,13 @@ export function createFyersDataApiBudget({
     // Retry-After: 0 is not a meaningful clearance signal. Use a conservative
     // local backoff and never let a provider header shorten it.
     cooldownPathname = pathname;
+    cooldownProbeMethod = method;
+    cooldownProbeUrl = method === 'GET' ? String(requestUrl) : null;
     cooldownGeneration += 1;
     cooldownUntil = Math.max(cooldownUntil, now() + Math.min(maxCooldownMs, Math.max(backoffMs, retryMs)));
     if (typeof onCooldownChange === 'function') {
       try {
-        const persisted = await onCooldownChange({ cooldownUntil, cooldownReason, cooldownPathname, cooldownGeneration,
+        const persisted = await onCooldownChange({ cooldownUntil, cooldownReason, cooldownPathname, cooldownProbeUrl, cooldownProbeMethod, cooldownGeneration,
           consecutiveCloudflareBlocks, consecutiveRateLimitBlocks });
         if (persisted === false) throw new Error('durable cooldown store is unavailable');
       } catch (error) {
@@ -157,7 +213,7 @@ export function createFyersDataApiBudget({
     // request has passed the shared queue, pacing and cooldown gates. Creating
     // the timeout before queueing incorrectly spent the network timeout while
     // waiting for the four-second gap / rolling-minute budget.
-    const { timeoutMs = 12_000, signal: callerSignal, bypassCache = false, ...fetchInit } = init;
+    const { timeoutMs = 12_000, signal: callerSignal, bypassCache = false, priority: requestedPriority, ...fetchInit } = init;
     const method = String(fetchInit.method || 'GET').toUpperCase();
     const ttl = method === 'GET' ? cacheTtl(target) : 0;
     const cacheKey = ttl > 0 ? target.toString() : null;
@@ -189,10 +245,11 @@ export function createFyersDataApiBudget({
 
     if (pendingRequests >= maxQueuedRequests) return makeQueueFullResponse();
     pendingRequests += 1;
+    const requestPriority = Number.isFinite(Number(requestedPriority))
+      ? Math.max(0, Math.min(100, Number(requestedPriority)))
+      : defaultRequestPriority(target.pathname);
     const requestPromise = (async () => {
-      queuedRequests += 1;
-      const current = queue.then(async () => {
-        queuedRequests = Math.max(0, queuedRequests - 1);
+      const result = await enqueue(async () => {
         // Recheck inside the serial queue: calls already waiting when a 1015
         // arrives must be stopped locally instead of hitting the same WAF.
         if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
@@ -222,11 +279,18 @@ export function createFyersDataApiBudget({
         const timeoutSignal = AbortSignal.timeout(Math.max(1, Number(timeoutMs) || 12_000));
         const signal = callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal;
         const response = await fetchImpl(url, { ...fetchInit, signal });
+        let recoveryResponseValid = false;
+        if (response.ok && cooldownPathname === target.pathname &&
+            requestCooldownGeneration === cooldownGeneration) {
+          const recoveryPayload = await response.clone().json().catch(() => null);
+          recoveryResponseValid = isValidFyersRecoveryPayload(target.pathname, recoveryPayload);
+        }
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
-          await activateCooldown(response, body, target.pathname);
+          await activateCooldown(response, body, target.pathname, target.toString(), method);
         } else if (canClearFyersDataApiCooldown({
           responseOk: response.ok,
+          responseValid: recoveryResponseValid,
           blockedPathname: cooldownPathname,
           responsePathname: target.pathname,
           requestGeneration: requestCooldownGeneration,
@@ -237,12 +301,14 @@ export function createFyersDataApiBudget({
           consecutiveCloudflareBlocks = 0;
           consecutiveRateLimitBlocks = 0;
           cooldownPathname = null;
+          cooldownProbeUrl = null;
+          cooldownProbeMethod = null;
           cooldownUntil = 0;
           cooldownReason = null;
           if (typeof onCooldownChange === 'function') {
             try {
               const persisted = await onCooldownChange({ cooldownUntil: 0, cooldownReason: null, cooldownPathname: null,
-                cooldownGeneration, consecutiveCloudflareBlocks, consecutiveRateLimitBlocks });
+                cooldownProbeUrl: null, cooldownProbeMethod: null, cooldownGeneration, consecutiveCloudflareBlocks, consecutiveRateLimitBlocks });
               if (persisted === false) throw new Error('durable cooldown store is unavailable');
               cooldownPersistenceHealthy = true;
             } catch (error) {
@@ -267,9 +333,7 @@ export function createFyersDataApiBudget({
           return { ...entry, cacheEntry: true };
         }
         return { response };
-      });
-      queue = current.then(() => {}, () => {});
-      const result = await current;
+      }, requestPriority);
       return result.cacheEntry ? result : { response: result.response };
     })();
 
@@ -295,6 +359,13 @@ export function createFyersDataApiBudget({
     cooldownUntil = until;
     cooldownReason = String(state.cooldownReason || 'RESTORED_COOLDOWN').slice(0, 40);
     cooldownPathname = state.cooldownPathname;
+    cooldownProbeMethod = String(state.cooldownProbeMethod || '').toUpperCase() === 'GET' ? 'GET' : null;
+    try {
+      const probeUrl = new URL(String(state.cooldownProbeUrl || ''));
+      cooldownProbeUrl = cooldownProbeMethod === 'GET' && probeUrl.hostname === 'api-t1.fyers.in' &&
+        probeUrl.pathname === cooldownPathname && !probeUrl.username && !probeUrl.password
+        ? probeUrl.toString() : null;
+    } catch { cooldownProbeUrl = null; }
     cooldownGeneration = Math.max(cooldownGeneration, Number(state.cooldownGeneration) || 0);
     consecutiveCloudflareBlocks = Math.max(0, Number(state.consecutiveCloudflareBlocks) || 0);
     consecutiveRateLimitBlocks = Math.max(0, Number(state.consecutiveRateLimitBlocks) || 0);
@@ -311,6 +382,8 @@ export function createFyersDataApiBudget({
       cooldownPersistenceHealthy,
       retryAfterSeconds: remainingMs > 0 ? Math.max(1, Math.ceil(remainingMs / 1000)) : recoveryProbeRequired ? 5 : 0,
       blockedUntil: cooldownPathname ? new Date(cooldownUntil).toISOString() : null,
+      blockedPathname: cooldownPathname,
+      recoveryProbeUrl: recoveryProbeRequired ? cooldownProbeUrl : null,
       cooldownReason: cooldownPathname ? cooldownReason : null,
       consecutiveCloudflareBlocks,
       consecutiveRateLimitBlocks,

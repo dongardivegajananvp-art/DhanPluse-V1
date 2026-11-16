@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFyersDataApiBudget } from './fyers-rest-budget.js';
+import { createFyersDataApiBudget, isValidFyersRecoveryPayload } from './fyers-rest-budget.js';
 
 test('workstation budget serializes FYERS v3 and Data API paths with one shared pace', async () => {
   let clock = 1_000_000;
@@ -78,7 +78,7 @@ test('after cooldown only the previously blocked endpoint can perform the single
     sleep: async ms => { clock += ms; },
     fetchImpl: async () => {
       sent += 1;
-      return new Response(JSON.stringify({ s: 'ok' }), { status: 200 });
+      return new Response(JSON.stringify({ s: 'ok', data: { header: [], body: [] } }), { status: 200 });
     },
     onCooldownChange: async state => {
       if (state.cooldownUntil === 0) cleared = true;
@@ -152,7 +152,7 @@ test('expired cooldown survives restart and still requires the original endpoint
     now: () => clock,
     fetchImpl: async () => {
       sent += 1;
-      return new Response(JSON.stringify({ s: 'ok' }), { status: 200 });
+      return new Response(JSON.stringify({ s: 'ok', d: [{ n: 'NSE:NIFTY50-INDEX', v: { lp: 25000 } }] }), { status: 200 });
     }
   });
   assert.equal(restarted.restoreStatus(persisted), true);
@@ -168,4 +168,130 @@ test('expired cooldown survives restart and still requires the original endpoint
   assert.equal(sent, 1);
   assert.equal(restarted.getStatus().cooldownActive, false);
   assert.equal(restarted.getStatus().recoveryProbeRequired, false);
+});
+
+
+test('recovery payload validation is endpoint-specific and rejects HTTP-200 error envelopes', () => {
+  assert.equal(isValidFyersRecoveryPayload('/data/quotes', { s: 'ok', d: [{ n: 'NSE:NIFTY50-INDEX', v: { lp: 25000 } }] }), true);
+  assert.equal(isValidFyersRecoveryPayload('/data/quotes', { s: 'ok', d: [] }), false);
+  assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'ok', candles: [[1, 1, 2, 1, 2]] }), true);
+  assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'ok', candles: [] }), false);
+  assert.equal(isValidFyersRecoveryPayload('/data/options-chain-v3', { s: 'ok', data: { optionsChain: [{ symbol: 'NSE:TESTCE' }] } }), true);
+  assert.equal(isValidFyersRecoveryPayload('/data/options-chain-v3', { s: 'ok', data: { optionsChain: [] } }), false);
+  assert.equal(isValidFyersRecoveryPayload('/api/v3/screeners/config', { s: 'ok', data: { screeners_standard: [] } }), true);
+  assert.equal(isValidFyersRecoveryPayload('/api/v3/screeners/standard', { s: 'ok', data: { header: [], body: [] } }), true);
+  assert.equal(isValidFyersRecoveryPayload('/api/v3/screeners/standard', { s: 'ok', data: {} }), false);
+  assert.equal(isValidFyersRecoveryPayload('/api/v3/positions', { s: 'ok', data: {} }), true);
+  assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'error', message: 'invalid symbol' }), false);
+});
+
+test('same-endpoint HTTP 200 with an FYERS error envelope does not clear the recovery circuit', async () => {
+  let clock = 5_000_000;
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    allApiPaths: true,
+    now: () => clock,
+    sleep: async ms => { clock += ms; },
+    fetchImpl: async () => {
+      sent += 1;
+      return new Response(JSON.stringify({ s: 'error', message: 'temporarily unavailable' }), { status: 200 });
+    },
+    onCooldownChange: async () => true
+  });
+  const state = {
+    blockedUntil: new Date(clock - 1).toISOString(),
+    cooldownReason: 'CLOUDFLARE_1015',
+    cooldownPathname: '/data/history',
+    cooldownGeneration: 9,
+    consecutiveCloudflareBlocks: 1,
+    consecutiveRateLimitBlocks: 0
+  };
+  assert.equal(request.restoreStatus(state), true);
+  const response = await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX');
+  assert.equal(response.status, 200);
+  assert.equal(sent, 1);
+  assert.equal(request.getStatus().cooldownActive, true);
+  assert.equal(request.getStatus().recoveryProbePathname, '/data/history');
+});
+
+
+test('priority queue runs live and option verification requests ahead of scanner history backlog', async () => {
+  let releaseFirst;
+  const firstGate = new Promise(resolve => { releaseFirst = resolve; });
+  const sent = [];
+  const request = createFyersDataApiBudget({
+    allApiPaths: true,
+    minIntervalMs: 0,
+    maxRequestsPerMinute: 15,
+    sleep: async () => {},
+    fetchImpl: async url => {
+      const path = new URL(url).pathname;
+      sent.push(path);
+      if (sent.length === 1) await firstGate;
+      return new Response(JSON.stringify({ s: 'ok', d: [] }), { status: 200 });
+    }
+  });
+
+  const active = request('https://api-t1.fyers.in/api/v3/orders', { priority: 1 });
+  await new Promise(resolve => setImmediate(resolve));
+  const scannerHistory = request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATCS-EQ', { priority: 10 });
+  const optionChain = request('https://api-t1.fyers.in/data/options-chain-v3?symbol=NSE%3ANIFTY50-INDEX', { priority: 80 });
+  const liveQuotes = request('https://api-t1.fyers.in/data/quotes?symbols=NSE%3ANIFTY50-INDEX', { priority: 100 });
+  releaseFirst();
+  const results = await Promise.all([active, scannerHistory, optionChain, liveQuotes]);
+  assert.ok(results.every(response => response.status === 200));
+  assert.deepEqual(sent, [
+    '/api/v3/orders',
+    '/data/quotes',
+    '/data/options-chain-v3',
+    '/data/history'
+  ]);
+});
+
+
+test('expired screener cooldown restores and probes only the persisted safe GET URL', async () => {
+  let clock = 6_000_000;
+  const sentUrls = [];
+  const request = createFyersDataApiBudget({
+    allApiPaths: true,
+    now: () => clock,
+    sleep: async ms => { clock += ms; },
+    fetchImpl: async url => {
+      sentUrls.push(String(url));
+      return new Response(JSON.stringify({ s: 'ok', data: { header: [], body: [] } }), { status: 200 });
+    },
+    onCooldownChange: async () => true
+  });
+  const probeUrl = 'https://api-t1.fyers.in/api/v3/screeners/standard?screener_id=futures-gainers&universe=fw002&fields=t0_close_ltp%2Ct0_per_change';
+  const persisted = {
+    blockedUntil: new Date(clock - 1).toISOString(),
+    cooldownReason: 'CLOUDFLARE_1015',
+    cooldownPathname: '/api/v3/screeners/standard',
+    cooldownProbeUrl: probeUrl,
+    cooldownProbeMethod: 'GET',
+    cooldownGeneration: 11,
+    consecutiveCloudflareBlocks: 1,
+    consecutiveRateLimitBlocks: 0
+  };
+  assert.equal(request.restoreStatus(persisted), true);
+  assert.equal(request.getStatus().blockedPathname, '/api/v3/screeners/standard');
+  assert.equal(request.getStatus().recoveryProbeUrl, probeUrl);
+  const response = await request(probeUrl);
+  assert.equal(response.status, 200);
+  assert.deepEqual(sentUrls, [probeUrl]);
+  assert.equal(request.getStatus().cooldownActive, false);
+});
+
+test('unsafe or mismatched persisted probe URLs are never restored', () => {
+  let clock = 7_000_000;
+  const request = createFyersDataApiBudget({ allApiPaths: true, now: () => clock });
+  const state = {
+    blockedUntil: new Date(clock - 1).toISOString(),
+    cooldownPathname: '/api/v3/screeners/standard',
+    cooldownProbeUrl: 'https://evil.example/api/v3/screeners/standard',
+    cooldownProbeMethod: 'GET',
+    cooldownGeneration: 12
+  };
+  assert.equal(request.restoreStatus(state), true);
+  assert.equal(request.getStatus().recoveryProbeUrl, null);
 });
