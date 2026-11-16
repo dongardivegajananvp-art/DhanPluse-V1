@@ -45,7 +45,7 @@ test('daily trend pullback strategy accepts 50 completed underlying and daily ca
     now
   });
   assert.equal(result.status,'NO_TRADE');
-  assert.notEqual(result.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.equal(result.evaluatedStrategies.includes('DAILY_TREND_5M_PULLBACK'),true);
 });
 
 test('nine fixed strategy identifiers are present and stable',()=>{
