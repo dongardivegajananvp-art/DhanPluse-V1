@@ -415,10 +415,15 @@ function isNseRegularSession(){
   return ['Mon','Tue','Wed','Thu','Fri'].includes(values.weekday)&&minute>=555&&minute<930;
 }
 async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
-  if (!authReady() || !isNseRegularSession() || fetchWithFyersBudget.getStatus().cooldownActive) return;
+  const restStatus = fetchWithFyersBudget.getStatus();
+  const quoteRecoveryProbe = restStatus.recoveryProbeRequired && restStatus.recoveryProbePathname === '/data/quotes';
+  if (!authReady() || !isNseRegularSession() || (restStatus.cooldownActive && !quoteRecoveryProbe)) return;
+  if (restStatus.recoveryProbeRequired && !quoteRecoveryProbe) return;
   if (Date.now() - lastRestQuoteRecoveryAt < 30000) return;
   lastRestQuoteRecoveryAt = Date.now();
-  const unique = [...new Set(staleSymbols)].filter(Boolean);
+  // After a persisted quote-path block expires, probe only the original endpoint
+  // with the three required indexes; never fan out the whole stale F&O window.
+  const unique = [...new Set(quoteRecoveryProbe ? BASE_SUBSCRIPTIONS : staleSymbols)].filter(Boolean);
   let accepted = 0, rejected = 0;
   for (let i = 0; i < unique.length; i += 50) {
     if (fetchWithFyersBudget.getStatus().cooldownActive) break;
@@ -470,6 +475,10 @@ const socketFeedWatchdog=setInterval(()=>{
   const monitored=[...new Set([...BASE_SUBSCRIPTIONS,...fnoScanSubscriptionSymbols,...strategyOptionSymbols,...(selectedOptionSymbol?[selectedOptionSymbol]:[])])];
   const staleSymbols=monitored.filter(symbol=>!freshTick(lastTicks.get(symbol),10000));
   const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),10000));
+  const restStatus=fetchWithFyersBudget.getStatus();
+  if(restStatus.recoveryProbeRequired&&restStatus.recoveryProbePathname==='/data/quotes'){
+    void recoverStaleSubscriptionsViaQuotes(BASE_SUBSCRIPTIONS);
+  }
   if(socket&&connected){
     if(freshIndexes.length<BASE_SUBSCRIPTIONS.length){
       if(!indexFeedStaleSince)indexFeedStaleSince=Date.now();
