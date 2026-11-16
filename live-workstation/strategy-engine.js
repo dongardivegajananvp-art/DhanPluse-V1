@@ -38,20 +38,20 @@ function ema(values, period) {
 function istDayKey(seconds) {
   return new Date((seconds + 19800) * 1000).toISOString().slice(0,10);
 }
-function isTradingCandleContiguous(previousTime, currentTime) {
+function isTradingCandleContiguous(previousTime, currentTime, sessionStartMinute = 555, sessionCloseMinute = 930) {
   if (currentTime - previousTime === INTERVAL_SECONDS) return true;
   const localParts = value => {
     const date = new Date((Number(value) + 19800) * 1000);
     return { day: date.toISOString().slice(0, 10), minute: date.getUTCHours() * 60 + date.getUTCMinutes() };
   };
   const previous = localParts(previousTime), current = localParts(currentTime);
-  return previous.minute === 925 && current.minute === 555 && current.day > previous.day;
+  return previous.minute === sessionCloseMinute - 5 && current.minute === sessionStartMinute && current.day > previous.day;
 }
-function contiguousWindow(rows, count) {
+function contiguousWindow(rows, count, sessionStartMinute = 555, sessionCloseMinute = 930) {
   if (!Array.isArray(rows) || rows.length < count) return false;
   const required = rows.slice(-count);
   return required.every((candle, index) => index === 0 ||
-    isTradingCandleContiguous(number(required[index - 1].time), number(candle.time)));
+    isTradingCandleContiguous(number(required[index - 1].time), number(candle.time), sessionStartMinute, sessionCloseMinute));
 }
 function currentSessionRows(rows) {
   if (!Array.isArray(rows) || !rows.length) return [];
@@ -143,14 +143,14 @@ export function detectFlagVolume(rows) {
   if(impulseDown&&number(last.close)<low&&number(last.volume)>=avgFlag*1.5)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last);
   return null;
 }
-export function detectOpeningRange(rows) {
+export function detectOpeningRange(rows, sessionStartMinute = 555) {
   const key=istDayKey(number(rows.at(-1).time));
   const day=rows.filter(c=>istDayKey(number(c.time))===key);
   if(day.length<5)return null;
   const opening=day.filter(c=>{
     const t=new Date((number(c.time)+19800)*1000);
     const mins=t.getUTCHours()*60+t.getUTCMinutes();
-    return mins>=555&&mins<570;
+    return mins>=sessionStartMinute&&mins<sessionStartMinute+15;
   });
   if(opening.length!==3)return null;
   const high=Math.max(...opening.map(c=>number(c.high))),low=Math.min(...opening.map(c=>number(c.low)));
@@ -229,7 +229,7 @@ export function detectDailyTrendPullback(rows, dailyCandles=[]) {
   return null;
 }
 
-export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], isTopGainer=false, now=Date.now() }) {
+export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930 }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
   if(!tickFresh(underlyingTick))return fail('Fresh FYERS underlying/futures tick is required');
@@ -244,17 +244,17 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   };
   // Each strategy validates only the candle history it actually consumes.
   // A gap in an older EMA50 window must not disable a valid two-candle momentum breakout.
-  consider('EMA20_EMA50_TREND',contiguousWindow(rows,50),()=>detectEmaTrend(rows));
-  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&contiguousWindow(rows,2),()=>detectTopGainerMomentum(rows,isTopGainer));
-  consider('DAILY_TREND_5M_PULLBACK',contiguousWindow(rows,50)&&Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50,()=>detectDailyTrendPullback(rows,dailyCandles));
+  consider('EMA20_EMA50_TREND',contiguousWindow(rows,50,sessionStartMinute,sessionCloseMinute),()=>detectEmaTrend(rows));
+  consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute),()=>detectTopGainerMomentum(rows,isTopGainer));
+  consider('DAILY_TREND_5M_PULLBACK',contiguousWindow(rows,50,sessionStartMinute,sessionCloseMinute)&&Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50,()=>detectDailyTrendPullback(rows,dailyCandles));
   const sessionRows=currentSessionRows(rows);
-  const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length);
+  const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);
   consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows));
-  consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',contiguousWindow(rows,48),()=>detectDoublePattern(rows));
-  consider('BULLISH_CONTINUATION',contiguousWindow(rows,30),()=>detectContinuation(rows,'LONG'));
-  consider('BEARISH_CONTINUATION',contiguousWindow(rows,30),()=>detectContinuation(rows,'SHORT'));
-  consider('FLAG_BREAKOUT_VOLUME',contiguousWindow(rows,30),()=>detectFlagVolume(rows));
-  consider('OPENING_RANGE_15M_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectOpeningRange(rows));
+  consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',contiguousWindow(rows,48,sessionStartMinute,sessionCloseMinute),()=>detectDoublePattern(rows));
+  consider('BULLISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'LONG'));
+  consider('BEARISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'SHORT'));
+  consider('FLAG_BREAKOUT_VOLUME',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectFlagVolume(rows));
+  consider('OPENING_RANGE_15M_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute));
   if(!candidates.length){
     if(!evaluated.length)return fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', '));
     return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked};
@@ -263,10 +263,10 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
 }
 
-export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], isTopGainer=false, now=Date.now() }) {
+export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930 }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
-  const setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,isTopGainer,now});
+  const setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute});
   if(setup.status!=='UNDERLYING_SETUP_CONFIRMED')return setup;
   if(!tickFresh(optionTick))return fail('Fresh FYERS option premium tick is required');
   if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return fail('Verified active CE/PE contract and tick size are required');
