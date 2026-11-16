@@ -257,7 +257,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   // A gap in an older EMA50 window must not disable a valid two-candle momentum breakout.
   consider('EMA20_EMA50_TREND',contiguousWindow(rows,50),()=>detectEmaTrend(rows));
   consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&contiguousWindow(rows,2),()=>detectTopGainerMomentum(rows,isTopGainer));
-  consider('DAILY_TREND_5M_PULLBACK',contiguousWindow(rows,51)&&Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50,()=>detectDailyTrendPullback(rows,dailyCandles));
+  consider('DAILY_TREND_5M_PULLBACK',contiguousWindow(rows,50)&&Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50,()=>detectDailyTrendPullback(rows,dailyCandles));
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length);
   consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows));
