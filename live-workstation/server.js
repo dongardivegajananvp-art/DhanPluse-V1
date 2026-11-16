@@ -76,6 +76,7 @@ let lastTickDiagnosticAt=new Map();
 const indexTickGapSamples=new Map();
 const mcxTickGapSamples=new Map();
 let lastSubscriptionRecoveryAt=0;
+let lastMcxSubscriptionRecoveryAt=0;
 let lastRestQuoteRecoveryAt=0;
 let selectedSymbol='';
 let selectedOptionSymbol='';
@@ -472,6 +473,12 @@ function isNseSubscriptionSession(){
 function isNseRegularSession(){
   return getNseMarketSession().phase==='REGULAR';
 }
+function isMcxScheduledSession(now=new Date()){
+  const parts=new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Kolkata',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(now);
+  const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+  const minutes=Number(values.hour)*60+Number(values.minute);
+  return !['Sat','Sun'].includes(values.weekday)&&minutes>=540&&minutes<1435;
+}
 async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
   const restStatus = fetchWithFyersBudget.getStatus();
   const quoteRecoveryProbe = restStatus.recoveryProbeRequired && restStatus.recoveryProbePathname === '/data/quotes';
@@ -581,6 +588,16 @@ const socketFeedWatchdog=setInterval(()=>{
   }
   if(socket&&!connected&&lastSocketConnectAttemptAt&&Date.now()-Date.parse(lastSocketConnectAttemptAt)>30000){
     scheduleSocketRecovery('socket_connect_timeout');
+    return;
+  }
+  if(mcxFutureRoot(selectedSymbol)){
+    if(!isMcxScheduledSession()){lastMcxSubscriptionRecoveryAt=0;return;}
+    if(freshTick(lastTicks.get(selectedSymbol),10000)){lastMcxSubscriptionRecoveryAt=0;return;}
+    if(socket&&connected&&Date.now()-lastMcxSubscriptionRecoveryAt>=30000){
+      lastMcxSubscriptionRecoveryAt=Date.now();
+      const result=syncSocketSubscriptions({force:true,reason:'mcx_fresh_tick_watchdog'});
+      console.warn('MCX selected-future tick heartbeat missed; reapplying only the selected MCX WebSocket subscription.',JSON.stringify({selectedSymbol,subscriptionError:result.error||null,recoveryAt:new Date().toISOString()}));
+    }
     return;
   }
   if(!isNseRegularSession())return;
