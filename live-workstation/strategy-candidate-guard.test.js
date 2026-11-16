@@ -90,7 +90,7 @@ test('option candle verifier rejects stale and malformed OHLC payloads', () => {
   }));
   assert.equal(validateOptionCandles(candles, { exchangeTime: exchangeTime + 1200 }, contract, now).ok, false);
   const malformed = candles.map(c => ({ ...c }));
-  malformed[5].low = 100.15;
+  malformed[2].low = 100.15;
   assert.equal(validateOptionCandles(malformed, { exchangeTime }, contract, now).ok, false);
 });
 
