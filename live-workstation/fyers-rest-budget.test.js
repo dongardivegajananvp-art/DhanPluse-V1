@@ -152,7 +152,7 @@ test('expired cooldown survives restart and still requires the original endpoint
     now: () => clock,
     fetchImpl: async () => {
       sent += 1;
-      return new Response(JSON.stringify({ s: 'ok' }), { status: 200 });
+      return new Response(JSON.stringify({ s: 'ok', d: [{ n: 'NSE:NIFTY50-INDEX', v: { lp: 25000 } }] }), { status: 200 });
     }
   });
   assert.equal(restarted.restoreStatus(persisted), true);
