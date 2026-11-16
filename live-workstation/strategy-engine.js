@@ -35,16 +35,6 @@ function ema(values, period) {
   for (let i = period; i < values.length; i++) result = values[i] * alpha + result * (1 - alpha);
   return result;
 }
-function atr14(candles) {
-  if (candles.length < 15) return NaN;
-  const rows = candles.slice(-14);
-  const ranges = rows.map((c, i) => {
-    const prev = candles[candles.length - 15 + i];
-    const pc = prev ? number(prev.close) : number(c.close);
-    return Math.max(number(c.high)-number(c.low), Math.abs(number(c.high)-pc), Math.abs(number(c.low)-pc));
-  });
-  return ranges.reduce((a,b)=>a+b,0)/ranges.length;
-}
 function istDayKey(seconds) {
   return new Date((seconds + 19800) * 1000).toISOString().slice(0,10);
 }
@@ -190,22 +180,21 @@ export function detectDayHighLowRetest(rows) {
   }
   return null;
 }
-export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, swingLow, atr, priorResistances=[] }) {
-  const values=[breakoutLevel,tickSize,livePremium,swingLow,atr];
-  if(!values.every(finite)||values.some(v=>number(v)<=0))return{status:'NO_TRADE',reason:'Breakout, tick size, live premium, swing low and ATR must be positive'};
+export function buildFixedPremiumPlan({ breakoutLevel, tickSize, livePremium, swingLow }) {
+  const values=[breakoutLevel,tickSize,livePremium,swingLow];
+  if(!values.every(finite)||values.some(v=>number(v)<=0))return{status:'NO_TRADE',reason:'Breakout, tick size, live premium and confirmed-candle swing low must be positive'};
   const step=number(tickSize);
   const entry=Number((Math.ceil((number(breakoutLevel)+step-1e-9)/step)*step).toFixed(8));
-  const stopLoss=Number((Math.floor((number(swingLow)-0.5*number(atr)+1e-9)/step)*step).toFixed(8));
+  // One completed post-breakout confirmation/retest candle defines the swing low.
+  // Place the stop one official option tick below that candle structure; ATR(14) is not required.
+  const stopLoss=Number((Math.floor((number(swingLow)-step+1e-9)/step)*step).toFixed(8));
   const risk=entry-stopLoss;
-  if(!(risk>=step))return{status:'NO_TRADE',reason:'Swing-low minus half ATR does not leave positive option-premium risk'};
+  if(!(risk>=step))return{status:'NO_TRADE',reason:'Single-candle confirmation swing low does not leave positive option-premium risk'};
   if(number(livePremium)+step*1e-7<entry)return{status:'NO_TRADE',reason:'Live option premium has not reached breakout level + one tick'};
   if(number(livePremium)>entry+0.5*risk+step*1e-7)return{status:'NO_TRADE',reason:'Option premium moved more than 0.5R beyond entry; chase blocked'};
   const target=Number((entry+2*risk).toFixed(8));
-  // RR is measured from the fixed planned Entry. Live premium is allowed to move
-  // up to +0.5R, as explicitly specified; beyond that the setup is chased.
   const plannedRr=(target-entry)/risk;
   if(!(Number.isFinite(plannedRr)&&plannedRr>=2-1e-9))return{status:'NO_TRADE',reason:'Fixed Entry/SL/Target do not preserve the required 1:2 reward/risk'};
-  if(priorResistances.some(level=>finite(level)&&number(level)>entry&&number(level)<target))return{status:'NO_TRADE',reason:'Verified resistance lies before the fixed 2R target'};
   return{status:'SETUP_CONFIRMED',entry,stopLoss,target,rr:Number(plannedRr.toFixed(2)),risk};
 }
 
@@ -283,21 +272,20 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return fail('Verified active CE/PE contract and tick size are required');
   const o=completed(optionCandles,optionTick,'Option premium');
   if(o.error)return fail(o.error);
-  if(!contiguousWindow(o.rows,21))return fail('Option premium requires 21 contiguous completed 5-minute candles for breakout, ATR and resistance verification');
+  if(!contiguousWindow(o.rows,3))return fail('Option premium needs only 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle');
   const chosen=setup;
   if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return{status:'NO_TRADE',reason:'Option side does not match the verified underlying direction',strategy:chosen.strategy};
   const premiumRows=o.rows,premiumLast=o.last,tickSize=number(contract.tickSize);
-  const premiumLevel=Math.max(...premiumRows.slice(-21,-1).map(c=>number(c.high)));
-  if(!(number(premiumLast.close)>premiumLevel))return{status:'NO_TRADE',reason:'Underlying setup confirmed, but option premium has no completed breakout confirmation',strategy:chosen.strategy};
-  const atr=atr14(premiumRows);
-  if(!Number.isFinite(atr)||atr<=0)return fail('Option premium ATR(14) is unavailable');
-  const swing=premiumRows.slice(-5);
-  const swingLow=Math.min(...swing.map(c=>number(c.low)));
-  const olderPremiumRows=premiumRows.slice(0,-21);
-  const resistances=olderPremiumRows.filter((c,i,a)=>i>1&&i<a.length-2&&pivotHigh(a,i,1)).map(c=>number(c.high));
-  const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow,atr,priorResistances:resistances});
+  const prior=premiumRows.at(-3),breakout=premiumRows.at(-2),confirmation=premiumLast;
+  const premiumLevel=number(prior.high);
+  const breakoutOccurred=number(breakout.close)>premiumLevel;
+  const confirmedAfterBreakout=number(confirmation.close)>premiumLevel;
+  if(!breakoutOccurred||!confirmedAfterBreakout)return{status:'NO_TRADE',reason:'Option premium breakout must be followed by one completed candle confirming above or retesting and holding the breakout level',strategy:chosen.strategy};
+  const confirmationType=number(confirmation.low)<=premiumLevel*1.002?'ONE_CANDLE_RETEST':'ONE_CANDLE_HOLD';
+  const swingLow=number(confirmation.low);
+  const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow});
   if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy};
-  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,rr:plan.rr,atr14:Number(atr.toFixed(4)),confirmedAt:chosen.confirmedAt,optionCandleTime:premiumLast.time,contract:contract.symbol};
+  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:premiumLast.time,optionConfirmation:confirmationType,contract:contract.symbol};
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {
   if(!Array.isArray(activeTrades)||!candidateTrade||!candidateTrade.underlying||!candidateTrade.contract)return{ok:false,reason:'Active trade state or candidate identity is invalid'};
