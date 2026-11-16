@@ -5,7 +5,7 @@ export function isHistoryCacheFresh(fetchedAt, now = Date.now(), ttlMs = HISTORY
   return Number.isFinite(stamp) && stamp <= now && now - stamp < ttlMs;
 }
 
-export function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600) {
+export function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, contiguousCount = 21) {
   const stamp = Number(exchangeTime);
   if (!Number.isFinite(stamp) || stamp <= 0) {
     return { completed: [], lastClosed: null, ageSeconds: Infinity, fresh: false };
@@ -19,8 +19,9 @@ export function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 
   const candleTime = Number(lastClosed?.time);
   const ageSeconds = lastClosed && Number.isFinite(candleTime) ? stamp - (candleTime + 300) : Infinity;
   const fresh = Boolean(lastClosed && Number.isFinite(candleTime) && ageSeconds >= -3 && ageSeconds <= maxAgeSeconds);
-  const recent = completed.slice(-3);
-  const contiguous = recent.length === 3 && recent.every((candle, index) => index === 0 || Number(candle.time) - Number(recent[index - 1].time) === 300);
+  const count = Math.max(1, Math.floor(Number(contiguousCount) || 21));
+  const recent = completed.slice(-count);
+  const contiguous = recent.length === count && recent.every((candle, index) => index === 0 || Number(candle.time) - Number(recent[index - 1].time) === 300);
   return { completed, lastClosed, ageSeconds, fresh, contiguous };
 }
 
