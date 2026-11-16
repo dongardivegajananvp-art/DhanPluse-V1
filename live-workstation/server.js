@@ -4,7 +4,7 @@ import { createFyersDataApiBudget } from './fyers-rest-budget.js';
 import { socketRecoveryDelayMs } from './socket-recovery-policy.js';
 import { shouldRestartSilentIndexFeed } from './socket-feed-watchdog.js';
 import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute } from './scanner-schedule.js';
-import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
+import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { historyRetryDelayMs, shouldAttemptHistoryRetry } from './history-retry-policy.js';
 import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
 import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
@@ -830,15 +830,12 @@ async function loadGainerHistory(symbol,{force=false}={}){
 }
 function evaluateGainerBreakout(candles,tick){
  if(!freshTick(tick))return{status:'WAITING_FOR_FRESH_TICK',reason:'Underlying exchange tick is not fresh'};
- const {completed,lastClosed,fresh,contiguous}=getCompletedCandleWindow(candles,tick.exchangeTime);
- if(completed.length<21)return{status:'WAITING_FOR_21_COMPLETED_CANDLES',reason:'Need at least 21 completed FYERS 5-minute candles'};
+ const {completed,fresh,contiguous}=getCompletedCandleWindow(candles,tick.exchangeTime,600,3);
  if(!fresh)return{status:'STALE_CANDLES',reason:'Latest completed 5-minute candle is stale'};
- if(!contiguous)return{status:'INCOMPLETE_CANDLE_WINDOW',reason:'Breakout window contains missing 5-minute candles'};
- const prior=completed.slice(-21,-1),swing=completed.slice(-5),resistance=Math.max(...prior.map(c=>c.high)),support=Math.min(...prior.map(c=>c.low));
- let plan=null;
- if(lastClosed.close>resistance&&Number(tick.price)>=lastClosed.close){const sl=Math.min(...swing.map(c=>c.low)),risk=lastClosed.close-sl;if(risk>0)plan={side:'LONG',entry:lastClosed.close,stopLoss:sl,target:lastClosed.close+2*risk,rr:'1:2'};}
- else if(lastClosed.close<support&&Number(tick.price)<=lastClosed.close){const sl=Math.max(...swing.map(c=>c.high)),risk=sl-lastClosed.close;if(risk>0)plan={side:'SHORT',entry:lastClosed.close,stopLoss:sl,target:lastClosed.close-2*risk,rr:'1:2'};}
- return plan?{status:'SETUP_CONFIRMED',...plan,candleTime:lastClosed.time,underlyingPrice:Number(tick.price)}:{status:'WAIT',reason:'No confirmed 20-candle breakout'};
+ if(completed.length<3)return{status:'WAITING_FOR_THREE_COMPLETED_CANDLES',reason:'Need reference, breakout and one completed confirmation candle'};
+ if(!contiguous)return{status:'INCOMPLETE_CANDLE_WINDOW',reason:'Latest three breakout confirmation candles contain a missing 5-minute interval'};
+ const plan=evaluateThreeCandleBreakout(completed,tick.price);
+ return plan.status==='SETUP_CONFIRMED'?{...plan,underlyingPrice:Number(tick.price)}:{status:plan.status==='NO_TRADE'?'NO_TRADE':'WAIT',reason:plan.reason};
 }
 app.get('/api/gainer-scan',async(_req,res)=>{
  res.set('Cache-Control','no-store');if(!authReady())return res.status(401).json({error:'FYERS session unavailable',results:[]});
