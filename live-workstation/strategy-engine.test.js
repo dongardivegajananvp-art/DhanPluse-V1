@@ -85,7 +85,7 @@ test('option breakout is confirmed by exactly one completed candle after the bre
   const optionCandles=[
     {time:bucket-900,open:100,high:100.2,low:99.8,close:100,volume:100},
     {time:bucket-600,open:100.2,high:100.4,low:100.1,close:100.3,volume:120},
-    {time:bucket-300,open:100.3,high:100.45,low:100.2,close:100.3,volume:110}
+    {time:bucket-300,open:100.3,high:100.45,low:100.15,close:100.3,volume:110}
   ];
   const optionTick={price:100.3,exchangeTime:now/1000,receivedAt:now};
   const underlyingTick={price:101.1,exchangeTime:now/1000,receivedAt:now};
@@ -96,10 +96,32 @@ test('option breakout is confirmed by exactly one completed candle after the bre
   assert.equal(result.status,'SETUP_CONFIRMED');
   assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
   assert.equal(result.rr,2);
-  assert.equal(result.optionConfirmation,'ONE_CANDLE_AFTER_BREAKOUT');
+  assert.equal(result.optionConfirmation,'ONE_CANDLE_RETEST');
   assert.equal(result.entry,100.25);
-  assert.equal(result.stopLoss,100.05);
-  assert.equal(result.target,100.65);
+  assert.equal(result.stopLoss,100.1);
+  assert.equal(result.target,100.55);
+});
+
+test('option breakout without one completed confirmation/retest candle remains NO TRADE',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const bucket=Math.floor((now/1000)/300)*300;
+  const underlyingCandles=[
+    {time:bucket-600,open:100,high:100.5,low:99.5,close:100,volume:100},
+    {time:bucket-300,open:100.5,high:101.2,low:100.2,close:101,volume:120}
+  ];
+  const optionCandles=[
+    {time:bucket-900,open:100,high:100.2,low:99.8,close:100,volume:100},
+    {time:bucket-600,open:100.2,high:100.4,low:100.1,close:100.3,volume:120},
+    {time:bucket-300,open:100.2,high:100.3,low:100.1,close:100.15,volume:110}
+  ];
+  const optionTick={price:100.15,exchangeTime:now/1000,receivedAt:now};
+  const underlyingTick={price:101.1,exchangeTime:now/1000,receivedAt:now};
+  const result=evaluateNineStrategies({
+    underlyingCandles,underlyingTick,optionCandles,optionTick,
+    contract:{symbol:'NSE:RELIANCE26NOV2500CE',side:'CE',tickSize:0.05},isTopGainer:true,now
+  });
+  assert.equal(result.status,'NO_TRADE');
+  assert.match(result.reason,/one completed candle/i);
 });
 
 test('strategy evaluator requires verified CE/PE contract metadata',()=>{
