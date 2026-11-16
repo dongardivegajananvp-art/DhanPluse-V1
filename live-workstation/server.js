@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { createFyersDataApiBudget } from './fyers-rest-budget.js';
+import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute } from './scanner-schedule.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
 import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
@@ -432,12 +433,12 @@ const socketFeedWatchdog=setInterval(()=>{
   if(recoverySymbols.length)void recoverStaleSubscriptionsViaQuotes(recoverySymbols);
 },5000);
 socketFeedWatchdog.unref?.();
-const automaticStrategyScanTimer=setInterval(()=>{void runAutomaticStrategyScan();},3500);
+const automaticStrategyScanTimer=setInterval(()=>{void runAutomaticStrategyScan();},STRATEGY_SCAN_INTERVAL_MS);
 automaticStrategyScanTimer.unref?.();
 const fnoUniverseRotationTimer=setInterval(()=>{
   if(!socket||!connected||!isNseRegularSession()||!fnoUniverseRows.length)return;
   rotateFnoUniverseSubscriptions('scheduled_rotation');
-},360000);
+},FNO_ROTATION_INTERVAL_MS);
 fnoUniverseRotationTimer.unref?.();
 app.get('/api/health',async(_req,res)=>{
   const now=Date.now();
@@ -688,6 +689,11 @@ async function runAutomaticStrategyScan(){
  strategyScanBusy=true;
  try{
   await refreshStrategyActivePlans();
+  const restStatus=fetchWithFyersBudget.getStatus();
+  if(!fyersRestBudgetReady||restStatus.cooldownActive){
+   strategyScanLastError=restStatus.cooldownActive?'FYERS REST cooldown active; scanner paused locally without queuing more history requests':'FYERS REST budget is not ready; scanner paused fail-closed';
+   return;
+  }
   let expired=false;
   for(const candidate of strategyPendingCandidates.values()){
    if(Date.now()-candidate.createdAt>120000){strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason:'Option tick did not become fresh within 120 seconds',strategy:candidate.setup.strategy});expired=true;continue;}
@@ -730,7 +736,7 @@ async function runAutomaticStrategyScan(){
 function strategyScanSnapshot(){
  const freshFutureTicks=fnoScanSubscriptionSymbols.filter(symbol=>freshTick(lastTicks.get(symbol))).length;
  const runtime=getScannerRuntimeState({authenticated:authReady(),socketConnected:connected,marketOpen:isNseRegularSession(),ledgerReady:strategyLedgerRuntimeReady,universeCount:fnoUniverseRows.length,activeSubscriptions:fnoScanSubscriptionSymbols.length,freshFutureTicks});
- return{enabled:true,mode:'AUTOMATIC_READ_ONLY',runtimeState:runtime.state,blocker:runtime.blocker,marketSession:isNseRegularSession()?'OPEN':'CLOSED',lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),orderMode:'DISABLED'};
+ return{enabled:true,mode:'AUTOMATIC_READ_ONLY',scanIntervalMs:STRATEGY_SCAN_INTERVAL_MS,rotationIntervalMs:FNO_ROTATION_INTERVAL_MS,estimatedScannerHistoryRequestsPerMinute:estimateScannerRestRequestsPerMinute(),runtimeState:runtime.state,blocker:runtime.blocker,marketSession:isNseRegularSession()?'OPEN':'CLOSED',lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),orderMode:'DISABLED'};
 }
 
 async function loadGainerHistory(symbol,{force=false}={}){
