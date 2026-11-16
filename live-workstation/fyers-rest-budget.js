@@ -95,10 +95,6 @@ export function createFyersDataApiBudget({
     return new Response(JSON.stringify({s:'error',message:'FYERS REST request budget queue is full; no upstream request was sent.'}),{status:503,headers:{'content-type':'application/json','x-fyers-budget':'queue-full'}});
   }
 
-  function makeRecoveryProbePendingResponse() {
-    return new Response(JSON.stringify({s:'error',message:'FYERS cooldown elapsed; waiting for one controlled probe to the previously blocked endpoint.',retryAfterSeconds:1,cooldownPathname}),{status:503,headers:{'content-type':'application/json','retry-after':'1','x-fyers-budget':'probe-pending'}});
-  }
-
   function makePersistenceFailureResponse() {
     return new Response(JSON.stringify({
       s: 'error', message: 'FYERS cooldown could not be durably persisted; Data API requests are blocked fail-closed.'
@@ -173,7 +169,6 @@ export function createFyersDataApiBudget({
 
     if (!cooldownPersistenceHealthy) return makePersistenceFailureResponse();
     if (cooldownUntil > currentTime) return makeCooldownResponse();
-    if (cooldownPathname && target.pathname !== cooldownPathname && cooldownUntil <= currentTime) return makeRecoveryProbePendingResponse();
 
     const pending = inFlightKey && inFlight.get(inFlightKey);
     if (pending) {
@@ -192,7 +187,6 @@ export function createFyersDataApiBudget({
         // arrives must be stopped locally instead of hitting the same WAF.
         if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
         if (cooldownUntil > now()) return { response: makeCooldownResponse() };
-        if (cooldownPathname && target.pathname !== cooldownPathname && cooldownUntil <= now()) return { response: makeRecoveryProbePendingResponse() };
 
         let time = now();
         while (true) {
@@ -210,7 +204,6 @@ export function createFyersDataApiBudget({
         // A prior queued request may have opened the circuit while this one waited.
         if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
         if (cooldownUntil > now()) return { response: makeCooldownResponse() };
-        if (cooldownPathname && target.pathname !== cooldownPathname && cooldownUntil <= now()) return { response: makeRecoveryProbePendingResponse() };
 
         time = now();
         requestTimes.push(time);
