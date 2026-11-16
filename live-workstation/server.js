@@ -525,12 +525,12 @@ app.get('/api/history',async(req,res)=>{
     const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
     const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000});
     const payload=await response.json().catch(()=>({}));
-    if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles))return res.status(response.status||502).json({error:'FYERS did not return verified completed 5-minute candles',detail:String(payload.message||payload.code||'Invalid candle payload')});
+    if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles))return res.status(response.ok?502:(response.status||502)).json({error:'FYERS did not return verified completed 5-minute candles',detail:String(payload.message||payload.code||'Invalid candle payload'),retryAfterMs:Number(payload.retryAfterSeconds)*1000||fyersRetryAfterMs(response)});
     const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))&&Number(c[3])>0).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
-    if(!candles.length)return res.status(502).json({error:'No valid completed 5-minute candles received'});
+    if(!candles.length)return res.status(502).json({error:'No valid completed 5-minute candles received',retryAfterMs:30000});
     const result={symbol,resolution:'5',candles,source:'FYERS Data API',fetchedAt:new Date().toISOString()};
     historyCache.set(symbol,result);res.set('Cache-Control','no-store').json(result);
-  }catch(e){res.status(502).json({error:'FYERS history request failed',detail:String(e?.message||e).slice(0,180)});}
+  }catch(e){res.status(Number(e?.statusCode)||502).json({error:'FYERS history request failed',detail:String(e?.message||e).slice(0,180),retryAfterMs:Number(e?.retryAfterMs)||0});}
 });
 
 
@@ -864,7 +864,7 @@ app.get('/api/account',async(_req,res)=>{
   if(accountSnapshot&&now-accountSnapshotFetchedAt<60000)return res.json({...accountSnapshot,cached:true});
   if(accountFetchPromise){try{return res.json(await accountFetchPromise);}catch(e){return res.status(502).json({error:'FYERS account reconciliation unavailable',detail:String(e.message||e).slice(0,160)});}}
   if(now<accountRetryAfter){
-    if(accountSnapshot)return res.json({...accountSnapshot,cached:true,stale:true,error:'FYERS account API rate limit; showing last verified account snapshot'});
+    if(accountSnapshot)return res.json({...accountSnapshot,cached:true,stale:true,error:'FYERS account API rate limit; showing last verified account snapshot',retryAfterMs:Math.max(0,accountRetryAfter-now)});
     return res.status(429).json({error:'FYERS account API rate limit; retry deferred',retryAfterMs:accountRetryAfter-now});
   }
   accountFetchPromise=(async()=>{
