@@ -46,7 +46,9 @@ export function createFyersDataApiBudget({
   maxCooldownMs = 60 * 60_000,
   onCooldownChange = null
 } = {}) {
-  let queue = Promise.resolve();
+  const waitingQueue = [];
+  let queueActive = false;
+  let queueSequence = 0;
   let requestTimes = [];
   let lastRequestAt = 0;
   let consecutiveCloudflareBlocks = 0;
@@ -63,6 +65,40 @@ export function createFyersDataApiBudget({
   let pendingRequests = 0;
   const responseCache = new Map();
   const inFlight = new Map();
+
+  function defaultRequestPriority(pathname) {
+    if (pathname === '/data/quotes') return 100;
+    if (pathname === '/api/v3/positions') return 90;
+    if (pathname === '/data/options-chain-v3') return 80;
+    if (pathname === '/data/history') return 40;
+    if (pathname.startsWith('/api/v3/screeners/')) return 20;
+    return 30;
+  }
+
+  function enqueue(task, priority) {
+    return new Promise((resolve, reject) => {
+      waitingQueue.push({ task, priority, sequence: queueSequence++, resolve, reject });
+      queuedRequests = waitingQueue.length;
+      void drainQueue();
+    });
+  }
+
+  async function drainQueue() {
+    if (queueActive) return;
+    queueActive = true;
+    try {
+      while (waitingQueue.length) {
+        waitingQueue.sort((a, b) => b.priority - a.priority || a.sequence - b.sequence);
+        const item = waitingQueue.shift();
+        queuedRequests = waitingQueue.length;
+        try { item.resolve(await item.task()); }
+        catch (error) { item.reject(error); }
+      }
+    } finally {
+      queueActive = false;
+      if (waitingQueue.length) void drainQueue();
+    }
+  }
 
   function cacheTtl(target) {
     if (target.pathname === '/data/history') return historyCacheMs;
@@ -170,7 +206,7 @@ export function createFyersDataApiBudget({
     // request has passed the shared queue, pacing and cooldown gates. Creating
     // the timeout before queueing incorrectly spent the network timeout while
     // waiting for the four-second gap / rolling-minute budget.
-    const { timeoutMs = 12_000, signal: callerSignal, bypassCache = false, ...fetchInit } = init;
+    const { timeoutMs = 12_000, signal: callerSignal, bypassCache = false, priority: requestedPriority, ...fetchInit } = init;
     const method = String(fetchInit.method || 'GET').toUpperCase();
     const ttl = method === 'GET' ? cacheTtl(target) : 0;
     const cacheKey = ttl > 0 ? target.toString() : null;
@@ -202,10 +238,11 @@ export function createFyersDataApiBudget({
 
     if (pendingRequests >= maxQueuedRequests) return makeQueueFullResponse();
     pendingRequests += 1;
+    const requestPriority = Number.isFinite(Number(requestedPriority))
+      ? Math.max(0, Math.min(100, Number(requestedPriority)))
+      : defaultRequestPriority(target.pathname);
     const requestPromise = (async () => {
-      queuedRequests += 1;
-      const current = queue.then(async () => {
-        queuedRequests = Math.max(0, queuedRequests - 1);
+      const result = await enqueue(async () => {
         // Recheck inside the serial queue: calls already waiting when a 1015
         // arrives must be stopped locally instead of hitting the same WAF.
         if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
@@ -287,9 +324,7 @@ export function createFyersDataApiBudget({
           return { ...entry, cacheEntry: true };
         }
         return { response };
-      });
-      queue = current.then(() => {}, () => {});
-      const result = await current;
+      }, requestPriority);
       return result.cacheEntry ? result : { response: result.response };
     })();
 
