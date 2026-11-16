@@ -465,3 +465,38 @@ test('strategy candle gate accepts a normal Friday-to-Monday session boundary',(
   assert.match(result.reason,/No eligible strategy confirmed/);
   assert.ok(result.evaluatedStrategies.includes('EMA20_EMA50_TREND'));
 });
+
+
+test('MCX nine-strategy session uses 09:00 opening range rather than NSE 09:15',()=>{
+  const now=Date.parse('2026-11-16T04:27:30Z');
+  const base=Math.floor(Date.parse('2026-11-16T03:30:00Z')/1000);
+  const rows=[
+    {time:base,open:100,high:101,low:99,close:100,volume:100},
+    {time:base+300,open:100,high:102,low:100,close:101,volume:110},
+    {time:base+600,open:101,high:103,low:100.5,close:102,volume:120},
+    {time:base+900,open:102,high:104,low:101.5,close:103.5,volume:130},
+    {time:base+1200,open:103,high:103.4,low:102.8,close:103.1,volume:140}
+  ];
+  const tick={price:103.1,exchangeTime:now/1000,receivedAt:now};
+  const result=detectNineStrategySetup({
+    underlyingCandles:rows,underlyingTick:tick,now,
+    sessionStartMinute:540,sessionCloseMinute:1435
+  });
+  assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
+  assert.equal(result.strategy,'OPENING_RANGE_15M_RETEST');
+  assert.equal(result.side,'LONG');
+});
+
+test('MCX overnight candle continuity accepts 23:50 to next-session 09:00 only for MCX session settings',()=>{
+  const previous=Math.floor(Date.parse('2026-11-15T18:20:00Z')/1000); // 23:50 IST
+  const next=Math.floor(Date.parse('2026-11-16T03:30:00Z')/1000); // 09:00 IST
+  const rows=[
+    {time:previous,open:100,high:101,low:99,close:100,volume:100},
+    {time:next,open:100,high:101,low:99,close:100,volume:100}
+  ];
+  const now=Date.parse('2026-11-16T03:31:00Z');
+  const tick={price:100,exchangeTime:now/1000,receivedAt:now};
+  const mcx=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,now,sessionStartMinute:540,sessionCloseMinute:1435});
+  assert.equal(mcx.status,'NO_TRADE');
+  assert.ok(mcx.blockedStrategies.includes('TOP_GAINER_MOMENTUM_BREAKOUT')===false);
+});
