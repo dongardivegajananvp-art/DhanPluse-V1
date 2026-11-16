@@ -468,7 +468,7 @@ test('strategy candle gate accepts a normal Friday-to-Monday session boundary',(
 
 
 test('MCX nine-strategy session uses 09:00 opening range rather than NSE 09:15',()=>{
-  const now=Date.parse('2026-11-16T04:27:30Z');
+  const now=Date.parse('2026-11-16T03:51:00Z');
   const base=Math.floor(Date.parse('2026-11-16T03:30:00Z')/1000);
   const rows=[
     {time:base,open:100,high:101,low:99,close:100,volume:100},
