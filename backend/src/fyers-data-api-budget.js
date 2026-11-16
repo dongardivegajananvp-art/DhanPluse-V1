@@ -47,6 +47,7 @@ export function createFyersDataApiBudget({
   let cooldownGeneration = 0;
   let cooldownPersistenceHealthy = true;
   let queuedRequests = 0;
+  let pendingRequests = 0;
   const responseCache = new Map();
   const inFlight = new Map();
 
@@ -186,7 +187,8 @@ export function createFyersDataApiBudget({
       return result.response.clone();
     }
 
-    if (queuedRequests >= maxQueuedRequests) return makeQueueFullResponse();
+    if (pendingRequests >= maxQueuedRequests) return makeQueueFullResponse();
+    pendingRequests += 1;
     const requestPromise = (async () => {
       queuedRequests += 1;
       const current = queue.then(async () => {
@@ -279,6 +281,7 @@ export function createFyersDataApiBudget({
       if (result.cacheEntry) return makeResponse(result, 0);
       return result.response;
     } finally {
+      pendingRequests = Math.max(0, pendingRequests - 1);
       if (inFlightKey && inFlight.get(inFlightKey) === requestPromise) inFlight.delete(inFlightKey);
     }
   }
@@ -307,7 +310,8 @@ export function createFyersDataApiBudget({
       cooldownReason: remainingMs > 0 ? cooldownReason : null,
       consecutiveCloudflareBlocks,
       consecutiveRateLimitBlocks,
-      queuedRequests
+      queuedRequests,
+      pendingRequests
     };
   };
 
