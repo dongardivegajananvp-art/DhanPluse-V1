@@ -376,5 +376,6 @@ test('strategy candle gate accepts a normal Friday-to-Monday session boundary',(
   const tick={price:100,exchangeTime:now/1000,receivedAt:now};
   const result=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,now});
   assert.equal(result.status,'NO_TRADE');
-  assert.match(result.reason,/None of the nine/);
+  assert.match(result.reason,/No eligible strategy confirmed/);
+  assert.ok(result.evaluatedStrategies.includes('EMA20_EMA50_TREND'));
 });
