@@ -97,17 +97,18 @@ test('after cooldown only the previously blocked endpoint can perform the single
   clock += 60_001;
 
   const otherEndpoint = await request('https://api-t1.fyers.in/api/v3/positions');
-  assert.equal(otherEndpoint.status, 503);
-  assert.equal(sent, 0, 'do not probe a different FYERS endpoint after expiry');
+  assert.equal(otherEndpoint.status, 200);
+  assert.equal(sent, 1, 'normal traffic can resume after the provider retry window');
+  assert.equal(cleared, false, 'another endpoint does not clear the blocked endpoint circuit history');
 
   const recoveryProbe = await request('https://api-t1.fyers.in/api/v3/screeners/standard');
   assert.equal(recoveryProbe.status, 200);
-  assert.equal(sent, 1);
-  assert.equal(cleared, true);
-
-  const normalTraffic = await request('https://api-t1.fyers.in/api/v3/positions');
-  assert.equal(normalTraffic.status, 200);
   assert.equal(sent, 2);
+  assert.equal(cleared, true, 'the originally blocked endpoint clears only after its own successful probe');
+
+  const normalTraffic = await request('https://api-t1.fyers.in/api/v3/orders');
+  assert.equal(normalTraffic.status, 200);
+  assert.equal(sent, 3);
 });
 
 test('queue overflow is rejected locally instead of accumulating REST backlog', async () => {
