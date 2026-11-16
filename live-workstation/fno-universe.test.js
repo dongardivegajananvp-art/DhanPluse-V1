@@ -101,3 +101,16 @@ test('does not rank futures without a verified previous close or fresh exchange 
   const tickBySymbol=new Map([['NSE:A26NOVFUT',{price:120,previousClose:null,receivedAt:now,exchangeTime:now/1000}]]);
   assert.equal(buildLiveFnoMovers({universeRows,tickBySymbol,now}).rows.length,0);
 });
+
+test('80-symbol operating window reserves 20 account-wide FYERS slots', () => {
+  const universe=Array.from({length:241},(_,i)=>'NSE:F'+i+'26NOVFUT');
+  const batch=selectFairSubscriptionBatch({
+    baseSymbols:['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'],
+    pinnedSymbols:['NSE:MAXHEALTH-EQ','NSE:POWERINDIA-EQ'],
+    universeSymbols:universe,cursor:0,limit:80
+  });
+  assert.equal(batch.symbols.length,80);
+  assert.equal(new Set(batch.symbols).size,80);
+  assert.equal(batch.fnoSymbols.length,75);
+  assert.ok(100-batch.symbols.length>=20);
+});
