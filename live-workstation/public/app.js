@@ -21,8 +21,8 @@ function renderMcxQuote(){const panel=$('mcxQuote'),scanPanel=$('mcxScanPanel');
 function renderGainers(rows,error){
  const root=$('gainers');root.replaceChildren();const liveRows=(rows||[]).filter(r=>r.fresh===true);
  if(!liveRows.length){const span=document.createElement('span');span.textContent=error||((rows||[]).length?'Waiting for fresh FYERS futures ticks':'No verified F&O gainer data');root.append(span);return}
- for(const r of liveRows){
-  const card=document.createElement('button');card.type='button';card.className='gainer-card';
+ for(const [rank,r] of liveRows.entries()){
+  const card=document.createElement('button');card.type='button';card.className='gainer-card gainer-rank-'+(rank+1);
   const name=String(r.underlying||r.symbol).replace(/^NSE:/,'').replace(/-EQ$/,'').replace(/\d{2}[A-Z0-9]+FUT$/,'');
   const scan=gainerScanResults.find(x=>x.underlying===r.underlying);let label='BREAKOUT SCAN PENDING';
   if(scan?.status==='SETUP_CONFIRMED')label=scan.side+' SETUP · E '+fmt(scan.entry)+' · SL '+fmt(scan.stopLoss)+' · T '+fmt(scan.target);
