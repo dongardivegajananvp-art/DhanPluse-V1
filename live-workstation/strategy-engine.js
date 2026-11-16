@@ -283,7 +283,7 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return fail('Verified active CE/PE contract and tick size are required');
   const o=completed(optionCandles,optionTick,'Option premium');
   if(o.error)return fail(o.error);
-  if(!contiguousWindow(o.rows,51))return fail('Option premium requires 51 contiguous completed 5-minute candles for breakout, ATR and resistance verification');
+  if(!contiguousWindow(o.rows,21))return fail('Option premium requires 21 contiguous completed 5-minute candles for breakout, ATR and resistance verification');
   const chosen=setup;
   if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return{status:'NO_TRADE',reason:'Option side does not match the verified underlying direction',strategy:chosen.strategy};
   const premiumRows=o.rows,premiumLast=o.last,tickSize=number(contract.tickSize);

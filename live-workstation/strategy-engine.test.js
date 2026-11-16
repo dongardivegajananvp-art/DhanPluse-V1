@@ -38,6 +38,29 @@ test('strategy evaluator fails closed when either futures or option tick is stal
   assert.match(result.reason,/option premium tick/i);
 });
 
+test('premium confirmation uses 21 contiguous option candles when the selected strategy uses a 2-candle underlying window',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const bucket=Math.floor((now/1000)/300)*300;
+  const underlyingCandles=[
+    {time:bucket-600,open:100,high:100.5,low:99.5,close:100,volume:100},
+    {time:bucket-300,open:100.5,high:101.2,low:100.2,close:101,volume:120}
+  ];
+  const optionCandles=Array.from({length:21},(_,i)=>({
+    time:bucket-(21-i)*300,
+    open:100,high:100.2,low:99.8,close:100,volume:100
+  }));
+  optionCandles[20]={...optionCandles[20],open:100.1,high:100.3,low:100,close:100.25};
+  const optionTick={price:100.25,exchangeTime:now/1000,receivedAt:now};
+  const underlyingTick={price:101.1,exchangeTime:now/1000,receivedAt:now};
+  const result=evaluateNineStrategies({
+    underlyingCandles,underlyingTick,optionCandles,optionTick,
+    contract:{symbol:'NSE:RELIANCE26NOV2500CE',side:'CE',tickSize:0.05},isTopGainer:true,now
+  });
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  assert.equal(result.rr,2);
+});
+
 test('strategy evaluator requires verified CE/PE contract metadata',()=>{
   const now=Date.parse('2026-11-16T04:00:00Z');
   const {rows,tick}=risingUnderlyingFixture(now);

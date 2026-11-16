@@ -44,19 +44,19 @@ test('option premium tick requires fresh exchange and receive timestamps plus of
   assert.equal(validateOptionPremiumTick({ ...fresh, symbol: 'NSE:OTHER26NOV2500CE' }, contract, now).ok, false);
 });
 
-test('option candles require 51 completed contiguous, valid and tick-aligned FYERS bars', () => {
+test('option candles require 21 completed contiguous, valid and tick-aligned FYERS bars', () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
   const exchangeTime = now / 1000;
   const currentBucket = Math.floor(exchangeTime / 300) * 300;
-  const candles = Array.from({ length: 51 }, (_, i) => ({
-    time: currentBucket - (51 - i) * 300,
+  const candles = Array.from({ length: 21 }, (_, i) => ({
+    time: currentBucket - (21 - i) * 300,
     open: 100, high: 100.20, low: 99.95, close: 100.10, volume: 1000
   }));
   const tick = { price: 100.10, exchangeTime, receivedAt: now };
   assert.equal(validateOptionCandles(candles, tick, contract, now).ok, true);
-  assert.equal(validateOptionCandles(candles.slice(0, 50), tick, contract, now).ok, false);
+  assert.equal(validateOptionCandles(candles.slice(0, 20), tick, contract, now).ok, false);
   const gap = candles.map(c => ({ ...c }));
-  gap[20].time += 300;
+  gap[10].time += 300;
   assert.equal(validateOptionCandles(gap, tick, contract, now).ok, false);
   const offBoundary = candles.map(c => ({ ...c, time: c.time + 60 }));
   assert.equal(validateOptionCandles(offBoundary, tick, contract, now).ok, false);
@@ -66,9 +66,20 @@ test('option candles require 51 completed contiguous, valid and tick-aligned FYE
   const unfinished = [...candles, { time: currentBucket, open: 100, high: 100.2, low: 99.95, close: 100.1 }];
   const withForming = validateOptionCandles(unfinished, tick, contract, now);
   assert.equal(withForming.ok, true);
-  assert.equal(withForming.completedCandles.length, 51);
+  assert.equal(withForming.completedCandles.length, 21);
 });
 
+test('option candle gaps outside the latest strategy window do not block a verified 21-candle window', () => {
+  const now = Date.parse('2026-11-16T04:00:00Z');
+  const exchangeTime = now / 1000;
+  const currentBucket = Math.floor(exchangeTime / 300) * 300;
+  const older = [{ time: currentBucket - 24 * 300, open: 100, high: 100.2, low: 99.95, close: 100.1 }];
+  const latest = Array.from({ length: 21 }, (_, i) => ({
+    time: currentBucket - (21 - i) * 300,
+    open: 100, high: 100.20, low: 99.95, close: 100.10
+  }));
+  assert.equal(validateOptionCandles([...older, ...latest], { exchangeTime }, contract, now).ok, true);
+});
 test('option candle verifier rejects stale and malformed OHLC payloads', () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
   const exchangeTime = now / 1000;
@@ -84,7 +95,7 @@ test('option candle verifier rejects stale and malformed OHLC payloads', () => {
 });
 
 
-test('option verifier allows prior-session gaps but requires the latest 51 bars to be contiguous', () => {
+test('option verifier allows prior-session gaps but requires the latest 21 bars to be contiguous', () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
   const exchangeTime = now / 1000;
   const currentBucket = Math.floor(exchangeTime / 300) * 300;
@@ -113,5 +124,5 @@ test('option candle window treats a Friday-to-Monday session boundary as a valid
   const tick = { symbol: contract.symbol, price: 100.10, exchangeTime: now / 1000, receivedAt: now };
   const result = validateOptionCandles([...previousSession, ...currentSession], tick, contract, now);
   assert.equal(result.ok, true);
-  assert.equal(result.completedCandles.length, 51);
+  assert.equal(result.completedCandles.length, 21);
 });
