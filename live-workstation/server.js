@@ -339,6 +339,7 @@ function ensureSocket(){
     owned.on('close',(code,reason)=>{
       if(socket!==owned)return;
       connected=false;
+      if(subscriptionTransitionTimer){clearTimeout(subscriptionTransitionTimer);subscriptionTransitionTimer=null;}
       subscribedSymbols.clear();
       console.warn('FYERS WebSocket CLOSED.',JSON.stringify({code:code??null,reason:reason==null?null:String(reason).slice(0,140),closedAt:new Date().toISOString()}));
     });
