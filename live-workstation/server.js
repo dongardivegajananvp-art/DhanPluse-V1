@@ -354,7 +354,7 @@ function ensureSocket(){
           const samples=receiveGapMs!==null&&receiveGapMs>=0?[...previousGaps.samples,receiveGapMs].slice(-20):previousGaps.samples;
           indexTickGapSamples.set(symbol,{lastReceivedAt:tick.receivedAt,samples});
         }
-        if(BASE_SUBSCRIPTIONS.every(indexSymbol=>freshTick(lastTicks.get(indexSymbol),15000))){
+        if(BASE_SUBSCRIPTIONS.every(indexSymbol=>freshTick(lastTicks.get(indexSymbol),10000))){
           indexFeedStaleSince=0;
           lastFreshIndexTickAt=new Date().toISOString();
           socketRecoveryAttempts=0;
@@ -468,8 +468,8 @@ const socketFeedWatchdog=setInterval(()=>{
   }
   if(!isNseRegularSession())return;
   const monitored=[...new Set([...BASE_SUBSCRIPTIONS,...fnoScanSubscriptionSymbols,...strategyOptionSymbols,...(selectedOptionSymbol?[selectedOptionSymbol]:[])])];
-  const staleSymbols=monitored.filter(symbol=>!freshTick(lastTicks.get(symbol),15000));
-  const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),15000));
+  const staleSymbols=monitored.filter(symbol=>!freshTick(lastTicks.get(symbol),10000));
+  const freshIndexes=BASE_SUBSCRIPTIONS.filter(symbol=>freshTick(lastTicks.get(symbol),10000));
   if(socket&&connected){
     if(freshIndexes.length<BASE_SUBSCRIPTIONS.length){
       if(!indexFeedStaleSince)indexFeedStaleSince=Date.now();
