@@ -160,7 +160,9 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   // and its verified option candidates. NSE indices/F&O rotation are irrelevant
   // to the MCX workstation view and can consume the Standard-plan symbol budget.
   const mcxOnlyMode=Boolean(mcxFutureRoot(selectedSymbol));
-  if(!mcxOnlyMode&&fnoUniverseRows.length){
+  const nseSessionActive=isNseSubscriptionSession();
+  const nseClosedIdleMode=!mcxOnlyMode&&!nseSessionActive;
+  if(!mcxOnlyMode&&nseSessionActive&&fnoUniverseRows.length){
     const pinned=[selectedSymbol,selectedOptionSymbol,...strategyOptionSymbols,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol])].filter(Boolean);
     try{
       const batch=selectFairSubscriptionBatch({baseSymbols:BASE_SUBSCRIPTIONS,pinnedSymbols:pinned,universeSymbols:fnoUniverseRows.map(x=>x.futureSymbol),cursor:fnoUniverseCursor,limit:FYERS_DATA_SYMBOL_LIMIT});
@@ -176,6 +178,7 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   }
   const wanted=mcxOnlyMode
     ?new Set([selectedSymbol,selectedOptionSymbol,...mcxOptionCandidateSymbols].filter(Boolean))
+    :nseClosedIdleMode?new Set()
     :new Set([...BASE_SUBSCRIPTIONS,...(selectedSymbol?[selectedSymbol]:[]),...(selectedOptionSymbol?[selectedOptionSymbol]:[]),...strategyOptionSymbols,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol]).filter(Boolean),...fnoScanSubscriptionSymbols]);
   if(wanted.size>FYERS_DATA_SYMBOL_LIMIT){
     fnoScanSubscriptionSymbols=[];
@@ -205,7 +208,7 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
       socket.mode(socket.FullMode);
       socket.subscribe(add);
       for(const symbol of add)subscribedSymbols.add(symbol);
-      console.info('FYERS market subscriptions requested.',JSON.stringify({reason,marketMode:mcxOnlyMode?'MCX_ONLY':'NSE_FNO',count:add.length,totalWanted:wanted.size,accountWideReserve:FYERS_DATA_SYMBOL_LIMIT,symbols:add}));
+      console.info('FYERS market subscriptions requested.',JSON.stringify({reason,marketMode:mcxOnlyMode?'MCX_ONLY':nseClosedIdleMode?'NSE_CLOSED_IDLE':'NSE_FNO',count:add.length,totalWanted:wanted.size,accountWideReserve:FYERS_DATA_SYMBOL_LIMIT,symbols:add}));
     }catch(e){subscriptionError='FYERS subscribe failed: '+String(e?.message||e).slice(0,140);console.error(subscriptionError);}
   }
   if(subscriptionError){fnoScanSubscriptionSymbols=[];fnoUniverseError=subscriptionError;return{subscribed:0,removed:remove.length,error:subscriptionError};}
@@ -359,7 +362,11 @@ function ensureSocket(){
       try{
         owned.mode(owned.FullMode);
         syncSocketSubscriptions({force:true,reason:'socket_connect'});
-        void refreshFnoUniverse().then(()=>rotateFnoUniverseSubscriptions('universe_loaded')).catch(error=>console.warn('FYERS F&O universe unavailable; scanner remains fail-closed.',String(error?.message||error).slice(0,180)));
+        if(!mcxFutureRoot(selectedSymbol)&&isNseSubscriptionSession()){
+          void refreshFnoUniverse().then(()=>rotateFnoUniverseSubscriptions('universe_loaded')).catch(error=>console.warn('FYERS F&O universe unavailable; scanner remains fail-closed.',String(error?.message||error).slice(0,180)));
+        }else if(!mcxFutureRoot(selectedSymbol)){
+          console.info('NSE subscriptions and F&O master refresh held while NSE is closed; awaiting MCX selection or next NSE session.');
+        }
       }catch(e){console.error('FYERS initial subscription restore failed.',String(e?.message||e).slice(0,180));}
     });
     owned.on('message',raw=>{
@@ -457,6 +464,10 @@ function ensureSocket(){
     scheduleSocketRecovery('socket_startup_failed');
     throw e;
   }
+}
+function isNseSubscriptionSession(){
+  const phase=String(getNseMarketSession().phase||'CLOSED');
+  return phase==='REGULAR'||phase.startsWith('PRE_OPEN_');
 }
 function isNseRegularSession(){
   return getNseMarketSession().phase==='REGULAR';
