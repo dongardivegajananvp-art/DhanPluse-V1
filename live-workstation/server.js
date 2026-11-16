@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { getNseMarketSession } from './nse-market-session.js';
 import {createSharedTokenReader} from './token-reader.js';
 import { createFyersDataApiBudget } from './fyers-rest-budget.js';
 import { socketRecoveryDelayMs } from './socket-recovery-policy.js';
@@ -416,10 +417,7 @@ function ensureSocket(){
   }
 }
 function isNseRegularSession(){
-  const parts=new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date());
-  const values=Object.fromEntries(parts.map(p=>[p.type,p.value]));
-  const minute=Number(values.hour)*60+Number(values.minute);
-  return ['Mon','Tue','Wed','Thu','Fri'].includes(values.weekday)&&minute>=555&&minute<930;
+  return getNseMarketSession().phase==='REGULAR';
 }
 async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
   const restStatus = fetchWithFyersBudget.getStatus();
@@ -887,7 +885,7 @@ async function runAutomaticStrategyScan(){
 function strategyScanSnapshot(){
  const freshFutureTicks=fnoScanSubscriptionSymbols.filter(symbol=>freshTick(lastTicks.get(symbol))).length;
  const runtime=getScannerRuntimeState({authenticated:authReady(),socketConnected:connected,marketOpen:isNseRegularSession(),ledgerReady:strategyLedgerRuntimeReady,universeCount:fnoUniverseRows.length,activeSubscriptions:fnoScanSubscriptionSymbols.length,freshFutureTicks});
- return{enabled:true,mode:'AUTOMATIC_READ_ONLY',scanIntervalMs:STRATEGY_SCAN_INTERVAL_MS,rotationIntervalMs:FNO_ROTATION_INTERVAL_MS,estimatedScannerHistoryRequestsPerMinute:estimateScannerRestRequestsPerMinute(),runtimeState:runtime.state,blocker:runtime.blocker,marketSession:isNseRegularSession()?'OPEN':'CLOSED',lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),orderMode:'DISABLED'};
+ return{enabled:true,mode:'AUTOMATIC_READ_ONLY',scanIntervalMs:STRATEGY_SCAN_INTERVAL_MS,rotationIntervalMs:FNO_ROTATION_INTERVAL_MS,estimatedScannerHistoryRequestsPerMinute:estimateScannerRestRequestsPerMinute(),runtimeState:runtime.state,blocker:runtime.blocker,marketSession,marketPhase:marketClock.phase,marketPhaseLabel:marketClock.label,lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),orderMode:'DISABLED'};
 }
 
 async function loadGainerHistory(symbol,{force=false,priority=20}={}){
