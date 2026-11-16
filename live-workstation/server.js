@@ -677,7 +677,7 @@ async function runAutomaticStrategyScan(){
    const currentTick=lastTicks.get(futureSymbol);
    if(!freshTick(currentTick)){setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Futures tick became stale during candle verification'});return;}
    strategyScanLastError='';
-   const isTopGainer=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<60*1000&&fnoMoversCache.rows[0]?.underlyingSymbol===row.underlyingSymbol;
+   const isTopGainer=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<60*1000&&fnoMoversCache.rows.some(mover=>mover.underlyingSymbol===row.underlyingSymbol);
    const setup=detectNineStrategySetup({underlyingCandles:history.candles,underlyingTick:currentTick,dailyCandles:daily.ok?daily.candles:[],isTopGainer,now:Date.now()});
    if(setup.status!=='UNDERLYING_SETUP_CONFIRMED'){
     if(setup.status==='DATA_UNAVAILABLE_NO_TRADE')setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:setup.status,reason:setup.reason,dailyDataStatus:daily.reason||'verified'});
