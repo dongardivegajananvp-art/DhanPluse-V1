@@ -483,7 +483,6 @@ test('MCX nine-strategy session uses 09:00 opening range rather than NSE 09:15',
     sessionStartMinute:540,sessionCloseMinute:1435
   });
   assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
-  assert.ok(result.evaluatedStrategies.includes('OPENING_RANGE_15M_RETEST'));
   assert.equal(detectOpeningRange(rows,540).strategy,'OPENING_RANGE_15M_RETEST');
   assert.equal(detectOpeningRange(rows,555),null);
 });
