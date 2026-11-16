@@ -500,6 +500,10 @@ async function recoverFyersRestEndpoint(pathname){
     console.warn('FYERS REST recovery endpoint has no safe automatic probe; circuit remains closed.',JSON.stringify({pathname,at:new Date().toISOString()}));
     return;
   }
+  if(!url){
+    console.warn('FYERS REST recovery URL was not safely persisted; circuit remains closed.',JSON.stringify({pathname,at:new Date().toISOString()}));
+    return;
+  }
   restRecoveryProbeInFlight=true;
   lastRestRecoveryProbeAt=Date.now();
   try{
