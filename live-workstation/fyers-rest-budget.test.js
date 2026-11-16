@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFyersDataApiBudget } from '../backend/src/fyers-data-api-budget.js';
+import { createFyersDataApiBudget } from './fyers-rest-budget.js';
 
 test('workstation budget serializes FYERS v3 and Data API paths with one shared pace', async () => {
   let clock = 1_000_000;
