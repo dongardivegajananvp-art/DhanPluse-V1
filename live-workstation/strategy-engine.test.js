@@ -487,16 +487,16 @@ test('MCX nine-strategy session uses 09:00 opening range rather than NSE 09:15',
   assert.equal(result.side,'LONG');
 });
 
-test('MCX overnight candle continuity accepts 23:50 to next-session 09:00 only for MCX session settings',()=>{
-  const previous=Math.floor(Date.parse('2026-11-15T18:20:00Z')/1000); // 23:50 IST
-  const next=Math.floor(Date.parse('2026-11-16T03:30:00Z')/1000); // 09:00 IST
-  const rows=[
-    {time:previous,open:100,high:101,low:99,close:100,volume:100},
-    {time:next,open:100,high:101,low:99,close:100,volume:100}
-  ];
+test('MCX overnight candle continuity accepts 23:50 to next-session 09:00 with MCX session settings',()=>{
+  const start=Math.floor(Date.parse('2026-11-15T14:20:00Z')/1000); // 19:50 IST
+  const rows=Array.from({length:49},(_,i)=>({
+    time:start+i*300,open:100,high:101,low:99,close:100,volume:100
+  }));
+  rows.push({time:Math.floor(Date.parse('2026-11-16T03:30:00Z')/1000),open:100,high:101,low:99,close:100,volume:100});
   const now=Date.parse('2026-11-16T03:31:00Z');
   const tick={price:100,exchangeTime:now/1000,receivedAt:now};
   const mcx=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,now,sessionStartMinute:540,sessionCloseMinute:1435});
   assert.equal(mcx.status,'NO_TRADE');
-  assert.ok(mcx.blockedStrategies.includes('TOP_GAINER_MOMENTUM_BREAKOUT')===false);
+  assert.ok(mcx.evaluatedStrategies.includes('EMA20_EMA50_TREND'));
+  assert.ok(mcx.blockedStrategies.includes('TOP_GAINER_MOMENTUM_BREAKOUT'));
 });
