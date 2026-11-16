@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
+import { createFyersDataApiBudget } from './fyers-rest-budget.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
 import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
@@ -73,6 +74,8 @@ const databaseUrl=String(process.env.DATABASE_URL||'').trim();
 const strategyPlanStore=createStrategyPlanStore({databaseUrl});
 const orderRequestPool=databaseUrl.startsWith('postgres://')||databaseUrl.startsWith('postgresql://')?new Pool({connectionString:databaseUrl,max:2,idleTimeoutMillis:10000,connectionTimeoutMillis:10000,application_name:'gv2vpd-order-idempotency'}):null;
 const orderRequestStoreReady=orderRequestPool?orderRequestPool.query("CREATE TABLE IF NOT EXISTS gv2vpd_order_requests (request_id VARCHAR(64) PRIMARY KEY, request_hash CHAR(64) NOT NULL, status VARCHAR(32) NOT NULL, broker_order_id VARCHAR(128), response_message TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").then(()=>true).catch(error=>{console.error('Order idempotency store unavailable; order route will remain fail-closed.',String(error?.message||error).slice(0,160));return false;}):Promise.resolve(false);
+const fyersCooldownStoreReady=orderRequestPool?orderRequestPool.query("CREATE TABLE IF NOT EXISTS gv2vpd_runtime_state (state_key TEXT PRIMARY KEY, state_value JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())").then(()=>true).catch(error=>{console.error('FYERS cooldown persistence table unavailable; REST will remain fail-closed.',String(error?.message||error).slice(0,160));return false;}):Promise.resolve(false);
+let fyersRestBudgetReady=false;
 
 const optionChains=new Map();
 const mcxOptionChains=new Map();
@@ -148,51 +151,51 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
 const FYERS_DATA='https://api-t1.fyers.in/data';
 const FYERS_API='https://api-t1.fyers.in/api/v3';
 const freshTick=(tick,maxAgeMs=10000)=>Boolean(tick&&Date.now()-tick.receivedAt>=0&&Date.now()-tick.receivedAt<=maxAgeMs&&Date.now()/1000-Number(tick.exchangeTime)<=10&&Date.now()/1000-Number(tick.exchangeTime)>=-3);
-// Serialize FYERS REST reads and open a local circuit breaker after HTTP 429.
-// WebSocket market ticks remain independent; no automatic retry is sent into a provider cooldown.
-let fyersRestQueue=Promise.resolve();
-let fyersRestLastRequestAt=0;
-let fyersRestCooldownUntil=0;
-let fyersRestCooldownReason='';
-let fyersRestCooldownPath='';
-let fyersRest429Count=0;
+// One shared FYERS API budget covers every api-t1 endpoint (Data + v3).
+// Cooldown state is durable in PostgreSQL and restored before REST traffic is allowed.
 const FYERS_REST_MIN_INTERVAL_MS=4000;
 const FYERS_REST_MAX_COOLDOWN_MS=60*60*1000;
 function fyersRetryAfterMs(response){const raw=String(response.headers?.get?.('retry-after')||'').trim();if(!raw)return 0;const seconds=Number(raw);if(Number.isFinite(seconds)&&seconds>=0)return seconds*1000;const date=Date.parse(raw);return Number.isFinite(date)?Math.max(0,date-Date.now()):0;}
-function fyersCooldownResponse(){const retryAfterMs=Math.max(1,fyersRestCooldownUntil-Date.now()),retryAfterSeconds=Math.max(1,Math.ceil(retryAfterMs/1000));return new Response(JSON.stringify({s:'error',message:'FYERS REST cooldown active; no upstream request was sent.',retryAfterSeconds,cooldownReason:fyersRestCooldownReason}),{status:429,headers:{'content-type':'application/json','retry-after':String(retryAfterSeconds),'x-gv2vpd-fyers-cooldown':'active'}});}
+const fetchWithFyersBudget=createFyersDataApiBudget({
+  allApiPaths:true,maxRequestsPerMinute:15,minIntervalMs:FYERS_REST_MIN_INTERVAL_MS,maxQueuedRequests:24,
+  onCooldownChange:async state=>{
+    if(!orderRequestPool||!(await fyersCooldownStoreReady)||!fyersRestBudgetReady)return false;
+    if(state.cooldownUntil>Date.now()){
+      const value={...state,blockedUntil:new Date(state.cooldownUntil).toISOString()};
+      await orderRequestPool.query(
+        `INSERT INTO gv2vpd_runtime_state (state_key,state_value,updated_at) VALUES ($1,$2::jsonb,NOW())
+         ON CONFLICT (state_key) DO UPDATE SET state_value=EXCLUDED.state_value,updated_at=NOW()`,
+        ['gv2vpd-live-workstation-fyers-rest-cooldown',JSON.stringify(value)]
+      );
+    }else{
+      await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-fyers-rest-cooldown']);
+    }
+    return true;
+  }
+});
+async function initializeFyersRestBudget(){
+  try{
+    if(!orderRequestPool||!(await fyersCooldownStoreReady))throw new Error('Durable PostgreSQL cooldown store is unavailable');
+    const result=await orderRequestPool.query('SELECT state_value FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-fyers-rest-cooldown']);
+    let saved=result.rows?.[0]?.state_value??null;
+    if(typeof saved==='string'){try{saved=JSON.parse(saved);}catch{saved=null;}}
+    if(saved&&fetchWithFyersBudget.restoreStatus(saved)){
+      console.warn('FYERS REST cooldown restored from PostgreSQL; all API endpoints remain paused.',JSON.stringify(fetchWithFyersBudget.getStatus()));
+    }else if(saved){
+      await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-fyers-rest-cooldown']);
+    }
+    fyersRestBudgetReady=true;
+    console.info('FYERS REST budget ready.',JSON.stringify({allApiPaths:true,minIntervalMs:FYERS_REST_MIN_INTERVAL_MS,maxRequestsPerMinute:15,maxQueuedRequests:24,persistence:'POSTGRESQL',restoredCooldown:Boolean(saved&&fetchWithFyersBudget.getStatus().cooldownActive)}));
+  }catch(error){
+    fyersRestBudgetReady=false;
+    console.error('FYERS REST budget initialization failed; authenticated REST is blocked fail-closed.',String(error?.message||error).slice(0,180));
+  }
+}
 async function fyersRestFetch(url,init={}){
   const target=new URL(url);
   if(target.hostname!=='api-t1.fyers.in')return fetch(url,init);
-  const {timeoutMs=12000,signal:callerSignal,...fetchInit}=init;
-  const execute=async()=>{
-    if(fyersRestCooldownUntil>Date.now())return fyersCooldownResponse();
-    const waitMs=Math.max(0,fyersRestLastRequestAt+FYERS_REST_MIN_INTERVAL_MS-Date.now());
-    if(waitMs)await new Promise(resolve=>setTimeout(resolve,waitMs));
-    if(fyersRestCooldownUntil>Date.now())return fyersCooldownResponse();
-    const timeoutSignal=AbortSignal.timeout(Math.max(1,Number(timeoutMs)||12000));
-    const signal=callerSignal?AbortSignal.any([callerSignal,timeoutSignal]):timeoutSignal;
-    fyersRestLastRequestAt=Date.now();
-    const response=await fetch(url,{...fetchInit,signal});
-    if(response.status===429){
-      const body=await response.clone().text().catch(()=>''),server=String(response.headers?.get?.('server')||''),cfRay=String(response.headers?.get?.('cf-ray')||'');
-      const cloudflare=/error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body)||(/cloudflare/i.test(server)&&Boolean(cfRay));
-      fyersRest429Count+=1;
-      const normalBackoff=[60000,120000,300000][Math.min(fyersRest429Count-1,2)];
-      const retryMs=fyersRetryAfterMs(response);
-      const backoffMs=cloudflare?FYERS_REST_MAX_COOLDOWN_MS:Math.max(normalBackoff,retryMs);
-      fyersRestCooldownUntil=Math.max(fyersRestCooldownUntil,Date.now()+Math.min(FYERS_REST_MAX_COOLDOWN_MS,backoffMs));
-      fyersRestCooldownReason=cloudflare?'CLOUDFLARE_1015':'HTTP_429';
-      fyersRestCooldownPath=target.pathname;
-      console.error('FYERS REST rate limit; circuit opened.',JSON.stringify({path:target.pathname,status:429,reason:fyersRestCooldownReason,consecutive429:fyersRest429Count,retryAfterSeconds:Math.ceil((fyersRestCooldownUntil-Date.now())/1000),upstreamRequestSent:true}));
-    }else if(response.ok&&fyersRestCooldownUntil&&Date.now()>=fyersRestCooldownUntil&&target.pathname===fyersRestCooldownPath){
-      console.info('FYERS REST cooldown cleared after a successful endpoint probe.',JSON.stringify({path:target.pathname,clearedAt:new Date().toISOString()}));
-      fyersRest429Count=0;fyersRestCooldownUntil=0;fyersRestCooldownReason='';fyersRestCooldownPath='';
-    }
-    return response;
-  };
-  const pending=fyersRestQueue.then(execute,execute);
-  fyersRestQueue=pending.then(()=>undefined,()=>undefined);
-  return pending;
+  if(!fyersRestBudgetReady)return new Response(JSON.stringify({s:'error',message:'FYERS REST budget is not ready; no upstream request was sent.'}),{status:503,headers:{'content-type':'application/json','x-fyers-budget':'not-ready'}});
+  return fetchWithFyersBudget(url,init);
 }
 
 function toEpochSeconds(value){if(value===null||value===undefined||value==='')return 0;const n=Number(value);if(Number.isFinite(n)&&n>0)return n>1e12?n/1000:n;const parsed=Date.parse(String(value));return Number.isFinite(parsed)&&parsed>0?parsed/1000:0;}
@@ -332,13 +335,13 @@ function isNseRegularSession(){
   return ['Mon','Tue','Wed','Thu','Fri'].includes(values.weekday)&&minute>=555&&minute<930;
 }
 async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
-  if (!authReady() || !isNseRegularSession() || fyersRestCooldownUntil > Date.now()) return;
+  if (!authReady() || !isNseRegularSession() || fetchWithFyersBudget.getStatus().cooldownActive) return;
   if (Date.now() - lastRestQuoteRecoveryAt < 30000) return;
   lastRestQuoteRecoveryAt = Date.now();
   const unique = [...new Set(staleSymbols)].filter(Boolean);
   let accepted = 0, rejected = 0;
   for (let i = 0; i < unique.length; i += 50) {
-    if (fyersRestCooldownUntil > Date.now()) break;
+    if (fetchWithFyersBudget.getStatus().cooldownActive) break;
     const batch = unique.slice(i, i + 50);
     try {
       const url = FYERS_DATA + '/quotes?symbols=' + encodeURIComponent(batch.join(','));
@@ -368,13 +371,13 @@ async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
       rejected += batch.length - ticks.length + monotonicRejected;
     } catch (error) {
       console.warn('FYERS REST quote recovery failed safely.', String(error?.message || error).slice(0, 160));
-      if (fyersRestCooldownUntil > Date.now()) break;
+      if (fetchWithFyersBudget.getStatus().cooldownActive) break;
     }
   }
   if (accepted) lastAcceptedTickAt = new Date().toISOString();
   console.info('FYERS REST quote recovery completed.', JSON.stringify({
     requested: unique.length, acceptedFreshExchangeTicks: accepted, rejectedOrStale: rejected,
-    at: new Date().toISOString(), cooldownActive: fyersRestCooldownUntil > Date.now()
+    at: new Date().toISOString(), cooldownActive: fetchWithFyersBudget.getStatus().cooldownActive
   }));
 }
 const socketFeedWatchdog=setInterval(()=>{
@@ -414,7 +417,7 @@ app.get('/api/health',async(_req,res)=>{
   const fnoUniverseCoverage=summarizeFnoCoverage(fnoUniverseRows.map(row=>row.futureSymbol),fnoScanSubscriptionSymbols,fnoUniverseRows.filter(row=>freshTick(lastTicks.get(row.futureSymbol))).map(row=>row.futureSymbol));
   const strategyLedgerReady=strategyPlanStore?await strategyPlanStore.ready:false;
   const latestExchangeTime=[...lastTicks.values()].reduce((latest,tick)=>Math.max(latest,Number(tick.exchangeTime)||0),0);
-  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,requestedFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,activeWindowFreshnessPercent:fnoFeed.coveragePercent,windowCoveragePercent:fnoUniverseCoverage.requestedCoveragePercent,freshUniverseCoveragePercent:fnoUniverseCoverage.freshUniverseCoveragePercent,notRequestedFutureCount:fnoUniverseCoverage.notRequestedCount,freshUniverseFutureCount:fnoUniverseCoverage.freshUniverseCount,coverage:fnoUniverseCoverage,lastRotationAt:lastFnoRotationAt,rotationCount:fnoRotationCount,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:{active:fyersRestCooldownUntil>Date.now(),reason:fyersRestCooldownReason||null,retryAfterSeconds:fyersRestCooldownUntil>Date.now()?Math.ceil((fyersRestCooldownUntil-Date.now())/1000):0,consecutive429:fyersRest429Count},orderMode:'DISABLED'});
+  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,requestedFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,activeWindowFreshnessPercent:fnoFeed.coveragePercent,windowCoveragePercent:fnoUniverseCoverage.requestedCoveragePercent,freshUniverseCoveragePercent:fnoUniverseCoverage.freshUniverseCoveragePercent,notRequestedFutureCount:fnoUniverseCoverage.notRequestedCount,freshUniverseFutureCount:fnoUniverseCoverage.freshUniverseCount,coverage:fnoUniverseCoverage,lastRotationAt:lastFnoRotationAt,rotationCount:fnoRotationCount,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:(()=>{const status=fetchWithFyersBudget.getStatus();return{active:status.cooldownActive,reason:status.cooldownReason||null,retryAfterSeconds:status.retryAfterSeconds,blockedUntil:status.blockedUntil,consecutive429:status.consecutiveCloudflareBlocks+status.consecutiveRateLimitBlocks,persistenceReady:fyersRestBudgetReady,persistenceHealthy:status.cooldownPersistenceHealthy,queuedRequests:status.queuedRequests};})(),orderMode:'DISABLED'});
 });
 app.get('/api/strategy-scan',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.status(401).json({error:'FYERS session unavailable',...strategyScanSnapshot()});await refreshStrategyActivePlans();res.json(strategyScanSnapshot());});
 app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,underlying:row.underlyingSymbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
@@ -906,7 +909,7 @@ app.get('/api/fyers/auth/callback',async(req,res)=>{
   if(!appId||!appSecret||!redirectUri||!tokenReader)return res.status(503).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>Secure FYERS storage is unavailable</h2><p>Connection was not activated. Check the existing workstation configuration.</p><a href="/">Return to GV2VPD</a>');
   try{
     const appIdHash=crypto.createHash('sha256').update(appId+':'+appSecret).digest('hex');
-    const response=await fetch('https://api-t1.fyers.in/api/v3/validate-authcode',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({grant_type:'authorization_code',appIdHash,code}),signal:AbortSignal.timeout(12000)});
+    const response=await fyersRestFetch('https://api-t1.fyers.in/api/v3/validate-authcode',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({grant_type:'authorization_code',appIdHash,code}),timeoutMs:12000});
     const data=await response.json().catch(()=>({}));
     if(!response.ok||data.s!=='ok'||typeof data.access_token!=='string'||!data.access_token){console.warn('FYERS OAuth validation rejected.',JSON.stringify({httpStatus:response.status,providerMessage:String(data.message||data.error||'').slice(0,140)}));return res.status(401).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>FYERS authentication failed</h2><p>FYERS did not accept the authorization code. Return to GV2VPD and reconnect.</p><a href="/">Return to GV2VPD</a>');}
     const authenticatedAt=new Date().toISOString();
@@ -918,6 +921,7 @@ app.get('/api/fyers/auth/callback',async(req,res)=>{
 });
 const server=app.listen(Number(process.env.PORT)||10000,'0.0.0.0',()=>console.log('GV2VPD Live Workstation listening'));
 async function restoreSharedFyersSession(){if(!tokenReader){console.warn('Shared encrypted FYERS token reader is not configured; market stream remains disconnected.');return;}try{const saved=await tokenReader.read();if(!saved){console.warn('No encrypted FYERS session found in shared token store.');return;}accessToken=saved.accessToken;console.log('Existing encrypted FYERS session restored read-only; authenticatedAt='+saved.authenticatedAt);ensureSocket();}catch(error){console.error('Could not restore shared FYERS session:',String(error?.message||error).slice(0,160));}}
+void initializeFyersRestBudget();
 void restoreSharedFyersSession();
 void refreshStrategyActivePlans(true).then(()=>{if(strategyOptionSymbols.size)syncSocketSubscriptions({reason:'strategy_plans_restored'});}).catch(error=>console.warn('Strategy plan restore unavailable; new entries remain blocked.',String(error?.message||error).slice(0,160)));
 server.on('error',error=>console.error('Workstation HTTP server error:',error.message));
