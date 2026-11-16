@@ -72,6 +72,7 @@ let indexFeedStaleSince=0;
 let lastFreshIndexTickAt=null;
 let socketPayloadDiagnostics=0;
 let lastTickDiagnosticAt=new Map();
+const indexTickGapSamples=new Map();
 let lastSubscriptionRecoveryAt=0;
 let lastRestQuoteRecoveryAt=0;
 let selectedSymbol='';
@@ -347,6 +348,12 @@ function ensureSocket(){
         const tickAcceptance=acceptExchangeTick(lastTicks.get(symbol),tick);
         if(!tickAcceptance.accepted){if(tickAcceptance.reason==='OUT_OF_ORDER_EXCHANGE_TIMESTAMP'||tickAcceptance.reason==='FUTURE_EXCHANGE_TIMESTAMP'){console.warn('FYERS tick rejected by monotonic timestamp guard.',JSON.stringify({symbol,reason:tickAcceptance.reason,exchangeTimestamp:new Date(stamp*1000).toISOString()}));}continue;}
         lastTicks.set(symbol,tick);
+        if(BASE_SUBSCRIPTIONS.includes(symbol)){
+          const previousGaps=indexTickGapSamples.get(symbol)||{lastReceivedAt:0,samples:[]};
+          const receiveGapMs=previousGaps.lastReceivedAt?tick.receivedAt-previousGaps.lastReceivedAt:null;
+          const samples=receiveGapMs!==null&&receiveGapMs>=0?[...previousGaps.samples,receiveGapMs].slice(-20):previousGaps.samples;
+          indexTickGapSamples.set(symbol,{lastReceivedAt:tick.receivedAt,samples});
+        }
         if(BASE_SUBSCRIPTIONS.every(indexSymbol=>freshTick(lastTicks.get(indexSymbol),15000))){
           indexFeedStaleSince=0;
           lastFreshIndexTickAt=new Date().toISOString();
@@ -358,7 +365,11 @@ function ensureSocket(){
         const lastLog=lastTickDiagnosticAt.get(symbol)||0;
         if(Date.now()-lastLog>=30000){
           const ageSeconds=Number((Date.now()/1000-stamp).toFixed(1));
-          console.info('FYERS exchange tick accepted.',JSON.stringify({symbol,exchangeTimestamp:new Date(stamp*1000).toISOString(),exchangeAgeSeconds:ageSeconds,freshness:ageSeconds>=0&&ageSeconds<=10?'FRESH':'STALE'}));
+          const gapStats=BASE_SUBSCRIPTIONS.includes(symbol)?(indexTickGapSamples.get(symbol)||{samples:[]}):{samples:[]};
+          const gaps=gapStats.samples;
+          const avgReceiveGapSeconds=gaps.length?Number((gaps.reduce((sum,value)=>sum+value,0)/gaps.length/1000).toFixed(2)):null;
+          const maxReceiveGapSeconds=gaps.length?Number((Math.max(...gaps)/1000).toFixed(2)):null;
+          console.info('FYERS exchange tick accepted.',JSON.stringify({symbol,exchangeTimestamp:new Date(stamp*1000).toISOString(),exchangeAgeSeconds:ageSeconds,freshness:ageSeconds>=0&&ageSeconds<=10?'FRESH':'STALE',receiveGapSampleCount:gaps.length,avgReceiveGapSeconds,maxReceiveGapSeconds}));
           lastTickDiagnosticAt.set(symbol,Date.now());
         }
       }
