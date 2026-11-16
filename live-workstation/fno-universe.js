@@ -97,3 +97,40 @@ export function selectSubscriptionBatch({ baseSymbols = [], pinnedSymbols = [], 
   const batch = selectFairSubscriptionBatch({ baseSymbols, pinnedSymbols, universeSymbols, cursor, limit });
   return { symbols: batch.symbols, nextCursor: batch.nextCursor, rotatingCount: batch.rotatingCount, universeCount: batch.universeCount };
 }
+
+export function buildLiveFnoMovers({ universeRows = [], tickBySymbol = new Map(), now = Date.now(), maxAgeMs = 10000 } = {}) {
+  const rows = [];
+  for (const item of Array.isArray(universeRows) ? universeRows : []) {
+    const tick = tickBySymbol?.get?.(item.futureSymbol);
+    if (!tick) continue;
+    const price = Number(tick.price);
+    const previousClose = Number(tick.previousClose);
+    const receivedAt = Number(tick.receivedAt);
+    const exchangeTime = epochSeconds(tick.exchangeTime);
+    const receivedAge = now - receivedAt;
+    const exchangeAge = now / 1000 - exchangeTime;
+    if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(previousClose) || previousClose <= 0 ||
+        !Number.isFinite(receivedAge) || receivedAge < 0 || receivedAge > maxAgeMs ||
+        !exchangeTime || exchangeAge < -3 || exchangeAge > 10) continue;
+    const change = (price / previousClose - 1) * 100;
+    if (!Number.isFinite(change)) continue;
+    rows.push({
+      symbol: item.futureSymbol,
+      underlying: item.underlyingSymbol.replace(/-EQ$|-INDEX$/, ''),
+      underlyingSymbol: item.underlyingSymbol,
+      expiry: item.expiry,
+      basePrice: previousClose,
+      price,
+      change,
+      exchangeTime,
+      source: 'FYERS WebSocket exchange tick'
+    });
+  }
+  rows.sort((a, b) => b.change - a.change);
+  return {
+    rows: rows.slice(0, 5),
+    updatedAt: rows.length ? Math.max(...rows.map(row => row.exchangeTime * 1000)) : 0,
+    freshUniverseTickCount: rows.length,
+    universeCount: Array.isArray(universeRows) ? universeRows.length : 0
+  };
+}
