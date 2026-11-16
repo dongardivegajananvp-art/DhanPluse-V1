@@ -246,14 +246,14 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   // A gap in an older EMA50 window must not disable a valid two-candle momentum breakout.
   consider('EMA20_EMA50_TREND',contiguousWindow(rows,50,sessionStartMinute,sessionCloseMinute),()=>detectEmaTrend(rows));
   consider('TOP_GAINER_MOMENTUM_BREAKOUT',isTopGainer&&contiguousWindow(rows,2,sessionStartMinute,sessionCloseMinute),()=>detectTopGainerMomentum(rows,isTopGainer));
-  consider('DAILY_TREND_5M_PULLBACK',contiguousWindow(rows,50)&&Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50,()=>detectDailyTrendPullback(rows,dailyCandles));
+  consider('DAILY_TREND_5M_PULLBACK',contiguousWindow(rows,50,sessionStartMinute,sessionCloseMinute)&&Array.isArray(dailyCandles)&&dailyCandles.filter(validOhlcv).length>=50,()=>detectDailyTrendPullback(rows,dailyCandles));
   const sessionRows=currentSessionRows(rows);
   const sessionContiguous=sessionRows.length>0&&contiguousWindow(sessionRows,sessionRows.length,sessionStartMinute,sessionCloseMinute);
   consider('DAY_HIGH_LOW_BREAK_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectDayHighLowRetest(rows));
   consider('DOUBLE_TOP_BOTTOM_NECKLINE_RETEST',contiguousWindow(rows,48,sessionStartMinute,sessionCloseMinute),()=>detectDoublePattern(rows));
   consider('BULLISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'LONG'));
-  consider('BEARISH_CONTINUATION',contiguousWindow(rows,30),()=>detectContinuation(rows,'SHORT'));
-  consider('FLAG_BREAKOUT_VOLUME',contiguousWindow(rows,30),()=>detectFlagVolume(rows));
+  consider('BEARISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'SHORT'));
+  consider('FLAG_BREAKOUT_VOLUME',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectFlagVolume(rows));
   consider('OPENING_RANGE_15M_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute));
   if(!candidates.length){
     if(!evaluated.length)return fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', '));
