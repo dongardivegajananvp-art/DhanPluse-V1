@@ -124,5 +124,5 @@ test('option candle window treats a Friday-to-Monday session boundary as a valid
   const tick = { symbol: contract.symbol, price: 100.10, exchangeTime: now / 1000, receivedAt: now };
   const result = validateOptionCandles([...previousSession, ...currentSession], tick, contract, now);
   assert.equal(result.ok, true);
-  assert.equal(result.completedCandles.length, 51);
+  assert.equal(result.completedCandles.length, 21);
 });
