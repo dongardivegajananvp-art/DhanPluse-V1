@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFyersDataApiBudget } from './fyers-rest-budget.js';
+import { createFyersDataApiBudget, isValidFyersRecoveryPayload } from './fyers-rest-budget.js';
 
 test('workstation budget serializes FYERS v3 and Data API paths with one shared pace', async () => {
   let clock = 1_000_000;
@@ -168,4 +168,44 @@ test('expired cooldown survives restart and still requires the original endpoint
   assert.equal(sent, 1);
   assert.equal(restarted.getStatus().cooldownActive, false);
   assert.equal(restarted.getStatus().recoveryProbeRequired, false);
+});
+
+
+test('recovery payload validation is endpoint-specific and rejects HTTP-200 error envelopes', () => {
+  assert.equal(isValidFyersRecoveryPayload('/data/quotes', { s: 'ok', d: [{ n: 'NSE:NIFTY50-INDEX', v: { lp: 25000 } }] }), true);
+  assert.equal(isValidFyersRecoveryPayload('/data/quotes', { s: 'ok', d: [] }), false);
+  assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'ok', candles: [[1, 1, 2, 1, 2]] }), true);
+  assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'ok', candles: [] }), false);
+  assert.equal(isValidFyersRecoveryPayload('/data/options-chain-v3', { s: 'ok', data: { optionsChain: [{ symbol: 'NSE:TESTCE' }] } }), true);
+  assert.equal(isValidFyersRecoveryPayload('/data/options-chain-v3', { s: 'ok', data: { optionsChain: [] } }), false);
+  assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'error', message: 'invalid symbol' }), false);
+});
+
+test('same-endpoint HTTP 200 with an FYERS error envelope does not clear the recovery circuit', async () => {
+  let clock = 5_000_000;
+  let sent = 0;
+  const request = createFyersDataApiBudget({
+    allApiPaths: true,
+    now: () => clock,
+    sleep: async ms => { clock += ms; },
+    fetchImpl: async () => {
+      sent += 1;
+      return new Response(JSON.stringify({ s: 'error', message: 'temporarily unavailable' }), { status: 200 });
+    },
+    onCooldownChange: async () => true
+  });
+  const state = {
+    blockedUntil: new Date(clock - 1).toISOString(),
+    cooldownReason: 'CLOUDFLARE_1015',
+    cooldownPathname: '/data/history',
+    cooldownGeneration: 9,
+    consecutiveCloudflareBlocks: 1,
+    consecutiveRateLimitBlocks: 0
+  };
+  assert.equal(request.restoreStatus(state), true);
+  const response = await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX');
+  assert.equal(response.status, 200);
+  assert.equal(sent, 1);
+  assert.equal(request.getStatus().cooldownActive, true);
+  assert.equal(request.getStatus().recoveryProbePathname, '/data/history');
 });
