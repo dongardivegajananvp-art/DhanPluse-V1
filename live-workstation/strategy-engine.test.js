@@ -11,6 +11,46 @@ function risingUnderlyingFixture(now){
   return{rows,tick:{price:153.5,exchangeTime:now/1000,receivedAt:now}};
 }
 
+test('EMA20/EMA50 strategy evaluates with exactly 50 completed 5-minute candles',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const bucket=Math.floor((now/1000)/300)*300;
+  const rows=Array.from({length:50},(_,i)=>{
+    const close=100+i*0.5;
+    return {time:bucket-(50-i)*300,open:close-0.1,high:close+0.2,low:close-0.2,close,volume:100};
+  });
+  const last=rows.at(-1);
+  const result=detectNineStrategySetup({
+    underlyingCandles:rows,
+    underlyingTick:{price:last.close,exchangeTime:now/1000,receivedAt:now},
+    now
+  });
+  assert.notEqual(result.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.equal(result.evaluatedStrategies.includes('EMA20_EMA50_TREND'),true);
+});
+
+test('daily trend pullback strategy accepts 50 completed underlying and daily candles',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const bucket=Math.floor((now/1000)/300)*300;
+  const rows=Array.from({length:50},(_,i)=>{
+    const close=100+i*0.5;
+    return {time:bucket-(50-i)*300,open:close-0.1,high:close+0.2,low:close-0.2,close,volume:100};
+  });
+  const dailyCandles=Array.from({length:50},(_,i)=>{
+    const close=100+i*0.5;
+    return {time:Math.floor(now/1000)-(50-i)*86400,open:close-0.1,high:close+0.2,low:close-0.2,close};
+  });
+  const last=rows.at(-1);
+  const result=detectNineStrategySetup({
+    underlyingCandles:rows,
+    underlyingTick:{price:last.close,exchangeTime:now/1000,receivedAt:now},
+    dailyCandles,
+    now
+  });
+  assert.notEqual(result.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.equal(result.evaluatedStrategies.includes('EMA20_EMA50_TREND'),true);
+  assert.equal(result.evaluatedStrategies.includes('DAILY_TREND_5M_PULLBACK'),true);
+});
+
 test('nine fixed strategy identifiers are present and stable',()=>{
   assert.equal(STRATEGIES.length,9);
   assert.equal(MAX_ACTIVE_TRADES,2);
