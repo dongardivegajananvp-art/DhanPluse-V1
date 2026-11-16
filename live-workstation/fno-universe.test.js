@@ -77,3 +77,27 @@ test('reports requested-window freshness separately from whole-universe coverage
   assert.equal(coverage.activeWindowFreshnessPercent, 50);
   assert.deepEqual(coverage.notRequestedSamples, ['NSE:C', 'NSE:D']);
 });
+
+test('builds top-five gainers only from fresh exchange-timestamped WebSocket futures ticks', async () => {
+  const { buildLiveFnoMovers } = await import('./fno-universe.js');
+  const now = Date.parse('2026-11-16T04:50:00Z');
+  const universeRows = Array.from({length:7},(_,i)=>({futureSymbol:'NSE:S'+i+'26NOVFUT',underlyingSymbol:'NSE:S'+i+'-EQ',expiry:now/1000+86400}));
+  const tickBySymbol = new Map(universeRows.map((row,i)=>[row.futureSymbol,{
+    price:100+i, previousClose:100, receivedAt:now-500, exchangeTime:now/1000-0.5
+  }]));
+  tickBySymbol.set('NSE:S6'+'26NOVFUT',{price:200,previousClose:100,receivedAt:now-20000,exchangeTime:now/1000-20});
+  const result=buildLiveFnoMovers({universeRows,tickBySymbol,now});
+  assert.equal(result.rows.length,5);
+  assert.equal(result.rows[0].symbol,'NSE:S5'+'26NOVFUT');
+  assert.equal(result.rows[0].change,5);
+  assert.equal(result.freshUniverseTickCount,5);
+  assert.equal(result.universeCount,7);
+});
+
+test('does not rank futures without a verified previous close or fresh exchange timestamp', async () => {
+  const { buildLiveFnoMovers } = await import('./fno-universe.js');
+  const now=Date.parse('2026-11-16T04:50:00Z');
+  const universeRows=[{futureSymbol:'NSE:A26NOVFUT',underlyingSymbol:'NSE:A-EQ'}];
+  const tickBySymbol=new Map([['NSE:A26NOVFUT',{price:120,previousClose:null,receivedAt:now,exchangeTime:now/1000}]]);
+  assert.equal(buildLiveFnoMovers({universeRows,tickBySymbol,now}).rows.length,0);
+});
