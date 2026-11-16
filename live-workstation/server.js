@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import {createSharedTokenReader} from './token-reader.js';
 import { createFyersDataApiBudget } from './fyers-rest-budget.js';
+import { socketRecoveryDelayMs } from './socket-recovery-policy.js';
 import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute } from './scanner-schedule.js';
 import { getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { acceptExchangeTick, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
@@ -61,6 +62,10 @@ let lastSocketConnectAt=null;
 let lastSocketMessageAt=null;
 let lastAcceptedTickAt=null;
 let lastSocketError='';
+let lastSocketConnectAttemptAt=null;
+let lastSocketRecoveryAt=null;
+let socketRecoveryAttempts=0;
+let socketRecoveryTimer=null;
 let socketPayloadDiagnostics=0;
 let lastTickDiagnosticAt=new Map();
 let lastSubscriptionRecoveryAt=0;
@@ -265,16 +270,38 @@ function rotateFnoUniverseSubscriptions(reason='scheduled_rotation'){
   return{symbols:fnoScanSubscriptionSymbols.length,universe:fnoUniverseRows.length,limit:FYERS_DATA_SYMBOL_LIMIT,nextCursor:fnoUniverseCursor,error:result.error||null};
 }
 function authReady(){return Boolean(appId&&accessToken);}
+function scheduleSocketRecovery(reason='socket_unavailable'){
+  if(!authReady()||connected||socketRecoveryTimer)return;
+  const delayMs=socketRecoveryDelayMs(socketRecoveryAttempts+1);
+  socketRecoveryAttempts+=1;
+  console.warn('FYERS socket recovery scheduled.',JSON.stringify({reason,attempt:socketRecoveryAttempts,delayMs,scheduledAt:new Date().toISOString()}));
+  socketRecoveryTimer=setTimeout(()=>{
+    socketRecoveryTimer=null;
+    if(!authReady()||connected)return;
+    const previous=socket;
+    socket=null;
+    connected=false;
+    subscribedSymbols.clear();
+    try{if(previous&&typeof previous.close==='function')previous.close();}catch{}
+    lastSocketRecoveryAt=new Date().toISOString();
+    console.warn('FYERS socket recovery restarting connection owner.',JSON.stringify({attempt:socketRecoveryAttempts,recoveryAt:lastSocketRecoveryAt,reason}));
+    ensureSocket();
+  },delayMs);
+  socketRecoveryTimer.unref?.();
+}
 function ensureSocket(){
   if(!authReady()||socket)return;
   let owned=null;
   try{
     owned=fyersDataSocket.getInstance(`${appId}:${accessToken}`,'',false);
     socket=owned;
+    lastSocketConnectAttemptAt=new Date().toISOString();
     console.info('FYERS WebSocket owner created.',JSON.stringify({at:new Date().toISOString(),tokenRestored:true}));
     owned.on('connect',()=>{
       if(socket!==owned)return;
       connected=true;
+      if(socketRecoveryTimer){clearTimeout(socketRecoveryTimer);socketRecoveryTimer=null;}
+      socketRecoveryAttempts=0;
       socketConnectCount+=1;
       lastSocketConnectAt=new Date().toISOString();
       lastSocketError='';
@@ -336,13 +363,16 @@ function ensureSocket(){
       try{if(typeof owned.isConnected==='function')sdkConnected=Boolean(owned.isConnected());}catch{}
       if(sdkConnected===false)connected=false;
       console.warn('FYERS WebSocket error event.',JSON.stringify({message:lastSocketError,transportConnected:connected,sdkConnected}));
+      if(sdkConnected===false)scheduleSocketRecovery('socket_error_disconnected');
     });
     owned.on('close',(code,reason)=>{
       if(socket!==owned)return;
       connected=false;
       if(subscriptionTransitionTimer){clearTimeout(subscriptionTransitionTimer);subscriptionTransitionTimer=null;}
       subscribedSymbols.clear();
+      lastSocketConnectAttemptAt=null;
       console.warn('FYERS WebSocket CLOSED.',JSON.stringify({code:code??null,reason:reason==null?null:String(reason).slice(0,140),closedAt:new Date().toISOString()}));
+      scheduleSocketRecovery('socket_closed');
     });
     const reconnect=typeof owned.autoreconnect==='function'?owned.autoreconnect.bind(owned):typeof owned.autoReconnect==='function'?owned.autoReconnect.bind(owned):null;
     if(!reconnect)throw new Error('FYERS SDK auto-reconnect unavailable');
@@ -355,6 +385,7 @@ function ensureSocket(){
     lastSocketError=String(e?.message||e).slice(0,180);
     if(socket===owned)socket=null;
     console.error('FYERS WebSocket startup failed.',lastSocketError);
+    scheduleSocketRecovery('socket_startup_failed');
     throw e;
   }
 }
@@ -411,7 +442,12 @@ async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
   }));
 }
 const socketFeedWatchdog=setInterval(()=>{
-  if(!authReady()||!isNseRegularSession())return;
+  if(!authReady())return;
+  if(socket&&!connected&&lastSocketConnectAttemptAt&&Date.now()-Date.parse(lastSocketConnectAttemptAt)>30000){
+    scheduleSocketRecovery('socket_connect_timeout');
+    return;
+  }
+  if(!isNseRegularSession())return;
   const monitored=[...new Set([...BASE_SUBSCRIPTIONS,...fnoScanSubscriptionSymbols,...strategyOptionSymbols,...(selectedOptionSymbol?[selectedOptionSymbol]:[])])];
   const staleSymbols=monitored.filter(symbol=>!freshTick(lastTicks.get(symbol),15000));
   if(!staleSymbols.length||Date.now()-lastSubscriptionRecoveryAt<30000)return;
@@ -447,7 +483,7 @@ app.get('/api/health',async(_req,res)=>{
   const fnoUniverseCoverage=summarizeFnoCoverage(fnoUniverseRows.map(row=>row.futureSymbol),fnoScanSubscriptionSymbols,fnoUniverseRows.filter(row=>freshTick(lastTicks.get(row.futureSymbol))).map(row=>row.futureSymbol));
   const strategyLedgerReady=strategyPlanStore?await strategyPlanStore.ready:false;
   const latestExchangeTime=[...lastTicks.values()].reduce((latest,tick)=>Math.max(latest,Number(tick.exchangeTime)||0),0);
-  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,requestedFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,activeWindowFreshnessPercent:fnoFeed.coveragePercent,windowCoveragePercent:fnoUniverseCoverage.requestedCoveragePercent,freshUniverseCoveragePercent:fnoUniverseCoverage.freshUniverseCoveragePercent,notRequestedFutureCount:fnoUniverseCoverage.notRequestedCount,freshUniverseFutureCount:fnoUniverseCoverage.freshUniverseCount,coverage:fnoUniverseCoverage,lastRotationAt:lastFnoRotationAt,rotationCount:fnoRotationCount,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:(()=>{const status=fetchWithFyersBudget.getStatus();return{active:status.cooldownActive,reason:status.cooldownReason||null,retryAfterSeconds:status.retryAfterSeconds,blockedUntil:status.blockedUntil,consecutive429:status.consecutiveCloudflareBlocks+status.consecutiveRateLimitBlocks,persistenceReady:fyersRestBudgetReady,persistenceHealthy:status.cooldownPersistenceHealthy,queuedRequests:status.queuedRequests};})(),orderMode:'DISABLED'});
+  res.set('Cache-Control','no-store').json({ok:true,authenticated:authReady(),socketConnected:connected,websocketState:connected?'CONNECTED':socket?'CONNECTING_OR_RECOVERING':'DISCONNECTED',socketConnectCount,lastSocketConnectAt,lastSocketConnectAttemptAt,lastSocketRecoveryAt,socketRecoveryAttempts,socketRecoveryPending:Boolean(socketRecoveryTimer),lastSocketMessageAt,lastAcceptedTickAt,lastSocketError:lastSocketError||null,freshIndexTickCount:indexFeed.freshCount,requiredIndexTickCount:BASE_SUBSCRIPTIONS.length,indexFeed,latestExchangeTimestamp:latestExchangeTime?new Date(latestExchangeTime*1000).toISOString():null,marketData:indexFeed.freshCount===BASE_SUBSCRIPTIONS.length?'FRESH_EXCHANGE_TICKS':'WAITING_FOR_FRESH_EXCHANGE_TICKS',fnoScanner:{universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,requestedFutureSubscriptions:fnoScanSubscriptionSymbols.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,rotationCursor:fnoUniverseCursor,universeUpdatedAt:fnoUniverseFetchedAt?new Date(fnoUniverseFetchedAt).toISOString():null,freshActiveFutureTicks:fnoFeed.freshCount,staleActiveFutureTicks:fnoFeed.staleCount,missingActiveFutureTicks:fnoFeed.missingCount,activeWindowFreshnessPercent:fnoFeed.coveragePercent,windowCoveragePercent:fnoUniverseCoverage.requestedCoveragePercent,freshUniverseCoveragePercent:fnoUniverseCoverage.freshUniverseCoveragePercent,notRequestedFutureCount:fnoUniverseCoverage.notRequestedCount,freshUniverseFutureCount:fnoUniverseCoverage.freshUniverseCount,coverage:fnoUniverseCoverage,lastRotationAt:lastFnoRotationAt,rotationCount:fnoRotationCount,feed:fnoFeed,error:fnoUniverseError||null},strategyPlanLedger:{configured:Boolean(strategyPlanStore),ready:strategyLedgerReady,entryGate:'READ_ONLY_PLAN_ONLY'},strategyScanner:strategyScanSnapshot(),fyersRestCooldown:(()=>{const status=fetchWithFyersBudget.getStatus();return{active:status.cooldownActive,reason:status.cooldownReason||null,retryAfterSeconds:status.retryAfterSeconds,blockedUntil:status.blockedUntil,consecutive429:status.consecutiveCloudflareBlocks+status.consecutiveRateLimitBlocks,persistenceReady:fyersRestBudgetReady,persistenceHealthy:status.cooldownPersistenceHealthy,queuedRequests:status.queuedRequests};})(),orderMode:'DISABLED'});
 });
 app.get('/api/strategy-scan',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.status(401).json({error:'FYERS session unavailable',...strategyScanSnapshot()});await refreshStrategyActivePlans();res.json(strategyScanSnapshot());});
 app.get('/api/market',async(_req,res)=>{res.set('Cache-Control','no-store');if(!authReady())return res.json({connected:false,quotes:[],nse:[],mcx:[],gainers:[],error:'FYERS session unavailable'});const movers=await loadFnoMovers();const gainers=movers.rows.map(row=>{const tick=lastTicks.get(row.symbol),tickFresh=freshTick(tick);return{symbol:row.symbol,underlying:row.underlyingSymbol,price:tickFresh?tick.price:row.price,change:tickFresh?(tick.price/row.basePrice-1)*100:row.change,exchangeTime:tickFresh?tick.exchangeTime:movers.updatedAt/1000,fresh:tickFresh,source:row.source};}).sort((a,b)=>b.change-a.change).slice(0,5);res.json({connected,quotes:[...lastTicks.values()],nse:[...nseTicks.values()],mcx:[...mcxTicks.values()],gainers,gainersUpdatedAt:movers.updatedAt,error:movers.error});});
