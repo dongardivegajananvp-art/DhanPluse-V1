@@ -620,6 +620,26 @@ const socketFeedWatchdog=setInterval(()=>{
 socketFeedWatchdog.unref?.();
 const automaticStrategyScanTimer=setInterval(()=>{void runAutomaticStrategyScan();},STRATEGY_SCAN_INTERVAL_MS);
 automaticStrategyScanTimer.unref?.();
+let lastNseSubscriptionSessionActive=isNseSubscriptionSession();
+const nseSubscriptionSessionMonitor=setInterval(()=>{
+  const sessionActive=isNseSubscriptionSession();
+  if(sessionActive===lastNseSubscriptionSessionActive)return;
+  lastNseSubscriptionSessionActive=sessionActive;
+  if(mcxFutureRoot(selectedSymbol))return;
+  if(!socket||!connected){
+    console.info('NSE session transition detected while FYERS socket is disconnected; reconnect handler will apply the current session.',JSON.stringify({sessionActive,phase:getNseMarketSession().phase}));
+    return;
+  }
+  if(!sessionActive){
+    const result=syncSocketSubscriptions({reason:'nse_session_closed'});
+    console.info('NSE session closed; NSE subscriptions released without REST requests.',JSON.stringify({phase:getNseMarketSession().phase,removed:result.removed,error:result.error||null}));
+    return;
+  }
+  console.info('NSE pre-open/regular session opened on an existing FYERS socket; restoring subscriptions.',JSON.stringify({phase:getNseMarketSession().phase}));
+  syncSocketSubscriptions({reason:'nse_session_open'});
+  void refreshFnoUniverse().then(()=>rotateFnoUniverseSubscriptions('nse_session_open_universe_loaded')).catch(error=>console.warn('NSE session-open F&O universe refresh failed; scanner remains fail-closed.',String(error?.message||error).slice(0,180)));
+},5000);
+nseSubscriptionSessionMonitor.unref?.();
 const fnoUniverseRotationTimer=setInterval(()=>{
   if(!socket||!connected||!isNseRegularSession()||!fnoUniverseRows.length)return;
   rotateFnoUniverseSubscriptions('scheduled_rotation');
