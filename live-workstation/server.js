@@ -12,7 +12,7 @@ import { sameStrategyConfirmation, validateOptionCandles, validateOptionContract
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates, evaluateMxcTrendPullback } from './mcx-options.js';
 import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
 import { buildFnoUniverse, buildLiveFnoMovers, selectFairSubscriptionBatch, summarizeFnoCoverage } from './fno-universe.js';
-import { createStrategyPlanStore } from './strategy-plan-store.js';
+import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy-plan-store.js';
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
 import { selectNearestOptionContract, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
 import 'dotenv/config';
@@ -686,7 +686,23 @@ async function refreshStrategyActivePlans(force=false){
  const result=await strategyPlanStore.listActivePlans();
  strategyLedgerRuntimeReady=Boolean(result.ok);
  if(!result.ok)return result;
- strategyActivePlans=result.plans||[];strategyActivePlansLoadedAt=Date.now();
+ const reconciled=[];
+ for(const plan of (result.plans||[])){
+  const lifecycle=evaluateActivePlanLifecycle(plan,lastTicks.get(plan.contract),Date.now());
+  if(['EXPIRED','STOP_LOSS_HIT','TARGET_HIT'].includes(lifecycle.status)){
+   const closed=await strategyPlanStore.closePlan(plan.plan_id||plan.planId,'CLOSED');
+   if(closed.ok){
+    const status='PLAN_CLOSED_'+lifecycle.status;
+    console.info('GV2VPD strategy plan lifecycle closed.',JSON.stringify({planId:plan.plan_id||plan.planId,underlying:plan.underlying,contract:plan.contract,status,reason:lifecycle.reason,price:lifecycle.price||null}));
+    setStrategyScanResult({underlying:plan.underlying,futureSymbol:plan.underlying,status,reason:lifecycle.reason,contract:plan.contract,updatedAt:new Date().toISOString()});
+    continue;
+   }
+   reconciled.push({...plan,lifecycleState:'CLOSE_PENDING',lifecycleReason:closed.reason||'Persistent close transition failed; plan remains active'});
+   continue;
+  }
+  reconciled.push({...plan,lifecycleState:lifecycle.status,lifecycleReason:lifecycle.reason});
+ }
+ strategyActivePlans=reconciled;strategyActivePlansLoadedAt=Date.now();
  const restored=new Set(strategyActivePlans.map(x=>x.contract).filter(Boolean));
  const pendingSymbols=new Set([...strategyPendingCandidates.values()].map(x=>x.contract.symbol));
  for(const symbol of [...strategyOptionSymbols])if(!pendingSymbols.has(symbol)&&!restored.has(symbol))strategyOptionSymbols.delete(symbol);

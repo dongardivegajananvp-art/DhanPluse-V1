@@ -79,6 +79,34 @@ function validatePlan(plan, now) {
   return null;
 }
 
+
+export function evaluateActivePlanLifecycle(plan, tick, now = Date.now()) {
+  if (!plan || typeof plan !== 'object') return { status: 'REVALIDATION_REQUIRED', reason: 'Persisted plan is unavailable' };
+  const expiry = epochSeconds(plan.expiry);
+  if (!expiry) return { status: 'REVALIDATION_REQUIRED', reason: 'Contract expiry cannot be verified' };
+  if (expiry * 1000 <= now) return { status: 'EXPIRED', reason: 'Option contract expiry has passed' };
+
+  const receivedAt = Number(tick?.receivedAt);
+  const exchangeTime = Number(tick?.exchangeTime);
+  const price = Number(tick?.price);
+  const receivedAge = now - receivedAt;
+  const exchangeAge = now / 1000 - exchangeTime;
+  if (!tick || !Number.isFinite(price) || price <= 0 ||
+      !Number.isFinite(receivedAge) || receivedAge < 0 || receivedAge > FRESH_MS ||
+      !Number.isFinite(exchangeAge) || exchangeAge < -3 || exchangeAge > 10) {
+    return { status: 'STALE_REVALIDATION_REQUIRED', reason: 'Fresh exchange tick for the exact option contract is required before lifecycle revalidation' };
+  }
+
+  const stopLoss = Number(plan.stop_loss ?? plan.stopLoss);
+  const target = Number(plan.target);
+  if (!positive(stopLoss) || !positive(target) || target <= stopLoss) {
+    return { status: 'REVALIDATION_REQUIRED', reason: 'Persisted Entry/SL/Target values are invalid; plan remains active and blocked' };
+  }
+  if (price <= stopLoss) return { status: 'STOP_LOSS_HIT', reason: 'Fresh option premium is at or below the fixed stop loss', price };
+  if (price >= target) return { status: 'TARGET_HIT', reason: 'Fresh option premium is at or above the fixed target', price };
+  return { status: 'ACTIVE', reason: 'Fresh option premium remains between fixed stop loss and target', price };
+}
+
 export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) {
   const url = String(databaseUrl || '').trim();
   if (!/^postgres(?:ql)?:\/\//i.test(url)) return null;

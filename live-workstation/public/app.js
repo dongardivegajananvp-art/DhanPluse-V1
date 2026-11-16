@@ -67,7 +67,7 @@ function renderStrategyScanner(data){
  for(const plan of plans){
   const card=document.createElement('article');card.className='strategy-result';
   const title=document.createElement('b');title.textContent=String(plan.strategy||'STRATEGY').replaceAll('_',' ')+' · '+(plan.underlying||'');
-  const detail=document.createElement('span');detail.textContent=[plan.contract,plan.option_side,plan.expiry,'STRIKE '+plan.strike,'PREMIUM '+fmt(plan.premium),'ENTRY '+fmt(plan.entry),'SL '+fmt(plan.stop_loss),'TARGET '+fmt(plan.target),'RR '+plan.rr].filter(Boolean).join(' | ');
+  const detail=document.createElement('span');detail.textContent=[plan.lifecycleState||'ACTIVE',plan.lifecycleReason,plan.contract,plan.option_side,plan.expiry,'STRIKE '+plan.strike,'PREMIUM '+fmt(plan.premium),'ENTRY '+fmt(plan.entry),'SL '+fmt(plan.stop_loss),'TARGET '+fmt(plan.target),'RR '+plan.rr].filter(Boolean).join(' | ');
   card.append(title,detail);active.append(card);
  }
 }
