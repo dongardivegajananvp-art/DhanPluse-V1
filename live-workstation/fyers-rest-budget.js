@@ -74,13 +74,17 @@ export function createFyersDataApiBudget({
   }
 
   function makeCooldownResponse() {
-    const remainingMs = Math.max(1, cooldownUntil - now());
-    const retrySeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+    const remainingMs = Math.max(0, cooldownUntil - now());
+    const recoveryProbeRequired = Boolean(cooldownPathname && remainingMs === 0);
+    const retrySeconds = remainingMs > 0 ? Math.max(1, Math.ceil(remainingMs / 1000)) : 5;
     return new Response(JSON.stringify({
       s: 'error',
-      message: 'FYERS Data API circuit breaker is active; no upstream request was sent.',
+      message: recoveryProbeRequired
+        ? 'FYERS Data API recovery probe is pending; only the previously blocked endpoint may be requested. No upstream request was sent.'
+        : 'FYERS Data API circuit breaker is active; no upstream request was sent.',
       retryAfterSeconds: retrySeconds,
-      cooldownReason
+      cooldownReason,
+      recoveryProbeRequired
     }), {
       status: 429,
       headers: {
@@ -89,6 +93,12 @@ export function createFyersDataApiBudget({
         'x-dhanpulse-cooldown': 'active'
       }
     });
+  }
+
+  function cooldownBlocksPath(pathname, timestamp = now()) {
+    if (!cooldownPathname) return cooldownUntil > timestamp;
+    if (cooldownUntil > timestamp) return true;
+    return pathname !== cooldownPathname;
   }
 
   function makeQueueFullResponse() {
@@ -168,7 +178,7 @@ export function createFyersDataApiBudget({
     }
 
     if (!cooldownPersistenceHealthy) return makePersistenceFailureResponse();
-    if (cooldownUntil > currentTime) return makeCooldownResponse();
+    if (cooldownBlocksPath(target.pathname, currentTime)) return makeCooldownResponse();
 
     const pending = inFlightKey && inFlight.get(inFlightKey);
     if (pending) {
@@ -186,7 +196,7 @@ export function createFyersDataApiBudget({
         // Recheck inside the serial queue: calls already waiting when a 1015
         // arrives must be stopped locally instead of hitting the same WAF.
         if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
-        if (cooldownUntil > now()) return { response: makeCooldownResponse() };
+        if (cooldownBlocksPath(target.pathname, now())) return { response: makeCooldownResponse() };
 
         let time = now();
         while (true) {
@@ -203,7 +213,7 @@ export function createFyersDataApiBudget({
 
         // A prior queued request may have opened the circuit while this one waited.
         if (!cooldownPersistenceHealthy) return { response: makePersistenceFailureResponse() };
-        if (cooldownUntil > now()) return { response: makeCooldownResponse() };
+        if (cooldownBlocksPath(target.pathname, now())) return { response: makeCooldownResponse() };
 
         time = now();
         requestTimes.push(time);
@@ -276,7 +286,10 @@ export function createFyersDataApiBudget({
 
   run.restoreStatus = state => {
     const until = Date.parse(String(state?.blockedUntil || ''));
-    if (!Number.isFinite(until) || until <= now() || until - now() > maxCooldownMs ||
+    // Keep an expired cooldown's blocked endpoint until its own recovery probe
+    // succeeds. Otherwise a process restart after Retry-After silently reopens
+    // every FYERS REST path without proving that the original path recovered.
+    if (!Number.isFinite(until) || until - now() > maxCooldownMs ||
         !(String(state?.cooldownPathname || '').startsWith('/data/') || (allApiPaths && String(state?.cooldownPathname || '').startsWith('/api/v3/')))) return false;
     cooldownPersistenceHealthy = true;
     cooldownUntil = until;
@@ -290,12 +303,15 @@ export function createFyersDataApiBudget({
 
   run.getStatus = () => {
     const remainingMs = Math.max(0, cooldownUntil - now());
+    const recoveryProbeRequired = Boolean(cooldownPathname && remainingMs === 0);
     return {
-      cooldownActive: remainingMs > 0,
+      cooldownActive: remainingMs > 0 || recoveryProbeRequired,
+      recoveryProbeRequired,
+      recoveryProbePathname: recoveryProbeRequired ? cooldownPathname : null,
       cooldownPersistenceHealthy,
-      retryAfterSeconds: remainingMs > 0 ? Math.max(1, Math.ceil(remainingMs / 1000)) : 0,
-      blockedUntil: remainingMs > 0 ? new Date(cooldownUntil).toISOString() : null,
-      cooldownReason: remainingMs > 0 ? cooldownReason : null,
+      retryAfterSeconds: remainingMs > 0 ? Math.max(1, Math.ceil(remainingMs / 1000)) : recoveryProbeRequired ? 5 : 0,
+      blockedUntil: cooldownPathname ? new Date(cooldownUntil).toISOString() : null,
+      cooldownReason: cooldownPathname ? cooldownReason : null,
       consecutiveCloudflareBlocks,
       consecutiveRateLimitBlocks,
       queuedRequests,
