@@ -489,6 +489,10 @@ async function recoverFyersRestEndpoint(pathname){
   }else if(pathname==='/data/options-chain-v3'){
     const params=new URLSearchParams({symbol:'NSE:NIFTY50-INDEX',strikecount:'1',greeks:'0'});
     url=FYERS_DATA+'/options-chain-v3?'+params.toString();
+  }else if(pathname==='/api/v3/screeners/config'){
+    url=FYERS_API+'/screeners/config';
+  }else if(pathname==='/api/v3/positions'){
+    url=FYERS_API+'/positions';
   }else{
     console.warn('FYERS REST recovery endpoint has no safe automatic probe; circuit remains closed.',JSON.stringify({pathname,at:new Date().toISOString()}));
     return;
@@ -500,7 +504,9 @@ async function recoverFyersRestEndpoint(pathname){
     const payload=await response.clone().json().catch(()=>null);
     const valid=pathname==='/data/history'
       ? Boolean(payload?.s==='ok'&&Array.isArray(payload.candles)&&payload.candles.length)
-      : Boolean(payload?.s==='ok'&&Array.isArray(payload?.data?.optionsChain)&&payload.data.optionsChain.length);
+      : pathname==='/data/options-chain-v3'
+        ? Boolean(payload?.s==='ok'&&Array.isArray(payload?.data?.optionsChain)&&payload.data.optionsChain.length)
+        : Boolean(payload?.s==='ok');
     console.info('FYERS endpoint recovery probe completed.',JSON.stringify({pathname,httpStatus:response.status,validProviderPayload:valid,circuit:fetchWithFyersBudget.getStatus().cooldownActive?'CLOSED':'OPEN',at:new Date().toISOString()}));
   }catch(error){
     console.warn('FYERS endpoint recovery probe failed safely.',JSON.stringify({pathname,message:String(error?.message||error).slice(0,140)}));
