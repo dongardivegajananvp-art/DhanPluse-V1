@@ -715,7 +715,7 @@ async function loadStrategyDailyHistory(symbol,{priority=10}={}){
  const cached=strategyDailyHistoryCache.get(symbol);
  if(cached&&Date.now()-cached.cachedAt<6*60*60*1000)return cached;
  const now=Math.floor(Date.now()/1000),params=new URLSearchParams({symbol,resolution:'D',date_format:'0',range_from:String(now-365*86400),range_to:String(now),cont_flag:'1'});
- const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000});
+ const response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000,priority});
  const payload=await response.json().catch(()=>({}));
  if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles)){const error=new Error('FYERS daily history unavailable');error.statusCode=response.status;throw error;}
  const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[0])>0&&Number(c[1])>0&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]),Number(c[3]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
@@ -900,7 +900,7 @@ async function loadGainerHistory(symbol,{force=false,priority=20}={}){
  const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
  let response,payload;
  try{
-  response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000});
+  response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000,priority});
   payload=await response.json().catch(()=>({}));
   if(!response.ok||payload.s!=='ok'||!Array.isArray(payload.candles)){
    const error=new Error('FYERS 5-minute history unavailable ('+(response.status||'invalid payload')+'): '+String(payload.message||payload.code||'invalid candle response').slice(0,120));
