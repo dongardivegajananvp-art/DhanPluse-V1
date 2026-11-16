@@ -227,7 +227,7 @@ export function detectTopGainerMomentum(rows, isTopGainer=false) {
     : null;
 }
 export function detectDailyTrendPullback(rows, dailyCandles=[]) {
-  if (!Array.isArray(rows) || rows.length < 51 || !Array.isArray(dailyCandles)) return null;
+  if (!Array.isArray(rows) || rows.length < 50 || !Array.isArray(dailyCandles)) return null;
   const dailyCloses=dailyCandles.filter(validOhlcv).map(c=>number(c.close));
   if(dailyCloses.length<50)return null;
   const d20=ema(dailyCloses,20),d50=ema(dailyCloses,50);
