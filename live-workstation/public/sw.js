@@ -1,6 +1,6 @@
-const CACHE_NAME='gv2vpd-pwa-shell-v5';
+const CACHE_NAME='gv2vpd-pwa-shell-v6';
 const OFFLINE_ASSETS=['/manifest.webmanifest','/icons/gv2vpd.svg','/offline.html'];
-const NETWORK_FIRST_ASSETS=['/style.css','/app.js','/chart-safety.js'];
+const NETWORK_FIRST_ASSETS=['/style.css','/app.js','/chart-safety.js','/chart-plan-cache.js'];
 
 self.addEventListener('install',event=>{
  event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(OFFLINE_ASSETS)).then(()=>self.skipWaiting()));
