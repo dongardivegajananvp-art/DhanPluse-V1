@@ -301,7 +301,11 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   const confirmedAfterBreakout=number(confirmation.close)>premiumLevel;
   if(!breakoutOccurred||!confirmedAfterBreakout)return{status:'NO_TRADE',reason:'Option premium breakout must be followed by one completed candle confirming above or retesting and holding the breakout level',strategy:chosen.strategy};
   const confirmationType=number(confirmation.low)<=premiumLevel*1.002?'ONE_CANDLE_RETEST':'ONE_CANDLE_HOLD';
-  const swingLow=number(confirmation.low);
+  // Use the complete two-candle breakout + confirmation structure for the stop.
+  // A confirmation candle that holds above entry alone can create zero/near-zero risk,
+  // rejecting valid breakouts or making the 0.5R chase guard unrealistically tight.
+  // Keep the stop one official option tick below the lower of both completed candle lows.
+  const swingLow=Math.min(number(breakout.low),number(confirmation.low));
   const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow});
   if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy};
   return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:premiumLast.time,optionConfirmation:confirmationType,contract:contract.symbol};
