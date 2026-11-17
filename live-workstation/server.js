@@ -1066,7 +1066,13 @@ async function runAutomaticStrategyScan(){
    strategyScanLastAttempt.set(futureSymbol,Date.now());strategyScanLastAt=new Date().toISOString();strategyScanLastSymbol=futureSymbol;
    const [history,daily]=await Promise.all([loadGainerHistory(futureSymbol,{priority:10}),loadStrategyDailyHistory(futureSymbol,{priority:10}).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}))]);
    const currentTick=lastTicks.get(futureSymbol);
-   if(!freshTick(currentTick)){setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Futures tick became stale during candle verification'});return;}
+   if(!freshTick(currentTick)){
+    // History is cached for five minutes; retry this same future after one scanner interval
+    // instead of suppressing a transient stale tick for the full 45-second symbol cooldown.
+    strategyScanLastAttempt.set(futureSymbol,Date.now()-45000+STRATEGY_SCAN_INTERVAL_MS);
+    setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Futures tick became stale during candle verification; retrying this symbol after the next scanner interval'});
+    return;
+   }
    strategyScanLastError='';
    const isTopGainer=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<60*1000&&fnoMoversCache.rows.some(mover=>mover.underlyingSymbol===row.underlyingSymbol);
    const setup=detectNineStrategySetup({underlyingCandles:history.candles,underlyingTick:currentTick,dailyCandles:daily.ok?daily.candles:[],isTopGainer,now:Date.now()});
