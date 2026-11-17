@@ -1091,6 +1091,9 @@ async function runAutomaticStrategyScan(){
    const discovered=await loadFnoMovers();
    if(discovered.rows.length){void refreshTopGainerOptionWatches(discovered.rows);console.info('GV2VPD scanner gainer discovery refreshed.',JSON.stringify({count:discovered.rows.length,source:discovered.source||'FYERS Standard Screener',updatedAt:discovered.updatedAt?new Date(discovered.updatedAt).toISOString():null}));}
   }
+  // Discovery can precede the first fresh tick for a newly pinned future; retry warmup
+  // from the cached gainer rows on each scan cycle. The warmup helper self-throttles.
+  if(fnoMoversCache.rows.length&&Date.now()-Number(fnoMoversCache.updatedAt||0)<60*1000)void refreshTopGainerOptionWatches(fnoMoversCache.rows);
   await refreshStrategyActivePlans();
   const restStatus=fetchWithFyersBudget.getStatus();
   if(!fyersRestBudgetReady||restStatus.cooldownActive||restStatus.recoveryProbeRequired){
