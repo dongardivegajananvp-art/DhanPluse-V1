@@ -16,7 +16,7 @@ import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js
 import { buildFnoUniverse, buildLiveFnoMovers, selectFairSubscriptionBatch, summarizeFnoCoverage } from './fno-universe.js';
 import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy-plan-store.js';
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
-import { selectNearestOptionContract, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
+import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -968,8 +968,8 @@ async function refreshTopGainerOptionWatches(rows){
    try{
     const contracts=await loadStrategyOptionContracts(row.underlyingSymbol);
     for(const side of ['CE','PE']){
-     const contract=selectNearestOptionContract(contracts,side,tick.price,Date.now());
-     if(contract){next.add(contract.symbol);watched.push({underlying:row.underlyingSymbol,side,contract:contract.symbol,strike:contract.strike,expiry:contract.expiry});}
+     const nearby=selectNearestOptionContracts(contracts,side,tick.price,2,Date.now());
+     for(const contract of nearby){next.add(contract.symbol);watched.push({underlying:row.underlyingSymbol,side,contract:contract.symbol,strike:contract.strike,expiry:contract.expiry});}
     }
    }catch(error){
     console.warn('GV2VPD top-gainer option prewarm unavailable.',JSON.stringify({underlying:row.underlyingSymbol,reason:String(error?.message||error).slice(0,140)}));
