@@ -5,7 +5,7 @@ const APP_SHELL_PATHS=new Set(APP_SHELL_ASSETS);
 
 function isWorkstationHtml(response){
  if(!response||!response.ok||!String(response.headers?.get?.('content-type')||'').toLowerCase().includes('text/html'))return Promise.resolve(false);
- return response.clone().text().then(html=>/<title>\s*GV2VPD\s*\\|\s*Live Trading Workstation/i.test(html)&&/id=["']feedState["']/.test(html)).catch(()=>false);
+ return response.clone().text().then(html=>/<title>\s*GV2VPD\s*\|\s*Live Trading Workstation/i.test(html)&&/id=["']feedState["']/.test(html)).catch(()=>false);
 }
 
 async function isValidShellResponse(path,response){
