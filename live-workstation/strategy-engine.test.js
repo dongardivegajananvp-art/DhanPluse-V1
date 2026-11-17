@@ -579,9 +579,10 @@ test('Strategy 9 first-candle breakout is returned by the complete nine-strategy
   const start=Date.parse('2026-11-16T03:45:00Z')/1000;
   const rows=[
     {time:start,open:100,high:101,low:99,close:100.5,volume:100},
-    {time:start+300,open:100.5,high:102,low:100.2,close:101.5,volume:120}
+    {time:start+300,open:100.5,high:100.9,low:100.2,close:100.7,volume:110},
+    {time:start+600,open:100.7,high:102,low:100.6,close:101.5,volume:120}
   ];
-  const now=Date.parse('2026-11-16T04:00:30Z');
+  const now=Date.parse('2026-11-16T04:01:00Z');
   const tick={price:101.5,exchangeTime:now/1000,receivedAt:now};
   const result=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,now});
   assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
