@@ -1009,9 +1009,10 @@ async function refreshStrategyActivePlans(force=false){
  if(!result.ok)return result;
  const reconciled=[];
  for(let plan of (result.plans||[])){
-  const lifecycle=evaluateActivePlanLifecycle(plan,lastTicks.get(plan.contract),Date.now());
+  const lifecycleTick=lastTicks.get(plan.contract);
+  const lifecycle=evaluateActivePlanLifecycle(plan,lifecycleTick,Date.now());
   if(lifecycle.status==='ENTRY_HIT'&&!plan.entry_hit_at){
-   const hit=await strategyPlanStore.markEntryHit(plan.plan_id||plan.planId,lifecycle.price,Date.now());
+   const hit=await strategyPlanStore.markEntryHit(plan.plan_id||plan.planId,lifecycle.price,Number(lifecycleTick?.receivedAt)||Date.now());
    if(!hit.ok){
     reconciled.push({...plan,lifecycleState:'ENTRY_HIT_PERSIST_PENDING',lifecycleReason:hit.reason||'Entry reached but durable entry-hit write is pending'});
     continue;
