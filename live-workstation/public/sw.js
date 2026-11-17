@@ -1,5 +1,5 @@
-const CACHE_NAME='gv2vpd-pwa-shell-v7';
-const OFFLINE_ASSETS=['/manifest.webmanifest','/icons/gv2vpd.svg','/offline.html'];
+const CACHE_NAME='gv2vpd-pwa-shell-v8';
+const OFFLINE_ASSETS=['/manifest.webmanifest','/icons/gv2vpd-192.svg','/icons/gv2vpd-512.svg','/icons/gv2vpd.svg','/offline.html'];
 const APP_SHELL_ASSETS=['/','/style.css','/app.js','/chart-safety.js','/chart-plan-cache.js','/pwa-register.js'];
 const APP_SHELL_PATHS=new Set(APP_SHELL_ASSETS);
 
