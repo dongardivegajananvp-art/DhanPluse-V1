@@ -6,9 +6,10 @@ function epochSeconds(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed / 1000 : 0;
 }
 
-export function selectNearestOptionContract(contracts, side, underlyingPrice, now = Date.now()) {
+export function selectNearestOptionContracts(contracts, side, underlyingPrice, count = 2, now = Date.now()) {
   if (!Array.isArray(contracts) || !['CE','PE'].includes(side) ||
-      !Number.isFinite(Number(underlyingPrice)) || Number(underlyingPrice) <= 0) return null;
+      !Number.isFinite(Number(underlyingPrice)) || Number(underlyingPrice) <= 0 ||
+      !Number.isInteger(count) || count < 1 || count > 4) return [];
   const eligible = contracts.filter(contract => {
     const expiry = epochSeconds(contract?.expiry);
     return contract && contract.side === side &&
@@ -21,9 +22,14 @@ export function selectNearestOptionContract(contracts, side, underlyingPrice, no
   eligible.sort((a, b) => epochSeconds(a.expiry) - epochSeconds(b.expiry) ||
     Math.abs(Number(a.strike) - Number(underlyingPrice)) - Math.abs(Number(b.strike) - Number(underlyingPrice)) ||
     a.symbol.localeCompare(b.symbol));
-  if (!eligible.length) return null;
-  const best = eligible[0];
-  return { ...best, strike: Number(best.strike), tickSize: Number(best.tickSize), lotSize: Number(best.lotSize) };
+  if (!eligible.length) return [];
+  const nearestExpiry = epochSeconds(eligible[0].expiry);
+  return eligible.filter(contract => epochSeconds(contract.expiry) === nearestExpiry).slice(0, count)
+    .map(contract => ({ ...contract, strike: Number(contract.strike), tickSize: Number(contract.tickSize), lotSize: Number(contract.lotSize) }));
+}
+
+export function selectNearestOptionContract(contracts, side, underlyingPrice, now = Date.now()) {
+  return selectNearestOptionContracts(contracts, side, underlyingPrice, 1, now)[0] || null;
 }
 
 export function completedDailyCandles(candles, now = Date.now(), maxAgeSeconds = 4 * 86400) {
