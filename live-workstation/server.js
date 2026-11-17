@@ -141,6 +141,7 @@ const subscribedSymbols=new Set();
 const strategyOptionSymbols=new Set();
 const strategyWarmOptionSymbols=new Set();
 let strategyWarmRefreshAt=0,strategyWarmRefreshBusy=false;
+let lastStrategyGainerDiscoveryAt=0;
 const strategyPendingCandidates=new Map();
 const strategyScanLastAttempt=new Map();
 const strategyDailyHistoryCache=new Map();
@@ -1083,7 +1084,13 @@ async function runAutomaticStrategyScan(){
  strategyScanBusy=true;
  try{
   // Keep gainer priority and option prewarming autonomous; do not rely on browser polling.
-  refreshLiveFnoMoversFromWebSocket();
+  // Prefer live WebSocket movers. If they cannot provide previous-close/change data,
+  // use the existing FYERS screener at most once per minute for discovery only.
+  if(!refreshLiveFnoMoversFromWebSocket()&&Date.now()-lastStrategyGainerDiscoveryAt>=60*1000){
+   lastStrategyGainerDiscoveryAt=Date.now();
+   const discovered=await loadFnoMovers();
+   if(discovered.rows.length){void refreshTopGainerOptionWatches(discovered.rows);console.info('GV2VPD scanner gainer discovery refreshed.',JSON.stringify({count:discovered.rows.length,source:discovered.source||'FYERS Standard Screener',updatedAt:discovered.updatedAt?new Date(discovered.updatedAt).toISOString():null}));}
+  }
   await refreshStrategyActivePlans();
   const restStatus=fetchWithFyersBudget.getStatus();
   if(!fyersRestBudgetReady||restStatus.cooldownActive||restStatus.recoveryProbeRequired){
