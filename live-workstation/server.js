@@ -16,6 +16,7 @@ import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js
 import { buildFnoUniverse, buildLiveFnoMovers, selectFairSubscriptionBatch, summarizeFnoCoverage } from './fno-universe.js';
 import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy-plan-store.js';
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
+import { evaluateIndexMarketRegime, unavailableMarketRegime } from './market-regime.js';
 import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
 import 'dotenv/config';
 import express from 'express';
@@ -152,6 +153,8 @@ let strategyScanLastAt=null;
 let strategyScanLastSymbol='';
 let strategyScanLastError='';
 let strategyScanLastResults=[];
+let marketRegime=unavailableMarketRegime('Waiting for fresh index candles');
+let marketRegimeRefreshAt=0,marketRegimeRefreshBusy=false;
 let strategyActivePlans=[];
 let strategyActivePlansLoadedAt=0;
 let strategyLedgerRuntimeReady=false;
@@ -1085,6 +1088,30 @@ async function processPendingStrategyCandidate(candidate){
   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_error'});return true;
  }
 }
+async function refreshIndexMarketRegime(){
+ if(marketRegimeRefreshBusy||Date.now()-marketRegimeRefreshAt<60_000)return marketRegime;
+ const rest=fetchWithFyersBudget.getStatus();
+ if(!fyersRestBudgetReady||rest.cooldownActive||rest.recoveryProbeRequired){
+  marketRegime=unavailableMarketRegime('FYERS history budget/cooldown prevents a verified index regime refresh');
+  return marketRegime;
+ }
+ marketRegimeRefreshBusy=true;marketRegimeRefreshAt=Date.now();
+ try{
+  const symbols=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
+  const results=await Promise.allSettled(symbols.map(symbol=>loadGainerHistory(symbol,{priority:5})));
+  const candles={},ticks={};
+  results.forEach((result,index)=>{
+   const symbol=symbols[index];
+   if(result.status==='fulfilled'&&result.value?.symbol===symbol)candles[symbol]=result.value.candles;
+   ticks[symbol]=lastTicks.get(symbol)||null;
+  });
+  marketRegime=evaluateIndexMarketRegime({candles,ticks,now:Date.now()});
+  console.info('GV2VPD index market regime evaluated.',JSON.stringify(marketRegime));
+ }catch(error){
+  marketRegime=unavailableMarketRegime('Index market regime refresh failed: '+String(error?.message||error).slice(0,120));
+ }finally{marketRegimeRefreshBusy=false;}
+ return marketRegime;
+}
 async function runAutomaticStrategyScan(){
  if(strategyScanBusy||!authReady()||!connected||!isNseRegularSession())return;
  strategyScanBusy=true;
@@ -1101,6 +1128,7 @@ async function runAutomaticStrategyScan(){
   // from the cached gainer rows on each scan cycle. The warmup helper self-throttles.
   if(fnoMoversCache.rows.length&&Date.now()-Number(fnoMoversCache.updatedAt||0)<60*1000)void refreshTopGainerOptionWatches(fnoMoversCache.rows);
   await refreshStrategyActivePlans();
+  await refreshIndexMarketRegime();
   const restStatus=fetchWithFyersBudget.getStatus();
   if(!fyersRestBudgetReady||restStatus.cooldownActive||restStatus.recoveryProbeRequired){
    strategyScanLastError=restStatus.recoveryProbeRequired?'FYERS REST recovery probe pending; scanner paused locally without queuing history requests':restStatus.cooldownActive?'FYERS REST cooldown active; scanner paused locally without queuing more history requests':'FYERS REST budget is not ready; scanner paused fail-closed';
@@ -1161,7 +1189,7 @@ function strategyScanSnapshot(){
  const marketSession=marketClock.phase==='REGULAR'?'OPEN':marketClock.phase.startsWith('PRE_OPEN')?'PRE-OPEN':'CLOSED';
  const freshFutureTicks=fnoScanSubscriptionSymbols.filter(symbol=>freshTick(lastTicks.get(symbol))).length;
  const runtime=getScannerRuntimeState({authenticated:authReady(),socketConnected:connected,marketOpen:isNseRegularSession(),ledgerReady:strategyLedgerRuntimeReady,universeCount:fnoUniverseRows.length,activeSubscriptions:fnoScanSubscriptionSymbols.length,freshFutureTicks});
- return{enabled:true,mode:'AUTOMATIC_READ_ONLY',scanIntervalMs:STRATEGY_SCAN_INTERVAL_MS,rotationIntervalMs:FNO_ROTATION_INTERVAL_MS,estimatedScannerHistoryRequestsPerMinute:estimateScannerRestRequestsPerMinute(),runtimeState:runtime.state,blocker:runtime.blocker,marketSession,marketPhase:marketClock.phase,marketPhaseLabel:marketClock.label,lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,prewarmedOptionSubscriptions:strategyWarmOptionSymbols.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),orderMode:'DISABLED'};
+ return{enabled:true,mode:'AUTOMATIC_READ_ONLY',scanIntervalMs:STRATEGY_SCAN_INTERVAL_MS,rotationIntervalMs:FNO_ROTATION_INTERVAL_MS,estimatedScannerHistoryRequestsPerMinute:estimateScannerRestRequestsPerMinute(),runtimeState:runtime.state,blocker:runtime.blocker,marketSession,marketPhase:marketClock.phase,marketPhaseLabel:marketClock.label,lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,prewarmedOptionSubscriptions:strategyWarmOptionSymbols.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),marketRegime,orderMode:'DISABLED'};
 }
 
 async function loadGainerHistory(symbol,{force=false,priority=20}={}){
