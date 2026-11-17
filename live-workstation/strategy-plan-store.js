@@ -201,7 +201,7 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
           Number(plan.strike),Number(plan.premium),Number(plan.tickSize),Number(plan.entry),Number(plan.stopLoss),Number(plan.target),Number(plan.rr),
           Number(plan.underlyingExchangeTime),Number(plan.optionExchangeTime),
           new Date(Number(plan.underlyingReceivedAt)).toISOString(),new Date(Number(plan.optionReceivedAt)).toISOString(),
-          new Date(Number(plan.optionReceivedAt)).toISOString(),Number(plan.premium),plan.underlyingCandleTime,plan.optionCandleTime
+          null,null,plan.underlyingCandleTime,plan.optionCandleTime
         ]);
         await client.query('COMMIT');
         return { ok: true, status: 'PLAN_PERSISTED', planId: plan.planId, entry: Number(plan.entry), stopLoss: Number(plan.stopLoss), target: Number(plan.target), rr: Number(plan.rr) };
