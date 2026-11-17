@@ -1089,7 +1089,7 @@ async function processPendingStrategyCandidate(candidate){
  }
 }
 async function refreshIndexMarketRegime(){
- if(marketRegimeRefreshBusy||Date.now()-marketRegimeRefreshAt<60_000)return marketRegime;
+ if(marketRegimeRefreshBusy||Date.now()-marketRegimeRefreshAt<10_000)return marketRegime;
  const rest=fetchWithFyersBudget.getStatus();
  if(!fyersRestBudgetReady||rest.cooldownActive||rest.recoveryProbeRequired){
   marketRegime=unavailableMarketRegime('FYERS history budget/cooldown prevents a verified index regime refresh');
@@ -1189,7 +1189,7 @@ function strategyScanSnapshot(){
  const marketSession=marketClock.phase==='REGULAR'?'OPEN':marketClock.phase.startsWith('PRE_OPEN')?'PRE-OPEN':'CLOSED';
  const freshFutureTicks=fnoScanSubscriptionSymbols.filter(symbol=>freshTick(lastTicks.get(symbol))).length;
  const runtime=getScannerRuntimeState({authenticated:authReady(),socketConnected:connected,marketOpen:isNseRegularSession(),ledgerReady:strategyLedgerRuntimeReady,universeCount:fnoUniverseRows.length,activeSubscriptions:fnoScanSubscriptionSymbols.length,freshFutureTicks});
- const regimeFresh=Boolean(isNseRegularSession()&&marketRegime.evaluatedAt&&Date.now()-Date.parse(marketRegime.evaluatedAt)<=60_000&&BASE_SUBSCRIPTIONS.every(symbol=>freshTick(lastTicks.get(symbol))));
+ const regimeFresh=Boolean(isNseRegularSession()&&marketRegime.evaluatedAt&&Date.now()-Date.parse(marketRegime.evaluatedAt)<=15_000&&BASE_SUBSCRIPTIONS.every(symbol=>freshTick(lastTicks.get(symbol))));
  const visibleMarketRegime=regimeFresh?marketRegime:unavailableMarketRegime('Market regime is not backed by currently fresh index exchange ticks');
  return{enabled:true,mode:'AUTOMATIC_READ_ONLY',scanIntervalMs:STRATEGY_SCAN_INTERVAL_MS,rotationIntervalMs:FNO_ROTATION_INTERVAL_MS,estimatedScannerHistoryRequestsPerMinute:estimateScannerRestRequestsPerMinute(),runtimeState:runtime.state,blocker:runtime.blocker,marketSession,marketPhase:marketClock.phase,marketPhaseLabel:marketClock.label,lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,prewarmedOptionSubscriptions:strategyWarmOptionSymbols.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),marketRegime:visibleMarketRegime,orderMode:'DISABLED'};
 }
