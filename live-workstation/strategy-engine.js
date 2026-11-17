@@ -11,13 +11,13 @@ const STRATEGIES = Object.freeze([
   'BULLISH_CONTINUATION',
   'BEARISH_CONTINUATION',
   'FLAG_BREAKOUT_VOLUME',
-  'OPENING_RANGE_15M_RETEST'
+  'OPENING_RANGE_BREAKOUT'
 ]);
 // When multiple setups confirm on the same completed candle, prefer the more specific pattern over the broad EMA trend fallback.
 const STRATEGY_TIE_PRIORITY = Object.freeze([
   'TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK','DAY_HIGH_LOW_BREAK_RETEST',
   'DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION','BEARISH_CONTINUATION',
-  'FLAG_BREAKOUT_VOLUME','OPENING_RANGE_15M_RETEST','EMA20_EMA50_TREND'
+  'FLAG_BREAKOUT_VOLUME','OPENING_RANGE_BREAKOUT','EMA20_EMA50_TREND'
 ]);
 
 function finite(value) { return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)); }
@@ -146,6 +146,25 @@ export function detectFlagVolume(rows) {
 export function detectOpeningRange(rows, sessionStartMinute = 555) {
   const key=istDayKey(number(rows.at(-1).time));
   const day=rows.filter(c=>istDayKey(number(c.time))===key);
+  if(day.length<2)return null;
+  const sessionMinute=c=>{
+    const t=new Date((number(c.time)+19800)*1000);
+    return t.getUTCHours()*60+t.getUTCMinutes();
+  };
+  // Strategy 9: the first completed 5-minute candle of the session defines
+  // the opening high/low. Confirm only a completed-candle close crossing it.
+  // The previous close must still be inside the range, preventing late re-entries.
+  const first=day.find(c=>sessionMinute(c)===sessionStartMinute);
+  const last=day.at(-1),prior=day.at(-2);
+  if(first&&prior&&last&&number(last.time)>number(first.time)){
+    const firstHigh=number(first.high),firstLow=number(first.low);
+    if(number(prior.close)<=firstHigh&&number(last.close)>firstHigh)
+      return candidate('OPENING_RANGE_BREAKOUT','LONG',firstHigh,last,{pattern:'FIRST_CANDLE_HIGH_BREAKOUT'});
+    if(number(prior.close)>=firstLow&&number(last.close)<firstLow)
+      return candidate('OPENING_RANGE_BREAKOUT','SHORT',firstLow,last,{pattern:'FIRST_CANDLE_LOW_BREAKDOWN'});
+  }
+  // Retain the existing 15-minute opening-range break/retest path as a
+  // second confirmation route within the same ninth strategy.
   if(day.length<5)return null;
   const opening=day.filter(c=>{
     const t=new Date((number(c.time)+19800)*1000);
@@ -159,8 +178,8 @@ export function detectOpeningRange(rows, sessionStartMinute = 555) {
   if(!prior.length)return null;
   const brokeHigh=prior.some(c=>number(c.close)>high);
   const brokeLow=prior.some(c=>number(c.close)<low);
-  if(brokeHigh&&number(last.low)<=high*1.002&&number(last.close)>high)return candidate('OPENING_RANGE_15M_RETEST','LONG',high,last);
-  if(brokeLow&&number(last.high)>=low*0.998&&number(last.close)<low)return candidate('OPENING_RANGE_15M_RETEST','SHORT',low,last);
+  if(brokeHigh&&number(last.low)<=high*1.002&&number(last.close)>high)return candidate('OPENING_RANGE_BREAKOUT','LONG',high,last);
+  if(brokeLow&&number(last.high)>=low*0.998&&number(last.close)<low)return candidate('OPENING_RANGE_BREAKOUT','SHORT',low,last);
   return null;
 }
 export function detectDayHighLowRetest(rows) {
@@ -254,7 +273,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   consider('BULLISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'LONG'));
   consider('BEARISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'SHORT'));
   consider('FLAG_BREAKOUT_VOLUME',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectFlagVolume(rows));
-  consider('OPENING_RANGE_15M_RETEST',sessionRows.length>=4&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute));
+  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=4&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute));
   if(!candidates.length){
     if(!evaluated.length)return fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', '));
     return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked};
