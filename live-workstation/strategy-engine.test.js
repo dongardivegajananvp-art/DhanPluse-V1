@@ -122,7 +122,7 @@ test('confirmed underlying setup remains WAITING until live option premium break
   assert.match(result.reason,/live option premium/i);
 });
 
-test('option premium stop uses the lower of breakout and confirmation candle lows',()=>{
+test('option premium stop uses the lower of the last two completed candle lows',()=>{
   const now=Date.parse('2026-11-16T04:00:30Z');
   const bucket=Math.floor((now/1000)/300)*300;
   const {rows:underlyingCandles}=risingUnderlyingFixture(now);
@@ -131,17 +131,17 @@ test('option premium stop uses the lower of breakout and confirmation candle low
     {time:bucket-600,open:100.2,high:100.4,low:100.05,close:100.3,volume:120},
     {time:bucket-300,open:100.3,high:100.45,low:100.3,close:100.35,volume:110}
   ];
-  const optionTick={price:100.35,exchangeTime:now/1000,receivedAt:now};
+  const optionTick={price:100.5,exchangeTime:now/1000,receivedAt:now};
   const underlyingTick={price:153.5,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({underlyingCandles,underlyingTick,optionCandles,optionTick,contract:{symbol:'NSE:RELIANCE26NOV2500CE',side:'CE',tickSize:0.05},isTopGainer:true,now});
   assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
-  assert.equal(result.entry,100.25);
+  assert.equal(result.entry,100.5);
   assert.equal(result.stopLoss,100);
-  assert.equal(result.target,100.75);
+  assert.equal(result.target,101.5);
   assert.equal(result.rr,2);
 });
 
-test('option breakout without one completed confirmation/retest candle remains NO TRADE',()=>{
+test('option premium remains WAITING until live quote crosses the latest completed candle high',()=>{
   const now=Date.parse('2026-11-16T04:00:30Z');
   const bucket=Math.floor((now/1000)/300)*300;
   const underlyingCandles=[
@@ -159,8 +159,8 @@ test('option breakout without one completed confirmation/retest candle remains N
     underlyingCandles,underlyingTick,optionCandles,optionTick,
     contract:{symbol:'NSE:RELIANCE26NOV2500CE',side:'CE',tickSize:0.05},isTopGainer:true,now
   });
-  assert.equal(result.status,'NO_TRADE');
-  assert.match(result.reason,/one completed candle/i);
+  assert.equal(result.status,'WAITING_FOR_OPTION_BREAKOUT');
+  assert.match(result.reason,/live option premium/i);
 });
 
 test('strategy evaluator requires verified CE/PE contract metadata',()=>{
@@ -557,7 +557,7 @@ test('MCX option confirmation accepts the verified 23:50 to 09:00 session bounda
     {time:Date.parse('2026-11-17T03:35:00Z')/1000,open:100.3,high:100.4,low:100.15,close:100.35,volume:110}
   ];
   const underlyingTick={price:105,exchangeTime:now/1000,receivedAt:now};
-  const optionTick={price:100.3,exchangeTime:now/1000,receivedAt:now};
+  const optionTick={price:100.45,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({
     underlyingCandles,underlyingTick,optionCandles,optionTick,
     contract:{symbol:'MCX:CRUDEOIL26NOV7500CE',side:'CE',tickSize:0.05},
