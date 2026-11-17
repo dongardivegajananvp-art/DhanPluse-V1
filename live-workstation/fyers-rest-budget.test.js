@@ -181,7 +181,8 @@ test('recovery payload validation is endpoint-specific and rejects HTTP-200 erro
   assert.equal(isValidFyersRecoveryPayload('/api/v3/screeners/config', { s: 'ok', data: { screeners_standard: [] } }), true);
   assert.equal(isValidFyersRecoveryPayload('/api/v3/screeners/standard', { s: 'ok', data: { header: [], body: [] } }), true);
   assert.equal(isValidFyersRecoveryPayload('/api/v3/screeners/standard', { s: 'ok', data: {} }), false);
-  assert.equal(isValidFyersRecoveryPayload('/api/v3/positions', { s: 'ok', data: {} }), true);
+  assert.equal(isValidFyersRecoveryPayload('/api/v3/positions', { s: 'ok', netPositions: [], overall: { count_total: 0, count_open: 0, pl_total: 0 } }), true);
+  assert.equal(isValidFyersRecoveryPayload('/api/v3/positions', { s: 'ok', data: {} }), false);
   assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'error', message: 'invalid symbol' }), false);
 });
 
