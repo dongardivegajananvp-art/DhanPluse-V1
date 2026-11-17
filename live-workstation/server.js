@@ -325,7 +325,7 @@ function rotateFnoUniverseSubscriptions(reason='scheduled_rotation'){
 }
 function authReady(){return Boolean(appId&&accessToken);}
 function scheduleSocketRecovery(reason='socket_unavailable'){
-  if(!authReady()||connected||socketRecoveryTimer)return;
+  if(!authReady()||connected||socketRecoveryTimer||/expired token|failed to decode jwt/i.test(lastSocketError))return;
   const delayMs=socketRecoveryDelayMs(socketRecoveryAttempts+1);
   socketRecoveryAttempts+=1;
   console.warn('FYERS socket recovery scheduled.',JSON.stringify({reason,attempt:socketRecoveryAttempts,delayMs,scheduledAt:new Date().toISOString()}));
@@ -461,9 +461,13 @@ function ensureSocket(){
     connected=false;
     lastSocketError=String(e?.message||e).slice(0,180);
     if(socket===owned)socket=null;
-    console.error('FYERS WebSocket startup failed.',lastSocketError);
-    scheduleSocketRecovery('socket_startup_failed');
-    throw e;
+    console.error('FYERS WebSocket startup failed; workstation process will remain available.',lastSocketError);
+    if(/expired token|failed to decode jwt/i.test(lastSocketError)){
+      console.warn('FYERS reconnect paused because the stored access token is expired; a new OAuth session is required.');
+    }else{
+      scheduleSocketRecovery('socket_startup_failed');
+    }
+    return;
   }
 }
 function isNseSubscriptionSession(){
@@ -1242,7 +1246,7 @@ app.get('/api/fyers/auth/callback',async(req,res)=>{
     const authenticatedAt=new Date().toISOString();
     try{await tokenReader.save(data.access_token,authenticatedAt);}catch(error){console.error('FYERS token issued but encrypted persistence failed; session not activated.',String(error?.message||error).slice(0,160));return res.status(503).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>Secure save failed</h2><p>FYERS issued a token, but GV2VPD could not securely save it. The session was not activated.</p><a href="/">Return to GV2VPD</a>');}
     try{if(socket&&typeof socket.close==='function')socket.close();}catch{}
-    socket=null;connected=false;accessToken=data.access_token;lastTicks.clear();nseTicks.clear();mcxTicks.clear();subscribedSymbols.clear();ensureSocket();
+    if(socketRecoveryTimer){clearTimeout(socketRecoveryTimer);socketRecoveryTimer=null;}socket=null;connected=false;accessToken=data.access_token;lastSocketError='';socketRecoveryAttempts=0;lastTicks.clear();nseTicks.clear();mcxTicks.clear();subscribedSymbols.clear();ensureSocket();
     console.info('FYERS OAuth session securely saved and market socket restart requested.',JSON.stringify({authenticatedAt,tokenPersisted:true}));return res.redirect(303,'/?fyers_connected=1');
   }catch(error){console.error('FYERS OAuth callback failed.',String(error?.message||error).slice(0,160));return res.status(502).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>Could not complete FYERS login</h2><p>FYERS authentication service could not be reached. No session was activated.</p><a href="/">Return to GV2VPD</a>');}
 });
