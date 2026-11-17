@@ -831,6 +831,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
     if(finalEvaluation.status!=='SETUP_CONFIRMED'||!sameStrategyConfirmation(best,finalEvaluation))
       return{status:'NO_TRADE',reason:'MCX underlying/option confirmation changed during final fresh-tick recheck'};
     if(!strategyPlanStore)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Persistent strategy plan ledger is unavailable; MCX setup not published'};
+    if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed before persistent plan creation'};
     const planId=crypto.createHash('sha256').update([future,best.contract.symbol,finalEvaluation.confirmedAt,finalEvaluation.optionCandleTime].join('|')).digest('hex').slice(0,48);
     const saved=await strategyPlanStore.saveConfirmedPlan({
       planId,strategy:finalEvaluation.strategy,underlying:future,contract:best.contract.symbol,
@@ -842,7 +843,17 @@ app.get('/api/mcx/scan',async(req,res)=>{
       underlyingCandleTime:String(finalEvaluation.confirmedAt),optionCandleTime:String(finalEvaluation.optionCandleTime)
     });
     if(!saved.ok)return{status:saved.status||'DATA_UNAVAILABLE_NO_TRADE',reason:saved.reason||'MCX plan could not be persisted; no setup published'};
+    if(selectedSymbol!==future||!freshTick(lastTicks.get(future))||!freshTick(lastTicks.get(best.contract.symbol))){
+      const cancelled=await strategyPlanStore.closePlan(planId,'CANCELLED');
+      await refreshStrategyActivePlans(true);
+      return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:cancelled.ok?'MCX selection or final exchange tick changed during ledger write; saved plan cancelled':'MCX selection/tick changed during ledger write; plan cancellation could not be confirmed and remains blocked'};
+    }
     await refreshStrategyActivePlans(true);
+    if(selectedSymbol!==future||!freshTick(lastTicks.get(future))||!freshTick(lastTicks.get(best.contract.symbol))){
+      const cancelled=await strategyPlanStore.closePlan(planId,'CANCELLED');
+      await refreshStrategyActivePlans(true);
+      return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:cancelled.ok?'MCX selection or final exchange tick changed during ledger refresh; saved plan cancelled':'MCX selection/tick changed during ledger refresh; plan cancellation could not be confirmed and remains blocked'};
+    }
     selectedOptionSymbol=best.contract.symbol;
     syncSocketSubscriptions({reason:'mcx_best_option_selected'});
     return{
