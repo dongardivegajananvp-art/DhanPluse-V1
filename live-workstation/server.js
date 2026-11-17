@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { oauthStateStorageKey, oauthStateIsFresh, AUTH_STATE_TTL_MS } from './oauth-state.js';
 import { getNseMarketSession } from './nse-market-session.js';
 import {createSharedTokenReader} from './token-reader.js';
-import { createFyersDataApiBudget } from './fyers-rest-budget.js';
+import { createFyersDataApiBudget, isValidFyersRecoveryPayload } from './fyers-rest-budget.js';
 import { socketRecoveryDelayMs } from './socket-recovery-policy.js';
 import { shouldRestartSilentIndexFeed } from './socket-feed-watchdog.js';
 import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute, shouldRetryFnoUniverse, prioritizeScannerSymbols } from './scanner-schedule.js';
@@ -588,7 +588,11 @@ async function recoverFyersRestEndpoint(pathname){
     url=FYERS_API+'/screeners/config';
   }else if(pathname==='/api/v3/screeners/standard'){
     const status=fetchWithFyersBudget.getStatus();
-    if(status.recoveryProbeUrl)url=status.recoveryProbeUrl;
+    // Older persisted cooldown rows may not contain the original query URL.
+    // Probe only the exact blocked endpoint with a minimal GET; the shared
+    // budget clears the circuit only when its endpoint-specific validator
+    // confirms a valid screeners payload. Never probe a different endpoint.
+    url=status.recoveryProbeUrl||FYERS_API+'/screeners/standard';
   }else if(pathname==='/api/v3/positions'){
     url=FYERS_API+'/positions';
   }else{
@@ -604,13 +608,7 @@ async function recoverFyersRestEndpoint(pathname){
   try{
     const response=await fyersRestFetch(url,{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:12000});
     const payload=await response.clone().json().catch(()=>null);
-    const valid=pathname==='/data/history'
-      ? Boolean(payload?.s==='ok'&&Array.isArray(payload.candles)&&payload.candles.length)
-      : pathname==='/data/options-chain-v3'
-        ? Boolean(payload?.s==='ok'&&Array.isArray(payload?.data?.optionsChain)&&payload.data.optionsChain.length)
-        : pathname==='/api/v3/positions'
-          ? Boolean(payload?.s==='ok'&&Array.isArray(payload?.netPositions)&&payload?.overall&&typeof payload.overall==='object'&&!Array.isArray(payload.overall))
-          : Boolean(payload?.s==='ok');
+    const valid=isValidFyersRecoveryPayload(pathname,payload);
     const budgetState=fetchWithFyersBudget.getStatus();
     const circuit=budgetState.recoveryProbeRequired?'PROBE_REQUIRED':budgetState.cooldownActive?'OPEN':'CLOSED';
     console.info('FYERS endpoint recovery probe completed.',JSON.stringify({pathname,httpStatus:response.status,validProviderPayload:valid,circuit,at:new Date().toISOString()}));
