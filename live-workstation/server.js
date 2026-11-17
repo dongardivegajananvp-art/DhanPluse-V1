@@ -581,7 +581,9 @@ async function recoverFyersRestEndpoint(pathname){
       ? Boolean(payload?.s==='ok'&&Array.isArray(payload.candles)&&payload.candles.length)
       : pathname==='/data/options-chain-v3'
         ? Boolean(payload?.s==='ok'&&Array.isArray(payload?.data?.optionsChain)&&payload.data.optionsChain.length)
-        : Boolean(payload?.s==='ok');
+        : pathname==='/api/v3/positions'
+          ? Boolean(payload?.s==='ok'&&Array.isArray(payload?.netPositions)&&payload?.overall&&typeof payload.overall==='object'&&!Array.isArray(payload.overall))
+          : Boolean(payload?.s==='ok');
     const budgetState=fetchWithFyersBudget.getStatus();
     const circuit=budgetState.recoveryProbeRequired?'PROBE_REQUIRED':budgetState.cooldownActive?'OPEN':'CLOSED';
     console.info('FYERS endpoint recovery probe completed.',JSON.stringify({pathname,httpStatus:response.status,validProviderPayload:valid,circuit,at:new Date().toISOString()}));
