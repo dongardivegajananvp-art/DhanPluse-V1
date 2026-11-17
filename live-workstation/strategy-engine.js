@@ -157,10 +157,12 @@ export function detectOpeningRange(rows, sessionStartMinute = 555, livePrice = n
   const first=day.find(c=>sessionMinute(c)===sessionStartMinute);
   const last=day.at(-1),prior=day.at(-2);
   if(first&&last){
-    const firstHigh=number(first.high),firstLow=number(first.low),price=Number(livePrice);
-    if(Number.isFinite(price)&&number(last.close)<=firstHigh&&price>firstHigh)
+    const firstHigh=number(first.high),firstLow=number(first.low);
+    const hasLivePrice=livePrice!==null&&livePrice!==undefined&&Number.isFinite(Number(livePrice));
+    const price=hasLivePrice?Number(livePrice):NaN;
+    if(hasLivePrice&&number(last.close)<=firstHigh&&price>firstHigh)
       return candidate('OPENING_RANGE_BREAKOUT','LONG',firstHigh,last,{pattern:'FIRST_CANDLE_HIGH_LIVE_BREAKOUT'});
-    if(Number.isFinite(price)&&number(last.close)>=firstLow&&price<firstLow)
+    if(hasLivePrice&&number(last.close)>=firstLow&&price<firstLow)
       return candidate('OPENING_RANGE_BREAKOUT','SHORT',firstLow,last,{pattern:'FIRST_CANDLE_LOW_LIVE_BREAKDOWN'});
     if(prior&&number(last.time)>number(first.time)){
       if(number(prior.close)<=firstHigh&&number(last.close)>firstHigh)
