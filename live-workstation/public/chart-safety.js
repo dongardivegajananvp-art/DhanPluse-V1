@@ -34,29 +34,51 @@ export function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 
 
 export function evaluateThreeCandleBreakout(completed, tickPrice) {
   const bars = Array.isArray(completed) ? completed.slice(-3) : [];
-  if (bars.length < 3) return { status: 'WAIT', reason: 'Need three completed 5-minute candles: reference, breakout and one confirmation' };
+  if (bars.length < 2) return { status: 'WAIT', reason: 'Need two completed 5-minute candles: reference and breakout' };
   if (bars.some(c => !c || ![c.time,c.open,c.high,c.low,c.close].every(v => Number.isFinite(Number(v))))) {
     return { status: 'NO_TRADE', reason: 'Breakout candles contain invalid OHLC data' };
   }
   if (bars.some((c,i) => i > 0 && Number(c.time) - Number(bars[i-1].time) !== 300)) {
     return { status: 'NO_TRADE', reason: 'Breakout confirmation candles are not contiguous' };
   }
-  const [reference, breakout, confirmation] = bars;
   const price = Number(tickPrice);
   if (!Number.isFinite(price) || price <= 0) return { status: 'NO_TRADE', reason: 'Fresh underlying price unavailable' };
-  const resistance = Number(reference.high);
-  const support = Number(reference.low);
-  if (Number(breakout.close) > resistance && Number(confirmation.close) > resistance && price >= Number(confirmation.close)) {
+
+  // Early confirmation: a completed directional breakout candle plus a fresh
+  // exchange tick through that candle's extreme. No extra 5-minute candle wait.
+  const reference = bars.at(-2), breakout = bars.at(-1);
+  const resistance = Number(reference.high), support = Number(reference.low);
+  const high = Number(breakout.high), low = Number(breakout.low);
+  if (Number(breakout.close) > resistance && Number(breakout.close) > Number(breakout.open) && price >= high) {
+    const entry = high, stopLoss = low, risk = entry - stopLoss;
+    if (!(risk > 0)) return { status: 'NO_TRADE', reason: 'Breakout candle has invalid long-side structural risk' };
+    if (price > entry + risk * 0.25) return { status: 'WAIT', reason: 'Live price is more than 0.25R above the exact entry; chase blocked' };
+    return { status: 'SETUP_CONFIRMED', side: 'LONG', confirmationType: 'EARLY_LIVE_HIGH_BREAK',
+      entry, stopLoss, target: entry + 2 * risk, rr: '1:2', candleTime: Number(breakout.time), triggerPrice: high };
+  }
+  if (Number(breakout.close) < support && Number(breakout.close) < Number(breakout.open) && price <= low) {
+    const entry = low, stopLoss = high, risk = stopLoss - entry;
+    if (!(risk > 0)) return { status: 'NO_TRADE', reason: 'Breakout candle has invalid short-side structural risk' };
+    if (price < entry - risk * 0.25) return { status: 'WAIT', reason: 'Live price is more than 0.25R below the exact entry; chase blocked' };
+    return { status: 'SETUP_CONFIRMED', side: 'SHORT', confirmationType: 'EARLY_LIVE_LOW_BREAK',
+      entry, stopLoss, target: entry - 2 * risk, rr: '1:2', candleTime: Number(breakout.time), triggerPrice: low };
+  }
+
+  // Keep the prior three-candle hold/retest path as a conservative fallback.
+  if (bars.length < 3) return { status: 'WAIT', reason: 'Waiting for a fresh live break of the completed breakout candle high/low' };
+  const [oldReference, breakoutCandle, confirmation] = bars;
+  const oldResistance = Number(oldReference.high), oldSupport = Number(oldReference.low);
+  if (Number(breakoutCandle.close) > oldResistance && Number(confirmation.close) > oldResistance && price >= Number(confirmation.close)) {
     const risk = Number(confirmation.close) - Number(confirmation.low);
     if (!(risk > 0)) return { status: 'NO_TRADE', reason: 'Confirmation candle has invalid long-side risk' };
-    return { status: 'SETUP_CONFIRMED', side: 'LONG', confirmationType: Number(confirmation.low) <= resistance ? 'ONE_CANDLE_RETEST' : 'ONE_CANDLE_HOLD',
+    return { status: 'SETUP_CONFIRMED', side: 'LONG', confirmationType: Number(confirmation.low) <= oldResistance ? 'ONE_CANDLE_RETEST' : 'ONE_CANDLE_HOLD',
       entry: Number(confirmation.close), stopLoss: Number(confirmation.low), target: Number(confirmation.close) + 2 * risk, rr: '1:2', candleTime: Number(confirmation.time) };
   }
-  if (Number(breakout.close) < support && Number(confirmation.close) < support && price <= Number(confirmation.close)) {
+  if (Number(breakoutCandle.close) < oldSupport && Number(confirmation.close) < oldSupport && price <= Number(confirmation.close)) {
     const risk = Number(confirmation.high) - Number(confirmation.close);
     if (!(risk > 0)) return { status: 'NO_TRADE', reason: 'Confirmation candle has invalid short-side risk' };
-    return { status: 'SETUP_CONFIRMED', side: 'SHORT', confirmationType: Number(confirmation.high) >= support ? 'ONE_CANDLE_RETEST' : 'ONE_CANDLE_HOLD',
+    return { status: 'SETUP_CONFIRMED', side: 'SHORT', confirmationType: Number(confirmation.high) >= oldSupport ? 'ONE_CANDLE_RETEST' : 'ONE_CANDLE_HOLD',
       entry: Number(confirmation.close), stopLoss: Number(confirmation.high), target: Number(confirmation.close) - 2 * risk, rr: '1:2', candleTime: Number(confirmation.time) };
   }
-  return { status: 'WAIT', reason: 'Breakout must be followed by one completed candle holding above or retesting and reclaiming the breakout level' };
+  return { status: 'WAIT', reason: 'Waiting for a completed directional breakout and fresh live tick through its exact high/low' };
 }
