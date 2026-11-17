@@ -518,7 +518,7 @@ test('MCX option confirmation accepts the verified 23:50 to 09:00 session bounda
     {time:Date.parse('2026-11-17T03:35:00Z')/1000,open:100.3,high:100.4,low:100.15,close:100.35,volume:110}
   ];
   const underlyingTick={price:105,exchangeTime:now/1000,receivedAt:now};
-  const optionTick={price:100.25,exchangeTime:now/1000,receivedAt:now};
+  const optionTick={price:100.3,exchangeTime:now/1000,receivedAt:now};
   const result=evaluateNineStrategies({
     underlyingCandles,underlyingTick,optionCandles,optionTick,
     contract:{symbol:'MCX:CRUDEOIL26NOV7500CE',side:'CE',tickSize:0.05},
