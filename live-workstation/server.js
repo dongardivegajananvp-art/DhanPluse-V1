@@ -89,11 +89,11 @@ async function restoreSelectedMcxInstrument(){
     if(typeof saved==='string'){try{saved=JSON.parse(saved);}catch{saved=null;}}
     const symbol=String(saved?.symbol||'').trim().toUpperCase();
     if(mcxFutureRoot(symbol)){
-      await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-selected-mcx-instrument']);
-      console.info('Previous MCX-only selection cleared; workstation now starts in NSE mode.',JSON.stringify({selectedSymbol,previousMcxSymbol:symbol,marketMode:'NSE_FNO',restoredAt:new Date().toISOString()}));
-    }else{
-      console.info('Workstation NSE mode selected for startup.',JSON.stringify({selectedSymbol,marketMode:'NSE_FNO',restoredAt:new Date().toISOString()}));
+      selectedSymbol=symbol;
+      console.info('Saved MCX instrument restored for workstation startup.',JSON.stringify({selectedSymbol,marketMode:'MCX_ONLY',restoredAt:new Date().toISOString()}));
+      return true;
     }
+    console.info('No saved MCX instrument; workstation starts in NSE mode.',JSON.stringify({selectedSymbol,marketMode:'NSE_FNO',restoredAt:new Date().toISOString()}));
     return false;
   }catch(error){
     console.error('Persisted MCX instrument restore failed; MCX selection remains unset.',String(error?.message||error).slice(0,160));
