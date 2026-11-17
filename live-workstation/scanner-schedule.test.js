@@ -5,7 +5,8 @@ import {
   FNO_ROTATION_INTERVAL_MS,
   estimateScannerRestRequestsPerMinute,
   canFinishSubscriptionWindowBeforeRotation,
-  shouldRetryFnoUniverse
+  shouldRetryFnoUniverse,
+  prioritizeScannerSymbols
 } from './scanner-schedule.js';
 
 test('scanner reserves at least one third of the shared 15 rpm REST budget', () => {
@@ -40,4 +41,11 @@ test('F&O universe retries after a recovered REST circuit without requiring a so
   assert.equal(shouldRetryFnoUniverse({...base, mcxOnlyMode:true}), false);
   assert.equal(shouldRetryFnoUniverse({...base, universeLoaded:true, subscriptionWindowReady:true}), false);
   assert.equal(shouldRetryFnoUniverse({...base, now:59_999}), false);
+});
+
+test('scanner checks fresh top-gainer futures first without duplicates or adding unsubscribed symbols', () => {
+  assert.deepEqual(
+    prioritizeScannerSymbols(['FUT-A','FUT-B','FUT-C','FUT-D'], ['FUT-C','FUT-A','NOT-SUBSCRIBED','FUT-C']),
+    ['FUT-C','FUT-A','FUT-B','FUT-D']
+  );
 });

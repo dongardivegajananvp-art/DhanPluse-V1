@@ -39,3 +39,11 @@ export function shouldRetryFnoUniverse({
     Number.isFinite(elapsed) && Number.isFinite(interval) && interval > 0 && elapsed >= interval
   );
 }
+
+export function prioritizeScannerSymbols(activeSymbols = [], prioritySymbols = []) {
+  const active = [...new Set((Array.isArray(activeSymbols) ? activeSymbols : []).filter(x => typeof x === 'string' && x.length))];
+  const activeSet = new Set(active);
+  const priority = [...new Set((Array.isArray(prioritySymbols) ? prioritySymbols : []).filter(x => activeSet.has(x)))];
+  const prioritySet = new Set(priority);
+  return [...priority, ...active.filter(symbol => !prioritySet.has(symbol))];
+}
