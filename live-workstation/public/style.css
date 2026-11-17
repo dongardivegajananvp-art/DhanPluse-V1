@@ -38,3 +38,5 @@
 .gainer-card.gainer-rank-4{background:#332817;border-color:#e7ad55;color:#ffd18a}
 .gainer-card.gainer-rank-5{background:#351e2a;border-color:#ef7d91;color:#ffb4c0}
 .gainer-card.gainer-rank-1:hover,.gainer-card.gainer-rank-2:hover,.gainer-card.gainer-rank-3:hover,.gainer-card.gainer-rank-4:hover,.gainer-card.gainer-rank-5:hover{filter:brightness(1.12)}
+
+.mode-switch{display:flex;gap:5px;align-items:center}.mode-button{border:1px solid #31445d;background:#101b2a;color:#8ea0b8;border-radius:6px;padding:8px 9px;font-size:9px;font-weight:800;letter-spacing:.4px;white-space:nowrap;cursor:pointer}.mode-button.active{border-color:#42d6a0;background:#102b2b;color:#8df0c9;box-shadow:inset 0 0 0 1px #42d6a0}.mode-button:disabled{opacity:.55;cursor:wait}@media(max-width:650px){.top{height:auto;min-height:64px;padding:8px 10px;gap:8px;align-items:flex-start}.feed{justify-content:flex-end}.mode-switch{width:100%;justify-content:flex-end}.mode-button{padding:7px 6px;font-size:8px}}
