@@ -294,21 +294,20 @@ export function evaluateNineStrategies({ underlyingCandles, underlyingTick, opti
   if(!contiguousWindow(o.rows,3,sessionStartMinute,sessionCloseMinute))return fail('Option premium needs only 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle');
   const chosen=setup;
   if(contract.side!==(chosen.side==='LONG'?'CE':'PE'))return{status:'NO_TRADE',reason:'Option side does not match the verified underlying direction',strategy:chosen.strategy};
-  const premiumRows=o.rows,premiumLast=o.last,tickSize=number(contract.tickSize);
-  const prior=premiumRows.at(-3),breakout=premiumRows.at(-2),confirmation=premiumLast;
-  const premiumLevel=number(prior.high);
-  const breakoutOccurred=number(breakout.close)>premiumLevel;
-  const confirmedAfterBreakout=number(confirmation.close)>premiumLevel;
-  if(!breakoutOccurred||!confirmedAfterBreakout)return{status:'NO_TRADE',reason:'Option premium breakout must be followed by one completed candle confirming above or retesting and holding the breakout level',strategy:chosen.strategy};
-  const confirmationType=number(confirmation.low)<=premiumLevel*1.002?'ONE_CANDLE_RETEST':'ONE_CANDLE_HOLD';
-  // Use the complete two-candle breakout + confirmation structure for the stop.
-  // A confirmation candle that holds above entry alone can create zero/near-zero risk,
-  // rejecting valid breakouts or making the 0.5R chase guard unrealistically tight.
-  // Keep the stop one official option tick below the lower of both completed candle lows.
-  const swingLow=Math.min(number(breakout.low),number(confirmation.low));
+  const premiumRows=o.rows,tickSize=number(contract.tickSize);
+  const prior=premiumRows.at(-2),reference=premiumRows.at(-1);
+  // The underlying strategy already confirmed on a completed 5-minute candle.
+  // Do not wait for a second option candle confirmation: trigger on a fresh live
+  // option premium crossing the latest completed option candle high + one tick.
+  const premiumLevel=number(reference.high);
+  const entry=Number((Math.ceil((premiumLevel+tickSize-1e-9)/tickSize)*tickSize).toFixed(8));
+  if(number(optionTick.price)+tickSize*1e-7<entry)return{status:'WAITING_FOR_OPTION_BREAKOUT',reason:'Underlying setup is confirmed; waiting for live option premium to break the latest completed 5-minute candle high + one tick',strategy:chosen.strategy,optionBreakoutLevel:premiumLevel};
+  // Structural risk uses the last two completed option candles; the live quote is
+  // the trigger. This removes the redundant extra 5-minute confirmation delay.
+  const swingLow=Math.min(number(prior.low),number(reference.low));
   const plan=buildFixedPremiumPlan({breakoutLevel:premiumLevel,tickSize,livePremium:optionTick.price,swingLow});
   if(plan.status!=='SETUP_CONFIRMED')return{...plan,strategy:chosen.strategy};
-  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:premiumLast.time,optionConfirmation:confirmationType,contract:contract.symbol};
+  return{status:'SETUP_CONFIRMED',strategy:chosen.strategy,underlyingSide:chosen.side,optionSide:contract.side,breakoutLevel:chosen.breakoutLevel,optionBreakoutLevel:premiumLevel,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,rr:plan.rr,confirmedAt:chosen.confirmedAt,optionCandleTime:reference.time,optionConfirmation:'LIVE_PREMIUM_BREAKOUT',contract:contract.symbol};
 }
 export function canAcceptStrategyTrade(activeTrades, candidateTrade, maxActive=MAX_ACTIVE_TRADES) {
   if(!Array.isArray(activeTrades)||!candidateTrade||!candidateTrade.underlying||!candidateTrade.contract)return{ok:false,reason:'Active trade state or candidate identity is invalid'};
