@@ -5,7 +5,7 @@ import {createSharedTokenReader} from './token-reader.js';
 import { createFyersDataApiBudget } from './fyers-rest-budget.js';
 import { socketRecoveryDelayMs } from './socket-recovery-policy.js';
 import { shouldRestartSilentIndexFeed } from './socket-feed-watchdog.js';
-import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute, shouldRetryFnoUniverse } from './scanner-schedule.js';
+import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute, shouldRetryFnoUniverse, prioritizeScannerSymbols } from './scanner-schedule.js';
 import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { historyRetryDelayMs, shouldAttemptHistoryRetry } from './history-retry-policy.js';
 import { acceptExchangeTick, exchangeTickFreshness, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
@@ -180,6 +180,7 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
     }
   }else if(mcxOnlyMode){
     fnoScanSubscriptionSymbols=[];
+    strategyWarmOptionSymbols.clear();
   }
   const wanted=mcxOnlyMode
     ?new Set([selectedSymbol,selectedOptionSymbol,...mcxOptionCandidateSymbols].filter(Boolean))
@@ -1084,12 +1085,16 @@ async function runAutomaticStrategyScan(){
    if(freshTick(lastTicks.get(candidate.contract.symbol))){await processPendingStrategyCandidate(candidate);return;}
   }
   if(expired)syncSocketSubscriptions({reason:'strategy_candidate_timeout'});
-  const symbols=fnoScanSubscriptionSymbols.slice();if(!symbols.length)return;
+  const freshGainerWindow=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<60*1000?fnoMoversCache.rows:[];
+  const priorityGainerFutures=freshGainerWindow.map(row=>row.symbol).filter(Boolean);
+  const symbols=prioritizeScannerSymbols(fnoScanSubscriptionSymbols,priorityGainerFutures);if(!symbols.length)return;
   if(strategyActivePlans.length+strategyPendingCandidates.size>=2)return;
   for(let attempt=0;attempt<symbols.length;attempt++){
    const index=strategyScanCursor%symbols.length;strategyScanCursor=(index+1)%symbols.length;
    const futureSymbol=symbols[index],row=fnoUniverseRows.find(x=>x.futureSymbol===futureSymbol);if(!row)continue;
-   if(Date.now()-(strategyScanLastAttempt.get(futureSymbol)||0)<45000)continue;
+   const isTopGainer=priorityGainerFutures.includes(futureSymbol);
+   const retryInterval=isTopGainer?STRATEGY_SCAN_INTERVAL_MS:45000;
+   if(Date.now()-(strategyScanLastAttempt.get(futureSymbol)||0)<retryInterval)continue;
    const futureTick=lastTicks.get(futureSymbol);if(!freshTick(futureTick))continue;
    strategyScanLastAttempt.set(futureSymbol,Date.now());strategyScanLastAt=new Date().toISOString();strategyScanLastSymbol=futureSymbol;
    const [history,daily]=await Promise.all([loadGainerHistory(futureSymbol,{priority:10}),loadStrategyDailyHistory(futureSymbol,{priority:10}).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}))]);
@@ -1102,7 +1107,6 @@ async function runAutomaticStrategyScan(){
     return;
    }
    strategyScanLastError='';
-   const isTopGainer=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<60*1000&&fnoMoversCache.rows.some(mover=>mover.underlyingSymbol===row.underlyingSymbol);
    const setup=detectNineStrategySetup({underlyingCandles:history.candles,underlyingTick:currentTick,dailyCandles:daily.ok?daily.candles:[],isTopGainer,now:Date.now()});
    if(setup.status!=='UNDERLYING_SETUP_CONFIRMED'){
     if(setup.status==='DATA_UNAVAILABLE_NO_TRADE')setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:setup.status,reason:setup.reason,dailyDataStatus:daily.reason||'verified'});
