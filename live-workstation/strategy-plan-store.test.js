@@ -102,8 +102,11 @@ test('ledger allows at most two active plans and rejects duplicate underlying or
 
 test('legacy active plan persists first Entry-hit tick exactly once', async () => {
   const now=Date.parse('2026-11-16T04:00:00Z');
-  const store=createStrategyPlanStore({databaseUrl:'postgres://test',PoolClass:FakePool});
+  class LegacyPool extends FakePool { constructor(){super();LegacyPool.instance=this;} }
+  const store=createStrategyPlanStore({databaseUrl:'postgres://test',PoolClass:LegacyPool});
   const saved=await store.saveConfirmedPlan(fixture(now),now);
+  LegacyPool.instance.plans[0].entryHitAt=null;
+  LegacyPool.instance.plans[0].entryHitPrice=null;
   const result=await store.markEntryHit(saved.planId,100.10,now+1000);
   assert.equal(result.ok,true);
   assert.equal(result.entryHitPrice,100.10);
