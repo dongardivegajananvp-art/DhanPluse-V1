@@ -84,6 +84,9 @@ test('ledger persists fixed Entry/SL/Target once and lists the same immutable pl
   assert.equal(listed.plans.length,1);
   assert.deepEqual([Number(listed.plans[0].premium),Number(listed.plans[0].entry),Number(listed.plans[0].stop_loss),Number(listed.plans[0].target)],[100.05,100.05,98.5,103.15]);
   assert.equal(Number(listed.plans[0].tickSize),0.05);
+  assert.equal(listed.plans[0].entry_hit_at,null);
+  assert.equal(listed.plans[0].entry_hit_price,null);
+  assert.equal(evaluateActivePlanLifecycle({...listed.plans[0],entry_hit_at:null},{price:100,receivedAt:now,exchangeTime:now/1000},now).status,'WAITING_FOR_ENTRY');
   assert.ok(listed.plans[0].underlying_received_at);
   assert.ok(listed.plans[0].option_received_at);
   assert.equal(typeof store.updatePlan, 'undefined');
