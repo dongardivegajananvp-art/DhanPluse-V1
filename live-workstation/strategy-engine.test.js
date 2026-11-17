@@ -500,3 +500,26 @@ test('MCX overnight candle continuity accepts 23:50 to next-session 09:00 with M
   assert.ok(mcx.evaluatedStrategies.includes('EMA20_EMA50_TREND'));
   assert.ok(mcx.blockedStrategies.includes('TOP_GAINER_MOMENTUM_BREAKOUT'));
 });
+
+test('MCX option confirmation accepts the verified 23:50 to 09:00 session boundary',()=>{
+  const now=Date.parse('2026-11-17T03:40:30Z'); // 09:10:30 IST
+  const underlyingCandles=[
+    {time:Date.parse('2026-11-17T03:30:00Z')/1000,open:100,high:100.5,low:99.5,close:100,volume:100},
+    {time:Date.parse('2026-11-17T03:35:00Z')/1000,open:100.5,high:101.2,low:100.2,close:101,volume:120}
+  ];
+  const optionCandles=[
+    {time:Date.parse('2026-11-16T18:20:00Z')/1000,open:100,high:100.2,low:99.95,close:100.1,volume:100},
+    {time:Date.parse('2026-11-17T03:30:00Z')/1000,open:100.1,high:100.35,low:100.05,close:100.3,volume:120},
+    {time:Date.parse('2026-11-17T03:35:00Z')/1000,open:100.3,high:100.4,low:100.15,close:100.35,volume:110}
+  ];
+  const underlyingTick={price:101.1,exchangeTime:now/1000,receivedAt:now};
+  const optionTick={price:100.25,exchangeTime:now/1000,receivedAt:now};
+  const result=evaluateNineStrategies({
+    underlyingCandles,underlyingTick,optionCandles,optionTick,
+    contract:{symbol:'MCX:CRUDEOIL26NOV7500CE',side:'CE',tickSize:0.05},
+    isTopGainer:true,now,sessionStartMinute:540,sessionCloseMinute:1435
+  });
+  assert.equal(result.status,'SETUP_CONFIRMED');
+  assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
+  assert.equal(result.rr,2);
+});
