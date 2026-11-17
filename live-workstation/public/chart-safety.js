@@ -61,9 +61,9 @@ export function evaluateThreeCandleBreakout(completed, tickPrice) {
   return { status: 'WAIT', reason: 'Breakout must be followed by one completed candle holding above or retesting and reclaiming the breakout level' };
 }
 
-// MCX futures can trade in a very narrow intrabar range. Keep the real OHLC
-// values untouched, but give the visual price axis a minimum 1% price span and
-// 12% breathing room so a single provisional candle never fills the chart.
+// MCX futures can produce large candles relative to the instrument price. Keep
+// real OHLC untouched, but use a wider 8% minimum visual price span plus 20%
+// padding so a small number of candles cannot stretch to fill the chart.
 export function getMcxChartPriceDomain(low, high) {
   const lo = Number(low), hi = Number(high);
   if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || hi < lo) {
@@ -71,8 +71,8 @@ export function getMcxChartPriceDomain(low, high) {
   }
   const center = (lo + hi) / 2;
   const rawSpan = Math.max(hi - lo, 0.01);
-  const span = Math.max(rawSpan, center * 0.01);
-  const paddedSpan = span * 1.12;
+  const span = Math.max(rawSpan, center * 0.08);
+  const paddedSpan = span * 1.2;
   const midpoint = (lo + hi) / 2;
   return { lo: midpoint - paddedSpan / 2, hi: midpoint + paddedSpan / 2 };
 }

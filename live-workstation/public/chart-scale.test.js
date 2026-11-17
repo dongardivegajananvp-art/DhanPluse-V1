@@ -6,8 +6,8 @@ test('MCX chart domain adds breathing room around a narrow single-candle range',
   const domain = getMcxChartPriceDomain(8067, 8069);
   assert.ok(domain.lo < 8067);
   assert.ok(domain.hi > 8069);
-  assert.ok(domain.hi - domain.lo >= 8068 * 0.01);
-  assert.ok(domain.hi - domain.lo <= 8068 * 0.012);
+  assert.ok(domain.hi - domain.lo >= 8068 * 0.08);
+  assert.ok(domain.hi - domain.lo <= 8068 * 0.096);
 });
 
 test('MCX chart domain preserves a wider real multi-candle range with padding', () => {
