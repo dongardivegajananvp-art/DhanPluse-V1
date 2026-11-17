@@ -447,7 +447,9 @@ function ensureSocket(){
         const lastLog=lastTickDiagnosticAt.get(symbol)||0;
         if(Date.now()-lastLog>=30000){
           const ageSeconds=Number((Date.now()/1000-stamp).toFixed(1));
-          const gapStats=BASE_SUBSCRIPTIONS.includes(symbol)?(indexTickGapSamples.get(symbol)||{samples:[]}):symbol.startsWith('MCX:')?(mcxTickGapSamples.get(symbol)||{samples:[]}):{samples:[]};
+          // The per-symbol map covers NSE F&O as well as indexes and MCX.
+          // Using only the index/MCX maps here silently logged zero F&O samples.
+          const gapStats=symbolTickGapSamples.get(symbol)||{samples:[]};
           const gaps=gapStats.samples;
           const avgReceiveGapSeconds=gaps.length?Number((gaps.reduce((sum,value)=>sum+value,0)/gaps.length/1000).toFixed(2)):null;
           const maxReceiveGapSeconds=gaps.length?Number((Math.max(...gaps)/1000).toFixed(2)):null;
