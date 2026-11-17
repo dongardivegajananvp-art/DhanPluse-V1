@@ -145,6 +145,7 @@ const strategyPendingCandidates=new Map();
 const strategyScanLastAttempt=new Map();
 const strategyDailyHistoryCache=new Map();
 let strategyScanCursor=0;
+let strategyPriorityKey='';
 let strategyScanBusy=false;
 let strategyScanLastAt=null;
 let strategyScanLastSymbol='';
@@ -1087,6 +1088,8 @@ async function runAutomaticStrategyScan(){
   if(expired)syncSocketSubscriptions({reason:'strategy_candidate_timeout'});
   const freshGainerWindow=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<60*1000?fnoMoversCache.rows:[];
   const priorityGainerFutures=freshGainerWindow.map(row=>row.symbol).filter(Boolean);
+  const priorityKey=priorityGainerFutures.join('|');
+  if(priorityKey!==strategyPriorityKey){strategyPriorityKey=priorityKey;strategyScanCursor=0;}
   const symbols=prioritizeScannerSymbols(fnoScanSubscriptionSymbols,priorityGainerFutures);if(!symbols.length)return;
   if(strategyActivePlans.length+strategyPendingCandidates.size>=2)return;
   for(let attempt=0;attempt<symbols.length;attempt++){
