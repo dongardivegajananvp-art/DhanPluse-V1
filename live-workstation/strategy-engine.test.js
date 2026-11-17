@@ -96,8 +96,13 @@ test('option entry triggers on live premium breakout after the underlying comple
   assert.equal(result.status,'SETUP_CONFIRMED');
   assert.equal(result.strategy,'TOP_GAINER_MOMENTUM_BREAKOUT');
   assert.equal(result.rr,2);
-  assert.equal(result.optionConfirmation,'LIVE_PREMIUM_BREAKOUT');
+  assert.equal(result.optionConfirmation,'EARLY_LIVE_OPTION_PREMIUM_BREAK');
   assert.equal(result.entry,100.5);
+  assert.equal(result.entryTriggerPrice,100.5);
+  assert.equal(result.risk,0.45);
+  assert.equal(result.reward,0.9);
+  assert.equal(result.stopLossBasis,'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK');
+  assert.equal(result.targetBasis,'EXACT_2R');
   assert.equal(result.stopLoss,100.05);
   assert.equal(result.target,101.4);
 });
