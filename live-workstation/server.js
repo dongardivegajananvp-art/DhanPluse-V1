@@ -1222,7 +1222,7 @@ async function createFyersAuthorizationUrl(){
   const now=Date.now();
   const state=crypto.randomBytes(24).toString('hex');
   const stateKey=oauthStateStorageKey(state);
-  await orderRequestPool.query("DELETE FROM gv2vpd_runtime_state WHERE state_key LIKE $1 AND updated_at < NOW() - INTERVAL '10 minutes'",['gv2vpd-live-workstation-oauth-state:%']);
+  await orderRequestPool.query("DELETE FROM gv2vpd_runtime_state WHERE state_key LIKE $1 AND updated_at < NOW() - ($2 * INTERVAL '1 millisecond')",['gv2vpd-live-workstation-oauth-state:%',AUTH_STATE_TTL_MS]);
   await orderRequestPool.query('INSERT INTO gv2vpd_runtime_state (state_key,state_value,updated_at) VALUES ($1,$2::jsonb,NOW()) ON CONFLICT (state_key) DO UPDATE SET state_value=EXCLUDED.state_value,updated_at=NOW()',[stateKey,JSON.stringify({createdAt:now})]);
   console.info('FYERS OAuth authorization state persisted.',JSON.stringify({callbackPath:'/api/fyers/auth/callback',stateStored:true,createdAt:new Date(now).toISOString()}));
   const url=new URL('https://api-t1.fyers.in/api/v3/generate-authcode');url.searchParams.set('client_id',appId);url.searchParams.set('redirect_uri',redirectUri);url.searchParams.set('response_type','code');url.searchParams.set('state',state);
