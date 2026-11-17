@@ -411,7 +411,7 @@ test('Strategy 8 flag breakout requires volume contraction then expansion with t
 });
 
 test('Strategy 9 opening range breakout requires 9:15-9:30 range, break then retest',()=>{
-  assert.equal(detectOpeningRange(openingRangeRows())?.strategy,'OPENING_RANGE_15M_RETEST');
+  assert.equal(detectOpeningRange(openingRangeRows())?.strategy,'OPENING_RANGE_BREAKOUT');
   assert.equal(detectOpeningRange(openingRangeRows({retest:false})),null);
 });
 
@@ -483,7 +483,7 @@ test('MCX nine-strategy session uses 09:00 opening range rather than NSE 09:15',
     sessionStartMinute:540,sessionCloseMinute:1435
   });
   assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED');
-  assert.equal(detectOpeningRange(rows,540).strategy,'OPENING_RANGE_15M_RETEST');
+  assert.equal(detectOpeningRange(rows,540).strategy,'OPENING_RANGE_BREAKOUT');
   assert.equal(detectOpeningRange(rows,555),null);
 });
 
@@ -526,4 +526,67 @@ test('MCX option confirmation accepts the verified 23:50 to 09:00 session bounda
   });
   assert.equal(result.status,'SETUP_CONFIRMED');
   assert.equal(result.rr,2);
+});
+
+
+test('Strategy 9 confirms a completed close above the first 5-minute candle high',()=>{
+  const start=Date.parse('2026-11-16T03:45:00Z')/1000;
+  const rows=[
+    {time:start,open:100,high:101,low:99,close:100.5,volume:100},
+    {time:start+300,open:100.5,high:102,low:100.2,close:101.5,volume:120}
+  ];
+  const result=detectOpeningRange(rows,555);
+  assert.equal(result?.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(result?.side,'LONG');
+  assert.equal(result?.breakoutLevel,101);
+  assert.equal(result?.pattern,'FIRST_CANDLE_HIGH_BREAKOUT');
+});
+
+test('Strategy 9 confirms a completed close below the first 5-minute candle low',()=>{
+  const start=Date.parse('2026-11-16T03:45:00Z')/1000;
+  const rows=[
+    {time:start,open:100,high:101,low:99,close:99.5,volume:100},
+    {time:start+300,open:99.5,high:99.8,low:98,close:98.5,volume:130}
+  ];
+  const result=detectOpeningRange(rows,555);
+  assert.equal(result?.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(result?.side,'SHORT');
+  assert.equal(result?.breakoutLevel,99);
+  assert.equal(result?.pattern,'FIRST_CANDLE_LOW_BREAKDOWN');
+});
+
+test('Strategy 9 does not trigger on an intrabar wick without a completed close outside first-candle range',()=>{
+  const start=Date.parse('2026-11-16T03:45:00Z')/1000;
+  const rows=[
+    {time:start,open:100,high:101,low:99,close:100.5,volume:100},
+    {time:start+300,open:100.5,high:102,low:100.2,close:100.8,volume:120}
+  ];
+  assert.equal(detectOpeningRange(rows,555),null);
+});
+
+test('Strategy 9 does not re-enter after the first-candle breakout is already extended',()=>{
+  const start=Date.parse('2026-11-16T03:45:00Z')/1000;
+  const rows=[
+    {time:start,open:100,high:101,low:99,close:100.5,volume:100},
+    {time:start+300,open:100.5,high:102,low:100.2,close:101.5,volume:120},
+    {time:start+600,open:101.5,high:103,low:101.2,close:102.5,volume:130}
+  ];
+  assert.equal(detectOpeningRange(rows,555),null);
+});
+
+
+test('Strategy 9 first-candle breakout is returned by the complete nine-strategy evaluator',()=>{
+  const start=Date.parse('2026-11-16T03:45:00Z')/1000;
+  const rows=[
+    {time:start,open:100,high:101,low:99,close:100.5,volume:100},
+    {time:start+300,open:100.5,high:100.9,low:100.2,close:100.7,volume:110},
+    {time:start+600,open:100.7,high:102,low:100.6,close:101.5,volume:120}
+  ];
+  const now=Date.parse('2026-11-16T04:01:00Z');
+  const tick={price:101.5,exchangeTime:now/1000,receivedAt:now};
+  const result=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,now});
+  assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED',JSON.stringify(result));
+  assert.equal(result.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(result.side,'LONG');
+  assert.equal(result.pattern,'FIRST_CANDLE_HIGH_BREAKOUT');
 });
