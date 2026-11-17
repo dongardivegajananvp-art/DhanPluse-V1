@@ -568,6 +568,43 @@ test('MCX option confirmation accepts the verified 23:50 to 09:00 session bounda
 });
 
 
+
+test('Strategy 9 triggers live when price first crosses the completed opening candle high',()=>{
+  const start=Date.parse('2026-11-16T03:45:00Z')/1000;
+  const rows=[{time:start,open:100,high:101,low:99,close:100.5,volume:100}];
+  const result=detectOpeningRange(rows,555,101.05);
+  assert.equal(result?.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(result?.side,'LONG');
+  assert.equal(result?.breakoutLevel,101);
+  assert.equal(result?.pattern,'FIRST_CANDLE_HIGH_LIVE_BREAKOUT');
+});
+
+test('Strategy 9 triggers live when price first crosses the completed opening candle low',()=>{
+  const start=Date.parse('2026-11-16T03:45:00Z')/1000;
+  const rows=[{time:start,open:100,high:101,low:99,close:99.5,volume:100}];
+  const result=detectOpeningRange(rows,555,98.95);
+  assert.equal(result?.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(result?.side,'SHORT');
+  assert.equal(result?.breakoutLevel,99);
+  assert.equal(result?.pattern,'FIRST_CANDLE_LOW_LIVE_BREAKDOWN');
+});
+
+test('complete nine-strategy evaluator accepts first-candle live breakout without waiting for a second completed candle',()=>{
+  const now=Date.parse('2026-11-16T03:50:30Z');
+  const start=Date.parse('2026-11-16T03:45:00Z')/1000;
+  const previous=Array.from({length:50},(_,i)=>{
+    const close=100+i*0.01;
+    return{time:start-86400-(49-i)*300,open:close-0.1,high:close+0.2,low:close-0.2,close,volume:100};
+  });
+  const first={time:start,open:100,high:101,low:99,close:100.5,volume:100};
+  const rows=[...previous,first];
+  const tick={price:101.05,exchangeTime:now/1000,receivedAt:now};
+  const result=detectNineStrategySetup({underlyingCandles:rows,underlyingTick:tick,now});
+  assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED',JSON.stringify(result));
+  assert.equal(result.strategy,'OPENING_RANGE_BREAKOUT');
+  assert.equal(result.pattern,'FIRST_CANDLE_HIGH_LIVE_BREAKOUT');
+});
+
 test('Strategy 9 confirms a completed close above the first 5-minute candle high',()=>{
   const start=Date.parse('2026-11-16T03:45:00Z')/1000;
   const rows=[
