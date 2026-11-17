@@ -20,7 +20,7 @@ class FakePool {
       return { rows: [] };
     }
     if (sql.includes('SELECT plan_id,strategy') && sql.includes('status IN')) return { rows: this.plans.filter(p => ['STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CLOSED','CANCELLED'].includes(p.status)).slice(0,20).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, entry_hit_at:p.entryHitAt, entry_hit_price:p.entryHitPrice, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
-    if (sql.includes('SELECT plan_id,strategy')) return { rows: this.plans.filter(p => p.status === 'ACTIVE').slice(0,2).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
+    if (sql.includes('SELECT plan_id,strategy')) return { rows: this.plans.filter(p => p.status === 'ACTIVE').slice(0,2).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, entry_hit_at:p.entryHitAt, entry_hit_price:p.entryHitPrice, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
     if (sql.includes('UPDATE gv2vpd_strategy_plans') && sql.includes('entry_hit_at')) { const p=this.plans.find(x=>x.planId===values[0]&&x.status==='ACTIVE'&&!x.entryHitAt); if(!p)return{rows:[]}; p.entryHitAt=values[1];p.entryHitPrice=values[2];return{rows:[{plan_id:p.planId,entry_hit_at:p.entryHitAt,entry_hit_price:p.entryHitPrice}]}; }
     if (sql.includes('SELECT plan_id,entry_hit_at')) { const p=this.plans.find(x=>x.planId===values[0]&&x.status==='ACTIVE'&&x.entryHitAt);return{rows:p?[{plan_id:p.planId,entry_hit_at:p.entryHitAt,entry_hit_price:p.entryHitPrice}]:[]}; }
     if (sql.includes('UPDATE gv2vpd_strategy_plans')) {
@@ -100,6 +100,19 @@ test('ledger allows at most two active plans and rejects duplicate underlying or
   await store.close();
 });
 
+test('legacy active plan persists first Entry-hit tick exactly once', async () => {
+  const now=Date.parse('2026-11-16T04:00:00Z');
+  const store=createStrategyPlanStore({databaseUrl:'postgres://test',PoolClass:FakePool});
+  const saved=await store.saveConfirmedPlan(fixture(now),now);
+  const result=await store.markEntryHit(saved.planId,100.10,now+1000);
+  assert.equal(result.ok,true);
+  assert.equal(result.entryHitPrice,100.10);
+  const again=await store.markEntryHit(saved.planId,100.15,now+2000);
+  assert.equal(again.ok,true);
+  assert.equal(again.alreadyRecorded,true);
+  assert.equal(again.entryHitPrice,100.10);
+  await store.close();
+});
 test('SL/Target hit terminal status releases active slot but permanently retains fixed Entry/SL/Target/RR', async () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
   const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
