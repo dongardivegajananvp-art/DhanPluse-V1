@@ -105,12 +105,13 @@ export function evaluateActivePlanLifecycle(plan, tick, now = Date.now()) {
   }
   // A plan cannot be stopped out or target-hit before its fixed entry is reached.
   // Persist the first live quote at/through Entry, then keep ENTRY_HIT until terminal.
-  if (!plan.entry_hit_at && price < entry) {
-    return { status: 'WAITING_FOR_ENTRY', reason: 'Fresh option premium has not reached the fixed entry trigger', price };
+  if (!plan.entry_hit_at) {
+    if (price < entry) return { status: 'WAITING_FOR_ENTRY', reason: 'Fresh option premium has not reached the fixed entry trigger', price };
+    return { status: 'ENTRY_HIT', reason: 'Fresh option premium has reached the fixed entry trigger; persist this transition before evaluating exits', price };
   }
   if (price <= stopLoss) return { status: 'STOP_LOSS_HIT', reason: 'Fresh option premium is at or below the fixed stop loss after entry', price };
   if (price >= target) return { status: 'TARGET_HIT', reason: 'Fresh option premium is at or above the fixed target after entry', price };
-  return { status: 'ENTRY_HIT', reason: plan.entry_hit_at ? 'Entry was previously confirmed; fixed SL and Target remain active' : 'Fresh option premium has reached the fixed entry trigger', price };
+  return { status: 'ENTRY_HIT', reason: 'Entry was previously confirmed; fixed SL and Target remain active', price };
 }
 
 export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) {
