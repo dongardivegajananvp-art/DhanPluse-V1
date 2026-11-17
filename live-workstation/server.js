@@ -1128,7 +1128,7 @@ async function refreshIndexMarketRegime(){
  return marketRegime;
 }
 async function runAutomaticStrategyScan(){
- if(strategyScanBusy||!authReady()||!connected||!isNseRegularSession())return;
+ if(strategyScanBusy||!authReady()||!connected||mcxFutureRoot(selectedSymbol)||!isNseRegularSession())return;
  strategyScanBusy=true;
  try{
   // Keep gainer priority and option prewarming autonomous; do not rely on browser polling.
