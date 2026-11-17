@@ -27,6 +27,17 @@ test('index market regime confirms bearish when at least two of three fresh inde
  const result=evaluateIndexMarketRegime({...fixture(now,['BEARISH','BEARISH','NEUTRAL']),now});
  assert.equal(result.state,'BEARISH');
 });
+test('index market regime measures candle freshness from candle close, not open',()=>{
+ const now=Date.parse('2026-11-17T08:00:30Z');
+ const result=evaluateIndexMarketRegime({...fixture(now),now});
+ assert.equal(result.state,'BULLISH');
+ assert.equal(result.confirmedIndexes.length,3);
+});
+test('index market regime rejects a candle more than ten minutes after its close',()=>{
+ const now=Date.parse('2026-11-17T08:10:30Z');
+ const result=evaluateIndexMarketRegime({...fixture(now),now});
+ assert.equal(result.state,'UNAVAILABLE');
+});
 test('index market regime stays unavailable when any index tick is stale',()=>{
  const now=Date.parse('2026-11-17T07:55:30Z');
  const data=fixture(now);data.ticks[symbols[2]].receivedAt=now-11000;
