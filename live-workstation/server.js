@@ -1240,7 +1240,11 @@ app.get('/api/fyers/auth/callback',async(req,res)=>{
   if(!appId||!appSecret||!redirectUri||!tokenReader)return res.status(503).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>Secure FYERS storage is unavailable</h2><p>Connection was not activated. Check the existing workstation configuration.</p><a href="/">Return to GV2VPD</a>');
   try{
     const appIdHash=crypto.createHash('sha256').update(appId+':'+appSecret).digest('hex');
-    const response=await fyersRestFetch('https://api-t1.fyers.in/api/v3/validate-authcode',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({grant_type:'authorization_code',appIdHash,code}),timeoutMs:12000});
+    // OAuth code exchange is a single-use authentication operation, not market-data REST.
+    // Keep it outside the persisted api-t1 data budget so an expired access-token
+    // cooldown cannot deadlock the only path that can issue a replacement token.
+    // The one-time state is consumed above; bound this request and never retry it.
+    const response=await fetch('https://api-t1.fyers.in/api/v3/validate-authcode',{method:'POST',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({grant_type:'authorization_code',appIdHash,code}),signal:AbortSignal.timeout(12000)});
     const data=await response.json().catch(()=>({}));
     if(!response.ok||data.s!=='ok'||typeof data.access_token!=='string'||!data.access_token){console.warn('FYERS OAuth validation rejected.',JSON.stringify({httpStatus:response.status,providerMessage:String(data.message||data.error||'').slice(0,140)}));return res.status(401).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>FYERS authentication failed</h2><p>FYERS did not accept the authorization code. Return to GV2VPD and reconnect.</p><a href="/">Return to GV2VPD</a>');}
     const authenticatedAt=new Date().toISOString();
