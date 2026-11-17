@@ -805,7 +805,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
           optionCandles:history.candles,optionTick,contract,dailyCandles,isTopGainer:false,now:Date.now(),
           sessionStartMinute:540,sessionCloseMinute:1435
         });
-        if(evaluated.status==='SETUP_CONFIRMED')valid.push({...evaluated,contract});
+        if(evaluated.status==='SETUP_CONFIRMED')valid.push({...evaluated,contract,optionCandles:history.candles});
         else rejected.push({symbol:contract.symbol,reason:evaluated.reason||evaluated.status,strategy:evaluated.strategy||underlyingSetup.strategy});
       }catch(error){
         if(Number(error?.statusCode)===429)throw error;
@@ -817,16 +817,44 @@ app.get('/api/mcx/scan',async(req,res)=>{
     if(!valid.length)return{status:'NO_TRADE',reason:rejected.length?'No candidate passed the nine-strategy underlying confirmation, fresh option-candle confirmation and 1:2 risk/reward checks':'Waiting for verified option history',side:underlyingSetup.side,strategy:underlyingSetup.strategy,rejected};
     valid.sort((a,b)=>b.rr-a.rr||a.contract.strikeDistance-b.contract.strikeDistance);
     const best=valid[0];
+    const finalUnderlyingTick=lastTicks.get(future);
+    const finalOptionTick=lastTicks.get(best.contract.symbol);
+    const officialContract=contracts.find(contract=>contract.symbol===best.contract.symbol);
+    const finalIdentity=validateOptionContractIdentity(best.contract,officialContract,Date.now());
+    if(!freshTick(finalUnderlyingTick)||!freshTick(finalOptionTick)||!finalIdentity.ok)
+      return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:!freshTick(finalUnderlyingTick)?'MCX futures tick became stale before plan persistence':!freshTick(finalOptionTick)?'Selected MCX option tick became stale before plan persistence':finalIdentity.reason};
+    const finalEvaluation=evaluateNineStrategies({
+      underlyingCandles:underlyingHistory.candles,underlyingTick:finalUnderlyingTick,
+      optionCandles:best.optionCandles,optionTick:finalOptionTick,contract:best.contract,dailyCandles,
+      isTopGainer:false,now:Date.now(),sessionStartMinute:540,sessionCloseMinute:1435
+    });
+    if(finalEvaluation.status!=='SETUP_CONFIRMED'||!sameStrategyConfirmation(best,finalEvaluation))
+      return{status:'NO_TRADE',reason:'MCX underlying/option confirmation changed during final fresh-tick recheck'};
+    if(!strategyPlanStore)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Persistent strategy plan ledger is unavailable; MCX setup not published'};
+    const planId=crypto.createHash('sha256').update([future,best.contract.symbol,finalEvaluation.confirmedAt,finalEvaluation.optionCandleTime].join('|')).digest('hex').slice(0,48);
+    const saved=await strategyPlanStore.saveConfirmedPlan({
+      planId,strategy:finalEvaluation.strategy,underlying:future,contract:best.contract.symbol,
+      optionSide:best.contract.side,expiry:best.contract.expiryDate,strike:best.contract.strike,
+      premium:finalOptionTick.price,tickSize:best.contract.tickSize,entry:finalEvaluation.entry,
+      stopLoss:finalEvaluation.stopLoss,target:finalEvaluation.target,rr:finalEvaluation.rr,
+      underlyingExchangeTime:finalUnderlyingTick.exchangeTime,optionExchangeTime:finalOptionTick.exchangeTime,
+      underlyingReceivedAt:finalUnderlyingTick.receivedAt,optionReceivedAt:finalOptionTick.receivedAt,
+      underlyingCandleTime:String(finalEvaluation.confirmedAt),optionCandleTime:String(finalEvaluation.optionCandleTime)
+    });
+    if(!saved.ok)return{status:saved.status||'DATA_UNAVAILABLE_NO_TRADE',reason:saved.reason||'MCX plan could not be persisted; no setup published'};
+    await refreshStrategyActivePlans(true);
     selectedOptionSymbol=best.contract.symbol;
     syncSocketSubscriptions({reason:'mcx_best_option_selected'});
     return{
       status:'SETUP_CONFIRMED',
-      label:'MCX · NINE-STRATEGY ENGINE · VERIFIED RULE-MATCH · READ-ONLY',
+      ledgerStatus:'PLAN_PERSISTED_READ_ONLY',
+      planId:saved.planId,
+      label:'MCX · NINE-STRATEGY ENGINE · VERIFIED · PERSISTED READ-ONLY PLAN',
       underlying:future,
-      underlyingSide:underlyingSetup.side,
+      underlyingSide:finalEvaluation.underlyingSide,
       contract:{symbol:best.contract.symbol,side:best.contract.side,strike:best.contract.strike,expiry:best.contract.expiryDate,lotSize:best.contract.lotSize,tickSize:best.contract.tickSize},
-      premium:lastTicks.get(best.contract.symbol).price,entry:best.entry,stopLoss:best.stopLoss,target:best.target,rr:best.rr,strategy:best.strategy,
-      source:'FYERS MCX Symbol Master + fresh futures/option ticks + completed 5-minute candles + nine-strategy engine',
+      premium:finalOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,strategy:finalEvaluation.strategy,
+      source:'FYERS MCX Symbol Master + fresh futures/option ticks + completed 5-minute candles + nine-strategy engine + persistent plan ledger',
       verifiedAt:new Date().toISOString()
     };
   })();
