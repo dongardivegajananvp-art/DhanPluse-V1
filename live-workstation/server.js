@@ -674,6 +674,7 @@ const fnoUniverseRotationTimer=setInterval(()=>{
 },FNO_ROTATION_INTERVAL_MS);
 fnoUniverseRotationTimer.unref?.();
 const fnoUniverseRecoveryTimer=setInterval(()=>{
+  if(fnoUniversePromise)return;
   const restStatus=fetchWithFyersBudget.getStatus();
   const shouldRetry=shouldRetryFnoUniverse({
     socketConnected:Boolean(socket&&connected),
