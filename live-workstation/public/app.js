@@ -30,11 +30,11 @@ function renderGainers(rows,error){
   const card=document.createElement('button');card.type='button';card.className='gainer-card gainer-rank-'+(rank+1);
   const name=String(r.underlying||r.symbol).replace(/^NSE:/,'').replace(/-EQ$/,'').replace(/\d{2}[A-Z0-9]+FUT$/,'');
   const scan=gainerScanResults.find(x=>x.underlying===r.underlying);let label='BREAKOUT SCAN PENDING';
-  if(scan?.status==='SETUP_CONFIRMED')label=scan.side+' SETUP · E '+fmt(scan.entry)+' · SL '+fmt(scan.stopLoss)+' · T '+fmt(scan.target);
+  if(scan?.status==='SETUP_CONFIRMED')label='UNDERLYING '+scan.side+' WATCH · E '+fmt(scan.entry)+' · SL '+fmt(scan.stopLoss)+' · T '+fmt(scan.target);
   else if(scan?.status==='WAIT')label='WAIT · NO CONFIRMED BREAKOUT';
   else if(scan?.status)label=scan.status.replaceAll('_',' ');
   card.textContent=name+' · '+fmt(r.price)+' · '+(r.change>=0?'+':'')+Number(r.change).toFixed(2)+'% · LIVE TICK · '+label;
-  card.title=scan?.reason||'Fresh FYERS data required; levels are underlying reference prices';
+  card.title=scan?.reason||'Underlying cash-equity breakout watch only; not an option-entry confirmation. The 9-strategy scanner must independently verify the exact option contract, fresh premium and 1:2 risk plan.';
   card.addEventListener('click',()=>{const chartSymbol=r.underlying||r.symbol;const chartSelect=$('symbol');let option=[...chartSelect.options].find(o=>o.value===chartSymbol);if(!option){option=new Option(name,chartSymbol);chartSelect.add(option)}chartSelect.value=chartSymbol;void selectInstrument(chartSymbol,name,r.underlying||'')});
   root.append(card);
  }

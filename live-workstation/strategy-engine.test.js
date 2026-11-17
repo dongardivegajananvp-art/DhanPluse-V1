@@ -98,8 +98,27 @@ test('option breakout is confirmed by exactly one completed candle after the bre
   assert.equal(result.rr,2);
   assert.equal(result.optionConfirmation,'ONE_CANDLE_RETEST');
   assert.equal(result.entry,100.25);
-  assert.equal(result.stopLoss,100.1);
-  assert.equal(result.target,100.55);
+  assert.equal(result.stopLoss,100.05);
+  assert.equal(result.target,100.65);
+});
+
+test('option premium stop uses the lower of breakout and confirmation candle lows',()=>{
+  const now=Date.parse('2026-11-16T04:00:30Z');
+  const bucket=Math.floor((now/1000)/300)*300;
+  const {rows:underlyingCandles}=risingUnderlyingFixture(now);
+  const optionCandles=[
+    {time:bucket-900,open:100,high:100.2,low:99.8,close:100,volume:100},
+    {time:bucket-600,open:100.2,high:100.4,low:100.05,close:100.3,volume:120},
+    {time:bucket-300,open:100.3,high:100.45,low:100.3,close:100.35,volume:110}
+  ];
+  const optionTick={price:100.35,exchangeTime:now/1000,receivedAt:now};
+  const underlyingTick={price:153.5,exchangeTime:now/1000,receivedAt:now};
+  const result=evaluateNineStrategies({underlyingCandles,underlyingTick,optionCandles,optionTick,contract:{symbol:'NSE:RELIANCE26NOV2500CE',side:'CE',tickSize:0.05},isTopGainer:true,now});
+  assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
+  assert.equal(result.entry,100.25);
+  assert.equal(result.stopLoss,100);
+  assert.equal(result.target,100.75);
+  assert.equal(result.rr,2);
 });
 
 test('option breakout without one completed confirmation/retest candle remains NO TRADE',()=>{
@@ -132,7 +151,7 @@ test('strategy evaluator requires verified CE/PE contract metadata',()=>{
   assert.match(result.reason,/verified active CE\/PE/i);
 });
 
-test('fixed premium plan uses one-candle swing low, one-tick stop buffer and exact 2R target',()=>{
+test('fixed premium plan uses structural swing low, one-tick stop buffer and exact 2R target',()=>{
   const plan=buildFixedPremiumPlan({breakoutLevel:100,tickSize:0.05,livePremium:100.05,swingLow:99});
   assert.equal(plan.status,'SETUP_CONFIRMED');
   assert.equal(plan.entry,100.05);
