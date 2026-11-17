@@ -77,7 +77,7 @@ const mcxTickGapSamples=new Map();
 let lastSubscriptionRecoveryAt=0;
 let lastMcxSubscriptionRecoveryAt=0;
 let lastRestQuoteRecoveryAt=0;
-let selectedSymbol='';
+let selectedSymbol='NSE:NIFTY50-INDEX';
 let selectedOptionSymbol='';
 async function restoreSelectedMcxInstrument(){
   if(!orderRequestPool||!(await fyersCooldownStoreReady))return false;
@@ -86,10 +86,13 @@ async function restoreSelectedMcxInstrument(){
     let saved=result.rows?.[0]?.state_value??null;
     if(typeof saved==='string'){try{saved=JSON.parse(saved);}catch{saved=null;}}
     const symbol=String(saved?.symbol||'').trim().toUpperCase();
-    if(!mcxFutureRoot(symbol))return false;
-    selectedSymbol=symbol;
-    console.info('Persisted MCX instrument restored before WebSocket startup.',JSON.stringify({selectedSymbol,restoredAt:new Date().toISOString()}));
-    return true;
+    if(mcxFutureRoot(symbol)){
+      await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1',['gv2vpd-live-workstation-selected-mcx-instrument']);
+      console.info('Previous MCX-only selection cleared; workstation now starts in NSE mode.',JSON.stringify({selectedSymbol,previousMcxSymbol:symbol,marketMode:'NSE_FNO',restoredAt:new Date().toISOString()}));
+    }else{
+      console.info('Workstation NSE mode selected for startup.',JSON.stringify({selectedSymbol,marketMode:'NSE_FNO',restoredAt:new Date().toISOString()}));
+    }
+    return false;
   }catch(error){
     console.error('Persisted MCX instrument restore failed; MCX selection remains unset.',String(error?.message||error).slice(0,160));
     return false;
