@@ -156,6 +156,7 @@ let strategyScanLastResults=[];
 let marketRegime=unavailableMarketRegime('Waiting for fresh index candles');
 let marketRegimeRefreshAt=0,marketRegimeRefreshBusy=false;
 let strategyActivePlans=[];
+let strategyTerminalPlans=[];
 let strategyActivePlansLoadedAt=0;
 let strategyLedgerRuntimeReady=false;
 const FYERS_DATA_SYMBOL_LIMIT=80; // Keep 20 account-wide slots free for other active FYERS API connections and transition overlap.
@@ -1001,11 +1002,14 @@ async function refreshStrategyActivePlans(force=false){
  for(const plan of (result.plans||[])){
   const lifecycle=evaluateActivePlanLifecycle(plan,lastTicks.get(plan.contract),Date.now());
   if(['EXPIRED','STOP_LOSS_HIT','TARGET_HIT'].includes(lifecycle.status)){
-   const closed=await strategyPlanStore.closePlan(plan.plan_id||plan.planId,'CLOSED');
+   const terminalStatus=lifecycle.status==='STOP_LOSS_HIT'?'STOP_LOSS_HIT':lifecycle.status==='TARGET_HIT'?'TARGET_HIT':'EXPIRED';
+   const closed=await strategyPlanStore.closePlan(plan.plan_id||plan.planId,terminalStatus);
    if(closed.ok){
-    const status='PLAN_CLOSED_'+lifecycle.status;
-    console.info('GV2VPD strategy plan lifecycle closed.',JSON.stringify({planId:plan.plan_id||plan.planId,underlying:plan.underlying,contract:plan.contract,status,reason:lifecycle.reason,price:lifecycle.price||null}));
-    setStrategyScanResult({underlying:plan.underlying,futureSymbol:plan.underlying,status,reason:lifecycle.reason,contract:plan.contract,updatedAt:new Date().toISOString()});
+    const status='PLAN_'+terminalStatus;
+    const terminal={...plan,status:terminalStatus,lifecycleState:terminalStatus,lifecycleReason:lifecycle.reason,hitPrice:lifecycle.price??null,closed_at:new Date().toISOString()};
+    strategyTerminalPlans=[terminal,...strategyTerminalPlans.filter(x=>(x.plan_id||x.planId)!==(plan.plan_id||plan.planId))].slice(0,20);
+    console.info('GV2VPD strategy plan terminal state persisted; fixed risk levels retained.',JSON.stringify({planId:plan.plan_id||plan.planId,underlying:plan.underlying,contract:plan.contract,status,reason:lifecycle.reason,price:lifecycle.price||null,entry:plan.entry,stopLoss:plan.stop_loss??plan.stopLoss,target:plan.target,rr:plan.rr}));
+    setStrategyScanResult({underlying:plan.underlying,futureSymbol:plan.underlying,status,reason:lifecycle.reason,contract:plan.contract,optionSide:plan.option_side||plan.optionSide,expiry:plan.expiry,strike:plan.strike,premium:plan.premium,entry:plan.entry,stopLoss:plan.stop_loss??plan.stopLoss,target:plan.target,rr:plan.rr,updatedAt:new Date().toISOString()});
     continue;
    }
    reconciled.push({...plan,lifecycleState:'CLOSE_PENDING',lifecycleReason:closed.reason||'Persistent close transition failed; plan remains active'});
@@ -1014,6 +1018,8 @@ async function refreshStrategyActivePlans(force=false){
   reconciled.push({...plan,lifecycleState:lifecycle.status,lifecycleReason:lifecycle.reason});
  }
  strategyActivePlans=reconciled;strategyActivePlansLoadedAt=Date.now();
+ const terminalResult=await strategyPlanStore.listRecentTerminalPlans(20);
+ if(terminalResult.ok)strategyTerminalPlans=terminalResult.plans||[];
  const restored=new Set(strategyActivePlans.map(x=>x.contract).filter(Boolean));
  const pendingSymbols=new Set([...strategyPendingCandidates.values()].map(x=>x.contract.symbol));
  for(const symbol of [...strategyOptionSymbols])if(!pendingSymbols.has(symbol)&&!restored.has(symbol))strategyOptionSymbols.delete(symbol);
@@ -1191,7 +1197,7 @@ function strategyScanSnapshot(){
  const runtime=getScannerRuntimeState({authenticated:authReady(),socketConnected:connected,marketOpen:isNseRegularSession(),ledgerReady:strategyLedgerRuntimeReady,universeCount:fnoUniverseRows.length,activeSubscriptions:fnoScanSubscriptionSymbols.length,freshFutureTicks});
  const regimeFresh=Boolean(isNseRegularSession()&&marketRegime.evaluatedAt&&Date.now()-Date.parse(marketRegime.evaluatedAt)<=15_000&&BASE_SUBSCRIPTIONS.every(symbol=>freshTick(lastTicks.get(symbol))));
  const visibleMarketRegime=regimeFresh?marketRegime:unavailableMarketRegime('Market regime is not backed by currently fresh index exchange ticks');
- return{enabled:true,mode:'AUTOMATIC_READ_ONLY',scanIntervalMs:STRATEGY_SCAN_INTERVAL_MS,rotationIntervalMs:FNO_ROTATION_INTERVAL_MS,estimatedScannerHistoryRequestsPerMinute:estimateScannerRestRequestsPerMinute(),runtimeState:runtime.state,blocker:runtime.blocker,marketSession,marketPhase:marketClock.phase,marketPhaseLabel:marketClock.label,lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,prewarmedOptionSubscriptions:strategyWarmOptionSymbols.size,activePlans:strategyActivePlans,topSetups:strategyScanLastResults.slice(0,3),marketRegime:visibleMarketRegime,orderMode:'DISABLED'};
+ return{enabled:true,mode:'AUTOMATIC_READ_ONLY',scanIntervalMs:STRATEGY_SCAN_INTERVAL_MS,rotationIntervalMs:FNO_ROTATION_INTERVAL_MS,estimatedScannerHistoryRequestsPerMinute:estimateScannerRestRequestsPerMinute(),runtimeState:runtime.state,blocker:runtime.blocker,marketSession,marketPhase:marketClock.phase,marketPhaseLabel:marketClock.label,lastScanAt:strategyScanLastAt,lastScannedFuture:strategyScanLastSymbol,lastError:strategyScanLastError||null,universeCount:fnoUniverseRows.length,activeFutureSubscriptions:fnoScanSubscriptionSymbols.length,freshActiveFutureTicks:freshFutureTicks,subscriptionLimit:FYERS_DATA_SYMBOL_LIMIT,coverage:'ROTATING_FYERS_STANDARD_WINDOW',pendingOptionChecks:strategyPendingCandidates.size,prewarmedOptionSubscriptions:strategyWarmOptionSymbols.size,activePlans:strategyActivePlans,terminalPlans:strategyTerminalPlans,topSetups:strategyScanLastResults.slice(0,3),marketRegime:visibleMarketRegime,orderMode:'DISABLED'};
 }
 
 async function loadGainerHistory(symbol,{force=false,priority=20}={}){
