@@ -959,12 +959,12 @@ async function loadStrategyOptionContracts(underlying){
 }
 async function refreshTopGainerOptionWatches(rows){
  if(strategyWarmRefreshBusy||Date.now()-strategyWarmRefreshAt<30000||mcxFutureRoot(selectedSymbol)||!isNseSubscriptionSession())return;
+ const eligibleRows=(Array.isArray(rows)?rows:[]).slice(0,5).map(row=>({row,tick:freshTick(lastTicks.get(row.underlyingSymbol))?lastTicks.get(row.underlyingSymbol):lastTicks.get(row.symbol)})).filter(item=>freshTick(item.tick));
+ if(!eligibleRows.length){strategyWarmRefreshAt=0;return;}
  strategyWarmRefreshBusy=true;strategyWarmRefreshAt=Date.now();
  const next=new Set(),watched=[];
  try{
-  for(const row of (Array.isArray(rows)?rows:[]).slice(0,5)){
-   const tick=lastTicks.get(row.underlyingSymbol);
-   if(!freshTick(tick))continue;
+  for(const {row,tick} of eligibleRows){
    try{
     const contracts=await loadStrategyOptionContracts(row.underlyingSymbol);
     for(const side of ['CE','PE']){
