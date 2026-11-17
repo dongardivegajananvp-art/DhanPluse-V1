@@ -97,14 +97,20 @@ export function evaluateActivePlanLifecycle(plan, tick, now = Date.now()) {
     return { status: 'STALE_REVALIDATION_REQUIRED', reason: 'Fresh exchange tick for the exact option contract is required before lifecycle revalidation' };
   }
 
+  const entry = Number(plan.entry);
   const stopLoss = Number(plan.stop_loss ?? plan.stopLoss);
   const target = Number(plan.target);
-  if (!positive(stopLoss) || !positive(target) || target <= stopLoss) {
+  if (!positive(entry) || !positive(stopLoss) || !positive(target) || !(entry > stopLoss && target > entry)) {
     return { status: 'REVALIDATION_REQUIRED', reason: 'Persisted Entry/SL/Target values are invalid; plan remains active and blocked' };
   }
-  if (price <= stopLoss) return { status: 'STOP_LOSS_HIT', reason: 'Fresh option premium is at or below the fixed stop loss', price };
-  if (price >= target) return { status: 'TARGET_HIT', reason: 'Fresh option premium is at or above the fixed target', price };
-  return { status: 'ACTIVE', reason: 'Fresh option premium remains between fixed stop loss and target', price };
+  // A plan cannot be stopped out or target-hit before its fixed entry is reached.
+  // Persist the first live quote at/through Entry, then keep ENTRY_HIT until terminal.
+  if (!plan.entry_hit_at && price < entry) {
+    return { status: 'WAITING_FOR_ENTRY', reason: 'Fresh option premium has not reached the fixed entry trigger', price };
+  }
+  if (price <= stopLoss) return { status: 'STOP_LOSS_HIT', reason: 'Fresh option premium is at or below the fixed stop loss after entry', price };
+  if (price >= target) return { status: 'TARGET_HIT', reason: 'Fresh option premium is at or above the fixed target after entry', price };
+  return { status: 'ENTRY_HIT', reason: plan.entry_hit_at ? 'Entry was previously confirmed; fixed SL and Target remain active' : 'Fresh option premium has reached the fixed entry trigger', price };
 }
 
 export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) {
@@ -137,6 +143,8 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
       option_exchange_time DOUBLE PRECISION NOT NULL,
       underlying_received_at TIMESTAMPTZ,
       option_received_at TIMESTAMPTZ,
+      entry_hit_at TIMESTAMPTZ,
+      entry_hit_price NUMERIC(18,6),
       underlying_candle_time VARCHAR(40) NOT NULL,
       option_candle_time VARCHAR(40) NOT NULL,
       status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CLOSED','CANCELLED','STOP_LOSS_HIT','TARGET_HIT','EXPIRED')),
@@ -149,6 +157,8 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS tick_size NUMERIC(18,6);
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS underlying_received_at TIMESTAMPTZ;
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS option_received_at TIMESTAMPTZ;
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS entry_hit_at TIMESTAMPTZ;
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS entry_hit_price NUMERIC(18,6);
     CREATE UNIQUE INDEX IF NOT EXISTS gv2vpd_strategy_active_underlying
       ON gv2vpd_strategy_plans (underlying) WHERE status = 'ACTIVE';
     CREATE UNIQUE INDEX IF NOT EXISTS gv2vpd_strategy_active_contract
@@ -183,14 +193,14 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
         await client.query(`
           INSERT INTO gv2vpd_strategy_plans (
             plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,
-            underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,underlying_candle_time,option_candle_time
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+            underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,entry_hit_at,entry_hit_price,underlying_candle_time,option_candle_time
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
         `, [
           plan.planId,plan.strategy,plan.underlying,plan.contract,plan.optionSide,plan.expiry,
           Number(plan.strike),Number(plan.premium),Number(plan.tickSize),Number(plan.entry),Number(plan.stopLoss),Number(plan.target),Number(plan.rr),
           Number(plan.underlyingExchangeTime),Number(plan.optionExchangeTime),
           new Date(Number(plan.underlyingReceivedAt)).toISOString(),new Date(Number(plan.optionReceivedAt)).toISOString(),
-          plan.underlyingCandleTime,plan.optionCandleTime
+          new Date(now).toISOString(),Number(plan.premium),plan.underlyingCandleTime,plan.optionCandleTime
         ]);
         await client.query('COMMIT');
         return { ok: true, status: 'PLAN_PERSISTED', planId: plan.planId, entry: Number(plan.entry), stopLoss: Number(plan.stopLoss), target: Number(plan.target), rr: Number(plan.rr) };
@@ -206,7 +216,7 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
     async listActivePlans() {
       if (!await ready) return { ok: false, status: 'DATA_UNAVAILABLE_NO_TRADE', plans: [] };
       try {
-        const result = await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,underlying_candle_time,option_candle_time,created_at FROM gv2vpd_strategy_plans WHERE status='ACTIVE' ORDER BY created_at ASC LIMIT 2");
+        const result = await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,entry_hit_at,entry_hit_price,underlying_candle_time,option_candle_time,created_at FROM gv2vpd_strategy_plans WHERE status='ACTIVE' ORDER BY created_at ASC LIMIT 2");
         return { ok: true, plans: result.rows || [] };
       } catch (error) {
         console.error('Strategy plan read failed; new entries remain blocked.', String(error?.message || error).slice(0, 160));
@@ -217,11 +227,24 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
       if (!await ready) return { ok: false, plans: [] };
       try {
         const safeLimit=Math.max(1,Math.min(50,Math.trunc(Number(limit)||20)));
-        const result=await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,underlying_candle_time,option_candle_time,status,created_at,closed_at FROM gv2vpd_strategy_plans WHERE status IN ('STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CLOSED','CANCELLED') ORDER BY closed_at DESC NULLS LAST,created_at DESC LIMIT $1",[safeLimit]);
+        const result=await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,entry_hit_at,entry_hit_price,underlying_candle_time,option_candle_time,status,created_at,closed_at FROM gv2vpd_strategy_plans WHERE status IN ('STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CLOSED','CANCELLED') ORDER BY closed_at DESC NULLS LAST,created_at DESC LIMIT $1",[safeLimit]);
         return { ok:true, plans:result.rows||[] };
       } catch(error) {
         console.error('Terminal strategy plan history read failed.',String(error?.message||error).slice(0,160));
         return { ok:false, plans:[] };
+      }
+    },
+    async markEntryHit(planId, price, at = Date.now()) {
+      if (!positive(price) || !Number.isFinite(Number(at))) return { ok:false, reason:'A verified entry-hit price and timestamp are required' };
+      if (!await ready) return { ok:false, reason:'Persistent strategy plan ledger is unavailable' };
+      try {
+        const result=await pool.query("UPDATE gv2vpd_strategy_plans SET entry_hit_at=$2,entry_hit_price=$3 WHERE plan_id=$1 AND status='ACTIVE' AND entry_hit_at IS NULL RETURNING plan_id,entry_hit_at,entry_hit_price",[planId,new Date(Number(at)).toISOString(),Number(price)]);
+        if(result.rows?.length)return{ok:true,entryHitAt:result.rows[0].entry_hit_at,entryHitPrice:Number(result.rows[0].entry_hit_price)};
+        const existing=await pool.query("SELECT plan_id,entry_hit_at,entry_hit_price FROM gv2vpd_strategy_plans WHERE plan_id=$1 AND status='ACTIVE' AND entry_hit_at IS NOT NULL",[planId]);
+        return existing.rows?.length?{ok:true,alreadyRecorded:true,entryHitAt:existing.rows[0].entry_hit_at,entryHitPrice:Number(existing.rows[0].entry_hit_price)}:{ok:false,reason:'Entry-hit transition could not be persisted'};
+      } catch(error) {
+        console.error('Strategy entry-hit persistence failed.',String(error?.message||error).slice(0,160));
+        return {ok:false,reason:'Persistent entry-hit update failed'};
       }
     },
     async closePlan(planId, status = 'CLOSED') {
