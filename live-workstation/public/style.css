@@ -50,3 +50,12 @@ body.mode-mcx #chart{height:480px;min-height:480px}
 body.mode-mcx .work{grid-template-columns:minmax(0,1fr)}
 body.mode-mcx .chart-panel{width:100%}
 @media(max-width:850px){body.mode-mcx .chart-panel{min-height:540px}body.mode-mcx #chart{height:390px;min-height:390px}}
+
+
+/* Final mode isolation: keep NSE symbol picker and broker positions out of MCX view. */
+body.mode-mcx .chart-panel .section-head select#symbol,
+body.mode-mcx .positions{display:none!important}
+/* Give the shared chart more room in both workspaces, including Android. */
+.chart-panel #chart{height:370px;min-height:370px}
+body.mode-mcx .chart-panel #chart{height:500px;min-height:500px}
+@media(max-width:850px){.chart-panel #chart{height:340px;min-height:340px}body.mode-mcx .chart-panel #chart{height:420px;min-height:420px}}
