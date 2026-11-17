@@ -40,3 +40,22 @@
 .gainer-card.gainer-rank-1:hover,.gainer-card.gainer-rank-2:hover,.gainer-card.gainer-rank-3:hover,.gainer-card.gainer-rank-4:hover,.gainer-card.gainer-rank-5:hover{filter:brightness(1.12)}
 
 .mode-switch{display:flex;gap:5px;align-items:center}.mode-button{border:1px solid #31445d;background:#101b2a;color:#8ea0b8;border-radius:6px;padding:8px 9px;font-size:9px;font-weight:800;letter-spacing:.4px;white-space:nowrap;cursor:pointer}.mode-button.active{border-color:#42d6a0;background:#102b2b;color:#8df0c9;box-shadow:inset 0 0 0 1px #42d6a0}.mode-button:disabled{opacity:.55;cursor:wait}@media(max-width:650px){.top{height:auto;min-height:64px;padding:8px 10px;gap:8px;align-items:flex-start}.feed{justify-content:flex-end}.mode-switch{width:100%;justify-content:flex-end}.mode-button{padding:7px 6px;font-size:8px}}
+
+/* Exclusive market-mode workspaces: no NSE/MCX control mixing. */
+body.mode-mcx .watch,body.mode-mcx .strategy-desk,body.mode-mcx .order-panel{display:none!important}
+body.mode-mcx .chart-quote{display:none!important}
+body.mode-nse .mcx-picker,body.mode-nse #mcxQuote,body.mode-nse #mcxScanPanel{display:none!important}
+body.mode-mcx .chart-panel{min-height:620px}
+body.mode-mcx #chart{height:480px;min-height:480px}
+body.mode-mcx .work{grid-template-columns:minmax(0,1fr)}
+body.mode-mcx .chart-panel{width:100%}
+@media(max-width:850px){body.mode-mcx .chart-panel{min-height:540px}body.mode-mcx #chart{height:390px;min-height:390px}}
+
+
+/* Final mode isolation: keep NSE symbol picker and broker positions out of MCX view. */
+body.mode-mcx .chart-panel .section-head select#symbol,
+body.mode-mcx .positions{display:none!important}
+/* Give the shared chart more room in both workspaces, including Android. */
+.chart-panel #chart{height:370px;min-height:370px}
+body.mode-mcx .chart-panel #chart{height:500px;min-height:500px}
+@media(max-width:850px){.chart-panel #chart{height:340px;min-height:340px}body.mode-mcx .chart-panel #chart{height:420px;min-height:420px}}

@@ -17,7 +17,7 @@ function startFyersConnect(){const button=$('fyersConnect');button.disabled=true
 const authUrl=new URL(window.location.href);if(authUrl.searchParams.get('fyers_connected')==='1'){authUrl.searchParams.delete('fyers_connected');history.replaceState({},'',authUrl.pathname+authUrl.search+authUrl.hash);$('feedState').textContent='FYERS LOGIN COMPLETE · VERIFYING FEED';$('fyersConnect').textContent='FYERS CONNECTED · CHECK FEED'}
 $('fyersConnect').addEventListener('click',()=>void startFyersConnect());
 function rememberedMcxInstrument(){try{const value=localStorage.getItem('gv2vpd.selectedMcxInstrument')||'';return /^MCX:(?:CRUDEOIL|NATURALGAS)\d{2}[A-Z]{3}FUT$/.test(value)?value:''}catch{return ''}}
-function updateModeButtons(symbol){const mcx=String(symbol||'').startsWith('MCX:');const nseButton=$('nseMode'),mcxButton=$('mcxMode');if(!nseButton||!mcxButton)return;nseButton.textContent=mcx?'NSE MODE OFF':'NSE MODE ON';mcxButton.textContent=mcx?'MCX MODE ON':'MCX MODE OFF';nseButton.classList.toggle('active',!mcx);mcxButton.classList.toggle('active',mcx);nseButton.setAttribute('aria-pressed',String(!mcx));mcxButton.setAttribute('aria-pressed',String(mcx))}
+function updateModeButtons(symbol){const mcx=String(symbol||'').startsWith('MCX:');const nseButton=$('nseMode'),mcxButton=$('mcxMode');if(!nseButton||!mcxButton)return;document.body.classList.toggle('mode-mcx',mcx);document.body.classList.toggle('mode-nse',!mcx);nseButton.textContent=mcx?'NSE MODE OFF':'NSE MODE ON';mcxButton.textContent=mcx?'MCX MODE ON':'MCX MODE OFF';nseButton.classList.toggle('active',!mcx);mcxButton.classList.toggle('active',mcx);nseButton.setAttribute('aria-pressed',String(!mcx));mcxButton.setAttribute('aria-pressed',String(mcx))}
 $('nseMode').addEventListener('click',()=>{if(selected!=='NSE:NIFTY50-INDEX')void selectInstrument('NSE:NIFTY50-INDEX','NIFTY 50')});
 $('mcxMode').addEventListener('click',()=>{const symbol=selected.startsWith('MCX:')?selected:rememberedMcxInstrument();if(symbol){const label=symbol.startsWith('MCX:CRUDEOIL')?'CRUDE OIL · MCX':'NATURAL GAS · MCX';void selectInstrument(symbol,label)}else{void chooseMcxProduct('CRUDEOIL','CRUDE OIL','chooseCrudeOil',true)}});
 const INDEX_TICK_FRESHNESS_MS=40000;function tickAge(t,maxAgeMs=10000){return isFreshExchangeTick(t,Date.now(),maxAgeMs)?'Fresh exchange tick':'Stale · orders blocked'}
@@ -211,4 +211,23 @@ $('optionUnderlying').addEventListener('change',e=>{const underlying=e.target.va
 $('contract').addEventListener('change',e=>chooseOption(e.target.value));
 $('buy').addEventListener('click',()=>sendOrder('BUY'));$('sell').addEventListener('click',()=>sendOrder('SELL'));
 ['qty','sl','target'].forEach(id=>$(id).addEventListener('input',updateOrderGate));
+let resumeRefreshBusy=false,lastResumeRefreshAt=0;
+async function refreshAfterResume(reason){
+ if(resumeRefreshBusy||Date.now()-lastResumeRefreshAt<1500)return;
+ resumeRefreshBusy=true;lastResumeRefreshAt=Date.now();
+ try{
+  $('feedState').textContent='CHECKING FYERS AFTER '+reason.toUpperCase();
+  await poll();
+  if(!document.hidden){
+   const health=await api('/api/health');
+   if(!health.socketConnected){$('feedState').textContent='FYERS RECONNECT REQUIRED · CHECKING FEED';$('dot').style.background='#d69b39';}
+  }
+ }catch(error){$('feedState').textContent='FEED RECHECK FAILED · '+String(error.message||error).slice(0,80);$('dot').style.background='#d69b39';}
+ finally{resumeRefreshBusy=false;}
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refreshAfterResume('APP RESUMED')});
+window.addEventListener('pageshow',()=>void refreshAfterResume('PAGE SHOWN'));
+window.addEventListener('focus',()=>void refreshAfterResume('FOCUS'));
+window.addEventListener('online',()=>void refreshAfterResume('NETWORK RESTORED'));
+window.addEventListener('offline',()=>{$('feedState').textContent='DEVICE OFFLINE · LIVE DATA PAUSED';$('dot').style.background='#d69b39'});
 setInterval(poll,1000);poll();
