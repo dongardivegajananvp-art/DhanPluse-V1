@@ -38,8 +38,12 @@ export function evaluateIndexMarketRegime({candles={},ticks={},now=Date.now()}={
   if(!window.every((c,i)=>i===0||contiguous(window[i-1],c))){
    details[symbol]={state:'UNAVAILABLE',reason:'Latest 50-candle EMA window contains a missing intraday interval'};continue;
   }
-  const age=now/1000-Number(window.at(-1).time);
-  if(age<300||age>600){details[symbol]={state:'UNAVAILABLE',reason:'Latest completed 5-minute candle is stale'};continue;}
+  // FYERS candle.time is the candle OPEN timestamp. Freshness must be measured
+  // from its close (open + 300s), not from the open; otherwise a valid candle
+  // becomes stale exactly one 5-minute interval too early.
+  const candleCloseTime=Number(window.at(-1).time)+300;
+  const completedCandleAge=now/1000-candleCloseTime;
+  if(completedCandleAge<0||completedCandleAge>600){details[symbol]={state:'UNAVAILABLE',reason:'Latest completed 5-minute candle is stale'};continue;}
   const closes=window.map(c=>Number(c.close));
   const e20=ema(closes,20),e50=ema(closes,50),last=closes.at(-1),prior=closes.at(-4);
   const direction=last>e20&&e20>e50&&last>prior?'BULLISH':
