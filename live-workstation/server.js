@@ -1008,7 +1008,7 @@ async function refreshStrategyActivePlans(force=false){
  strategyLedgerRuntimeReady=Boolean(result.ok);
  if(!result.ok)return result;
  const reconciled=[];
- for(const plan of (result.plans||[])){
+ for(let plan of (result.plans||[])){
   const lifecycle=evaluateActivePlanLifecycle(plan,lastTicks.get(plan.contract),Date.now());
   if(lifecycle.status==='ENTRY_HIT'&&!plan.entry_hit_at){
    const hit=await strategyPlanStore.markEntryHit(plan.plan_id||plan.planId,lifecycle.price,Date.now());
