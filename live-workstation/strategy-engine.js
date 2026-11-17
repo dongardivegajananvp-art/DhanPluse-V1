@@ -174,12 +174,12 @@ export function detectOpeningRange(rows, sessionStartMinute = 555) {
   if(opening.length!==3)return null;
   const high=Math.max(...opening.map(c=>number(c.high))),low=Math.min(...opening.map(c=>number(c.low)));
   const later=day.filter(c=>number(c.time)>number(opening.at(-1).time));
-  const last=rows.at(-1), prior=later.slice(0,-1);
+  const rangeLast=rows.at(-1), prior=later.slice(0,-1);
   if(!prior.length)return null;
   const brokeHigh=prior.some(c=>number(c.close)>high);
   const brokeLow=prior.some(c=>number(c.close)<low);
-  if(brokeHigh&&number(last.low)<=high*1.002&&number(last.close)>high)return candidate('OPENING_RANGE_BREAKOUT','LONG',high,last);
-  if(brokeLow&&number(last.high)>=low*0.998&&number(last.close)<low)return candidate('OPENING_RANGE_BREAKOUT','SHORT',low,last);
+  if(brokeHigh&&number(rangeLast.low)<=high*1.002&&number(rangeLast.close)>high)return candidate('OPENING_RANGE_BREAKOUT','LONG',high,rangeLast);
+  if(brokeLow&&number(rangeLast.high)>=low*0.998&&number(rangeLast.close)<low)return candidate('OPENING_RANGE_BREAKOUT','SHORT',low,rangeLast);
   return null;
 }
 export function detectDayHighLowRetest(rows) {
