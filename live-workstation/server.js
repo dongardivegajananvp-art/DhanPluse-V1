@@ -537,7 +537,12 @@ async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
   }));
 }
 async function recoverFyersRestEndpoint(pathname){
-  if(!authReady()||!fyersRestBudgetReady||!pathname||restRecoveryProbeInFlight||Date.now()-lastRestRecoveryProbeAt<30000)return;
+  if(!authReady()||!fyersRestBudgetReady||!pathname)return;
+  if(/expired token|failed to decode jwt/i.test(lastSocketError)){
+    console.info('FYERS REST recovery probe paused until a new OAuth session is saved; stored token is expired.',JSON.stringify({pathname,at:new Date().toISOString()}));
+    return;
+  }
+  if(restRecoveryProbeInFlight||Date.now()-lastRestRecoveryProbeAt<30000)return;
   if(pathname==='/data/quotes'){
     lastRestRecoveryProbeAt=Date.now();
     await recoverStaleSubscriptionsViaQuotes(BASE_SUBSCRIPTIONS);
@@ -577,7 +582,9 @@ async function recoverFyersRestEndpoint(pathname){
       : pathname==='/data/options-chain-v3'
         ? Boolean(payload?.s==='ok'&&Array.isArray(payload?.data?.optionsChain)&&payload.data.optionsChain.length)
         : Boolean(payload?.s==='ok');
-    console.info('FYERS endpoint recovery probe completed.',JSON.stringify({pathname,httpStatus:response.status,validProviderPayload:valid,circuit:fetchWithFyersBudget.getStatus().cooldownActive?'CLOSED':'OPEN',at:new Date().toISOString()}));
+    const budgetState=fetchWithFyersBudget.getStatus();
+    const circuit=budgetState.recoveryProbeRequired?'PROBE_REQUIRED':budgetState.cooldownActive?'OPEN':'CLOSED';
+    console.info('FYERS endpoint recovery probe completed.',JSON.stringify({pathname,httpStatus:response.status,validProviderPayload:valid,circuit,at:new Date().toISOString()}));
   }catch(error){
     console.warn('FYERS endpoint recovery probe failed safely.',JSON.stringify({pathname,message:String(error?.message||error).slice(0,140)}));
   }finally{restRecoveryProbeInFlight=false;}
