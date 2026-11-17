@@ -12,7 +12,7 @@ test('GV2VPD PWA declares installable branded 192px and 512px icons', async () =
   assert.ok(manifest.icons.some(icon => icon.sizes === '512x512' && icon.purpose === 'any'));
   assert.ok(manifest.icons.some(icon => icon.sizes === '512x512' && icon.purpose === 'maskable'));
   for (const icon of manifest.icons) {
-    const file = await readFile(new URL(icon.src.replace(/^\//, '../'), import.meta.url), 'utf8');
+    const file = await readFile(new URL(icon.src.replace(/^\//, ''), import.meta.url), 'utf8');
     assert.match(file, /<svg[^>]+viewBox="0 0 512 512"/);
   }
 });
