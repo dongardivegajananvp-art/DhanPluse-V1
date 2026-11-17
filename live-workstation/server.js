@@ -227,7 +227,7 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
 }
 const FYERS_DATA='https://api-t1.fyers.in/data';
 const FYERS_API='https://api-t1.fyers.in/api/v3';
-const freshTick=(tick,maxAgeMs=10000)=>Boolean(tick&&Date.now()-tick.receivedAt>=0&&Date.now()-tick.receivedAt<=maxAgeMs&&Date.now()/1000-Number(tick.exchangeTime)<=10&&Date.now()/1000-Number(tick.exchangeTime)>=-3);
+const freshTick=(tick,maxAgeMs=10000)=>Boolean(tick&&Date.now()-tick.receivedAt>=0&&Date.now()-tick.receivedAt<=maxAgeMs&&Date.now()/1000-Number(tick.exchangeTime)<=maxAgeMs/1000&&Date.now()/1000-Number(tick.exchangeTime)>=-3);
 // One shared FYERS API budget covers every api-t1 endpoint (Data + v3).
 // Cooldown state is durable in PostgreSQL and restored before REST traffic is allowed.
 const FYERS_REST_MIN_INTERVAL_MS=4000;
@@ -442,7 +442,7 @@ function ensureSocket(){
           const gaps=gapStats.samples;
           const avgReceiveGapSeconds=gaps.length?Number((gaps.reduce((sum,value)=>sum+value,0)/gaps.length/1000).toFixed(2)):null;
           const maxReceiveGapSeconds=gaps.length?Number((Math.max(...gaps)/1000).toFixed(2)):null;
-          console.info('FYERS exchange tick accepted.',JSON.stringify({symbol,exchangeTimestamp:new Date(stamp*1000).toISOString(),exchangeAgeSeconds:ageSeconds,freshness:ageSeconds>=0&&ageSeconds<=10?'FRESH':'STALE',receiveGapSampleCount:gaps.length,avgReceiveGapSeconds,maxReceiveGapSeconds}));
+          const diagnosticMaxAgeSeconds=/^(NSE:NIFTY50-INDEX|NSE:NIFTYBANK-INDEX|BSE:SENSEX-INDEX)$/.test(symbol)?40:10;console.info('FYERS exchange tick accepted.',JSON.stringify({symbol,exchangeTimestamp:new Date(stamp*1000).toISOString(),exchangeAgeSeconds:ageSeconds,freshness:ageSeconds>=0&&ageSeconds<=diagnosticMaxAgeSeconds?'FRESH':'STALE',freshnessWindowSeconds:diagnosticMaxAgeSeconds,receiveGapSampleCount:gaps.length,avgReceiveGapSeconds,maxReceiveGapSeconds}));
           lastTickDiagnosticAt.set(symbol,Date.now());
         }
       }
@@ -1054,8 +1054,14 @@ async function processPendingStrategyCandidate(candidate){
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_underlying_recheck_failed'});return true;
   }
   const evaluated=evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,optionCandles:optionHistory.candles,optionTick:currentOptionTick,contract:candidate.contract,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now()});
+  if(evaluated.status==='WAITING_FOR_OPTION_BREAKOUT'){
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:evaluated.status,reason:evaluated.reason,strategy:candidate.setup.strategy,contract:candidate.contract.symbol,updatedAt:new Date().toISOString()});
+   // Keep the option subscribed and candidate pending for the existing 120-second
+   // window. A missing breakout is a WAIT, not a failed setup; don't discard it.
+   return false;
+  }
   if(evaluated.status!=='SETUP_CONFIRMED'){
-   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:evaluated.status,reason:evaluated.reason||'Option premium confirmation did not pass',strategy:candidate.setup.strategy,updatedAt:new Date().toISOString()});
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:evaluated.status,reason:evaluated.reason||'Option premium breakout/risk checks did not pass',strategy:candidate.setup.strategy,updatedAt:new Date().toISOString()});
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_rejected'});return true;
   }
   const finalOptionTick=lastTicks.get(candidate.contract.symbol),finalUnderlyingTick=lastTicks.get(candidate.futureSymbol);
