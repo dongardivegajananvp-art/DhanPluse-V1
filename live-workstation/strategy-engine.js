@@ -143,25 +143,31 @@ export function detectFlagVolume(rows) {
   if(impulseDown&&number(last.close)<low&&number(last.volume)>=avgFlag*1.5)return candidate('FLAG_BREAKOUT_VOLUME','SHORT',low,last);
   return null;
 }
-export function detectOpeningRange(rows, sessionStartMinute = 555) {
+export function detectOpeningRange(rows, sessionStartMinute = 555, livePrice = null) {
   const key=istDayKey(number(rows.at(-1).time));
   const day=rows.filter(c=>istDayKey(number(c.time))===key);
-  if(day.length<2)return null;
+  if(!day.length)return null;
   const sessionMinute=c=>{
     const t=new Date((number(c.time)+19800)*1000);
     return t.getUTCHours()*60+t.getUTCMinutes();
   };
-  // Strategy 9: the first completed 5-minute candle of the session defines
-  // the opening high/low. Confirm only a completed-candle close crossing it.
-  // The previous close must still be inside the range, preventing late re-entries.
+  // The first completed 5-minute candle defines the opening high/low.
+  // A fresh underlying exchange tick crossing that range is the early trigger;
+  // a completed close outside the range remains a valid confirmation fallback.
   const first=day.find(c=>sessionMinute(c)===sessionStartMinute);
   const last=day.at(-1),prior=day.at(-2);
-  if(first&&prior&&last&&number(last.time)>number(first.time)){
-    const firstHigh=number(first.high),firstLow=number(first.low);
-    if(number(prior.close)<=firstHigh&&number(last.close)>firstHigh)
-      return candidate('OPENING_RANGE_BREAKOUT','LONG',firstHigh,last,{pattern:'FIRST_CANDLE_HIGH_BREAKOUT'});
-    if(number(prior.close)>=firstLow&&number(last.close)<firstLow)
-      return candidate('OPENING_RANGE_BREAKOUT','SHORT',firstLow,last,{pattern:'FIRST_CANDLE_LOW_BREAKDOWN'});
+  if(first&&last){
+    const firstHigh=number(first.high),firstLow=number(first.low),price=Number(livePrice);
+    if(Number.isFinite(price)&&number(last.close)<=firstHigh&&price>firstHigh)
+      return candidate('OPENING_RANGE_BREAKOUT','LONG',firstHigh,last,{pattern:'FIRST_CANDLE_HIGH_LIVE_BREAKOUT'});
+    if(Number.isFinite(price)&&number(last.close)>=firstLow&&price<firstLow)
+      return candidate('OPENING_RANGE_BREAKOUT','SHORT',firstLow,last,{pattern:'FIRST_CANDLE_LOW_LIVE_BREAKDOWN'});
+    if(prior&&number(last.time)>number(first.time)){
+      if(number(prior.close)<=firstHigh&&number(last.close)>firstHigh)
+        return candidate('OPENING_RANGE_BREAKOUT','LONG',firstHigh,last,{pattern:'FIRST_CANDLE_HIGH_BREAKOUT'});
+      if(number(prior.close)>=firstLow&&number(last.close)<firstLow)
+        return candidate('OPENING_RANGE_BREAKOUT','SHORT',firstLow,last,{pattern:'FIRST_CANDLE_LOW_BREAKDOWN'});
+    }
   }
   // Retain the existing 15-minute opening-range break/retest path as a
   // second confirmation route within the same ninth strategy.
@@ -273,7 +279,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   consider('BULLISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'LONG'));
   consider('BEARISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'SHORT'));
   consider('FLAG_BREAKOUT_VOLUME',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectFlagVolume(rows));
-  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=2&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute));
+  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute,number(underlyingTick.price)));
   if(!candidates.length){
     if(!evaluated.length)return fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', '));
     return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked};
