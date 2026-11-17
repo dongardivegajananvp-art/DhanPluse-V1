@@ -164,3 +164,22 @@ test('active plan lifecycle fails closed when persisted risk values are malforme
   const plan = { expiry: '2026-11-26', stop_loss: 0, target: 103.15 };
   assert.equal(evaluateActivePlanLifecycle(plan, { price: 100, receivedAt: now, exchangeTime: now / 1000 }, now).status, 'REVALIDATION_REQUIRED');
 });
+
+test('ledger persists a verified MCX option plan with fixed 1:2 risk values', async () => {
+  const now = Date.parse('2026-11-16T04:00:00Z');
+  const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
+  const plan = fixture(now, {
+    underlying:'MCX:CRUDEOIL26NOVFUT',
+    contract:'MCX:CRUDEOIL26NOV7500CE',
+    optionSide:'CE',
+    expiry:'2026-11-26',
+    strike:7500
+  });
+  const saved = await store.saveConfirmedPlan(plan, now);
+  assert.equal(saved.status,'PLAN_PERSISTED');
+  const listed = await store.listActivePlans();
+  assert.equal(listed.plans[0].underlying,'MCX:CRUDEOIL26NOVFUT');
+  assert.equal(listed.plans[0].contract,'MCX:CRUDEOIL26NOV7500CE');
+  assert.deepEqual([saved.entry,saved.stopLoss,saved.target,saved.rr],[100.05,98.5,103.15,2]);
+  await store.close();
+});
