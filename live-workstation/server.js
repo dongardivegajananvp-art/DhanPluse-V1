@@ -1,10 +1,11 @@
 import crypto from 'node:crypto';
+import { oauthStateStorageKey, oauthStateIsFresh, AUTH_STATE_TTL_MS } from './oauth-state.js';
 import { getNseMarketSession } from './nse-market-session.js';
 import {createSharedTokenReader} from './token-reader.js';
 import { createFyersDataApiBudget } from './fyers-rest-budget.js';
 import { socketRecoveryDelayMs } from './socket-recovery-policy.js';
 import { shouldRestartSilentIndexFeed } from './socket-feed-watchdog.js';
-import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute } from './scanner-schedule.js';
+import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute, shouldRetryFnoUniverse } from './scanner-schedule.js';
 import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { historyRetryDelayMs, shouldAttemptHistoryRetry } from './history-retry-policy.js';
 import { acceptExchangeTick, exchangeTickFreshness, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
@@ -54,8 +55,6 @@ app.use(express.static(new URL('./public',import.meta.url).pathname));
 const appId=(process.env.FYERS_APP_ID||'').trim();
 const appSecret=(process.env.FYERS_APP_SECRET||'').trim();
 const redirectUri=(process.env.FYERS_REDIRECT_URI||'').trim();
-const pendingAuthStates=new Map();
-const AUTH_STATE_TTL_MS=10*60*1000;
 const tokenReader=createSharedTokenReader({databaseUrl:process.env.DATABASE_URL,encryptionKey:process.env.FYERS_TOKEN_ENCRYPTION_KEY});
 let accessToken='';
 let socket=null;
@@ -151,7 +150,7 @@ let strategyActivePlansLoadedAt=0;
 let strategyLedgerRuntimeReady=false;
 const FYERS_DATA_SYMBOL_LIMIT=80; // Keep 20 account-wide slots free for other active FYERS API connections and transition overlap.
 let subscriptionTransitionTimer=null;
-let fnoUniverseRows=[],fnoUniverseFetchedAt=0,fnoUniversePromise=null,fnoUniverseCursor=0,fnoScanSubscriptionSymbols=[],fnoUniverseError='Not loaded',lastFnoRotationAt=null,fnoRotationCount=0;
+let fnoUniverseRows=[],fnoUniverseFetchedAt=0,fnoUniversePromise=null,fnoUniverseCursor=0,fnoScanSubscriptionSymbols=[],fnoUniverseError='Not loaded',lastFnoRotationAt=null,fnoRotationCount=0,lastFnoUniverseRetryAt=0;
 const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
 function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!socket||!connected)return {subscribed:0,removed:0};
@@ -298,7 +297,7 @@ function optionMeta(symbol,master){const x=master?.[symbol];if(!x||Number(x.trad
 
 async function loadScreenerConfig(){if(screenerConfigCache&&Date.now()-screenerConfigFetchedAt<86400000)return screenerConfigCache;if(screenerConfigPromise)return screenerConfigPromise;screenerConfigPromise=fyersGet(FYERS_API+'/screeners/config').then(x=>{screenerConfigCache=x;screenerConfigFetchedAt=Date.now();return x;}).finally(()=>{screenerConfigPromise=null});return screenerConfigPromise;}
 function screenerIds(value){return Array.isArray(value)?value.map(item=>typeof item==='string'?item:String(item?.id||'')).filter(Boolean):[];}
-async function loadFnoMovers(){if(fnoMoversCache.expiresAt>Date.now())return fnoMoversCache;if(fnoMoversPromise)return fnoMoversPromise;const live=buildLiveFnoMovers({universeRows:fnoUniverseRows,tickBySymbol:lastTicks,now:Date.now(),maxAgeMs:10000});if(live.rows.length){fnoMoversCache={rows:live.rows,updatedAt:live.updatedAt,expiresAt:Date.now()+5000,error:'',source:'FYERS WebSocket live futures ticks',coverage:{freshTickCount:live.freshUniverseTickCount,universeCount:live.universeCount}};syncSocketSubscriptions();return fnoMoversCache;}if(fetchWithFyersBudget.getStatus().cooldownActive){fnoMoversCache={rows:[],updatedAt:0,expiresAt:Date.now()+5000,error:'FYERS REST cooldown active; waiting for fresh WebSocket futures ticks'};return fnoMoversCache;}fnoMoversPromise=(async()=>{try{const config=await loadScreenerConfig(),data=config.data||{};const screeners=Array.isArray(data.screeners_standard)?data.screeners_standard:[];const candidates=screeners.filter(x=>String(x.category||'').toLowerCase().includes('futures')&&/(gain|gainer)/i.test(String(x.id||'')+' '+String(x.name||'')));const screener=candidates.find(x=>{const allowed=new Set(x.supported_params||[]);const universeIds=screenerIds(data.universe_groups?.[x.universe_group]);const columnIds=screenerIds(data.column_groups?.[x.column_group]);return allowed.has('universe')&&allowed.has('fields')&&universeIds.includes('fw002')&&['t0_close_ltp','t0_per_change'].every(id=>columnIds.includes(id));});if(!screener){const summary=candidates.map(x=>({id:x.id,category:x.category,universe_group:x.universe_group,column_group:x.column_group,supported_params:x.supported_params}));throw new Error('No FYERS Futures Scan gainer screener accepts fw002 + live price/change fields. Candidates: '+JSON.stringify(summary).slice(0,260));}const allowed=new Set(screener.supported_params||[]),params=new URLSearchParams({screener_id:screener.id});params.set('universe','fw002');params.set('fields','t0_close_ltp,t0_per_change');if(allowed.has('order_by'))params.set('order_by','t0_per_change');if(allowed.has('order'))params.set('order','desc');if(allowed.has('timeframe')&&(x=>x.includes('t0'))(screener.allowed_timeframes||[]))params.set('timeframe','t0');const result=await fyersGet(FYERS_API+'/screeners/standard?'+params.toString());const d=result.data||{},header=Array.isArray(d.header)?d.header:[],idx=Object.fromEntries(header.map((item,i)=>[item.unique_key,i]));if(!Number.isInteger(idx.symbolticker)||!Number.isInteger(idx.t0_close_ltp)||!Number.isInteger(idx.t0_per_change))throw new Error('FYERS screener response missing symbolticker / t0_close_ltp / t0_per_change columns');const master=await loadNseFoMaster();const byUnderlying=new Map();for(const row of (Array.isArray(d.body)?d.body:[])){const symbol=String(row[idx.symbolticker]||''),price=Number(row[idx.t0_close_ltp]),change=Number(row[idx.t0_per_change]);if(!/^NSE:.+FUT$/.test(symbol)||!Number.isFinite(price)||price<=0||!Number.isFinite(change)||1+change/100<=0)continue;const expiry=toEpochSeconds(master?.[symbol]?.expiryDate);if(!expiry||expiry*1000<Date.now())continue;const underlying=symbol.replace(/\d{2}[A-Z]{3}FUT$/,'');if(underlying===symbol)continue;const optionUnderlying=underlying==='NSE:NIFTY50'?'NSE:NIFTY50-INDEX':underlying==='NSE:BANKNIFTY'?'NSE:NIFTYBANK-INDEX':underlying+'-EQ';const candidate={symbol,underlying,underlyingSymbol:optionUnderlying,expiry,basePrice:price/(1+change/100),price,change,exchangeTime:Number(d.last_update_time||d.fetch_time||0),source:'FYERS Standard Screener'};const previous=byUnderlying.get(underlying);if(!previous||candidate.expiry<previous.expiry)byUnderlying.set(underlying,candidate);}const rows=[...byUnderlying.values()].sort((a,b)=>b.change-a.change).slice(0,5);if(!rows.length)throw new Error('FYERS stock-futures gainer screener returned no valid NSE futures rows');const updatedAt=Number(d.last_update_time||d.fetch_time||0)*1000;if(!Number.isFinite(updatedAt)||updatedAt<=0)throw new Error('FYERS screener response did not include a valid exchange refresh timestamp');fnoMoversCache={rows,updatedAt,expiresAt:Date.now()+60*1000,error:''};syncSocketSubscriptions();console.info('FYERS stock-futures gainers loaded.',JSON.stringify({screenerId:screener.id,count:rows.length,updatedAt:new Date(updatedAt).toISOString()}));return fnoMoversCache;}catch(e){const message=String(e?.message||e).replace(/\\s+/g,' ').slice(0,260);console.error('FYERS stock-futures gainers unavailable.',JSON.stringify({message,statusCode:e?.statusCode||null,retryAfterMs:e?.retryAfterMs||0}));const retryDelay=Math.max(15000,Math.min(FYERS_REST_MAX_COOLDOWN_MS,Number(e?.retryAfterMs)||30000));fnoMoversCache={rows:[],updatedAt:0,expiresAt:Date.now()+retryDelay,error:message};syncSocketSubscriptions();return fnoMoversCache;}})().finally(()=>{fnoMoversPromise=null});return fnoMoversPromise;}
+async function loadFnoMovers(){if(fnoMoversCache.expiresAt>Date.now())return fnoMoversCache;if(fnoMoversPromise)return fnoMoversPromise;const live=buildLiveFnoMovers({universeRows:fnoUniverseRows,tickBySymbol:lastTicks,now:Date.now(),maxAgeMs:10000});if(live.rows.length){fnoMoversCache={rows:live.rows,updatedAt:live.updatedAt,expiresAt:Date.now()+5000,error:'',source:'FYERS WebSocket live futures ticks',coverage:{freshTickCount:live.freshUniverseTickCount,universeCount:live.universeCount}};syncSocketSubscriptions();return fnoMoversCache;}if(!connected||/expired token|failed to decode jwt/i.test(lastSocketError)){fnoMoversCache={rows:[],updatedAt:0,expiresAt:Date.now()+5000,error:/expired token|failed to decode jwt/i.test(lastSocketError)?'FYERS access token expired; reconnect required':'FYERS WebSocket disconnected; screener paused until live feed returns'};return fnoMoversCache;}const restStatus=fetchWithFyersBudget.getStatus();if(restStatus.cooldownActive||restStatus.recoveryProbeRequired){fnoMoversCache={rows:[],updatedAt:0,expiresAt:Date.now()+5000,error:restStatus.recoveryProbeRequired?'FYERS REST recovery probe pending; screener paused locally':'FYERS REST cooldown active; waiting for fresh WebSocket futures ticks'};return fnoMoversCache;}fnoMoversPromise=(async()=>{try{const config=await loadScreenerConfig(),data=config.data||{};const screeners=Array.isArray(data.screeners_standard)?data.screeners_standard:[];const candidates=screeners.filter(x=>String(x.category||'').toLowerCase().includes('futures')&&/(gain|gainer)/i.test(String(x.id||'')+' '+String(x.name||'')));const screener=candidates.find(x=>{const allowed=new Set(x.supported_params||[]);const universeIds=screenerIds(data.universe_groups?.[x.universe_group]);const columnIds=screenerIds(data.column_groups?.[x.column_group]);return allowed.has('universe')&&allowed.has('fields')&&universeIds.includes('fw002')&&['t0_close_ltp','t0_per_change'].every(id=>columnIds.includes(id));});if(!screener){const summary=candidates.map(x=>({id:x.id,category:x.category,universe_group:x.universe_group,column_group:x.column_group,supported_params:x.supported_params}));throw new Error('No FYERS Futures Scan gainer screener accepts fw002 + live price/change fields. Candidates: '+JSON.stringify(summary).slice(0,260));}const allowed=new Set(screener.supported_params||[]),params=new URLSearchParams({screener_id:screener.id});params.set('universe','fw002');params.set('fields','t0_close_ltp,t0_per_change');if(allowed.has('order_by'))params.set('order_by','t0_per_change');if(allowed.has('order'))params.set('order','desc');if(allowed.has('timeframe')&&(x=>x.includes('t0'))(screener.allowed_timeframes||[]))params.set('timeframe','t0');const result=await fyersGet(FYERS_API+'/screeners/standard?'+params.toString());const d=result.data||{},header=Array.isArray(d.header)?d.header:[],idx=Object.fromEntries(header.map((item,i)=>[item.unique_key,i]));if(!Number.isInteger(idx.symbolticker)||!Number.isInteger(idx.t0_close_ltp)||!Number.isInteger(idx.t0_per_change))throw new Error('FYERS screener response missing symbolticker / t0_close_ltp / t0_per_change columns');const master=await loadNseFoMaster();const byUnderlying=new Map();for(const row of (Array.isArray(d.body)?d.body:[])){const symbol=String(row[idx.symbolticker]||''),price=Number(row[idx.t0_close_ltp]),change=Number(row[idx.t0_per_change]);if(!/^NSE:.+FUT$/.test(symbol)||!Number.isFinite(price)||price<=0||!Number.isFinite(change)||1+change/100<=0)continue;const expiry=toEpochSeconds(master?.[symbol]?.expiryDate);if(!expiry||expiry*1000<Date.now())continue;const underlying=symbol.replace(/\d{2}[A-Z]{3}FUT$/,'');if(underlying===symbol)continue;const optionUnderlying=underlying==='NSE:NIFTY50'?'NSE:NIFTY50-INDEX':underlying==='NSE:BANKNIFTY'?'NSE:NIFTYBANK-INDEX':underlying+'-EQ';const candidate={symbol,underlying,underlyingSymbol:optionUnderlying,expiry,basePrice:price/(1+change/100),price,change,exchangeTime:Number(d.last_update_time||d.fetch_time||0),source:'FYERS Standard Screener'};const previous=byUnderlying.get(underlying);if(!previous||candidate.expiry<previous.expiry)byUnderlying.set(underlying,candidate);}const rows=[...byUnderlying.values()].sort((a,b)=>b.change-a.change).slice(0,5);if(!rows.length)throw new Error('FYERS stock-futures gainer screener returned no valid NSE futures rows');const updatedAt=Number(d.last_update_time||d.fetch_time||0)*1000;if(!Number.isFinite(updatedAt)||updatedAt<=0)throw new Error('FYERS screener response did not include a valid exchange refresh timestamp');fnoMoversCache={rows,updatedAt,expiresAt:Date.now()+60*1000,error:''};syncSocketSubscriptions();console.info('FYERS stock-futures gainers loaded.',JSON.stringify({screenerId:screener.id,count:rows.length,updatedAt:new Date(updatedAt).toISOString()}));return fnoMoversCache;}catch(e){const message=String(e?.message||e).replace(/\\s+/g,' ').slice(0,260);console.error('FYERS stock-futures gainers unavailable.',JSON.stringify({message,statusCode:e?.statusCode||null,retryAfterMs:e?.retryAfterMs||0}));const retryDelay=Math.max(15000,Math.min(FYERS_REST_MAX_COOLDOWN_MS,Number(e?.retryAfterMs)||30000));fnoMoversCache={rows:[],updatedAt:0,expiresAt:Date.now()+retryDelay,error:message};syncSocketSubscriptions();return fnoMoversCache;}})().finally(()=>{fnoMoversPromise=null});return fnoMoversPromise;}
 
 async function refreshFnoUniverse(force=false){
   if(!force&&fnoUniverseRows.length&&Date.now()-fnoUniverseFetchedAt<6*60*60*1000)return fnoUniverseRows;
@@ -538,7 +537,12 @@ async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
   }));
 }
 async function recoverFyersRestEndpoint(pathname){
-  if(!authReady()||!fyersRestBudgetReady||!pathname||restRecoveryProbeInFlight||Date.now()-lastRestRecoveryProbeAt<30000)return;
+  if(!authReady()||!fyersRestBudgetReady||!pathname)return;
+  if(/expired token|failed to decode jwt/i.test(lastSocketError)){
+    console.info('FYERS REST recovery probe paused until a new OAuth session is saved; stored token is expired.',JSON.stringify({pathname,at:new Date().toISOString()}));
+    return;
+  }
+  if(restRecoveryProbeInFlight||Date.now()-lastRestRecoveryProbeAt<30000)return;
   if(pathname==='/data/quotes'){
     lastRestRecoveryProbeAt=Date.now();
     await recoverStaleSubscriptionsViaQuotes(BASE_SUBSCRIPTIONS);
@@ -577,8 +581,12 @@ async function recoverFyersRestEndpoint(pathname){
       ? Boolean(payload?.s==='ok'&&Array.isArray(payload.candles)&&payload.candles.length)
       : pathname==='/data/options-chain-v3'
         ? Boolean(payload?.s==='ok'&&Array.isArray(payload?.data?.optionsChain)&&payload.data.optionsChain.length)
-        : Boolean(payload?.s==='ok');
-    console.info('FYERS endpoint recovery probe completed.',JSON.stringify({pathname,httpStatus:response.status,validProviderPayload:valid,circuit:fetchWithFyersBudget.getStatus().cooldownActive?'CLOSED':'OPEN',at:new Date().toISOString()}));
+        : pathname==='/api/v3/positions'
+          ? Boolean(payload?.s==='ok'&&Array.isArray(payload?.netPositions)&&payload?.overall&&typeof payload.overall==='object'&&!Array.isArray(payload.overall))
+          : Boolean(payload?.s==='ok');
+    const budgetState=fetchWithFyersBudget.getStatus();
+    const circuit=budgetState.recoveryProbeRequired?'PROBE_REQUIRED':budgetState.cooldownActive?'OPEN':'CLOSED';
+    console.info('FYERS endpoint recovery probe completed.',JSON.stringify({pathname,httpStatus:response.status,validProviderPayload:valid,circuit,at:new Date().toISOString()}));
   }catch(error){
     console.warn('FYERS endpoint recovery probe failed safely.',JSON.stringify({pathname,message:String(error?.message||error).slice(0,140)}));
   }finally{restRecoveryProbeInFlight=false;}
@@ -667,6 +675,34 @@ const fnoUniverseRotationTimer=setInterval(()=>{
   rotateFnoUniverseSubscriptions('scheduled_rotation');
 },FNO_ROTATION_INTERVAL_MS);
 fnoUniverseRotationTimer.unref?.();
+const fnoUniverseRecoveryTimer=setInterval(()=>{
+  if(fnoUniversePromise)return;
+  const restStatus=fetchWithFyersBudget.getStatus();
+  const shouldRetry=shouldRetryFnoUniverse({
+    socketConnected:Boolean(socket&&connected),
+    marketOpen:isNseRegularSession(),
+    mcxOnlyMode:Boolean(mcxFutureRoot(selectedSymbol)),
+    restBudgetReady:fyersRestBudgetReady,
+    cooldownActive:restStatus.cooldownActive,
+    recoveryProbeRequired:restStatus.recoveryProbeRequired,
+    universeLoaded:fnoUniverseRows.length>0,
+    subscriptionWindowReady:fnoScanSubscriptionSymbols.length>0,
+    lastAttemptAt:lastFnoUniverseRetryAt,
+    now:Date.now()
+  });
+  if(!shouldRetry)return;
+  lastFnoUniverseRetryAt=Date.now();
+  if(fnoUniverseRows.length){
+    const result=rotateFnoUniverseSubscriptions('universe_subscription_recovery');
+    if(result.error)console.warn('FYERS F&O subscription recovery remains blocked; retry will be deferred.',String(result.error).slice(0,160));
+    return;
+  }
+  void refreshFnoUniverse().then(()=>rotateFnoUniverseSubscriptions('universe_loaded')).catch(error=>{
+    fnoUniverseError=String(error?.message||error).slice(0,160);
+    console.warn('FYERS F&O universe retry failed; supervised retry remains scheduled.',fnoUniverseError);
+  });
+},15_000);
+fnoUniverseRecoveryTimer.unref?.();
 function startUpErrorSafe(value){return String(value||'').slice(0,180);}
 app.get('/api/health',async(_req,res)=>{
   const now=Date.now();
@@ -806,7 +842,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
           optionCandles:history.candles,optionTick,contract,dailyCandles,isTopGainer:false,now:Date.now(),
           sessionStartMinute:540,sessionCloseMinute:1435
         });
-        if(evaluated.status==='SETUP_CONFIRMED')valid.push({...evaluated,contract});
+        if(evaluated.status==='SETUP_CONFIRMED')valid.push({...evaluated,contract,optionCandles:history.candles});
         else rejected.push({symbol:contract.symbol,reason:evaluated.reason||evaluated.status,strategy:evaluated.strategy||underlyingSetup.strategy});
       }catch(error){
         if(Number(error?.statusCode)===429)throw error;
@@ -818,16 +854,55 @@ app.get('/api/mcx/scan',async(req,res)=>{
     if(!valid.length)return{status:'NO_TRADE',reason:rejected.length?'No candidate passed the nine-strategy underlying confirmation, fresh option-candle confirmation and 1:2 risk/reward checks':'Waiting for verified option history',side:underlyingSetup.side,strategy:underlyingSetup.strategy,rejected};
     valid.sort((a,b)=>b.rr-a.rr||a.contract.strikeDistance-b.contract.strikeDistance);
     const best=valid[0];
+    const finalUnderlyingTick=lastTicks.get(future);
+    const finalOptionTick=lastTicks.get(best.contract.symbol);
+    const officialContract=contracts.find(contract=>contract.symbol===best.contract.symbol);
+    const finalIdentity=validateOptionContractIdentity(best.contract,officialContract,Date.now());
+    if(!freshTick(finalUnderlyingTick)||!freshTick(finalOptionTick)||!finalIdentity.ok)
+      return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:!freshTick(finalUnderlyingTick)?'MCX futures tick became stale before plan persistence':!freshTick(finalOptionTick)?'Selected MCX option tick became stale before plan persistence':finalIdentity.reason};
+    const finalEvaluation=evaluateNineStrategies({
+      underlyingCandles:underlyingHistory.candles,underlyingTick:finalUnderlyingTick,
+      optionCandles:best.optionCandles,optionTick:finalOptionTick,contract:best.contract,dailyCandles,
+      isTopGainer:false,now:Date.now(),sessionStartMinute:540,sessionCloseMinute:1435
+    });
+    if(finalEvaluation.status!=='SETUP_CONFIRMED'||!sameStrategyConfirmation(best,finalEvaluation))
+      return{status:'NO_TRADE',reason:'MCX underlying/option confirmation changed during final fresh-tick recheck'};
+    if(!strategyPlanStore)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Persistent strategy plan ledger is unavailable; MCX setup not published'};
+    if(selectedSymbol!==future)return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:'MCX instrument changed before persistent plan creation'};
+    const planId=crypto.createHash('sha256').update([future,best.contract.symbol,finalEvaluation.confirmedAt,finalEvaluation.optionCandleTime].join('|')).digest('hex').slice(0,48);
+    const saved=await strategyPlanStore.saveConfirmedPlan({
+      planId,strategy:finalEvaluation.strategy,underlying:future,contract:best.contract.symbol,
+      optionSide:best.contract.side,expiry:best.contract.expiryDate,strike:best.contract.strike,
+      premium:finalOptionTick.price,tickSize:best.contract.tickSize,entry:finalEvaluation.entry,
+      stopLoss:finalEvaluation.stopLoss,target:finalEvaluation.target,rr:finalEvaluation.rr,
+      underlyingExchangeTime:finalUnderlyingTick.exchangeTime,optionExchangeTime:finalOptionTick.exchangeTime,
+      underlyingReceivedAt:finalUnderlyingTick.receivedAt,optionReceivedAt:finalOptionTick.receivedAt,
+      underlyingCandleTime:String(finalEvaluation.confirmedAt),optionCandleTime:String(finalEvaluation.optionCandleTime)
+    });
+    if(!saved.ok)return{status:saved.status||'DATA_UNAVAILABLE_NO_TRADE',reason:saved.reason||'MCX plan could not be persisted; no setup published'};
+    if(selectedSymbol!==future||!freshTick(lastTicks.get(future))||!freshTick(lastTicks.get(best.contract.symbol))){
+      const cancelled=await strategyPlanStore.closePlan(planId,'CANCELLED');
+      await refreshStrategyActivePlans(true);
+      return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:cancelled.ok?'MCX selection or final exchange tick changed during ledger write; saved plan cancelled':'MCX selection/tick changed during ledger write; plan cancellation could not be confirmed and remains blocked'};
+    }
+    await refreshStrategyActivePlans(true);
+    if(selectedSymbol!==future||!freshTick(lastTicks.get(future))||!freshTick(lastTicks.get(best.contract.symbol))){
+      const cancelled=await strategyPlanStore.closePlan(planId,'CANCELLED');
+      await refreshStrategyActivePlans(true);
+      return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:cancelled.ok?'MCX selection or final exchange tick changed during ledger refresh; saved plan cancelled':'MCX selection/tick changed during ledger refresh; plan cancellation could not be confirmed and remains blocked'};
+    }
     selectedOptionSymbol=best.contract.symbol;
     syncSocketSubscriptions({reason:'mcx_best_option_selected'});
     return{
       status:'SETUP_CONFIRMED',
-      label:'MCX · NINE-STRATEGY ENGINE · VERIFIED RULE-MATCH · READ-ONLY',
+      ledgerStatus:'PLAN_PERSISTED_READ_ONLY',
+      planId:saved.planId,
+      label:'MCX · NINE-STRATEGY ENGINE · VERIFIED · PERSISTED READ-ONLY PLAN',
       underlying:future,
-      underlyingSide:underlyingSetup.side,
+      underlyingSide:finalEvaluation.underlyingSide,
       contract:{symbol:best.contract.symbol,side:best.contract.side,strike:best.contract.strike,expiry:best.contract.expiryDate,lotSize:best.contract.lotSize,tickSize:best.contract.tickSize},
-      premium:lastTicks.get(best.contract.symbol).price,entry:best.entry,stopLoss:best.stopLoss,target:best.target,rr:best.rr,strategy:best.strategy,
-      source:'FYERS MCX Symbol Master + fresh futures/option ticks + completed 5-minute candles + nine-strategy engine',
+      premium:finalOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,strategy:finalEvaluation.strategy,
+      source:'FYERS MCX Symbol Master + fresh futures/option ticks + completed 5-minute candles + nine-strategy engine + persistent plan ledger',
       verifiedAt:new Date().toISOString()
     };
   })();
@@ -968,8 +1043,8 @@ async function runAutomaticStrategyScan(){
  try{
   await refreshStrategyActivePlans();
   const restStatus=fetchWithFyersBudget.getStatus();
-  if(!fyersRestBudgetReady||restStatus.cooldownActive){
-   strategyScanLastError=restStatus.cooldownActive?'FYERS REST cooldown active; scanner paused locally without queuing more history requests':'FYERS REST budget is not ready; scanner paused fail-closed';
+  if(!fyersRestBudgetReady||restStatus.cooldownActive||restStatus.recoveryProbeRequired){
+   strategyScanLastError=restStatus.recoveryProbeRequired?'FYERS REST recovery probe pending; scanner paused locally without queuing history requests':restStatus.cooldownActive?'FYERS REST cooldown active; scanner paused locally without queuing more history requests':'FYERS REST budget is not ready; scanner paused fail-closed';
    return;
   }
   let expired=false;
@@ -1214,29 +1289,44 @@ app.post('/api/order',async(req,res)=>{
     return res.status(502).json({error:'FYERS order result uncertain/failed; durable request lock retained. Do not retry. Check broker orderbook.',detail:String(error?.message||error).slice(0,160)});
   }
 });
-function createFyersAuthorizationUrl(){
+async function createFyersAuthorizationUrl(){
   if(!appId||!appSecret||!redirectUri||!tokenReader){const error=new Error('FYERS reconnect is not configured on this workstation.');error.status=503;error.detail={hasAppId:Boolean(appId),hasAppSecret:Boolean(appSecret),hasRedirect:Boolean(redirectUri),secureTokenStore:Boolean(tokenReader)};throw error;}
   const external=String(process.env.RENDER_EXTERNAL_URL||'').replace(/\/$/,'');
   const expectedCallback=external+'/api/fyers/auth/callback';
   if(!external||redirectUri!==expectedCallback){const error=new Error('FYERS callback URL is not configured for this GV2VPD workstation.');error.status=503;error.detail='Set FYERS_REDIRECT_URI to '+expectedCallback+' and register the exact same URL in the FYERS Developer App.';throw error;}
-  const now=Date.now();for(const [key,value] of pendingAuthStates){if(now-value.createdAt>AUTH_STATE_TTL_MS)pendingAuthStates.delete(key);}
-  const state=crypto.randomBytes(24).toString('hex');pendingAuthStates.set(state,{createdAt:now});
+  if(!orderRequestPool||!(await fyersCooldownStoreReady)){const error=new Error('Secure OAuth state storage is unavailable.');error.status=503;throw error;}
+  const now=Date.now();
+  const state=crypto.randomBytes(24).toString('hex');
+  const stateKey=oauthStateStorageKey(state);
+  await orderRequestPool.query("DELETE FROM gv2vpd_runtime_state WHERE state_key LIKE $1 AND updated_at < NOW() - ($2 * INTERVAL '1 millisecond')",['gv2vpd-live-workstation-oauth-state:%',AUTH_STATE_TTL_MS]);
+  await orderRequestPool.query('INSERT INTO gv2vpd_runtime_state (state_key,state_value,updated_at) VALUES ($1,$2::jsonb,NOW()) ON CONFLICT (state_key) DO UPDATE SET state_value=EXCLUDED.state_value,updated_at=NOW()',[stateKey,JSON.stringify({createdAt:now})]);
+  console.info('FYERS OAuth authorization state persisted.',JSON.stringify({callbackPath:'/api/fyers/auth/callback',stateStored:true,createdAt:new Date(now).toISOString()}));
   const url=new URL('https://api-t1.fyers.in/api/v3/generate-authcode');url.searchParams.set('client_id',appId);url.searchParams.set('redirect_uri',redirectUri);url.searchParams.set('response_type','code');url.searchParams.set('state',state);
   return url.toString();
 }
-app.get('/api/fyers/auth/redirect',(req,res)=>{
-  try{res.set('Cache-Control','no-store').redirect(302,createFyersAuthorizationUrl());}
-  catch(error){res.status(error.status||503).json({error:error.message,detail:error.detail||null});}
+app.get('/api/fyers/auth/redirect',async(req,res)=>{
+  try{res.set('Cache-Control','no-store').redirect(302,await createFyersAuthorizationUrl());}
+  catch(error){console.error('FYERS OAuth authorization redirect unavailable.',String(error?.message||error).slice(0,160));res.status(error.status||503).json({error:error.message,detail:error.detail||null});}
 });
-app.get('/api/fyers/auth/start',(req,res)=>{
-  try{res.set('Cache-Control','no-store').json({authorizationUrl:createFyersAuthorizationUrl()});}
-  catch(error){res.status(error.status||503).json({error:error.message,detail:error.detail||null});}
+app.get('/api/fyers/auth/start',async(req,res)=>{
+  try{res.set('Cache-Control','no-store').json({authorizationUrl:await createFyersAuthorizationUrl()});}
+  catch(error){console.error('FYERS OAuth authorization URL unavailable.',String(error?.message||error).slice(0,160));res.status(error.status||503).json({error:error.message,detail:error.detail||null});}
 });
 
 app.get('/api/fyers/auth/callback',async(req,res)=>{
-  const code=typeof req.query.auth_code==='string'?req.query.auth_code.trim():'';const state=typeof req.query.state==='string'?req.query.state.trim():'';const pending=pendingAuthStates.get(state);
-  if(!code||code.length>4096||!state||!pending||Date.now()-pending.createdAt>AUTH_STATE_TTL_MS){if(state)pendingAuthStates.delete(state);return res.status(400).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>FYERS login could not be verified</h2><p>The authorization code or one-time state is missing or expired. Return to GV2VPD and tap Connect / Reconnect FYERS again.</p><a href="/">Return to GV2VPD</a>');}
-  pendingAuthStates.delete(state);
+  const code=typeof req.query.auth_code==='string'?req.query.auth_code.trim():'';const state=typeof req.query.state==='string'?req.query.state.trim():'';
+  console.info('FYERS OAuth callback received.',JSON.stringify({hasCode:Boolean(code),hasState:Boolean(state)}));
+  let pending=null;
+  try{
+    if(state&&orderRequestPool&&await fyersCooldownStoreReady){
+      const consumed=await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1 RETURNING state_value',[oauthStateStorageKey(state)]);
+      pending=consumed.rows?.[0]?.state_value??null;
+    }
+  }catch(error){console.error('FYERS OAuth state consumption failed.',String(error?.message||error).slice(0,160));return res.status(503).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>Secure login state could not be checked</h2><p>No session was activated. Return to GV2VPD and try Connect / Reconnect FYERS again.</p><a href="/">Return to GV2VPD</a>');}
+  if(!code||code.length>4096||!state||!oauthStateIsFresh(pending)){
+    console.warn('FYERS OAuth callback rejected before token exchange.',JSON.stringify({hasCode:Boolean(code),hasState:Boolean(state),stateFound:Boolean(pending),stateFresh:oauthStateIsFresh(pending)}));
+    return res.status(400).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>FYERS login could not be verified</h2><p>The authorization code or one-time state is missing, expired, or already used. Return to GV2VPD and tap Connect / Reconnect FYERS again.</p><a href="/">Return to GV2VPD</a>');
+  }
   if(!appId||!appSecret||!redirectUri||!tokenReader)return res.status(503).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>Secure FYERS storage is unavailable</h2><p>Connection was not activated. Check the existing workstation configuration.</p><a href="/">Return to GV2VPD</a>');
   try{
     const appIdHash=crypto.createHash('sha256').update(appId+':'+appSecret).digest('hex');

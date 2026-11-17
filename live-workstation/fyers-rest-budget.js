@@ -9,7 +9,7 @@ export function isValidFyersRecoveryPayload(pathname, payload) {
   if (pathname === '/api/v3/screeners/standard') {
     return Array.isArray(payload.data?.header) && Array.isArray(payload.data?.body);
   }
-  if (pathname === '/api/v3/positions') return Boolean(payload.data && typeof payload.data === 'object');
+  if (pathname === '/api/v3/positions') return Array.isArray(payload.netPositions) && Boolean(payload.overall && typeof payload.overall === 'object' && !Array.isArray(payload.overall));
   return false;
 }
 

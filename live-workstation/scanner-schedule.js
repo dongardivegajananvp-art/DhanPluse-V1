@@ -22,3 +22,20 @@ export function canFinishSubscriptionWindowBeforeRotation(activeSymbols, {
     Number.isFinite(rotationIntervalMs) && rotationIntervalMs > 0 &&
     activeSymbols * scanIntervalMs <= rotationIntervalMs;
 }
+
+
+export function shouldRetryFnoUniverse({
+  socketConnected = false, marketOpen = false, mcxOnlyMode = false,
+  restBudgetReady = false, cooldownActive = false, recoveryProbeRequired = false,
+  universeLoaded = false, subscriptionWindowReady = false,
+  lastAttemptAt = 0, now = Date.now(), retryIntervalMs = 60_000
+} = {}) {
+  const elapsed = Number(now) - Number(lastAttemptAt);
+  const interval = Number(retryIntervalMs);
+  return Boolean(
+    socketConnected && marketOpen && !mcxOnlyMode && restBudgetReady &&
+    !cooldownActive && !recoveryProbeRequired &&
+    (!universeLoaded || !subscriptionWindowReady) &&
+    Number.isFinite(elapsed) && Number.isFinite(interval) && interval > 0 && elapsed >= interval
+  );
+}
