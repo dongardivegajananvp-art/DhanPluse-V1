@@ -61,7 +61,7 @@ test('returns the cached GV2VPD page immediately when Render is still showing it
   const harness = createHarness(async () => new Response('Render loading page', {
     status: 503, headers: { 'content-type': 'text/html' }
   }));
-  const cache = await harness.caches.open('gv2vpd-pwa-shell-v7');
+  const cache = await harness.caches.open('gv2vpd-pwa-shell-v8');
   await cache.put('/', new Response('<title>GV2VPD | Live Trading Workstation</title><div id="feedState"></div>', {
     headers: { 'content-type': 'text/html' }
   }));
@@ -77,7 +77,7 @@ test('does not replace a cached JavaScript bundle with an HTML Render loading re
   const harness = createHarness(async () => new Response('<html>Render loading page</html>', {
     status: 200, headers: { 'content-type': 'text/html' }
   }));
-  const cache = await harness.caches.open('gv2vpd-pwa-shell-v7');
+  const cache = await harness.caches.open('gv2vpd-pwa-shell-v8');
   await cache.put('/app.js', new Response('window.GV2VPD = true;', {
     headers: { 'content-type': 'application/javascript' }
   }));
@@ -91,7 +91,7 @@ test('does not replace a cached JavaScript bundle with an HTML Render loading re
 
 test('migrates the previous PWA shell cache before deleting it', async () => {
   const harness = createHarness(async () => new Response('unused'));
-  const previous = await harness.caches.open('gv2vpd-pwa-shell-v6');
+  const previous = await harness.caches.open('gv2vpd-pwa-shell-v7');
   await previous.put('/', new Response('<title>GV2VPD | Live Trading Workstation</title>', {
     headers: { 'content-type': 'text/html' }
   }));
@@ -102,7 +102,7 @@ test('migrates the previous PWA shell cache before deleting it', async () => {
   const event = { waitUntil(promise) { this.pending = promise; } };
   harness.handlers.activate(event);
   await event.pending;
-  assert.ok(await (await harness.caches.open('gv2vpd-pwa-shell-v7')).match('/'));
-  assert.ok(await (await harness.caches.open('gv2vpd-pwa-shell-v7')).match('/app.js'));
-  assert.deepEqual(await harness.caches.keys(), ['gv2vpd-pwa-shell-v7']);
+  assert.ok(await (await harness.caches.open('gv2vpd-pwa-shell-v8')).match('/'));
+  assert.ok(await (await harness.caches.open('gv2vpd-pwa-shell-v8')).match('/app.js'));
+  assert.deepEqual(await harness.caches.keys(), ['gv2vpd-pwa-shell-v8']);
 });
