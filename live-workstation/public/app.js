@@ -1,5 +1,5 @@
 import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isFreshExchangeTick, isHistoryCacheFresh } from './chart-safety.js';
-import { rememberChartPlan, getRetainedChartPlan } from './chart-plan-cache.js';
+import { rememberChartPlan, getRetainedChartPlan, serializeChartPlans, restoreChartPlans } from './chart-plan-cache.js';
 import { boundedRetryDelayMs } from './request-retry.js';
 const $=id=>document.getElementById(id);
 const fmt=n=>Number(n).toLocaleString('en-IN',{maximumFractionDigits:2});
@@ -10,6 +10,7 @@ let activeChartCandles=[],activeChartSymbol='',lastChartTickStamp=0,chartVisible
 let chartLoading=false,chartReady=false,chartLiveOnly=false,serverSelectionApplied=false,accountBusy=false,lastAccountAt=0,accountRetryAt=0,accountFailures=0,accountForcePending=false,chartAttemptedFor='',optionsAttemptedFor='',optionsAttemptedAt=0,chartSelectionId=0;
 const chartRetryBySymbol=new Map();
 const chartConfirmedPlans=new Map();
+try{restoreChartPlans(chartConfirmedPlans,localStorage.getItem('gv2vpd.chart.confirmedPlans.v1')||'')}catch{}
 let gainerScanResults=[],latestGainers=[],latestGainerError='',lastGainerScanAt=0,gainerScanBusy=false;
 let mcxScanBusy=false,mcxScanTimer=null,mcxPickerRequest=0;
 let strategyScanBusy=false,lastStrategyScanAt=0;
@@ -151,11 +152,12 @@ function renderRetainedChartPlan(plan,status){
 function retainOrClearChartPlan(status,fallback){
  const retained=getRetainedChartPlan(chartConfirmedPlans,activeChartSymbol,Date.now());
  if(retained){renderRetainedChartPlan(retained,status);return}
- clearChartLevels(fallback);drawCandles(activeChartCandles);
+ clearChartLevels(fallback);if(activeChartCandles.length)drawCandles(activeChartCandles);
 }
 function updateChartPlan(){
  if(chartLiveOnly){clearChartLevels(chartHasTickGap?'NO TRADE · provisional live-only candles retained across FYERS tick gaps; missing intervals are not fabricated':'NO TRADE · REST history unavailable; live-only candles are provisional');drawCandles(activeChartCandles);return}
- if(!activeChartCandles.length||activeChartSymbol!==selected){clearChartLevels('Waiting for verified 5-minute candles');return}
+ if(activeChartSymbol!==selected){clearChartLevels('Waiting for verified 5-minute candles');return}
+ if(!activeChartCandles.length){retainOrClearChartPlan('CHART HISTORY UNAVAILABLE · DISPLAY ONLY','Waiting for verified 5-minute candles');return}
  const tick=marketSnapshot.find(x=>x.symbol===activeChartSymbol);
  if(!tick||tickAge(tick)!=='Fresh exchange tick'){retainOrClearChartPlan('UNDERLYING TICK STALE · DISPLAY ONLY','NO TRADE · underlying exchange tick is not fresh');return}
  const {completed,fresh,contiguous}=getCompletedCandleWindow(activeChartCandles,tick.exchangeTime,600,3);
@@ -164,7 +166,7 @@ function updateChartPlan(){
  if(!contiguous){retainOrClearChartPlan('CANDLE GAP · DISPLAY ONLY','NO TRADE · latest three breakout candles are not contiguous');return}
  const plan=evaluateThreeCandleBreakout(completed,Number(tick.price));
  if(plan.status!=='SETUP_CONFIRMED'||plan.target<=0){retainOrClearChartPlan('CURRENT BREAKOUT NOT RECONFIRMED · DISPLAY ONLY','WAIT · '+(plan.reason||'no one-candle breakout confirmation')+' · NO TRADE');return}
- const confirmed=rememberChartPlan(chartConfirmedPlans,activeChartSymbol,{side:plan.side,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,confirmationType:plan.confirmationType},Date.now());
+ const confirmed=rememberChartPlan(chartConfirmedPlans,activeChartSymbol,{side:plan.side,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,confirmationType:plan.confirmationType},Date.now());try{localStorage.setItem('gv2vpd.chart.confirmedPlans.v1',serializeChartPlans(chartConfirmedPlans))}catch{}
  $('entryLine').textContent=fmt(confirmed.entry);$('slLine').textContent=fmt(confirmed.stopLoss);$('targetLine').textContent=fmt(confirmed.target);
  $('chartSignal').textContent='FYERS 5-MIN '+confirmed.side+' BREAKOUT · '+confirmed.confirmationType.replaceAll('_',' ')+' · RR 1:2 · CONFIRMED '+new Date(confirmed.confirmedAt).toLocaleTimeString('en-IN');
  drawCandles(activeChartCandles,{side:confirmed.side,entry:confirmed.entry,sl:confirmed.stopLoss,target:confirmed.target});
