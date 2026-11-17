@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isFreshExchangeTick, isHistoryCacheFresh } from '../public/chart-safety.js';
 
+test('index feed accepts the exchange 30-second cadence while normal instruments retain the 10-second freshness gate',()=>{
+  const now=Date.parse('2026-11-17T06:37:36Z');
+  const indexTick={receivedAt:now-10000,exchangeTime:now/1000-10};
+  const optionTick={...indexTick};
+  assert.equal(isFreshExchangeTick(indexTick,now,40000),true);
+  assert.equal(isFreshExchangeTick(optionTick,now),false);
+});
+
 test('history cache expires instead of remaining valid indefinitely', () => {
   const now = 1_800_000_000_000;
   assert.equal(isHistoryCacheFresh(now - 59_999, now), true);
