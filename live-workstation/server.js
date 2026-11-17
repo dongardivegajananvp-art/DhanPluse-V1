@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { oauthStateStorageKey, oauthStateIsFresh, AUTH_STATE_TTL_MS } from './oauth-state.js';
 import { getNseMarketSession } from './nse-market-session.js';
 import {createSharedTokenReader} from './token-reader.js';
 import { createFyersDataApiBudget } from './fyers-rest-budget.js';
@@ -54,8 +55,6 @@ app.use(express.static(new URL('./public',import.meta.url).pathname));
 const appId=(process.env.FYERS_APP_ID||'').trim();
 const appSecret=(process.env.FYERS_APP_SECRET||'').trim();
 const redirectUri=(process.env.FYERS_REDIRECT_URI||'').trim();
-const pendingAuthStates=new Map();
-const AUTH_STATE_TTL_MS=10*60*1000;
 const tokenReader=createSharedTokenReader({databaseUrl:process.env.DATABASE_URL,encryptionKey:process.env.FYERS_TOKEN_ENCRYPTION_KEY});
 let accessToken='';
 let socket=null;
@@ -1214,29 +1213,44 @@ app.post('/api/order',async(req,res)=>{
     return res.status(502).json({error:'FYERS order result uncertain/failed; durable request lock retained. Do not retry. Check broker orderbook.',detail:String(error?.message||error).slice(0,160)});
   }
 });
-function createFyersAuthorizationUrl(){
+async function createFyersAuthorizationUrl(){
   if(!appId||!appSecret||!redirectUri||!tokenReader){const error=new Error('FYERS reconnect is not configured on this workstation.');error.status=503;error.detail={hasAppId:Boolean(appId),hasAppSecret:Boolean(appSecret),hasRedirect:Boolean(redirectUri),secureTokenStore:Boolean(tokenReader)};throw error;}
   const external=String(process.env.RENDER_EXTERNAL_URL||'').replace(/\/$/,'');
   const expectedCallback=external+'/api/fyers/auth/callback';
   if(!external||redirectUri!==expectedCallback){const error=new Error('FYERS callback URL is not configured for this GV2VPD workstation.');error.status=503;error.detail='Set FYERS_REDIRECT_URI to '+expectedCallback+' and register the exact same URL in the FYERS Developer App.';throw error;}
-  const now=Date.now();for(const [key,value] of pendingAuthStates){if(now-value.createdAt>AUTH_STATE_TTL_MS)pendingAuthStates.delete(key);}
-  const state=crypto.randomBytes(24).toString('hex');pendingAuthStates.set(state,{createdAt:now});
+  if(!orderRequestPool||!(await fyersCooldownStoreReady)){const error=new Error('Secure OAuth state storage is unavailable.');error.status=503;throw error;}
+  const now=Date.now();
+  const state=crypto.randomBytes(24).toString('hex');
+  const stateKey=oauthStateStorageKey(state);
+  await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key LIKE $1 AND (state_value->>\'createdAt\') ~ \'^[0-9]+$\' AND (state_value->>\'createdAt\')::bigint < $2',['gv2vpd-live-workstation-oauth-state:%',now-AUTH_STATE_TTL_MS]);
+  await orderRequestPool.query('INSERT INTO gv2vpd_runtime_state (state_key,state_value,updated_at) VALUES ($1,$2::jsonb,NOW()) ON CONFLICT (state_key) DO UPDATE SET state_value=EXCLUDED.state_value,updated_at=NOW()',[stateKey,JSON.stringify({createdAt:now})]);
+  console.info('FYERS OAuth authorization state persisted.',JSON.stringify({callbackPath:'/api/fyers/auth/callback',stateStored:true,createdAt:new Date(now).toISOString()}));
   const url=new URL('https://api-t1.fyers.in/api/v3/generate-authcode');url.searchParams.set('client_id',appId);url.searchParams.set('redirect_uri',redirectUri);url.searchParams.set('response_type','code');url.searchParams.set('state',state);
   return url.toString();
 }
-app.get('/api/fyers/auth/redirect',(req,res)=>{
-  try{res.set('Cache-Control','no-store').redirect(302,createFyersAuthorizationUrl());}
-  catch(error){res.status(error.status||503).json({error:error.message,detail:error.detail||null});}
+app.get('/api/fyers/auth/redirect',async(req,res)=>{
+  try{res.set('Cache-Control','no-store').redirect(302,await createFyersAuthorizationUrl());}
+  catch(error){console.error('FYERS OAuth authorization redirect unavailable.',String(error?.message||error).slice(0,160));res.status(error.status||503).json({error:error.message,detail:error.detail||null});}
 });
-app.get('/api/fyers/auth/start',(req,res)=>{
-  try{res.set('Cache-Control','no-store').json({authorizationUrl:createFyersAuthorizationUrl()});}
-  catch(error){res.status(error.status||503).json({error:error.message,detail:error.detail||null});}
+app.get('/api/fyers/auth/start',async(req,res)=>{
+  try{res.set('Cache-Control','no-store').json({authorizationUrl:await createFyersAuthorizationUrl()});}
+  catch(error){console.error('FYERS OAuth authorization URL unavailable.',String(error?.message||error).slice(0,160));res.status(error.status||503).json({error:error.message,detail:error.detail||null});}
 });
 
 app.get('/api/fyers/auth/callback',async(req,res)=>{
-  const code=typeof req.query.auth_code==='string'?req.query.auth_code.trim():'';const state=typeof req.query.state==='string'?req.query.state.trim():'';const pending=pendingAuthStates.get(state);
-  if(!code||code.length>4096||!state||!pending||Date.now()-pending.createdAt>AUTH_STATE_TTL_MS){if(state)pendingAuthStates.delete(state);return res.status(400).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>FYERS login could not be verified</h2><p>The authorization code or one-time state is missing or expired. Return to GV2VPD and tap Connect / Reconnect FYERS again.</p><a href="/">Return to GV2VPD</a>');}
-  pendingAuthStates.delete(state);
+  const code=typeof req.query.auth_code==='string'?req.query.auth_code.trim():'';const state=typeof req.query.state==='string'?req.query.state.trim():'';
+  console.info('FYERS OAuth callback received.',JSON.stringify({hasCode:Boolean(code),hasState:Boolean(state)}));
+  let pending=null;
+  try{
+    if(state&&orderRequestPool&&await fyersCooldownStoreReady){
+      const consumed=await orderRequestPool.query('DELETE FROM gv2vpd_runtime_state WHERE state_key=$1 RETURNING state_value',[oauthStateStorageKey(state)]);
+      pending=consumed.rows?.[0]?.state_value??null;
+    }
+  }catch(error){console.error('FYERS OAuth state consumption failed.',String(error?.message||error).slice(0,160));return res.status(503).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>Secure login state could not be checked</h2><p>No session was activated. Return to GV2VPD and try Connect / Reconnect FYERS again.</p><a href="/">Return to GV2VPD</a>');}
+  if(!code||code.length>4096||!state||!oauthStateIsFresh(pending)){
+    console.warn('FYERS OAuth callback rejected before token exchange.',JSON.stringify({hasCode:Boolean(code),hasState:Boolean(state),stateFound:Boolean(pending),stateFresh:oauthStateIsFresh(pending)}));
+    return res.status(400).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>FYERS login could not be verified</h2><p>The authorization code or one-time state is missing, expired, or already used. Return to GV2VPD and tap Connect / Reconnect FYERS again.</p><a href="/">Return to GV2VPD</a>');
+  }
   if(!appId||!appSecret||!redirectUri||!tokenReader)return res.status(503).type('html').send('<!doctype html><meta name="viewport" content="width=device-width"><title>GV2VPD FYERS login</title><h2>Secure FYERS storage is unavailable</h2><p>Connection was not activated. Check the existing workstation configuration.</p><a href="/">Return to GV2VPD</a>');
   try{
     const appIdHash=crypto.createHash('sha256').update(appId+':'+appSecret).digest('hex');
