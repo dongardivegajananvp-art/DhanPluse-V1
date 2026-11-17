@@ -1010,6 +1010,14 @@ async function refreshStrategyActivePlans(force=false){
  const reconciled=[];
  for(const plan of (result.plans||[])){
   const lifecycle=evaluateActivePlanLifecycle(plan,lastTicks.get(plan.contract),Date.now());
+  if(lifecycle.status==='ENTRY_HIT'&&!plan.entry_hit_at){
+   const hit=await strategyPlanStore.markEntryHit(plan.plan_id||plan.planId,lifecycle.price,Date.now());
+   if(!hit.ok){
+    reconciled.push({...plan,lifecycleState:'ENTRY_HIT_PERSIST_PENDING',lifecycleReason:hit.reason||'Entry reached but durable entry-hit write is pending'});
+    continue;
+   }
+   plan={...plan,entry_hit_at:hit.entryHitAt,entry_hit_price:hit.entryHitPrice};
+  }
   if(['EXPIRED','STOP_LOSS_HIT','TARGET_HIT'].includes(lifecycle.status)){
    const terminalStatus=lifecycle.status==='STOP_LOSS_HIT'?'STOP_LOSS_HIT':lifecycle.status==='TARGET_HIT'?'TARGET_HIT':'EXPIRED';
    const closed=await strategyPlanStore.closePlan(plan.plan_id||plan.planId,terminalStatus);
