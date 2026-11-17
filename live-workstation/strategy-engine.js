@@ -273,7 +273,7 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   consider('BULLISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'LONG'));
   consider('BEARISH_CONTINUATION',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectContinuation(rows,'SHORT'));
   consider('FLAG_BREAKOUT_VOLUME',contiguousWindow(rows,30,sessionStartMinute,sessionCloseMinute),()=>detectFlagVolume(rows));
-  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=4&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute));
+  consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=2&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute));
   if(!candidates.length){
     if(!evaluated.length)return fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', '));
     return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked};
