@@ -139,10 +139,12 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
       option_received_at TIMESTAMPTZ,
       underlying_candle_time VARCHAR(40) NOT NULL,
       option_candle_time VARCHAR(40) NOT NULL,
-      status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CLOSED','CANCELLED')),
+      status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CLOSED','CANCELLED','STOP_LOSS_HIT','TARGET_HIT','EXPIRED')),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       closed_at TIMESTAMPTZ
     );
+    ALTER TABLE gv2vpd_strategy_plans DROP CONSTRAINT IF EXISTS gv2vpd_strategy_plans_status_check;
+    ALTER TABLE gv2vpd_strategy_plans ADD CONSTRAINT gv2vpd_strategy_plans_status_check CHECK (status IN ('ACTIVE','CLOSED','CANCELLED','STOP_LOSS_HIT','TARGET_HIT','EXPIRED'));
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS premium NUMERIC(18,6);
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS tick_size NUMERIC(18,6);
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS underlying_received_at TIMESTAMPTZ;
@@ -211,8 +213,19 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
         return { ok: false, status: 'DATA_UNAVAILABLE_NO_TRADE', plans: [] };
       }
     },
+    async listRecentTerminalPlans(limit = 20) {
+      if (!await ready) return { ok: false, plans: [] };
+      try {
+        const safeLimit=Math.max(1,Math.min(50,Math.trunc(Number(limit)||20)));
+        const result=await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,underlying_candle_time,option_candle_time,status,created_at,closed_at FROM gv2vpd_strategy_plans WHERE status IN ('STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CLOSED','CANCELLED') ORDER BY closed_at DESC NULLS LAST,created_at DESC LIMIT $1",[safeLimit]);
+        return { ok:true, plans:result.rows||[] };
+      } catch(error) {
+        console.error('Terminal strategy plan history read failed.',String(error?.message||error).slice(0,160));
+        return { ok:false, plans:[] };
+      }
+    },
     async closePlan(planId, status = 'CLOSED') {
-      if (!['CLOSED','CANCELLED'].includes(status)) return { ok: false, reason: 'Only CLOSED or CANCELLED transitions are allowed' };
+      if (!['CLOSED','CANCELLED','STOP_LOSS_HIT','TARGET_HIT','EXPIRED'].includes(status)) return { ok: false, reason: 'Unsupported terminal plan status' };
       if (!await ready) return { ok: false, reason: 'Persistent strategy plan ledger is unavailable' };
       try {
         const result = await pool.query("UPDATE gv2vpd_strategy_plans SET status=$2,closed_at=NOW() WHERE plan_id=$1 AND status='ACTIVE' RETURNING plan_id,status", [planId,status]);

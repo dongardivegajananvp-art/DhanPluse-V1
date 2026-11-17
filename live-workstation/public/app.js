@@ -77,6 +77,13 @@ function renderStrategyScanner(data){
   const detail=document.createElement('span');detail.textContent=[plan.lifecycleState||'ACTIVE',plan.lifecycleReason,plan.contract,plan.option_side,plan.expiry,'STRIKE '+plan.strike,'PREMIUM '+fmt(plan.premium),'ENTRY '+fmt(plan.entry),'SL '+fmt(plan.stop_loss),'TARGET '+fmt(plan.target),'RR '+plan.rr].filter(Boolean).join(' | ');
   card.append(title,detail);active.append(card);
  }
+ const terminal=Array.isArray(data.terminalPlans)?data.terminalPlans:[];
+ for(const plan of terminal){
+  const card=document.createElement('article');card.className='strategy-result';
+  const title=document.createElement('b');title.textContent='HISTORY · '+String(plan.status||'CLOSED').replaceAll('_',' ')+' · '+(plan.underlying||'');
+  const detail=document.createElement('span');detail.textContent=[plan.strategy,plan.contract,plan.option_side,plan.expiry,'STRIKE '+plan.strike,'ENTRY '+fmt(plan.entry),'SL '+fmt(plan.stop_loss),'TARGET '+fmt(plan.target),'RR '+plan.rr,plan.hitPrice?'HIT PRICE '+fmt(plan.hitPrice):'',plan.closed_at?'AT '+new Date(plan.closed_at).toLocaleString('en-IN'):''].filter(Boolean).join(' | ');
+  card.append(title,detail);active.append(card);
+ }
 }
 async function refreshStrategyScanner(){
  if(strategyScanBusy||Date.now()-lastStrategyScanAt<10000)return;

@@ -5,7 +5,7 @@ import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy
 class FakePool {
   constructor() { this.plans = []; this.closed = false; }
   async query(sql, values = []) {
-    if (sql.includes('CREATE TABLE') || sql.includes('CREATE UNIQUE INDEX') || sql.includes('CREATE INDEX')) return { rows: [] };
+    if (sql.includes('CREATE TABLE') || sql.includes('CREATE UNIQUE INDEX') || sql.includes('CREATE INDEX') || sql.includes('ALTER TABLE')) return { rows: [] };
     if (sql.includes('SELECT COUNT(*)')) return { rows: [{ count: this.plans.filter(p => p.status === 'ACTIVE').length }] };
     if (sql.includes('SELECT plan_id FROM')) {
       const found = this.plans.filter(p => p.status === 'ACTIVE' && (p.underlying === values[0] || p.contract === values[1]));
@@ -19,6 +19,7 @@ class FakePool {
       this.plans.push({ planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,underlyingCandleTime,optionCandleTime,status:'ACTIVE' });
       return { rows: [] };
     }
+    if (sql.includes('SELECT plan_id,strategy') && sql.includes('status IN')) return { rows: this.plans.filter(p => ['STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CLOSED','CANCELLED'].includes(p.status)).slice(0,20).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
     if (sql.includes('SELECT plan_id,strategy')) return { rows: this.plans.filter(p => p.status === 'ACTIVE').slice(0,2).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
     if (sql.includes('UPDATE gv2vpd_strategy_plans')) {
       const p = this.plans.find(x => x.planId === values[0] && x.status === 'ACTIVE');
@@ -97,14 +98,19 @@ test('ledger allows at most two active plans and rejects duplicate underlying or
   await store.close();
 });
 
-test('closing a plan releases the active slot without changing its fixed risk values', async () => {
+test('SL/Target hit terminal status releases active slot but permanently retains fixed Entry/SL/Target/RR', async () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
   const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
-  await store.saveConfirmedPlan(fixture(now),now);
-  const closed = await store.closePlan('plan-one');
+  const plan=fixture(now);
+  await store.saveConfirmedPlan(plan,now);
+  const closed = await store.closePlan('plan-one','STOP_LOSS_HIT');
   assert.equal(closed.ok,true);
   const active = await store.listActivePlans();
   assert.equal(active.plans.length,0);
+  const history=await store.listRecentTerminalPlans();
+  assert.equal(history.plans.length,1);
+  assert.equal(history.plans[0].status,'STOP_LOSS_HIT');
+  assert.deepEqual([history.plans[0].entry,history.plans[0].stopLoss,history.plans[0].target,history.plans[0].rr],[100.05,98.5,103.15,2]);
   assert.equal((await store.closePlan('plan-one','ACTIVE')).ok,false);
   await store.close();
 });
