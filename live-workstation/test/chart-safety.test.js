@@ -117,6 +117,18 @@ test('early short entry confirms on live tick through the completed breakout can
   assert.equal(plan.confirmationType, 'EARLY_LIVE_LOW_BREAK');
   assert.deepEqual([plan.entry,plan.stopLoss,plan.target],[97,101,89]);
 });
+test('MCX chart confirmation keeps the original three-completed-candle rule and does not use NSE early entry',()=>{
+ const twoBars=[
+  {time:900,open:99,high:100,low:98,close:99.5},
+  {time:1200,open:99.5,high:103,low:99,close:102}
+ ];
+ assert.equal(evaluateThreeCandleBreakout(twoBars,103,{allowEarlyEntry:false}).status,'WAIT');
+ const threeBars=[...twoBars,{time:1500,open:102,high:104,low:101,close:103}];
+ const plan=evaluateThreeCandleBreakout(threeBars,103.5,{allowEarlyEntry:false});
+ assert.equal(plan.status,'SETUP_CONFIRMED');
+ assert.equal(plan.confirmationType,'ONE_CANDLE_HOLD');
+ assert.deepEqual([plan.entry,plan.stopLoss,plan.target,plan.rr],[103,101,107,'1:2']);
+});
 test('early breakout blocks chasing beyond 0.25R', () => {
   const bars = [
     { time: 900, open: 99, high: 100, low: 98, close: 99.5 },

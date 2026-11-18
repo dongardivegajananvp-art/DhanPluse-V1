@@ -226,6 +226,18 @@ test('ledger persists a verified MCX option plan with fixed 1:2 risk values', as
   assert.equal(listed.plans[0].underlying,'MCX:CRUDEOIL26NOVFUT');
   assert.equal(listed.plans[0].contract,'MCX:CRUDEOIL26NOV7500CE');
   assert.deepEqual([saved.entry,saved.stopLoss,saved.target,saved.rr],[100.05,98.5,103.15,2]);
+  assert.equal(listed.plans[0].entry_hit_at,null);
+  const firstHit=await store.markEntryHit(saved.planId,100.10,now+1000);
+  assert.equal(firstHit.ok,true);
+  assert.equal(firstHit.entryHitPrice,100.10);
+  const duplicateHit=await store.markEntryHit(saved.planId,100.15,now+2000);
+  assert.equal(duplicateHit.ok,true);
+  assert.equal(duplicateHit.alreadyRecorded,true);
+  assert.equal(duplicateHit.entryHitPrice,100.10);
+  const [afterHit]=(await store.listActivePlans()).plans;
+  assert.ok(afterHit.entry_hit_at);
+  assert.equal(Number(afterHit.entry_hit_price),100.10);
+  assert.equal(evaluateActivePlanLifecycle(afterHit,{price:100.5,receivedAt:now+3000,exchangeTime:(now+3000)/1000},now+3000).status,'ENTRY_HIT');
   await store.close();
 });
 
