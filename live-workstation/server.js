@@ -20,6 +20,7 @@ import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
 import { evaluateIndexMarketRegime, unavailableMarketRegime } from './market-regime.js';
 import { getResearchHistoryDiagnostics, rankResearchResults } from './ai-research-engine.js';
+import { claimPendingCandidateProcessing, releasePendingCandidateProcessing } from './pending-option-dispatch.js';
 import { buildProRiskPlan } from './pro-risk-engine.js';
 import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
 import 'dotenv/config';
@@ -425,6 +426,11 @@ function ensureSocket(){
         const tickAcceptance=acceptExchangeTick(lastTicks.get(symbol),tick);
         if(!tickAcceptance.accepted){if(tickAcceptance.reason==='OUT_OF_ORDER_EXCHANGE_TIMESTAMP'||tickAcceptance.reason==='FUTURE_EXCHANGE_TIMESTAMP'){console.warn('FYERS tick rejected by monotonic timestamp guard.',JSON.stringify({symbol,reason:tickAcceptance.reason,exchangeTimestamp:new Date(stamp*1000).toISOString()}));}continue;}
         lastTicks.set(symbol,tick);
+        if(strategyPendingCandidates.size){
+          for(const candidate of strategyPendingCandidates.values()){
+            if(candidate.contract?.symbol===symbol||candidate.futureSymbol===symbol)void processPendingStrategyCandidate(candidate);
+          }
+        }
         const previousSymbolGap=symbolTickGapSamples.get(symbol)||{lastReceivedAt:0,samples:[]};
         const symbolReceiveGap=previousSymbolGap.lastReceivedAt?tick.receivedAt-previousSymbolGap.lastReceivedAt:null;
         const symbolSamples=symbolReceiveGap!==null&&symbolReceiveGap>=0?[...previousSymbolGap.samples,symbolReceiveGap].slice(-20):previousSymbolGap.samples;
@@ -563,7 +569,7 @@ async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
   }
   if (accepted) lastAcceptedTickAt = new Date().toISOString();
   console.info('FYERS REST quote recovery completed.', JSON.stringify({
-    requested: unique.length, acceptedFreshExchangeTicks: accepted, rejectedOrStale: rejected,
+    requested: unique.length, symbols:unique, acceptedFreshExchangeTicks: accepted, rejectedOrStale: rejected,
     at: new Date().toISOString(), cooldownActive: fetchWithFyersBudget.getStatus().cooldownActive
   }));
 }
@@ -1047,7 +1053,7 @@ async function refreshStrategyActivePlans(force=false){
 }
 async function processPendingStrategyCandidate(candidate){
  const optionTick=lastTicks.get(candidate.contract.symbol),underlyingTick=lastTicks.get(candidate.futureSymbol);
- if(!freshTick(optionTick)||!freshTick(underlyingTick))return false;
+ if(!claimPendingCandidateProcessing(candidate,{optionTick,underlyingTick,isFresh:freshTick}))return false;
  try{
   const officialMaster=candidate.underlyingSymbol.startsWith('BSE:')?await loadBseFoMaster():await loadNseFoMaster();
   const officialContract=optionMeta(candidate.contract.symbol,officialMaster);
@@ -1139,6 +1145,8 @@ async function processPendingStrategyCandidate(candidate){
   if(Number(error?.statusCode)===429){strategyScanLastError='FYERS REST cooldown; scanner paused without another upstream request';return false;}
   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,160),strategy:candidate.setup.strategy});
   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_error'});return true;
+ }finally{
+  releasePendingCandidateProcessing(candidate);
  }
 }
 async function refreshIndexMarketRegime(){
@@ -1190,7 +1198,14 @@ async function runAutomaticStrategyScan(){
   let expired=false;
   for(const candidate of strategyPendingCandidates.values()){
    if(Date.now()-candidate.createdAt>120000){strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason:'Option tick did not become fresh within 120 seconds',strategy:candidate.setup.strategy});expired=true;continue;}
-   if(freshTick(lastTicks.get(candidate.contract.symbol))){await processPendingStrategyCandidate(candidate);return;}
+   const pendingSymbols=[candidate.contract.symbol,candidate.futureSymbol].filter(symbol=>!freshTick(lastTicks.get(symbol)));
+   if(pendingSymbols.length){
+    // One targeted FYERS quote snapshot can recover a quiet option/future while
+    // preserving the exchange-time freshness gate. The shared 30s REST throttle
+    // and global cooldown still apply; no symbol fanout or stale quote promotion.
+    await recoverStaleSubscriptionsViaQuotes(pendingSymbols);
+   }
+   if(freshTick(lastTicks.get(candidate.contract.symbol))&&freshTick(lastTicks.get(candidate.futureSymbol))){await processPendingStrategyCandidate(candidate);return;}
   }
   if(expired)syncSocketSubscriptions({reason:'strategy_candidate_timeout'});
   const freshGainerWindow=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<60*1000?fnoMoversCache.rows:[];
@@ -1233,6 +1248,8 @@ async function runAutomaticStrategyScan(){
    strategyPendingCandidates.set(key,{key,futureSymbol,underlyingSymbol:row.underlyingSymbol,setup,marketRegime,contract,underlyingCandles:history.candles,dailyCandles:daily.ok?daily.candles:[],isTopGainer,createdAt:Date.now()});
    strategyOptionSymbols.add(contract.symbol);syncSocketSubscriptions({reason:'strategy_option_candidate'});
    setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'WAITING_FOR_FRESH_OPTION_TICK',strategy:setup.strategy,optionSide,contract:contract.symbol,expiry:contract.expiry,strike:contract.strike,research:setup.research||null,reason:'Underlying setup verified; waiting for fresh option exchange tick and completed option candles'});
+   const pendingCandidate=strategyPendingCandidates.get(key);
+   if(pendingCandidate&&freshTick(lastTicks.get(contract.symbol))&&freshTick(lastTicks.get(futureSymbol)))void processPendingStrategyCandidate(pendingCandidate);
    return;
   }
  }catch(error){strategyScanLastError=String(error?.message||error).slice(0,180);if(Number(error?.statusCode)!==429)console.warn('Automatic nine-strategy scan paused safely.',strategyScanLastError);}
