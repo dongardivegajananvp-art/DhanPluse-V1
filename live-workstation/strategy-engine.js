@@ -1,5 +1,5 @@
 import { getCompletedCandleWindow } from './public/chart-safety.js';
-import { analyzeSetupResearch } from './ai-research-engine.js';
+import { analyzeEarlyWatch, analyzeSetupResearch } from './ai-research-engine.js';
 
 const INTERVAL_SECONDS = 300;
 const MAX_ACTIVE_TRADES = 2;
@@ -285,6 +285,10 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   consider('OPENING_RANGE_BREAKOUT',sessionRows.length>=1&&sessionContiguous,()=>detectOpeningRange(rows,sessionStartMinute,number(underlyingTick.price)));
   if(!candidates.length){
     if(!evaluated.length)return fail('No strategy had its required fresh, contiguous candle window; blocked: '+blocked.join(', '));
+    if(researchEnabled){
+      const watch=analyzeEarlyWatch({candles:rows,dailyCandles,tick:underlyingTick,now});
+      if(watch.status==='WATCH')return{status:'EARLY_WATCH',...watch,underlyingPrice:number(underlyingTick.price),evaluatedStrategies:evaluated,blockedStrategies:blocked};
+    }
     return{status:'NO_TRADE',reason:'No eligible strategy confirmed a completed-candle setup',evaluatedStrategies:evaluated,blockedStrategies:blocked};
   }
   if(researchEnabled){
