@@ -15,6 +15,7 @@ import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates } from '
 import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
 import { buildFnoUniverse, buildLiveFnoMovers, selectFairSubscriptionBatch, summarizeFnoCoverage } from './fno-universe.js';
 import { fyersExpiryEpochSeconds as toEpochSeconds } from './expiry-date.js';
+import { buildFyersHistoryRange, normalizeCompletedFyersCandles } from './research-history.js';
 import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy-plan-store.js';
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
 import { evaluateIndexMarketRegime, unavailableMarketRegime } from './market-regime.js';
@@ -977,6 +978,11 @@ async function refreshTopGainerOptionWatches(rows){
  const eligibleRows=(Array.isArray(rows)?rows:[]).slice(0,5).map(row=>({row,tick:freshTick(lastTicks.get(row.underlyingSymbol))?lastTicks.get(row.underlyingSymbol):lastTicks.get(row.symbol)})).filter(item=>freshTick(item.tick));
  if(!eligibleRows.length){strategyWarmRefreshAt=0;return;}
  strategyWarmRefreshBusy=true;strategyWarmRefreshAt=Date.now();
+ const restStatus=fetchWithFyersBudget.getStatus();
+ if(!fyersRestBudgetReady||restStatus.cooldownActive||restStatus.recoveryProbeRequired){
+  console.info('GV2VPD option prewarm paused locally; FYERS REST budget is not ready.',JSON.stringify({budgetReady:fyersRestBudgetReady,cooldownActive:Boolean(restStatus.cooldownActive),recoveryProbeRequired:Boolean(restStatus.recoveryProbeRequired)}));
+  return;
+ }
  const next=new Set(),watched=[];
  try{
   for(const {row,tick} of eligibleRows){
@@ -1250,8 +1256,8 @@ async function loadGainerHistory(symbol,{force=false,priority=20}={}){
   const error=new Error(retry.reason+'; symbol history retry deferred');
   error.statusCode=retry.statusCode||503;error.retryAfterMs=retry.retryAt-nowMs;throw error;
  }
- const now=Math.floor(nowMs/1000),to=now-300,from=to-5*24*60*60;
- const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(from),range_to:String(to),cont_flag:'1'});
+ const now=Math.floor(nowMs/1000),range=buildFyersHistoryRange({nowSeconds:now,lookbackDays:15});
+ const params=new URLSearchParams({symbol,resolution:'5',date_format:'0',range_from:String(range.rangeFrom),range_to:String(range.rangeTo),cont_flag:'1'});
  let response,payload;
  try{
   response=await fyersRestFetch('https://api-t1.fyers.in/data/history?'+params.toString(),{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:15000,priority});
@@ -1260,9 +1266,11 @@ async function loadGainerHistory(symbol,{force=false,priority=20}={}){
    const error=new Error('FYERS 5-minute history unavailable ('+(response.status||'invalid payload')+'): '+String(payload.message||payload.code||'invalid candle response').slice(0,120));
    error.statusCode=response.status||502;error.retryAfterMs=Number(payload.retryAfterSeconds)*1000||fyersRetryAfterMs(response);throw error;
   }
-  const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))&&Number(c[3])>0).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
-  if(!candles.length)throw Object.assign(new Error('FYERS returned no valid 5-minute OHLC rows'),{statusCode:502});
-  const result={symbol,candles,source:'FYERS Data API',cachedAt:Date.now(),fetchedAt:new Date().toISOString()};
+  const normalized=normalizeCompletedFyersCandles(payload.candles,now);
+  const candles=normalized.candles;
+  if(!candles.length)throw Object.assign(new Error('FYERS returned no valid completed 5-minute OHLC rows'),{statusCode:502});
+  const result={symbol,candles,source:'FYERS Data API',cachedAt:Date.now(),fetchedAt:new Date().toISOString(),historyDiagnostics:{lookbackDays:range.lookbackDays,candleCount:candles.length,invalidCount:normalized.invalidCount,partialCount:normalized.partialCount,duplicateCount:normalized.duplicateCount,firstCandleTime:candles[0].time,lastCandleTime:candles.at(-1).time}};
+  console.info('FYERS NSE research history normalized.',JSON.stringify({symbol,...result.historyDiagnostics}));
   gainerHistoryCache.set(symbol,result);gainerHistoryRetry.delete(symbol);gainerHistoryFailures.delete(symbol);return result;
  }catch(error){
   const attempts=(gainerHistoryFailures.get(symbol)||0)+1;gainerHistoryFailures.set(symbol,attempts);
