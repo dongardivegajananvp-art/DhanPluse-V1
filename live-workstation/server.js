@@ -9,6 +9,8 @@ import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRes
 import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { historyRetryDelayMs, shouldAttemptHistoryRetry } from './history-retry-policy.js';
 import { acceptExchangeTick, exchangeTickFreshness, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
+import { reserveStrategyWarmRefresh, releaseStrategyWarmRefresh } from './strategy-warm-refresh-policy.js';
+import { resolveFnoRotationCursor } from './fno-rotation-state.js';
 import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
 import { sameStrategyConfirmation, validateOptionCandles, validateOptionContractIdentity, validateOptionPremiumTick } from './strategy-candidate-guard.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates } from './mcx-options.js';
@@ -147,7 +149,7 @@ let accountSnapshot=null,accountSnapshotFetchedAt=0,accountFetchPromise=null,acc
 const subscribedSymbols=new Set();
 const strategyOptionSymbols=new Set();
 const strategyWarmOptionSymbols=new Set();
-let strategyWarmRefreshAt=0,strategyWarmRefreshBusy=false;
+const strategyWarmRefreshState={lastAt:0,busy:false};
 let lastStrategyGainerDiscoveryAt=0;
 const strategyPendingCandidates=new Map();
 const strategyScanLastAttempt=new Map();
@@ -168,6 +170,8 @@ let strategyLedgerRuntimeReady=false;
 const FYERS_DATA_SYMBOL_LIMIT=80; // Keep 20 account-wide slots free for other active FYERS API connections and transition overlap.
 let subscriptionTransitionTimer=null;
 let fnoUniverseRows=[],fnoUniverseFetchedAt=0,fnoUniversePromise=null,fnoUniverseCursor=0,fnoUniverseActiveCursor=0,fnoScanSubscriptionSymbols=[],fnoUniverseError='Not loaded',lastFnoRotationAt=null,fnoRotationCount=0,lastFnoUniverseRetryAt=0;
+const FNO_ROTATION_STATE_KEY='gv2vpd-live-workstation-fno-rotation-cursor';
+let savedFnoRotationState=null,fnoRotationPersistenceReady=false,fnoRotationStateApplied=false;
 const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
 function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!socket||!connected)return {subscribed:0,removed:0};
@@ -263,6 +267,36 @@ const fetchWithFyersBudget=createFyersDataApiBudget({
     return true;
   }
 });
+async function restoreFnoRotationState(){
+  try{
+    const result=await orderRequestPool.query('SELECT state_value FROM gv2vpd_runtime_state WHERE state_key=$1',[FNO_ROTATION_STATE_KEY]);
+    let saved=result.rows?.[0]?.state_value??null;
+    if(typeof saved==='string'){try{saved=JSON.parse(saved);}catch{saved=null;}}
+    savedFnoRotationState=saved&&typeof saved==='object'&&!Array.isArray(saved)?saved:null;
+    fnoRotationPersistenceReady=true;
+    console.info('FYERS F&O rotation cursor persistence ready.',JSON.stringify({
+      restored:Boolean(savedFnoRotationState),activeSymbol:savedFnoRotationState?.activeSymbol||null,
+      activeCursor:Number.isInteger(savedFnoRotationState?.activeCursor)?savedFnoRotationState.activeCursor:null
+    }));
+    return true;
+  }catch(error){
+    fnoRotationPersistenceReady=false;
+    console.warn('FYERS F&O rotation cursor restore unavailable; in-memory rotation remains active.',String(error?.message||error).slice(0,140));
+    return false;
+  }
+}
+async function persistFnoRotationState(){
+  if(!fnoRotationPersistenceReady||!orderRequestPool||!fnoUniverseRows.length)return false;
+  const activeCursor=((Math.trunc(fnoUniverseActiveCursor)%fnoUniverseRows.length)+fnoUniverseRows.length)%fnoUniverseRows.length;
+  const state={activeSymbol:fnoUniverseRows[activeCursor]?.futureSymbol||null,activeCursor,universeCount:fnoUniverseRows.length,updatedAt:new Date().toISOString()};
+  await orderRequestPool.query(
+    `INSERT INTO gv2vpd_runtime_state (state_key,state_value,updated_at) VALUES ($1,$2::jsonb,NOW())
+     ON CONFLICT (state_key) DO UPDATE SET state_value=EXCLUDED.state_value,updated_at=NOW()`,
+    [FNO_ROTATION_STATE_KEY,JSON.stringify(state)]
+  );
+  console.info('FYERS F&O rotation cursor persisted.',JSON.stringify({activeSymbol:state.activeSymbol,activeCursor,universeCount:state.universeCount}));
+  return true;
+}
 async function initializeFyersRestBudget(){
   try{
     if(!orderRequestPool||!(await fyersCooldownStoreReady))throw new Error('Durable PostgreSQL cooldown store is unavailable');
@@ -336,6 +370,20 @@ async function refreshFnoUniverse(force=false){
     const rows=buildNseFnoUniverse({nseMaster,now:Date.now()});
     if(!rows.length)throw new Error('Official FYERS NSE Symbol Master returned no active, unexpired NSE F&O futures');
     fnoUniverseRows=rows;
+    if(!fnoRotationStateApplied){
+      const cursor=resolveFnoRotationCursor({
+        universeSymbols:rows.map(row=>row.futureSymbol),
+        savedActiveSymbol:savedFnoRotationState?.activeSymbol||'',
+        savedActiveCursor:savedFnoRotationState?.activeCursor
+      });
+      fnoUniverseCursor=cursor;
+      fnoUniverseActiveCursor=cursor;
+      fnoRotationStateApplied=true;
+      console.info('FYERS F&O rotation cursor restored for the active subscription window.',JSON.stringify({
+        restored:Boolean(savedFnoRotationState),activeSymbol:rows[cursor]?.futureSymbol||null,
+        activeCursor:cursor,universeCount:rows.length
+      }));
+    }
     fnoUniverseFetchedAt=Date.now();
     fnoUniverseError='';
     console.info('Verified FYERS NSE-only F&O universe loaded.',JSON.stringify({underlyings:rows.length,nse:rows.length,bse:0,scope:'NSE_ONLY',loadedAt:new Date(fnoUniverseFetchedAt).toISOString()}));
@@ -346,6 +394,7 @@ async function refreshFnoUniverse(force=false){
 function rotateFnoUniverseSubscriptions(reason='scheduled_rotation'){
   if(!fnoUniverseRows.length)return{symbols:0,universe:0,limit:FYERS_DATA_SYMBOL_LIMIT};
   const result=syncSocketSubscriptions({reason});
+  if(!result.error)void persistFnoRotationState().catch(error=>console.warn('FYERS F&O rotation cursor persistence failed.',String(error?.message||error).slice(0,140)));
   console.info('FYERS F&O rotating subscription window updated.',JSON.stringify({reason,activeFutureSymbols:fnoScanSubscriptionSymbols.length,universeCount:fnoUniverseRows.length,symbolLimit:FYERS_DATA_SYMBOL_LIMIT,nextCursor:fnoUniverseCursor,subscribed:result.subscribed,removed:result.removed,error:result.error||null}));
   return{symbols:fnoScanSubscriptionSymbols.length,universe:fnoUniverseRows.length,limit:FYERS_DATA_SYMBOL_LIMIT,nextCursor:fnoUniverseCursor,error:result.error||null};
 }
@@ -982,13 +1031,16 @@ async function loadStrategyOptionContracts(underlying){
  return contracts;
 }
 async function refreshTopGainerOptionWatches(rows){
- if(strategyWarmRefreshBusy||Date.now()-strategyWarmRefreshAt<30000||mcxFutureRoot(selectedSymbol)||!isNseSubscriptionSession())return;
+ if(strategyWarmRefreshState.busy||Date.now()-strategyWarmRefreshState.lastAt<30000||mcxFutureRoot(selectedSymbol)||!isNseSubscriptionSession())return;
  const eligibleRows=(Array.isArray(rows)?rows:[]).slice(0,5).map(row=>({row,tick:freshTick(lastTicks.get(row.underlyingSymbol))?lastTicks.get(row.underlyingSymbol):lastTicks.get(row.symbol)})).filter(item=>freshTick(item.tick));
- if(!eligibleRows.length){strategyWarmRefreshAt=0;return;}
- strategyWarmRefreshBusy=true;strategyWarmRefreshAt=Date.now();
+ if(!eligibleRows.length){strategyWarmRefreshState.lastAt=0;return;}
  const restStatus=fetchWithFyersBudget.getStatus();
- if(!fyersRestBudgetReady||restStatus.cooldownActive||restStatus.recoveryProbeRequired){
-  console.info('GV2VPD option prewarm paused locally; FYERS REST budget is not ready.',JSON.stringify({budgetReady:fyersRestBudgetReady,cooldownActive:Boolean(restStatus.cooldownActive),recoveryProbeRequired:Boolean(restStatus.recoveryProbeRequired)}));
+ const reservation=reserveStrategyWarmRefresh(strategyWarmRefreshState,{
+  now:Date.now(),minIntervalMs:30000,budgetReady:fyersRestBudgetReady,
+  cooldownActive:Boolean(restStatus.cooldownActive),recoveryProbeRequired:Boolean(restStatus.recoveryProbeRequired)
+ });
+ if(!reservation.reserved){
+  if(reservation.reason==='REST_PAUSED')console.info('GV2VPD option prewarm paused locally; FYERS REST budget is not ready.',JSON.stringify({budgetReady:fyersRestBudgetReady,cooldownActive:Boolean(restStatus.cooldownActive),recoveryProbeRequired:Boolean(restStatus.recoveryProbeRequired)}));
   return;
  }
  const next=new Set(),watched=[];
@@ -1009,7 +1061,7 @@ async function refreshTopGainerOptionWatches(rows){
   const current=[...strategyWarmOptionSymbols].sort().join('|');
   if(previous!==current)syncSocketSubscriptions({reason:'top_gainer_option_prewarm'});
   console.info('GV2VPD top-gainer option watches refreshed.',JSON.stringify({gainerCount:Math.min(5,(rows||[]).length),prewarmedOptionCount:next.size,watches:watched}));
- }finally{strategyWarmRefreshBusy=false;}
+ }finally{releaseStrategyWarmRefresh(strategyWarmRefreshState);}
 }
 function setStrategyScanResult(item){
  if(item.futureSymbol)console.info('GV2VPD strategy candidate decision.',JSON.stringify({underlying:item.underlying||null,futureSymbol:item.futureSymbol,status:item.status||'UNKNOWN',strategy:item.strategy||null,contract:item.contract||null,reason:item.reason||null,entry:item.entry??null,stopLoss:item.stopLoss??null,target:item.target??null,rr:item.rr??null,updatedAt:item.updatedAt||new Date().toISOString()}));
@@ -1539,6 +1591,7 @@ async function restoreSharedFyersSession(){
 async function startWorkstation(){
   startupState='STARTING';
   const restReady=await initializeFyersRestBudget();
+  const rotationStateReady=await restoreFnoRotationState();
   await restoreSelectedMcxInstrument();
   const sessionReady=await restoreSharedFyersSession();
   try{
@@ -1547,7 +1600,7 @@ async function startWorkstation(){
   }catch(error){console.warn('Strategy plan restore unavailable; new entries remain blocked.',String(error?.message||error).slice(0,160));}
   startupState=restReady&&sessionReady&&strategyLedgerRuntimeReady?'INITIALIZED':'DEGRADED';
   startupError=[!restReady?'REST_BUDGET_NOT_READY':'',!sessionReady?'FYERS_SESSION_NOT_RESTORED':'',!strategyLedgerRuntimeReady?'STRATEGY_LEDGER_NOT_READY':''].filter(Boolean).join(',');
-  console.info('GV2VPD startup readiness resolved.',JSON.stringify({startupState,restBudgetReady:restReady,sharedSessionRestored:sessionReady,authenticated:authReady(),socketConnected:connected,at:new Date().toISOString()}));
+  console.info('GV2VPD startup readiness resolved.',JSON.stringify({startupState,restBudgetReady:restReady,rotationStateReady,sharedSessionRestored:sessionReady,authenticated:authReady(),socketConnected:connected,at:new Date().toISOString()}));
 }
 void startWorkstation();
 server.on('error',error=>console.error('Workstation HTTP server error:',error.message));
