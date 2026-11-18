@@ -48,6 +48,22 @@ test('daily trend pullback strategy accepts 50 completed underlying and daily ca
   assert.equal(result.evaluatedStrategies.includes('DAILY_TREND_5M_PULLBACK'),true);
 });
 
+test('MCX strategy rejects an old candle window when the immediately preceding 5-minute candle is missing',()=>{
+  const now=Date.parse('2026-11-18T11:39:30Z');
+  const bucket=Math.floor((now/1000)/300)*300;
+  const rows=[
+    {time:bucket-900,open:100,high:101,low:99,close:100.5,volume:100},
+    {time:bucket-600,open:100.5,high:102,low:100,close:101.5,volume:120}
+  ];
+  const result=detectNineStrategySetup({
+    underlyingCandles:rows,
+    underlyingTick:{price:101.5,exchangeTime:now/1000,receivedAt:now},
+    isTopGainer:true,now,maxCandleAgeSeconds:299,sessionStartMinute:540,sessionCloseMinute:1435
+  });
+  assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(result.reason,/latest completed candle is stale/i);
+});
+
 test('nine fixed strategy identifiers are present and stable',()=>{
   assert.equal(STRATEGIES.length,9);
   assert.equal(MAX_ACTIVE_TRADES,2);
