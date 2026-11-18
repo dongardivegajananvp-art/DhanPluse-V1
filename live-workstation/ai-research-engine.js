@@ -230,6 +230,9 @@ export function rankResearchResults(results = []) {
     if (quality) return quality;
     const confirmed = Number(b?.status === 'PLAN_CONFIRMED_READ_ONLY') - Number(a?.status === 'PLAN_CONFIRMED_READ_ONLY');
     if (confirmed) return confirmed;
+    const watchDistance = item => item?.status === 'EARLY_WATCH' && finite(item.triggerDistancePct) ? num(item.triggerDistancePct) : Infinity;
+    const watchOrder = watchDistance(a) - watchDistance(b);
+    if (Number.isFinite(watchOrder) && watchOrder) return watchOrder;
     const rr = (Number(b?.rr) || 0) - (Number(a?.rr) || 0);
     if (rr) return rr;
     return String(b?.verifiedAt || b?.updatedAt || '').localeCompare(String(a?.verifiedAt || a?.updatedAt || ''));
