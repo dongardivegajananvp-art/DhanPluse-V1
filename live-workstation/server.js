@@ -9,6 +9,7 @@ import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRes
 import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { historyRetryDelayMs, shouldAttemptHistoryRetry } from './history-retry-policy.js';
 import { acceptExchangeTick, exchangeTickFreshness, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
+import { reserveStrategyWarmRefresh, releaseStrategyWarmRefresh } from './strategy-warm-refresh-policy.js';
 import { parseFyersQuoteTicks } from './fyers-quote-recovery.js';
 import { sameStrategyConfirmation, validateOptionCandles, validateOptionContractIdentity, validateOptionPremiumTick } from './strategy-candidate-guard.js';
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates } from './mcx-options.js';
@@ -147,7 +148,7 @@ let accountSnapshot=null,accountSnapshotFetchedAt=0,accountFetchPromise=null,acc
 const subscribedSymbols=new Set();
 const strategyOptionSymbols=new Set();
 const strategyWarmOptionSymbols=new Set();
-let strategyWarmRefreshAt=0,strategyWarmRefreshBusy=false;
+const strategyWarmRefreshState={lastAt:0,busy:false};
 let lastStrategyGainerDiscoveryAt=0;
 const strategyPendingCandidates=new Map();
 const strategyScanLastAttempt=new Map();
@@ -982,13 +983,16 @@ async function loadStrategyOptionContracts(underlying){
  return contracts;
 }
 async function refreshTopGainerOptionWatches(rows){
- if(strategyWarmRefreshBusy||Date.now()-strategyWarmRefreshAt<30000||mcxFutureRoot(selectedSymbol)||!isNseSubscriptionSession())return;
+ if(strategyWarmRefreshState.busy||Date.now()-strategyWarmRefreshState.lastAt<30000||mcxFutureRoot(selectedSymbol)||!isNseSubscriptionSession())return;
  const eligibleRows=(Array.isArray(rows)?rows:[]).slice(0,5).map(row=>({row,tick:freshTick(lastTicks.get(row.underlyingSymbol))?lastTicks.get(row.underlyingSymbol):lastTicks.get(row.symbol)})).filter(item=>freshTick(item.tick));
- if(!eligibleRows.length){strategyWarmRefreshAt=0;return;}
- strategyWarmRefreshBusy=true;strategyWarmRefreshAt=Date.now();
+ if(!eligibleRows.length){strategyWarmRefreshState.lastAt=0;return;}
  const restStatus=fetchWithFyersBudget.getStatus();
- if(!fyersRestBudgetReady||restStatus.cooldownActive||restStatus.recoveryProbeRequired){
-  console.info('GV2VPD option prewarm paused locally; FYERS REST budget is not ready.',JSON.stringify({budgetReady:fyersRestBudgetReady,cooldownActive:Boolean(restStatus.cooldownActive),recoveryProbeRequired:Boolean(restStatus.recoveryProbeRequired)}));
+ const reservation=reserveStrategyWarmRefresh(strategyWarmRefreshState,{
+  now:Date.now(),minIntervalMs:30000,budgetReady:fyersRestBudgetReady,
+  cooldownActive:Boolean(restStatus.cooldownActive),recoveryProbeRequired:Boolean(restStatus.recoveryProbeRequired)
+ });
+ if(!reservation.reserved){
+  if(reservation.reason==='REST_PAUSED')console.info('GV2VPD option prewarm paused locally; FYERS REST budget is not ready.',JSON.stringify({budgetReady:fyersRestBudgetReady,cooldownActive:Boolean(restStatus.cooldownActive),recoveryProbeRequired:Boolean(restStatus.recoveryProbeRequired)}));
   return;
  }
  const next=new Set(),watched=[];
@@ -1009,7 +1013,7 @@ async function refreshTopGainerOptionWatches(rows){
   const current=[...strategyWarmOptionSymbols].sort().join('|');
   if(previous!==current)syncSocketSubscriptions({reason:'top_gainer_option_prewarm'});
   console.info('GV2VPD top-gainer option watches refreshed.',JSON.stringify({gainerCount:Math.min(5,(rows||[]).length),prewarmedOptionCount:next.size,watches:watched}));
- }finally{strategyWarmRefreshBusy=false;}
+ }finally{releaseStrategyWarmRefresh(strategyWarmRefreshState);}
 }
 function setStrategyScanResult(item){
  if(item.futureSymbol)console.info('GV2VPD strategy candidate decision.',JSON.stringify({underlying:item.underlying||null,futureSymbol:item.futureSymbol,status:item.status||'UNKNOWN',strategy:item.strategy||null,contract:item.contract||null,reason:item.reason||null,entry:item.entry??null,stopLoss:item.stopLoss??null,target:item.target??null,rr:item.rr??null,updatedAt:item.updatedAt||new Date().toISOString()}));
