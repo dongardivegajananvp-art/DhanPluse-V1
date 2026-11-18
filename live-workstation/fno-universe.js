@@ -18,6 +18,10 @@ const uniqueSymbols = values => [...new Set((Array.isArray(values) ? values : []
   .filter(value => typeof value === 'string' && value.trim())
   .map(value => value.trim()))];
 
+export function buildNseFnoUniverse({ nseMaster = {}, bseMaster = {}, now = Date.now() } = {}) {
+  return buildFnoUniverse({ nseMaster, bseMaster, now }).filter(row => row.exchange === 'NSE');
+}
+
 export function buildFnoUniverse({ nseMaster = {}, bseMaster = {}, now = Date.now() } = {}) {
   const nearest = new Map();
   for (const [symbol, row] of [...Object.entries(nseMaster), ...Object.entries(bseMaster)]) {
