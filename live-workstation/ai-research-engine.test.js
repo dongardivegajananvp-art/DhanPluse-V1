@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeSetupResearch, rankResearchResults } from './ai-research-engine.js';
+import { analyzeEarlyWatch, analyzeSetupResearch, rankResearchResults } from './ai-research-engine.js';
 
 function candles(count,{start=Date.UTC(2026,10,16,3,45)/1000,step=300,trend=1,volume=100}={}) {
   return Array.from({length:count},(_,i)=>{
@@ -77,4 +77,23 @@ test('global scanner ranking puts higher complete research quality before plan l
   assert.equal(ranked[0].research.qualityScore,88);
   assert.equal(ranked[1].research.qualityScore,61);
   assert.equal(ranked[2].research.status,'INCOMPLETE');
+});
+
+test('research v2 reports independently derived supply/demand zones, retest evidence and non-trading early levels',()=>{
+  const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400,trend:1});
+  const result=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',strategy:'DAY_HIGH_LOW_BREAK_RETEST',breakoutLevel:111.7},marketRegime:{direction:'BULLISH',evaluatedAt:new Date(now).toISOString()},now});
+  assert.equal(result.status,'COMPLETE');
+  assert.ok(result.zones);
+  assert.ok(result.zoneContext);
+  assert.ok(['RETEST_HELD','RETEST_NOT_CONFIRMED','RETEST_INVALIDATED'].includes(result.pullbackRetest.quality));
+  assert.equal(result.earlyConfirmation.triggerLevel,111.7);
+  assert.match(result.earlyConfirmation.note,/does not modify fixed option Entry\/SL\/Target\/RR/);
+  assert.equal(result.model,'GV2VPD_QUANT_RESEARCH_V2');
+});
+
+test('early watch requires fresh FYERS ticks and does not promote a trade',()=>{
+  const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400,trend:1});
+  const stale=analyzeEarlyWatch({candles:intraday,dailyCandles:daily,tick:tick(now),now:now+20000});
+  assert.equal(stale.status,'INCOMPLETE');
+  assert.match(stale.reason,/Fresh exchange-timestamped/);
 });
