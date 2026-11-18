@@ -14,6 +14,7 @@ import { sameStrategyConfirmation, validateOptionCandles, validateOptionContract
 import { mcxFutureRoot, listMxcOptionContracts, pickMxcOptionCandidates } from './mcx-options.js';
 import { parseFyersMarginPreflight, classifyFyersOrder } from './order-safety.js';
 import { buildFnoUniverse, buildLiveFnoMovers, selectFairSubscriptionBatch, summarizeFnoCoverage } from './fno-universe.js';
+import { fyersExpiryEpochSeconds as toEpochSeconds } from './expiry-date.js';
 import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy-plan-store.js';
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
 import { evaluateIndexMarketRegime, unavailableMarketRegime } from './market-regime.js';
@@ -300,7 +301,7 @@ async function fyersRestFetch(url,init={}){
   return fetchWithFyersBudget(url,init);
 }
 
-function toEpochSeconds(value){if(value===null||value===undefined||value==='')return 0;const n=Number(value);if(Number.isFinite(n)&&n>0)return n>1e12?n/1000:n;const parsed=Date.parse(String(value));return Number.isFinite(parsed)&&parsed>0?parsed/1000:0;}
+
 async function fyersGet(url,{priority}={}){const r=await fyersRestFetch(url,{headers:{Authorization:appId+':'+accessToken,Accept:'application/json'},timeoutMs:12000,priority});const raw=await r.text();let j={};try{j=raw?JSON.parse(raw):{};}catch{throw new Error('FYERS returned non-JSON response (HTTP '+r.status+')');}if(!r.ok||j.s==='error'){const error=new Error('FYERS HTTP '+r.status+' · '+String(j.message||j.code||j.data?.error||'request rejected').replace(/\\s+/g,' ').slice(0,180));error.statusCode=r.status;error.retryAfterMs=Number(j.retryAfterSeconds)*1000||fyersRetryAfterMs(r);throw error;}return j;}
 async function fyersPost(url,body){const r=await fyersRestFetch(url,{method:'POST',headers:{Authorization:appId+':'+accessToken,'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(body),timeoutMs:12000});const j=await r.json().catch(()=>({}));if(!r.ok||j.s!=='ok'){const error=new Error(String(j.message||j.code||'FYERS order request failed'));error.statusCode=r.status;error.retryAfterMs=Number(j.retryAfterSeconds)*1000||fyersRetryAfterMs(r);throw error;}return j;}
 async function loadNseFoMaster(){if(nseFoMaster&&Date.now()-nseFoMasterFetchedAt<86400000)return nseFoMaster;if(nseFoMasterPromise)return nseFoMasterPromise;nseFoMasterPromise=(async()=>{const r=await fetch('https://public.fyers.in/sym_details/NSE_FO_sym_master.json',{headers:{Accept:'application/json'},signal:AbortSignal.timeout(30000)});if(!r.ok)throw new Error('FYERS NSE F&O symbol master unavailable');const master=await r.json();if(!master||typeof master!=='object'||Array.isArray(master))throw new Error('Invalid FYERS symbol master');nseFoMaster=master;nseFoMasterFetchedAt=Date.now();return master;})().finally(()=>{nseFoMasterPromise=null});return nseFoMasterPromise;}
