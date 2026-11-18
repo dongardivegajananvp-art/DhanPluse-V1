@@ -1,8 +1,8 @@
 export function fyersExpiryEpochSeconds(value) {
   if (value === null || value === undefined || value === '') return 0;
   const raw = String(value).trim();
-  const compact = /^(\\d{4})(\\d{2})(\\d{2})$/.exec(raw);
-  const dateOnly = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(raw);
+  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(raw);
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
   const match = compact || dateOnly;
   if (match) {
     const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
