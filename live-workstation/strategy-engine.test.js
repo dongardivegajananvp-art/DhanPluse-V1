@@ -666,3 +666,49 @@ test('Strategy 9 first-candle breakout is returned by the complete nine-strategy
   assert.equal(result.side,'LONG');
   assert.equal(result.pattern,'FIRST_CANDLE_HIGH_BREAKOUT');
 });
+
+
+function multiTimeframeResearchFixture(now) {
+  const rows=[];
+  const starts=[Date.UTC(2026,10,16,3,45),Date.UTC(2026,10,17,3,45),Date.UTC(2026,10,18,3,45)];
+  let index=0;
+  for(let day=0;day<starts.length;day++){
+    const count=day===2?30:75;
+    for(let i=0;i<count;i++){
+      const close=100+index*0.2;
+      rows.push({time:starts[day]/1000+i*300,open:close-0.08,high:close+0.1,low:close-0.15,close,volume:100+index});
+      index++;
+    }
+  }
+  const prior=rows.at(-2),last=rows.at(-1);
+  prior.high=prior.close+0.02;
+  last.open=prior.close+0.03;last.close=prior.high+0.2;last.high=last.close+0.05;last.low=last.open-0.1;last.volume=500;
+  const dailyStart=Date.UTC(2026,8,19,3,45)/1000;
+  const dailyCandles=Array.from({length:60},(_,i)=>{
+    const close=100+i*0.5;
+    return{time:dailyStart+i*86400,open:close-0.1,high:close+0.2,low:close-0.2,close,volume:1000};
+  });
+  return{
+    underlyingCandles:rows,dailyCandles,
+    underlyingTick:{price:last.close,exchangeTime:now/1000,receivedAt:now},
+    marketRegime:{state:'BULLISH',direction:'BULLISH',evaluatedAt:new Date(now).toISOString()}
+  };
+}
+
+test('NSE research-enabled scanner fails closed when required multi-timeframe research is incomplete',()=>{
+  const now=Date.UTC(2026,10,18,6,15);
+  const fixture=multiTimeframeResearchFixture(now);
+  const result=detectNineStrategySetup({...fixture,dailyCandles:[],isTopGainer:true,researchEnabled:true,now});
+  assert.equal(result.status,'DATA_UNAVAILABLE_NO_TRADE');
+  assert.equal(result.research?.status,'INCOMPLETE');
+  assert.match(result.reason,/daily candles/i);
+});
+
+test('NSE research-enabled scanner advances only a fully researched setup',()=>{
+  const now=Date.UTC(2026,10,18,6,15);
+  const fixture=multiTimeframeResearchFixture(now);
+  const result=detectNineStrategySetup({...fixture,isTopGainer:true,researchEnabled:true,now});
+  assert.equal(result.status,'UNDERLYING_SETUP_CONFIRMED',JSON.stringify(result));
+  assert.equal(result.research?.status,'COMPLETE');
+  assert.ok(result.research.qualityScore>=0&&result.research.qualityScore<=100);
+});
