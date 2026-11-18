@@ -69,7 +69,8 @@ function renderStrategyScanner(data){
   const detail=document.createElement('span');
   const contract=item.contract?item.contract+' · '+(item.optionSide||'')+' · '+(item.expiry||'')+' · STRIKE '+(item.strike??'—'):'';
   const levels=item.entry!==undefined?'PREMIUM '+fmt(item.premium)+' · ENTRY '+fmt(item.entry)+' · SL '+fmt(item.stopLoss)+' · TARGET '+fmt(item.target)+' · RR '+item.rr+(item.verifiedAt?' · '+new Date(item.verifiedAt).toLocaleTimeString('en-IN'):''):'';
-  detail.textContent=[item.underlying||item.futureSymbol||'',contract,levels,item.reason||''].filter(Boolean).join(' | ');
+  const research=item.research&&item.research.status==='COMPLETE'?'AI RESEARCH '+item.research.grade+' · '+item.research.qualityScore+'/100 · '+(item.research.evidence||[]).slice(0,3).join(', ')+(item.research.riskFlags?.length?' · RISKS: '+item.research.riskFlags.slice(0,2).join(', '):''):'AI RESEARCH PENDING · '+(item.research?.reason||'Full verified research context unavailable');
+  detail.textContent=[item.underlying||item.futureSymbol||'',contract,levels,research,item.reason||''].filter(Boolean).join(' | ');
   card.append(title,detail);results.append(card);
  }
  active.replaceChildren();
