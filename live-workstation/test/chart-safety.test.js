@@ -95,6 +95,35 @@ test('one completed candle after breakout confirms a short retest', () => {
   assert.equal(plan.target, 87);
 });
 
+test('early long entry confirms on live tick through the completed breakout candle high with exact 1:2 levels', () => {
+  const bars = [
+    { time: 900, open: 99, high: 100, low: 98, close: 99.5 },
+    { time: 1200, open: 99.5, high: 103, low: 99, close: 102 }
+  ];
+  const plan = evaluateThreeCandleBreakout(bars, 103);
+  assert.equal(plan.status, 'SETUP_CONFIRMED');
+  assert.equal(plan.side, 'LONG');
+  assert.equal(plan.confirmationType, 'EARLY_LIVE_HIGH_BREAK');
+  assert.deepEqual([plan.entry,plan.stopLoss,plan.target,plan.rr],[103,99,111,'1:2']);
+});
+test('early short entry confirms on live tick through the completed breakout candle low', () => {
+  const bars = [
+    { time: 900, open: 101, high: 102, low: 100, close: 101 },
+    { time: 1200, open: 101, high: 101, low: 97, close: 98 }
+  ];
+  const plan = evaluateThreeCandleBreakout(bars, 97);
+  assert.equal(plan.status, 'SETUP_CONFIRMED');
+  assert.equal(plan.side, 'SHORT');
+  assert.equal(plan.confirmationType, 'EARLY_LIVE_LOW_BREAK');
+  assert.deepEqual([plan.entry,plan.stopLoss,plan.target],[97,101,89]);
+});
+test('early breakout blocks chasing beyond 0.25R', () => {
+  const bars = [
+    { time: 900, open: 99, high: 100, low: 98, close: 99.5 },
+    { time: 1200, open: 99.5, high: 103, low: 99, close: 102 }
+  ];
+  assert.match(evaluateThreeCandleBreakout(bars,104.1).reason,/0.25R/);
+});
 test('breakout without the one following confirmation candle remains WAIT', () => {
   const bars = [
     { time: 900, open: 99, high: 100, low: 98, close: 99 },

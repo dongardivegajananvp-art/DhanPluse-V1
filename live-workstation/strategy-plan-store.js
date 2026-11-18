@@ -74,14 +74,15 @@ export function evaluateActivePlanLifecycle(plan, tick, now = Date.now()) {
     return { status: 'STALE_REVALIDATION_REQUIRED', reason: 'Fresh exchange tick for the exact option contract is required before lifecycle revalidation' };
   }
 
-  const stopLoss = Number(plan.stop_loss ?? plan.stopLoss);
-  const target = Number(plan.target);
-  if (!positive(stopLoss) || !positive(target) || target <= stopLoss) {
-    return { status: 'REVALIDATION_REQUIRED', reason: 'Persisted Entry/SL/Target values are invalid; plan remains active and blocked' };
+  const entry = Number(plan.entry), stopLoss = Number(plan.stop_loss ?? plan.stopLoss), target = Number(plan.target);
+  if (!positive(entry) || !positive(stopLoss) || !positive(target) || !(entry > stopLoss && target > entry)) return { status: 'REVALIDATION_REQUIRED', reason: 'Persisted Entry/SL/Target values are invalid; plan remains active and blocked' };
+  if (!plan.entry_hit_at) {
+    if (price < entry) return { status: 'WAITING_FOR_ENTRY', reason: 'Fresh option premium has not reached the fixed entry trigger', price };
+    return { status: 'ENTRY_HIT', reason: 'Fresh option premium has reached the fixed entry trigger; persist this transition before evaluating exits', price };
   }
-  if (price <= stopLoss) return { status: 'STOP_LOSS_HIT', reason: 'Fresh option premium is at or below the fixed stop loss', price };
-  if (price >= target) return { status: 'TARGET_HIT', reason: 'Fresh option premium is at or above the fixed target', price };
-  return { status: 'ACTIVE', reason: 'Fresh option premium remains between fixed stop loss and target', price };
+  if (price <= stopLoss) return { status: 'STOP_LOSS_HIT', reason: 'Fresh option premium is at or below the fixed stop loss after entry', price };
+  if (price >= target) return { status: 'TARGET_HIT', reason: 'Fresh option premium is at or above the fixed target after entry', price };
+  return { status: 'ENTRY_HIT', reason: 'Entry was previously confirmed; fixed SL and Target remain active', price };
 }
 
 export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) {
@@ -114,6 +115,8 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
       option_exchange_time DOUBLE PRECISION NOT NULL,
       underlying_received_at TIMESTAMPTZ,
       option_received_at TIMESTAMPTZ,
+      entry_hit_at TIMESTAMPTZ,
+      entry_hit_price NUMERIC(18,6),
       underlying_candle_time VARCHAR(40) NOT NULL,
       option_candle_time VARCHAR(40) NOT NULL,
       status VARCHAR(24) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','CLOSED','CANCELLED','STOP_LOSS_HIT','TARGET_HIT','EXPIRED')),
@@ -126,6 +129,8 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS tick_size NUMERIC(18,6);
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS underlying_received_at TIMESTAMPTZ;
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS option_received_at TIMESTAMPTZ;
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS entry_hit_at TIMESTAMPTZ;
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS entry_hit_price NUMERIC(18,6);
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS max_favorable_price NUMERIC(18,6);
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS max_adverse_price NUMERIC(18,6);
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS observed_ticks INTEGER NOT NULL DEFAULT 0;
@@ -171,8 +176,8 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
           INSERT INTO gv2vpd_strategy_plans (
             plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,
             underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,underlying_candle_time,option_candle_time,
-            max_favorable_price,max_adverse_price,observed_ticks,risk_model_version,target_hit_rate,target_confidence_lower,target_sample_size,market_regime,risk_research
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,1,$22,$23,$24,$25,$26,$27::jsonb)
+            max_favorable_price,max_adverse_price,observed_ticks,risk_model_version,target_hit_rate,target_confidence_lower,target_sample_size,market_regime,risk_research,entry_hit_at,entry_hit_price
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,1,$22,$23,$24,$25,$26,$27::jsonb,$28,$29)
         `, [
           plan.planId,plan.strategy,plan.underlying,plan.contract,plan.optionSide,plan.expiry,
           Number(plan.strike),Number(plan.premium),Number(plan.tickSize),Number(plan.entry),Number(plan.stopLoss),Number(plan.target),Number(plan.rr),
@@ -184,7 +189,7 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
           plan.riskResearch?.probability?.lowerBound!==null&&plan.riskResearch?.probability?.lowerBound!==undefined&&Number.isFinite(Number(plan.riskResearch.probability.lowerBound))?Number(plan.riskResearch.probability.lowerBound):null,
           Number.isFinite(Number(plan.riskResearch?.probability?.samples))?Number(plan.riskResearch.probability.samples):0,
           String(plan.marketRegime||'UNKNOWN').slice(0,24),
-          JSON.stringify(plan.riskResearch||{})
+          JSON.stringify(plan.riskResearch||{}),null,null
         ]);
         await client.query('COMMIT');
         return { ok: true, status: 'PLAN_PERSISTED', planId: plan.planId, entry: Number(plan.entry), stopLoss: Number(plan.stopLoss), target: Number(plan.target), rr: Number(plan.rr), riskResearch: plan.riskResearch||null };
@@ -200,7 +205,7 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
     async listActivePlans() {
       if (!await ready) return { ok: false, status: 'DATA_UNAVAILABLE_NO_TRADE', plans: [] };
       try {
-        const result = await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,underlying_candle_time,option_candle_time,max_favorable_price,max_adverse_price,observed_ticks,last_observed_at,risk_model_version,target_hit_rate,target_confidence_lower,target_sample_size,market_regime,risk_research,created_at FROM gv2vpd_strategy_plans WHERE status='ACTIVE' ORDER BY created_at ASC LIMIT 2");
+        const result = await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,entry_hit_at,entry_hit_price,underlying_candle_time,option_candle_time,max_favorable_price,max_adverse_price,observed_ticks,last_observed_at,risk_model_version,target_hit_rate,target_confidence_lower,target_sample_size,market_regime,risk_research,created_at FROM gv2vpd_strategy_plans WHERE status='ACTIVE' ORDER BY created_at ASC LIMIT 2");
         return { ok: true, plans: result.rows || [] };
       } catch (error) {
         console.error('Strategy plan read failed; new entries remain blocked.', String(error?.message || error).slice(0, 160));
@@ -211,11 +216,24 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
       if (!await ready) return { ok: false, plans: [] };
       try {
         const safeLimit=Math.max(1,Math.min(50,Math.trunc(Number(limit)||20)));
-        const result=await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,underlying_candle_time,option_candle_time,status,max_favorable_price,max_adverse_price,observed_ticks,last_observed_at,risk_model_version,target_hit_rate,target_confidence_lower,target_sample_size,market_regime,risk_research,created_at,closed_at FROM gv2vpd_strategy_plans WHERE status IN ('STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CLOSED','CANCELLED') ORDER BY closed_at DESC NULLS LAST,created_at DESC LIMIT $1",[safeLimit]);
+        const result=await pool.query("SELECT plan_id,strategy,underlying,contract,option_side,expiry,strike,premium,tick_size,entry,stop_loss,target,rr,underlying_exchange_time,option_exchange_time,underlying_received_at,option_received_at,entry_hit_at,entry_hit_price,underlying_candle_time,option_candle_time,status,max_favorable_price,max_adverse_price,observed_ticks,last_observed_at,risk_model_version,target_hit_rate,target_confidence_lower,target_sample_size,market_regime,risk_research,created_at,closed_at FROM gv2vpd_strategy_plans WHERE status IN ('STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CLOSED','CANCELLED') ORDER BY closed_at DESC NULLS LAST,created_at DESC LIMIT $1",[safeLimit]);
         return { ok:true, plans:result.rows||[] };
       } catch(error) {
         console.error('Terminal strategy plan history read failed.',String(error?.message||error).slice(0,160));
         return { ok:false, plans:[] };
+      }
+    },
+    async markEntryHit(planId, price, at = Date.now()) {
+      if (!positive(price) || !Number.isFinite(Number(at))) return { ok:false, reason:'A verified entry-hit price and timestamp are required' };
+      if (!await ready) return { ok:false, reason:'Persistent strategy plan ledger is unavailable' };
+      try {
+        const result=await pool.query("UPDATE gv2vpd_strategy_plans SET entry_hit_at=$2,entry_hit_price=$3 WHERE plan_id=$1 AND status='ACTIVE' AND entry_hit_at IS NULL RETURNING plan_id,entry_hit_at,entry_hit_price",[planId,new Date(Number(at)).toISOString(),Number(price)]);
+        if(result.rows?.length)return{ok:true,entryHitAt:result.rows[0].entry_hit_at,entryHitPrice:Number(result.rows[0].entry_hit_price)};
+        const existing=await pool.query("SELECT plan_id,entry_hit_at,entry_hit_price FROM gv2vpd_strategy_plans WHERE plan_id=$1 AND status='ACTIVE' AND entry_hit_at IS NOT NULL",[planId]);
+        return existing.rows?.length?{ok:true,alreadyRecorded:true,entryHitAt:existing.rows[0].entry_hit_at,entryHitPrice:Number(existing.rows[0].entry_hit_price)}:{ok:false,reason:'Entry-hit transition could not be persisted'};
+      } catch(error) {
+        console.error('Strategy entry-hit persistence failed.',String(error?.message||error).slice(0,160));
+        return {ok:false,reason:'Persistent entry-hit update failed'};
       }
     },
     async getNseOutcomeStats({strategy,optionSide,targetRr=2}={}) {
