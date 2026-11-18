@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { completedDailyCandles, selectNearestOptionContract, selectNearestOptionContracts, strategyCandidateKey } from './strategy-scanner.js';
+import { completedDailyCandles, dailyHistorySymbolForFnoRow, selectNearestOptionContract, selectNearestOptionContracts, strategyCandidateKey } from './strategy-scanner.js';
 
 test('selects nearest expiry first, then nearest strike, without OI or volume fields', () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
@@ -67,4 +67,11 @@ test('selects an option contract with compact YYYYMMDD expiry from FYERS Symbol 
   const now = Date.parse('2026-11-18T04:00:00Z');
   const contracts = [{symbol:'NSE:ABC26NOV100CE',side:'CE',strike:100,expiry:'20261126',tickSize:0.05,lotSize:10}];
   assert.equal(selectNearestOptionContract(contracts,'CE',100,now).symbol,'NSE:ABC26NOV100CE');
+});
+
+
+test('uses the verified cash or index underlying for 50-day trend research, not the expiring futures contract', () => {
+  assert.equal(dailyHistorySymbolForFnoRow({futureSymbol:'NSE:NAVINFLUOR26NOVFUT',underlyingSymbol:'NSE:NAVINFLUOR-EQ'}),'NSE:NAVINFLUOR-EQ');
+  assert.equal(dailyHistorySymbolForFnoRow({futureSymbol:'NSE:NIFTY26NOVFUT',underlyingSymbol:'NSE:NIFTY50-INDEX'}),'NSE:NIFTY50-INDEX');
+  assert.equal(dailyHistorySymbolForFnoRow({futureSymbol:'NSE:ABC26NOVFUT',underlyingSymbol:'invalid'}),'NSE:ABC26NOVFUT');
 });
