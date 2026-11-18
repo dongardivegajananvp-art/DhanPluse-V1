@@ -300,8 +300,19 @@ export function createFyersDataApiBudget({
         const isRecoveryProbe = Boolean(cooldownPathname === target.pathname && cooldownUntil <= time);
         if (isRecoveryProbe) {
           if (recoveryProbeAttemptedGeneration === requestCooldownGeneration) return { response: makeCooldownResponse() };
-          // Claim this generation before the upstream call so concurrent/queued callers cannot duplicate it.
+          // Claim and persist this generation before the upstream call so concurrent callers or a restart cannot duplicate it.
           recoveryProbeAttemptedGeneration = requestCooldownGeneration;
+          if (typeof onCooldownChange === 'function') {
+            try {
+              const persisted = await onCooldownChange({ cooldownUntil, cooldownReason, cooldownPathname, cooldownProbeUrl, cooldownProbeMethod,
+                cooldownGeneration, recoveryProbeAttemptedGeneration, recoveryProbeFailureCount, consecutiveCloudflareBlocks, consecutiveRateLimitBlocks });
+              if (persisted === false) throw new Error('durable recovery-probe claim is unavailable');
+            } catch (error) {
+              cooldownPersistenceHealthy = false;
+              console.error('FYERS recovery-probe claim could not be durably persisted; no upstream probe was sent:', String(error?.message || error).slice(0, 140));
+              return { response: makePersistenceFailureResponse() };
+            }
+          }
         }
         requestTimes.push(time);
         lastRequestAt = time;
@@ -435,6 +446,12 @@ export function createFyersDataApiBudget({
     cooldownGeneration = Math.max(cooldownGeneration, Number(state.cooldownGeneration) || 0);
     recoveryProbeFailureCount = Math.max(0, Number(state.recoveryProbeFailureCount) || 0);
     recoveryProbeAttemptedGeneration = Number.isFinite(Number(state.recoveryProbeAttemptedGeneration)) ? Number(state.recoveryProbeAttemptedGeneration) : null;
+    if (recoveryProbeAttemptedGeneration === cooldownGeneration && cooldownPathname && cooldownUntil <= now()) {
+      // A restart interrupted an already-claimed probe. Do not repeat it immediately; defer into a fresh generation.
+      recoveryProbeFailureCount += 1;
+      cooldownUntil = now() + recoveryProbeBackoffMs[Math.min(recoveryProbeFailureCount - 1, recoveryProbeBackoffMs.length - 1)];
+      cooldownGeneration += 1;
+    }
     consecutiveCloudflareBlocks = Math.max(0, Number(state.consecutiveCloudflareBlocks) || 0);
     consecutiveRateLimitBlocks = Math.max(0, Number(state.consecutiveRateLimitBlocks) || 0);
     return true;
