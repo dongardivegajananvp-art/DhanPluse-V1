@@ -317,7 +317,7 @@ test('identical concurrent quote reads share one upstream request but are not ca
   assert.equal(sent, 2);
 });
 
-test('default FYERS pacing enforces 15 requests per minute and a four-second minimum gap', async () => {
+test('default FYERS pacing enforces six requests per minute and a ten-second minimum gap', async () => {
   let clock = 700_000;
   const sentAt = [];
   const request = createFyersDataApiBudget({
@@ -329,9 +329,9 @@ test('default FYERS pacing enforces 15 requests per minute and a four-second min
     await request('https://api-t1.fyers.in/data/history?symbol=NSE%3ATEST' + index + '-EQ&resolution=5');
   }
   assert.equal(sentAt.length, 16);
-  assert.ok(sentAt[1] - sentAt[0] >= 4000);
-  assert.ok(sentAt[14] - sentAt[0] < 60_000);
-  assert.ok(sentAt[15] - sentAt[0] >= 60_000);
+  assert.ok(sentAt[1] - sentAt[0] >= 10_000);
+  assert.ok(sentAt[5] - sentAt[0] < 60_000);
+  assert.ok(sentAt[6] - sentAt[0] >= 60_000);
 });
 
 
@@ -361,7 +361,7 @@ test('success from a different FYERS endpoint does not reset Cloudflare backoff 
   assert.equal(quoteAttempts, 2);
 });
 
-test('default FYERS budget stays at or below 15 requests per minute with a four-second minimum gap', async () => {
+test('default FYERS budget stays at or below six requests per minute with a ten-second minimum gap', async () => {
   let clock = 700_000;
   const sentAt = [];
   const request = createFyersDataApiBudget({
@@ -376,9 +376,9 @@ test('default FYERS budget stays at or below 15 requests per minute with a four-
 
   assert.equal(sentAt.length, 16);
   for (let index = 1; index < sentAt.length; index += 1) {
-    assert.ok(sentAt[index] - sentAt[index - 1] >= 4_000, 'requests must be at least four seconds apart');
+    assert.ok(sentAt[index] - sentAt[index - 1] >= 10_000, 'requests must be at least ten seconds apart');
   }
-  assert.ok(sentAt[15] - sentAt[0] >= 60_000, 'the sixteenth request must wait for the rolling-minute budget');
+  assert.ok(sentAt[6] - sentAt[0] >= 60_000, 'the seventh request must wait for the rolling-minute budget');
 });
 
 
