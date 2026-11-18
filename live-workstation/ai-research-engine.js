@@ -137,3 +137,23 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
     model:'GV2VPD_QUANT_RESEARCH_V1'
   };
 }
+
+
+/**
+ * Rank visible scanner candidates by research quality first. A confirmed plan
+ * is only a tie-breaker; lifecycle status must not outrank better research.
+ * Missing/incomplete research is deliberately placed after every scored result.
+ */
+export function rankResearchResults(results = []) {
+  return [...(Array.isArray(results) ? results : [])].sort((a, b) => {
+    const score = item => item?.research?.status === 'COMPLETE' && finite(item.research.qualityScore)
+      ? num(item.research.qualityScore) : -1;
+    const quality = score(b) - score(a);
+    if (quality) return quality;
+    const confirmed = Number(b?.status === 'PLAN_CONFIRMED_READ_ONLY') - Number(a?.status === 'PLAN_CONFIRMED_READ_ONLY');
+    if (confirmed) return confirmed;
+    const rr = (Number(b?.rr) || 0) - (Number(a?.rr) || 0);
+    if (rr) return rr;
+    return String(b?.verifiedAt || b?.updatedAt || '').localeCompare(String(a?.verifiedAt || a?.updatedAt || ''));
+  });
+}
