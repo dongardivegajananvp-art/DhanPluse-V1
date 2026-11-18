@@ -12,11 +12,11 @@ test('claims a pending candidate only when option and underlying ticks are both 
 
 test('prevents duplicate concurrent processing and releases the lock for a later tick', () => {
   const candidate = { processing: false };
-  const ticks = { optionTick: { fresh: true }, underlyingTick: { fresh: true }, isFresh: fresh };
-  assert.equal(claimPendingCandidateProcessing(candidate, ticks), true);
-  assert.equal(claimPendingCandidateProcessing(candidate, ticks), false);
+  const ticks = { optionTick: { fresh: true }, underlyingTick: { fresh: true }, isFresh: fresh, minIntervalMs: 1000 };
+  assert.equal(claimPendingCandidateProcessing(candidate, { ...ticks, nowMs: 1000 }), true);
+  assert.equal(claimPendingCandidateProcessing(candidate, { ...ticks, nowMs: 1000 }), false);
   assert.equal(releasePendingCandidateProcessing(candidate), true);
-  assert.equal(claimPendingCandidateProcessing(candidate, ticks), true);
+  assert.equal(claimPendingCandidateProcessing(candidate, { ...ticks, nowMs: 2000 }), true);
 });
 
 test('does not claim when either exchange tick is stale or missing', () => {
