@@ -47,3 +47,14 @@ export function prioritizeScannerSymbols(activeSymbols = [], prioritySymbols = [
   const prioritySet = new Set(priority);
   return [...priority, ...active.filter(symbol => !prioritySet.has(symbol))];
 }
+
+export function isFnoSubscriptionWindowRotation(reason = '') {
+  return ['scheduled_rotation', 'universe_loaded', 'nse_session_open_universe_loaded'].includes(String(reason));
+}
+
+export function resolveFnoSubscriptionWindowCursor({
+  reason = '', activeCursor = 0, nextCursor = 0
+} = {}) {
+  const cursor = isFnoSubscriptionWindowRotation(reason) ? nextCursor : activeCursor;
+  return Number.isInteger(cursor) && cursor >= 0 ? cursor : 0;
+}

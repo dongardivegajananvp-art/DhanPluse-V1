@@ -6,7 +6,9 @@ import {
   estimateScannerRestRequestsPerMinute,
   canFinishSubscriptionWindowBeforeRotation,
   shouldRetryFnoUniverse,
-  prioritizeScannerSymbols
+  prioritizeScannerSymbols,
+  isFnoSubscriptionWindowRotation,
+  resolveFnoSubscriptionWindowCursor
 } from './scanner-schedule.js';
 
 test('scanner reserves at least one third of the shared 15 rpm REST budget', () => {
@@ -48,4 +50,22 @@ test('scanner checks fresh top-gainer futures first without duplicates or adding
     prioritizeScannerSymbols(['FUT-A','FUT-B','FUT-C','FUT-D'], ['FUT-C','FUT-A','NOT-SUBSCRIBED','FUT-C']),
     ['FUT-C','FUT-A','FUT-B','FUT-D']
   );
+});
+
+test('only scheduled or session/universe activation events advance the F&O subscription window', () => {
+  assert.equal(isFnoSubscriptionWindowRotation('universe_loaded'), true);
+  assert.equal(isFnoSubscriptionWindowRotation('scheduled_rotation'), true);
+  assert.equal(isFnoSubscriptionWindowRotation('nse_session_open_universe_loaded'), true);
+  for (const reason of ['fresh_tick_watchdog', 'state_change', 'post_unsubscribe_settle', 'strategy_option_candidate', 'top_gainer_option_prewarm']) {
+    assert.equal(isFnoSubscriptionWindowRotation(reason), false, reason);
+  }
+});
+
+test('watchdog and state changes keep the active F&O batch; scheduled rotation selects the next cursor', () => {
+  const state = { activeCursor: 77, nextCursor: 154 };
+  assert.equal(resolveFnoSubscriptionWindowCursor({ reason: 'fresh_tick_watchdog', ...state }), 77);
+  assert.equal(resolveFnoSubscriptionWindowCursor({ reason: 'state_change', ...state }), 77);
+  assert.equal(resolveFnoSubscriptionWindowCursor({ reason: 'post_unsubscribe_settle', ...state }), 77);
+  assert.equal(resolveFnoSubscriptionWindowCursor({ reason: 'scheduled_rotation', ...state }), 154);
+  assert.equal(resolveFnoSubscriptionWindowCursor({ reason: 'universe_loaded', activeCursor: 0, nextCursor: 0 }), 0);
 });
