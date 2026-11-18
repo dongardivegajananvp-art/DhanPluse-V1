@@ -163,11 +163,13 @@ function updateChartPlan(){
  if(!activeChartCandles.length){retainOrClearChartPlan('CHART HISTORY UNAVAILABLE · DISPLAY ONLY','Waiting for verified 5-minute candles');return}
  const tick=marketSnapshot.find(x=>x.symbol===activeChartSymbol);
  if(!tick||tickAge(tick)!=='Fresh exchange tick'){retainOrClearChartPlan('UNDERLYING TICK STALE · DISPLAY ONLY','NO TRADE · underlying exchange tick is not fresh');return}
- const {completed,fresh,contiguous}=getCompletedCandleWindow(activeChartCandles,tick.exchangeTime,600,2);
+ const isMcx=activeChartSymbol.startsWith('MCX:');
+ const requiredCandles=isMcx?3:2;
+ const {completed,fresh,contiguous}=getCompletedCandleWindow(activeChartCandles,tick.exchangeTime,600,requiredCandles);
  if(!fresh){retainOrClearChartPlan('COMPLETED CANDLE STALE · DISPLAY ONLY','NO TRADE · latest completed 5-minute candle is stale');return}
- if(completed.length<2){retainOrClearChartPlan('WAITING FOR BREAKOUT CANDLE · DISPLAY ONLY','WAIT · need reference + one completed breakout candle');return}
- if(!contiguous){retainOrClearChartPlan('CANDLE GAP · DISPLAY ONLY','NO TRADE · latest two reference/breakout candles are not contiguous');return}
- const plan=evaluateThreeCandleBreakout(completed,Number(tick.price));
+ if(completed.length<requiredCandles){retainOrClearChartPlan(isMcx?'WAITING FOR MCX THREE-CANDLE CONFIRMATION · DISPLAY ONLY':'WAITING FOR BREAKOUT CANDLE · DISPLAY ONLY',isMcx?'WAIT · MCX requires reference + breakout + completed confirmation candle':'WAIT · need reference + one completed breakout candle');return}
+ if(!contiguous){retainOrClearChartPlan('CANDLE GAP · DISPLAY ONLY',isMcx?'NO TRADE · latest three MCX confirmation candles are not contiguous':'NO TRADE · latest two reference/breakout candles are not contiguous');return}
+ const plan=evaluateThreeCandleBreakout(completed,Number(tick.price),{allowEarlyEntry:!isMcx});
  if(plan.status!=='SETUP_CONFIRMED'||plan.target<=0){retainOrClearChartPlan('CURRENT BREAKOUT NOT RECONFIRMED · DISPLAY ONLY','WAIT · '+(plan.reason||'no one-candle breakout confirmation')+' · NO TRADE');return}
  const confirmed=rememberChartPlan(chartConfirmedPlans,activeChartSymbol,{side:plan.side,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,confirmationType:plan.confirmationType},Date.now());try{localStorage.setItem('gv2vpd.chart.confirmedPlans.v1',serializeChartPlans(chartConfirmedPlans))}catch{}
  $('entryLine').textContent=fmt(confirmed.entry);$('slLine').textContent=fmt(confirmed.stopLoss);$('targetLine').textContent=fmt(confirmed.target);
