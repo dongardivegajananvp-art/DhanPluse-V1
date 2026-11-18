@@ -74,6 +74,10 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
     return fail('50 contiguous completed FYERS 5-minute candles are required');
   if(!Array.isArray(dailyCandles)||dailyCandles.length<50||dailyCandles.some(c=>!validCandle(c)))
     return fail('50 completed FYERS daily candles are required for multi-timeframe research');
+  const dailyLastTime=num(dailyCandles.at(-1).time),dailyAge=now/1000-dailyLastTime;
+  if(dailyAge<0||dailyAge>4*86400)return fail('Latest completed FYERS daily candle is future-dated or stale');
+  const fiveMinuteCloseTime=num(candles.at(-1).time)+300,fiveMinuteAge=now/1000-fiveMinuteCloseTime;
+  if(fiveMinuteAge< -3||fiveMinuteAge>600)return fail('Latest completed FYERS 5-minute candle is future-dated or stale');
   if(!tick||!finite(tick.price)||num(tick.price)<=0||!finite(tick.receivedAt)||now-num(tick.receivedAt)<0||now-num(tick.receivedAt)>10000||
      !finite(tick.exchangeTime)||now/1000-num(tick.exchangeTime)<-3||now/1000-num(tick.exchangeTime)>10)
     return fail('Fresh exchange-timestamped underlying tick is required');
