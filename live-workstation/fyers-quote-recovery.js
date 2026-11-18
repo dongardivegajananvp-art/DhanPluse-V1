@@ -19,7 +19,7 @@ export function parseFyersQuoteTicks(payload, requestedSymbols, now = Date.now()
       previousClose: Number(value.prev_close_price) > 0 ? Number(value.prev_close_price) : null,
       source: 'FYERS_QUOTES_REST'
     };
-    if (exchangeTickFreshness(tick, now, 15_000).status === 'FRESH') ticks.push(tick);
+    if (exchangeTickFreshness(tick, now, 10_000).status === 'FRESH') ticks.push(tick);
   }
   return ticks;
 }
