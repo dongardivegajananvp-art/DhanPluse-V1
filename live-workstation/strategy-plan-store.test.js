@@ -6,7 +6,7 @@ class FakePool {
   constructor() { this.plans = []; this.closed = false; }
   async query(sql, values = []) {
     if (sql.includes('CREATE TABLE') || sql.includes('CREATE UNIQUE INDEX') || sql.includes('CREATE INDEX') || sql.includes('ALTER TABLE')) return { rows: [] };
-    if (sql.includes('SELECT COUNT(*)')) return { rows: [{ count: this.plans.filter(p => p.status === 'ACTIVE').length }] };
+    if (sql.includes('SELECT COUNT(*)::int AS count')) return { rows: [{ count: this.plans.filter(p => p.status === 'ACTIVE').length }] };
     if (sql.includes('SELECT plan_id FROM')) {
       const found = this.plans.filter(p => p.status === 'ACTIVE' && (p.underlying === values[0] || p.contract === values[1]));
       return { rows: found.map(p => ({ plan_id: p.planId })) };
