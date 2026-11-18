@@ -22,7 +22,7 @@ import { evaluateIndexMarketRegime, unavailableMarketRegime } from './market-reg
 import { getResearchHistoryDiagnostics, rankResearchResults } from './ai-research-engine.js';
 import { claimPendingCandidateProcessing, releasePendingCandidateProcessing } from './pending-option-dispatch.js';
 import { buildProRiskPlan } from './pro-risk-engine.js';
-import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
+import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, dailyHistorySymbolForFnoRow, strategyCandidateKey } from './strategy-scanner.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -1222,7 +1222,8 @@ async function runAutomaticStrategyScan(){
    if(Date.now()-(strategyScanLastAttempt.get(futureSymbol)||0)<retryInterval)continue;
    const futureTick=lastTicks.get(futureSymbol);if(!freshTick(futureTick))continue;
    strategyScanLastAttempt.set(futureSymbol,Date.now());strategyScanLastAt=new Date().toISOString();strategyScanLastSymbol=futureSymbol;
-   const [history,daily]=await Promise.all([loadGainerHistory(futureSymbol,{priority:10}),loadStrategyDailyHistory(futureSymbol,{priority:10}).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}))]);
+   const dailySymbol=dailyHistorySymbolForFnoRow(row);
+   const [history,daily]=await Promise.all([loadGainerHistory(futureSymbol,{priority:10}),loadStrategyDailyHistory(dailySymbol,{priority:10}).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}))]);
    const currentTick=lastTicks.get(futureSymbol);
    if(!freshTick(currentTick)){
     // History is cached for five minutes; retry this same future after one scanner interval
