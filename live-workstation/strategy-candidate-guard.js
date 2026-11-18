@@ -65,13 +65,13 @@ export function validateOptionCandles(candles, tick, contract, now = Date.now())
     if (![open, high, low, close].every(value => isTickAligned(value, contract?.tickSize))) return { ok: false, reason: 'FYERS option candle price does not align with official contract tick size' };
   }
   const completed = Number(rows.at(-1).time) === currentBucket ? rows.slice(0, -1) : rows;
-  if (completed.length < 3) return { ok: false, reason: 'FYERS option candle window includes an unfinished candle or has fewer than 3 completed candles' };
-  const required = completed.slice(-3);
-  if (!required.every((candle, index) => index === 0 || isTradingCandleContiguous(Number(required[index - 1].time), Number(candle.time)))) return { ok: false, reason: 'Latest 3 FYERS option candles contain a missing 5-minute interval inside a trading session' };
+  if (completed.length < 50) return { ok: false, reason: 'At least 50 completed FYERS option candles are required for NSE Pro risk research' };
+  const required = completed.slice(-50);
+  if (!required.every((candle, index) => index === 0 || isTradingCandleContiguous(Number(required[index - 1].time), Number(candle.time)))) return { ok: false, reason: 'Latest 50 FYERS option candles contain a missing 5-minute interval inside a trading session' };
   const latest = completed.at(-1);
   const age = exchangeTime - (Number(latest.time) + 300);
   if (!Number.isFinite(exchangeTime) || age < -3 || age > 600 || now / 1000 - (Number(latest.time) + 300) > 900) return { ok: false, reason: 'Latest completed FYERS option candle is stale or ahead of the exchange tick' };
-  return { ok: true, reason: '', completedCandles: completed.slice(-3), latestCompletedTime: Number(latest.time) };
+  return { ok: true, reason: '', completedCandles: completed.slice(-50), latestCompletedTime: Number(latest.time) };
 }
 
 export function validateOptionContractIdentity(candidate, official, now = Date.now()) {
