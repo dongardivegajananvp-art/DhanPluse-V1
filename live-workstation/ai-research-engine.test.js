@@ -105,3 +105,17 @@ test('non-applicable retest does not create a false risk flag and score stays bo
   assert.equal(result.pullbackRetest.applicable,false);
   assert.ok(!result.riskFlags.some(flag=>flag.includes('Pullback/retest quality')));
 });
+
+test('early watch reports a near-breakout candidate without creating a trade setup',()=>{
+  const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400,trend:1});
+  const level=Math.max(...intraday.slice(-21,-1).map(c=>c.high));
+  const last=intraday.at(-1);
+  last.open=level-0.25;last.high=level-0.05;last.low=level-0.35;last.close=level-0.1;
+  const result=analyzeEarlyWatch({candles:intraday,dailyCandles:daily,tick:{price:level-0.1,receivedAt:now,exchangeTime:now/1000},now});
+  assert.equal(result.status,'WATCH',JSON.stringify(result));
+  assert.equal(result.side,'LONG');
+  assert.ok(result.triggerDistancePct>=0&&result.triggerDistancePct<=0.35);
+  assert.equal(result.research.status,'WATCH');
+  assert.equal(result.research.qualityScore,null);
+  assert.ok(result.research.missingEvidence.some(x=>x.includes('option quote')));
+});
