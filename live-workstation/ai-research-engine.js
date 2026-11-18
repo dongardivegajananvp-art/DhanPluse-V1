@@ -164,10 +164,12 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
   ];
   const qualityScore=components.reduce((sum,item)=>sum+item.points,0);
   const evidence=components.filter(x=>x.pass).map(x=>x.label);
-  const riskFlags=components.filter(x=>!x.pass).map(x=>x.label+(x.key==='dailyTrend'?' conflicts with the setup direction':x.key==='marketRegime'&&regimeKnown?' conflicts with the index regime':' is not confirmed'));
+  const riskFlags=components.filter(x=>!x.pass&&!(x.key==='pullbackRetest'&&!retest.applicable)).map(x=>x.label+(x.key==='dailyTrend'?' conflicts with the setup direction':x.key==='marketRegime'&&regimeKnown?' conflicts with the index regime':' is not confirmed'));
   const missingEvidence=[];
   if(!volumeKnown)missingEvidence.push('Volume field is unavailable; volume score is neutral');
   if(!regimeKnown)missingEvidence.push('Fresh verified index market regime is unavailable or stale; regime score is neutral');
+  if(!alignedZone)missingEvidence.push('No confirmed nearby '+(side==='LONG'?'demand':'supply')+' pivot zone in the available FYERS candle window');
+  if(retest.applicable&&retest.quality!=='RETEST_HELD')missingEvidence.push(retest.reason);
   const grade=qualityScore>=85?'A+':qualityScore>=75?'A':qualityScore>=65?'B':qualityScore>=55?'C':'D';
   return {
     status:'COMPLETE',qualityScore,grade,scoreMeaning:'Research quality score out of 100; not a win probability',
@@ -190,7 +192,11 @@ export function analyzeEarlyWatch({candles=[],dailyCandles=[],tick,now=Date.now(
   if(!tick||!finite(tick.price)||num(tick.price)<=0||!finite(tick.receivedAt)||now-num(tick.receivedAt)<0||now-num(tick.receivedAt)>10000||!finite(tick.exchangeTime)||now/1000-num(tick.exchangeTime)<-3||now/1000-num(tick.exchangeTime)>10)return incomplete('Fresh exchange-timestamped underlying tick is required for early watch');
   const rows=candles.slice(-50),closes=rows.map(c=>num(c.close)),dailyCloses=dailyCandles.slice(-50).map(c=>num(c.close));
   const e20=ema(closes,20),e50=ema(closes,50),d20=ema(dailyCloses,20),d50=ema(dailyCloses,50),price=num(tick.price);
-  const side=price>e20&&e20>e50&&d20>d50?'LONG':price<e20&&e20<e50&&d20<d50?'SHORT':null;
+  const fifteenWindow=resample15m(candles).slice(-50);
+  if(fifteenWindow.length<50||!contiguous15m(fifteenWindow))return incomplete('50 contiguous completed 15-minute candles derived from FYERS 5-minute data are required for early watch');
+  const fifteenCloses=fifteenWindow.map(c=>num(c.close)),m20=ema(fifteenCloses,20),m50=ema(fifteenCloses,50);
+  const side=price>e20&&e20>e50&&d20>d50&&fifteenCloses.at(-1)>m20&&m20>m50?'LONG':
+    price<e20&&e20<e50&&d20<d50&&fifteenCloses.at(-1)<m20&&m20<m50?'SHORT':null;
   if(!side)return {status:'NONE',reason:'No aligned daily and 5-minute trend for an early watch'};
   const prior=rows.slice(-21,-1);
   const level=side==='LONG'?Math.max(...prior.map(c=>num(c.high))):Math.min(...prior.map(c=>num(c.low)));
@@ -200,7 +206,7 @@ export function analyzeEarlyWatch({candles=[],dailyCandles=[],tick,now=Date.now(
   return {status:'WATCH',side,breakoutLevel:level,triggerDistancePct:Number(distance.toFixed(3)),
     invalidationReference:earlyInvalidation(rows,side),zones,
     research:{status:'WATCH',grade:'EARLY',qualityScore:null,scoreMeaning:'Early watch only; not a confirmed setup or win probability',
-      evidence:['Fresh exchange-timestamped underlying tick','Daily and 5-minute EMA20/EMA50 alignment','Price within 0.35% of prior 20-candle range'],
+      evidence:['Fresh exchange-timestamped underlying tick','Daily, 15-minute and 5-minute EMA20/EMA50 alignment','Price within 0.35% of prior 20-candle range'],
       riskFlags:['Breakout and option confirmation are not complete'],missingEvidence:['Completed-candle breakout confirmation','Fresh verified option quote and option candles'],
       model:'GV2VPD_QUANT_RESEARCH_V2',source:'FYERS completed candles + fresh exchange timestamp',
       earlyConfirmation:{triggerLevel:level,invalidationReference:earlyInvalidation(rows,side),triggerDistancePct:Number(distance.toFixed(3))},zones}
