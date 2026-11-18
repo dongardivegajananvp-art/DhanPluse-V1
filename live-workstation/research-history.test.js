@@ -41,3 +41,20 @@ test('drops conflicting duplicate timestamps and malformed OHLC rather than inve
 test('rejects invalid FYERS range parameters', () => {
   assert.throws(() => buildFyersHistoryRange({ lookbackDays: 31 }), /Invalid FYERS historical range/);
 });
+
+
+test('keeps only completed candles inside the configured NSE regular session',()=>{
+  const now = Date.parse('2026-11-18T11:00:00Z') / 1000;
+  const day = Date.parse('2026-11-18T00:00:00Z') / 1000;
+  const at = (hour,minute) => day + hour*3600 + minute*60 - 19800;
+  const rows = [
+    [at(9,10),100,101,99,100.5,10],
+    [at(9,15),100,101,99,100.5,10],
+    [at(15,25),100,101,99,100.5,10],
+    [at(15,30),100,101,99,100.5,10],
+    [at(15,35),100,101,99,100.5,10]
+  ];
+  const result = normalizeCompletedFyersCandles(rows, now);
+  assert.deepEqual(result.candles.map(c=>c.time),[at(9,15),at(15,25)]);
+  assert.equal(result.outsideSessionCount,3);
+});
