@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isFreshExchangeTick, isHistoryCacheFresh } from '../public/chart-safety.js';
+import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isFreshExchangeTick, isHistoryCacheFresh, restoreMcxChartHistoryCandles } from '../public/chart-safety.js';
 
 test('index feed accepts the exchange 30-second cadence while normal instruments retain the 10-second freshness gate',()=>{
   const now=Date.parse('2026-11-17T06:37:36Z');
@@ -16,6 +16,21 @@ test('history cache expires instead of remaining valid indefinitely', () => {
   assert.equal(isHistoryCacheFresh(now - 60_000, now), false);
   assert.equal(isHistoryCacheFresh(now + 1, now), false);
   assert.equal(isHistoryCacheFresh('not-a-date', now), false);
+});
+
+test('MCX history recovery discards provisional live-only candles instead of promoting them',()=>{
+  const verified=[
+    {time:900,open:100,high:101,low:99,close:100.5,volume:100},
+    {time:1200,open:100.5,high:102,low:100,close:101.5,volume:120}
+  ];
+  const provisional=[
+    {time:1500,open:101.5,high:103,low:101,close:102.5,volume:0},
+    {time:1800,open:102.5,high:104,low:102,close:103.5,volume:0}
+  ];
+  const restored=restoreMcxChartHistoryCandles(verified,provisional);
+  assert.deepEqual(restored.candles,verified);
+  assert.equal(restored.discardedProvisionalCount,2);
+  assert.notEqual(restored.candles[0],verified[0]);
 });
 
 test('current forming candle is excluded from completed candle window', () => {

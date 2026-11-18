@@ -1,4 +1,4 @@
-import { evaluateThreeCandleBreakout, getCompletedCandleWindow, getMcxChartPriceDomain, isFreshExchangeTick, isHistoryCacheFresh } from './chart-safety.js';
+import { evaluateThreeCandleBreakout, getCompletedCandleWindow, getMcxChartPriceDomain, isFreshExchangeTick, isHistoryCacheFresh, restoreMcxChartHistoryCandles } from './chart-safety.js';
 import { rememberChartPlan, getRetainedChartPlan, serializeChartPlans, restoreChartPlans } from './chart-plan-cache.js';
 import { boundedRetryDelayMs } from './request-retry.js';
 const $=id=>document.getElementById(id);
@@ -165,7 +165,7 @@ function updateChartPlan(){
  if(!tick||tickAge(tick)!=='Fresh exchange tick'){retainOrClearChartPlan('UNDERLYING TICK STALE · DISPLAY ONLY','NO TRADE · underlying exchange tick is not fresh');return}
  const isMcx=activeChartSymbol.startsWith('MCX:');
  const requiredCandles=isMcx?3:2;
- const {completed,fresh,contiguous}=getCompletedCandleWindow(activeChartCandles,tick.exchangeTime,600,requiredCandles);
+ const {completed,fresh,contiguous}=getCompletedCandleWindow(activeChartCandles,tick.exchangeTime,isMcx?299:600,requiredCandles);
  if(!fresh){retainOrClearChartPlan('COMPLETED CANDLE STALE · DISPLAY ONLY','NO TRADE · latest completed 5-minute candle is stale');return}
  if(completed.length<requiredCandles){retainOrClearChartPlan(isMcx?'WAITING FOR MCX THREE-CANDLE CONFIRMATION · DISPLAY ONLY':'WAITING FOR BREAKOUT CANDLE · DISPLAY ONLY',isMcx?'WAIT · MCX requires reference + breakout + completed confirmation candle':'WAIT · need reference + one completed breakout candle');return}
  if(!contiguous){retainOrClearChartPlan('CANDLE GAP · DISPLAY ONLY',isMcx?'NO TRADE · latest three MCX confirmation candles are not contiguous':'NO TRADE · latest two reference/breakout candles are not contiguous');return}
@@ -187,13 +187,9 @@ async function retryMcxHistoryIfDue(){
   if(selectionId!==chartSelectionId||selected!==symbol)return;
   if(!Array.isArray(data.candles)||!data.candles.length)throw Error('FYERS returned no verified MCX candles');
   historyCache.set(symbol,data);
-  const merged=new Map(data.candles.map(c=>[Number(c.time),{...c}]));
-  for(const candle of activeChartCandles){
-   const key=Number(candle.time),prior=merged.get(key);
-   if(prior)merged.set(key,{...prior,high:Math.max(Number(prior.high),Number(candle.high)),low:Math.min(Number(prior.low),Number(candle.low)),close:Number(candle.close)});
-   else merged.set(key,{...candle});
-  }
-  activeChartCandles=[...merged.values()].sort((a,b)=>Number(a.time)-Number(b.time)).slice(-300);
+  const restored=restoreMcxChartHistoryCandles(data.candles,activeChartCandles);
+  activeChartCandles=restored.candles;
+  console.info('MCX provisional candles discarded after verified FYERS history recovery.',JSON.stringify({symbol,verifiedHistoryCandles:activeChartCandles.length,discardedProvisionalCandles:restored.discardedProvisionalCount}));
   chartLiveOnly=false;chartReady=true;chartHasTickGap=false;chartAttemptedFor=symbol;mcxHistoryRetryBySymbol.delete(symbol);
   updateLiveChartFromTick();updateChartPlan();
   $('chart').setAttribute('aria-label','Verified FYERS MCX 5-minute history with live exchange ticks');
