@@ -234,7 +234,7 @@ test('ledger migration SQL separates ALTER statements with real newlines', async
   const store=createStrategyPlanStore({databaseUrl:'postgres://test',PoolClass:CapturingPool});
   await store.ready;
   assert.ok(captured.schemaSql);
-  assert.doesNotMatch(captured.schemaSql,/\\n\\s+ALTER TABLE/);
-  assert.match(captured.schemaSql,/\\n\\s+ALTER TABLE/);
+  assert.doesNotMatch(captured.schemaSql,/\\n\s+ALTER TABLE/);
+  assert.match(captured.schemaSql,/\n\s+ALTER TABLE/);
   await store.close();
 });
