@@ -32,22 +32,22 @@ export function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 
   return { completed, lastClosed, ageSeconds, fresh, contiguous };
 }
 
-export function evaluateThreeCandleBreakout(completed, tickPrice) {
+export function evaluateThreeCandleBreakout(completed, tickPrice, { allowEarlyEntry = true } = {}) {
   const bars = Array.isArray(completed) ? completed.slice(-3) : [];
-  if (bars.length < 2) return { status: 'WAIT', reason: 'Need two completed 5-minute candles: reference and breakout' };
+  if (bars.length < (allowEarlyEntry ? 2 : 3)) return { status: 'WAIT', reason: allowEarlyEntry ? 'Need two completed 5-minute candles: reference and breakout' : 'MCX confirmation requires three completed 5-minute candles: reference, breakout and confirmation' };
   if (bars.some(c => !c || ![c.time,c.open,c.high,c.low,c.close].every(v => Number.isFinite(Number(v))))) return { status: 'NO_TRADE', reason: 'Breakout candles contain invalid OHLC data' };
   if (bars.some((c,i) => i > 0 && Number(c.time) - Number(bars[i-1].time) !== 300)) return { status: 'NO_TRADE', reason: 'Breakout confirmation candles are not contiguous' };
   const price = Number(tickPrice);
   if (!Number.isFinite(price) || price <= 0) return { status: 'NO_TRADE', reason: 'Fresh underlying price unavailable' };
   const reference = bars.at(-2), breakout = bars.at(-1);
   const resistance = Number(reference.high), support = Number(reference.low), high = Number(breakout.high), low = Number(breakout.low);
-  if (Number(breakout.close) > resistance && Number(breakout.close) > Number(breakout.open) && price >= high) {
+  if (allowEarlyEntry && Number(breakout.close) > resistance && Number(breakout.close) > Number(breakout.open) && price >= high) {
     const entry = high, stopLoss = low, risk = entry - stopLoss;
     if (!(risk > 0)) return { status: 'NO_TRADE', reason: 'Breakout candle has invalid long-side structural risk' };
     if (price > entry + risk * 0.25) return { status: 'WAIT', reason: 'Live price is more than 0.25R above the exact entry; chase blocked' };
     return { status: 'SETUP_CONFIRMED', side: 'LONG', confirmationType: 'EARLY_LIVE_HIGH_BREAK', entry, stopLoss, target: entry + 2 * risk, rr: '1:2', candleTime: Number(breakout.time), triggerPrice: high };
   }
-  if (Number(breakout.close) < support && Number(breakout.close) < Number(breakout.open) && price <= low) {
+  if (allowEarlyEntry && Number(breakout.close) < support && Number(breakout.close) < Number(breakout.open) && price <= low) {
     const entry = low, stopLoss = high, risk = stopLoss - entry;
     if (!(risk > 0)) return { status: 'NO_TRADE', reason: 'Breakout candle has invalid short-side structural risk' };
     if (price < entry - risk * 0.25) return { status: 'WAIT', reason: 'Live price is more than 0.25R below the exact entry; chase blocked' };
