@@ -18,6 +18,7 @@ import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
 import { evaluateIndexMarketRegime, unavailableMarketRegime } from './market-regime.js';
 import { rankResearchResults } from './ai-research-engine.js';
+import { buildProRiskPlan } from './pro-risk-engine.js';
 import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
 import 'dotenv/config';
 import express from 'express';
@@ -1089,11 +1090,39 @@ async function processPendingStrategyCandidate(candidate){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason,strategy:candidate.setup.strategy});
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_final_tick_recheck_failed'});return true;
   }
+  const provisionalRisk=buildProRiskPlan({candles:optionHistory.candles,entry:evaluated.entry,tickSize:candidate.contract.tickSize,livePremium:finalOptionTick.price,side:'LONG'});
+  if(provisionalRisk.status!=='SETUP_CONFIRMED'){
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason:provisionalRisk.reason,strategy:evaluated.strategy});
+   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'nse_pro_risk_rejected'});return true;
+  }
+  const outcomeStats=await strategyPlanStore.getNseOutcomeStats({strategy:evaluated.strategy,optionSide:candidate.contract.side,targetRr:provisionalRisk.rr});
+  const persistenceOptionTick=lastTicks.get(candidate.contract.symbol),persistenceUnderlyingTick=lastTicks.get(candidate.futureSymbol);
+  const persistenceIdentity=validateOptionContractIdentity(candidate.contract,officialContract,Date.now());
+  const persistencePremiumCheck=validateOptionPremiumTick(persistenceOptionTick,candidate.contract,Date.now());
+  if(!persistenceIdentity.ok||!freshTick(persistenceUnderlyingTick)||!persistencePremiumCheck.ok){
+   const reason=!persistenceIdentity.ok?persistenceIdentity.reason:!freshTick(persistenceUnderlyingTick)?'Underlying exchange tick became stale during Pro risk calibration':persistencePremiumCheck.reason;
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason,strategy:evaluated.strategy});
+   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'nse_pro_risk_final_tick_recheck_failed'});return true;
+  }
+  const proRisk=buildProRiskPlan({candles:optionHistory.candles,entry:evaluated.entry,tickSize:candidate.contract.tickSize,livePremium:persistenceOptionTick.price,side:'LONG',outcomeStats:outcomeStats.ok?outcomeStats:{}});
+  if(proRisk.status!=='SETUP_CONFIRMED'||proRisk.riskResearch.probability.status==='LOW_CONFIDENCE'){
+   const reason=proRisk.status!=='SETUP_CONFIRMED'?proRisk.reason:proRisk.riskResearch.probability.reason;
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason,strategy:evaluated.strategy,riskResearch:proRisk.riskResearch||null});
+   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'nse_pro_probability_gate_rejected'});return true;
+  }
+  if(!outcomeStats.ok){
+   proRisk.riskResearch.probability.status='CALIBRATION_UNAVAILABLE';
+   proRisk.riskResearch.probability.hitRate=null;
+   proRisk.riskResearch.probability.lowerBound=null;
+   proRisk.riskResearch.probability.reason=outcomeStats.reason||'NSE historical outcome calibration is unavailable; no probability claim is made';
+   proRisk.riskResearch.tradePermission='READ_ONLY_RESEARCH_ONLY_UNCALIBRATED';
+  }
   const planId=crypto.createHash('sha256').update([candidate.underlyingSymbol,candidate.contract.symbol,candidate.setup.confirmedAt,evaluated.optionCandleTime].join('|')).digest('hex').slice(0,48);
-  const saved=await strategyPlanStore.saveConfirmedPlan({planId,strategy:evaluated.strategy,underlying:candidate.underlyingSymbol,contract:candidate.contract.symbol,optionSide:candidate.contract.side,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:finalOptionTick.price,tickSize:candidate.contract.tickSize,entry:evaluated.entry,stopLoss:evaluated.stopLoss,target:evaluated.target,rr:evaluated.rr,underlyingExchangeTime:finalUnderlyingTick.exchangeTime,optionExchangeTime:finalOptionTick.exchangeTime,underlyingReceivedAt:finalUnderlyingTick.receivedAt,optionReceivedAt:finalOptionTick.receivedAt,underlyingCandleTime:String(evaluated.confirmedAt),optionCandleTime:String(evaluated.optionCandleTime)});
+  const saved=await strategyPlanStore.saveConfirmedPlan({planId,strategy:evaluated.strategy,underlying:candidate.underlyingSymbol,contract:candidate.contract.symbol,optionSide:candidate.contract.side,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:persistenceOptionTick.price,tickSize:candidate.contract.tickSize,entry:proRisk.entry,stopLoss:proRisk.stopLoss,target:proRisk.target,rr:proRisk.rr,underlyingExchangeTime:persistenceUnderlyingTick.exchangeTime,optionExchangeTime:persistenceOptionTick.exchangeTime,underlyingReceivedAt:persistenceUnderlyingTick.receivedAt,optionReceivedAt:persistenceOptionTick.receivedAt,underlyingCandleTime:String(evaluated.confirmedAt),optionCandleTime:String(evaluated.optionCandleTime),riskResearch:proRisk.riskResearch,marketRegime:(candidate.marketRegime||marketRegime)?.direction||'UNKNOWN'});
   if(saved.ok){
    await refreshStrategyActivePlans(true);
-   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'PLAN_CONFIRMED_READ_ONLY',strategy:evaluated.strategy,optionSide:candidate.contract.side,contract:candidate.contract.symbol,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:finalOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,planId:saved.planId,research:evaluated.research||candidate.setup.research||null,verifiedAt:new Date().toISOString()});
+   const calibrated=proRisk.riskResearch.probability.status==='CALIBRATED';
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:calibrated?'PLAN_CONFIRMED_READ_ONLY':'PLAN_RESEARCH_ONLY_UNCALIBRATED',strategy:evaluated.strategy,optionSide:candidate.contract.side,contract:candidate.contract.symbol,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:persistenceOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,planId:saved.planId,research:evaluated.research||candidate.setup.research||null,riskResearch:proRisk.riskResearch,verifiedAt:new Date().toISOString()});
   }else setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:saved.status||'NO_TRADE',reason:saved.reason,strategy:evaluated.strategy});
   strategyPendingCandidates.delete(candidate.key);if(!strategyActivePlans.some(plan=>plan.contract===candidate.contract.symbol))strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_processed'});return true;
  }catch(error){
