@@ -61,3 +61,10 @@ test('prewarms two nearest strikes per side from the nearest active expiry only'
   assert.deepEqual(selectNearestOptionContracts(contracts,'PE',108,2,now).map(x=>x.symbol),['NSE:ABC26NOV110PE','NSE:ABC26NOV100PE']);
   assert.equal(selectNearestOptionContracts(contracts,'CE',108,5,now).length,0);
 });
+
+
+test('selects an option contract with compact YYYYMMDD expiry from FYERS Symbol Master', () => {
+  const now = Date.parse('2026-11-18T04:00:00Z');
+  const contracts = [{symbol:'NSE:ABC26NOV100CE',side:'CE',strike:100,expiry:'20261126',tickSize:0.05,lotSize:10}];
+  assert.equal(selectNearestOptionContract(contracts,'CE',100,now).symbol,'NSE:ABC26NOV100CE');
+});
