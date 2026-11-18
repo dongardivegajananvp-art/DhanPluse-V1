@@ -238,3 +238,20 @@ test('ledger migration SQL separates ALTER statements with real newlines', async
   assert.match(captured.schemaSql,/\n\s+ALTER TABLE/);
   await store.close();
 });
+
+test('ledger accepts valid compact YYYYMMDD option expiry from FYERS instruments', async () => {
+  const now = Date.parse('2026-11-16T04:00:00Z');
+  const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
+  const saved = await store.saveConfirmedPlan(fixture(now, { expiry: '20261126' }), now);
+  assert.equal(saved.status, 'PLAN_PERSISTED');
+  await store.close();
+});
+
+test('ledger rejects invalid compact YYYYMMDD option expiry', async () => {
+  const now = Date.parse('2026-11-16T04:00:00Z');
+  const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
+  const saved = await store.saveConfirmedPlan(fixture(now, { expiry: '20261131' }), now);
+  assert.equal(saved.status, 'DATA_UNAVAILABLE_NO_TRADE');
+  assert.match(saved.reason, /malformed or expired/i);
+  await store.close();
+});
