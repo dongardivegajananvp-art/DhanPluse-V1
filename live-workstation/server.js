@@ -1077,10 +1077,17 @@ async function refreshStrategyActivePlans(force=false){
  strategyLedgerRuntimeReady=Boolean(result.ok);
  if(!result.ok)return result;
  const reconciled=[];
- for(const plan of (result.plans||[])){
-  const lifecycle=evaluateActivePlanLifecycle(plan,lastTicks.get(plan.contract),Date.now());
-  if(lifecycle.status==='ACTIVE'&&String(plan.underlying||'').startsWith('NSE:')&&freshTick(lastTicks.get(plan.contract))){
-   await strategyPlanStore.recordPlanObservation(plan.plan_id||plan.planId,lastTicks.get(plan.contract).price,Date.now());
+ for(let plan of (result.plans||[])){
+  const lifecycleTick=lastTicks.get(plan.contract);
+  let lifecycle=evaluateActivePlanLifecycle(plan,lifecycleTick,Date.now());
+  if(lifecycle.status==='ENTRY_HIT'&&!plan.entry_hit_at){
+   const hit=await strategyPlanStore.markEntryHit(plan.plan_id||plan.planId,lifecycle.price,Number(lifecycleTick?.receivedAt));
+   if(!hit.ok){reconciled.push({...plan,lifecycleState:'ENTRY_HIT_PERSIST_PENDING',lifecycleReason:hit.reason||'Entry reached but durable entry-hit write is pending'});continue;}
+   plan={...plan,entry_hit_at:hit.entryHitAt,entry_hit_price:hit.entryHitPrice};
+   lifecycle=evaluateActivePlanLifecycle(plan,lifecycleTick,Date.now());
+  }
+  if(['ACTIVE','ENTRY_HIT'].includes(lifecycle.status)&&String(plan.underlying||'').startsWith('NSE:')&&freshTick(lifecycleTick)){
+   await strategyPlanStore.recordPlanObservation(plan.plan_id||plan.planId,lifecycleTick.price,Number(lifecycleTick.receivedAt));
   }
   if(['EXPIRED','STOP_LOSS_HIT','TARGET_HIT'].includes(lifecycle.status)){
    const terminalStatus=lifecycle.status==='STOP_LOSS_HIT'?'STOP_LOSS_HIT':lifecycle.status==='TARGET_HIT'?'TARGET_HIT':'EXPIRED';
