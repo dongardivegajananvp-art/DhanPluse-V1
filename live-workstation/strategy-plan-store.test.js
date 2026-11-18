@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy-plan-store.js';
 
 class FakePool {
-  constructor() { this.plans = []; this.closed = false; }
+  constructor() { this.plans = []; this.closed = false; this.schemaSql = ''; }
   async query(sql, values = []) {
-    if (sql.includes('CREATE TABLE') || sql.includes('CREATE UNIQUE INDEX') || sql.includes('CREATE INDEX') || sql.includes('ALTER TABLE')) return { rows: [] };
+    if (sql.includes('CREATE TABLE') || sql.includes('CREATE UNIQUE INDEX') || sql.includes('CREATE INDEX') || sql.includes('ALTER TABLE')) { this.schemaSql = sql; return { rows: [] }; }
     if (sql.includes('SELECT COUNT(*)::int AS count')) return { rows: [{ count: this.plans.filter(p => p.status === 'ACTIVE').length }] };
     if (sql.includes('SELECT plan_id FROM')) {
       const found = this.plans.filter(p => p.status === 'ACTIVE' && (p.underlying === values[0] || p.contract === values[1]));
@@ -21,7 +21,7 @@ class FakePool {
     }
     if (sql.includes('COUNT(*) FILTER')) {
       const [strategy,side,targetRr]=values;
-      const rows=this.plans.filter(p=>p.underlying?.startsWith('NSE:')&&p.strategy===strategy&&p.optionSide===side&&Math.abs(Number(p.rr)-Number(targetRr))<=0.25);
+      const rows=this.plans.filter(p=>p.underlying?.startsWith('NSE:')&&p.strategy===strategy&&p.optionSide===side&&p.riskModelVersion==='GV2VPD_NSE_PRO_RISK_V1'&&Math.abs(Number(p.rr)-Number(targetRr))<=0.25);
       return {rows:[{wins:rows.filter(p=>p.status==='TARGET_HIT').length,losses:rows.filter(p=>p.status==='STOP_LOSS_HIT').length}]};
     }
     if (sql.includes('UPDATE gv2vpd_strategy_plans') && sql.includes('max_favorable_price')) {
@@ -65,6 +65,7 @@ function fixture(now, overrides = {}) {
     underlyingCandleTime: String(now / 1000 - 300),
     optionCandleTime: String(now / 1000 - 300),
     premium:100.05,
+    riskResearch:{model:'GV2VPD_NSE_PRO_RISK_V1',probability:{}},
     ...overrides
   };
 }
@@ -224,4 +225,16 @@ test('NSE plan observation records favourable/adverse option excursion without t
  assert.equal(active.maxAdversePrice,100.05);
  assert.equal(active.observedTicks,2);
  await store.close();
+});
+
+
+test('ledger migration SQL separates ALTER statements with real newlines', async()=>{
+  let captured;
+  class CapturingPool extends FakePool { constructor(){ super(); captured=this; } }
+  const store=createStrategyPlanStore({databaseUrl:'postgres://test',PoolClass:CapturingPool});
+  await store.ready;
+  assert.ok(captured.schemaSql);
+  assert.doesNotMatch(captured.schemaSql,/\\n\s+ALTER TABLE/);
+  assert.match(captured.schemaSql,/\n\s+ALTER TABLE/);
+  await store.close();
 });

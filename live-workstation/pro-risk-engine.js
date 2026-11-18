@@ -37,7 +37,7 @@ export function estimateTargetHitConfidence(stats={}) {
   const wins=Math.max(0,Math.trunc(Number(stats.wins)||0)),losses=Math.max(0,Math.trunc(Number(stats.losses)||0)),samples=wins+losses;
   const rate=samples?wins/samples:null,lower=wilsonLowerBound(wins,losses);
   if(samples<30)return{status:'UNCALIBRATED',samples,wins,losses,hitRate:null,lowerBound:null,reason:'At least 30 completed NSE outcomes in the comparable strategy/RR bucket are required; no probability claim is made'};
-  if(lower===null||lower<0.50)return{status:'LOW_CONFIDENCE',samples,wins,losses,hitRate:Number((rate*100).toFixed(1)),lowerBound:Number(((lower||0)*100).toFixed(1)),reason:'Conservative 95% lower confidence bound does not clear the 50% minimum for a 1:2+ reward/risk setup'};
+  if(lower===null||lower<0.50)return{status:'LOW_CONFIDENCE',samples,wins,losses,hitRate:Number((rate*100).toFixed(1)),lowerBound:Number(((lower||0)*100).toFixed(1)),reason:'Conservative 95% lower confidence bound does not clear the internal 50% research-confidence floor; this is not the 1:2 reward/risk break-even threshold'};
   return{status:'CALIBRATED',samples,wins,losses,hitRate:Number((rate*100).toFixed(1)),lowerBound:Number((lower*100).toFixed(1)),reason:'Historical NSE target/stop outcomes; confidence bound, not a guarantee'};
 }
 
@@ -83,6 +83,7 @@ export function buildProRiskPlan({candles=[],entry,tickSize,livePremium,side='LO
     status:'SETUP_CONFIRMED',entry:trigger,stopLoss:stop,target,rr:Number(rr.toFixed(2)),risk,
     model:'GV2VPD_NSE_PRO_RISK_V1',
     riskResearch:{
+      model:'GV2VPD_NSE_PRO_RISK_V1',
       atr14:Number(atr.toFixed(6)),stopDistanceAtr:Number((risk/atr).toFixed(3)),
       targetDistanceAtr:Number((reward/atr).toFixed(3)),stopSource:'TIGHTEST_CONFIRMED_5M_STRUCTURAL_PIVOT_WITH_ATR_NOISE_BUFFER',
       targetSource,structuralStopPivot:structuralLow.price,resistancePivot:resistance?.price??null,

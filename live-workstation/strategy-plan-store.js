@@ -147,7 +147,17 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS premium NUMERIC(18,6);
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS tick_size NUMERIC(18,6);
     ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS underlying_received_at TIMESTAMPTZ;
-    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS option_received_at TIMESTAMPTZ;\n    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS max_favorable_price NUMERIC(18,6);\n    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS max_adverse_price NUMERIC(18,6);\n    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS observed_ticks INTEGER NOT NULL DEFAULT 0;\n    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS last_observed_at TIMESTAMPTZ;\n    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS risk_model_version VARCHAR(64);\n    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS target_hit_rate NUMERIC(8,4);\n    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS target_confidence_lower NUMERIC(8,4);\n    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS target_sample_size INTEGER;\n    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS market_regime VARCHAR(24);\n    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS risk_research JSONB;
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS option_received_at TIMESTAMPTZ;
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS max_favorable_price NUMERIC(18,6);
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS max_adverse_price NUMERIC(18,6);
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS observed_ticks INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS last_observed_at TIMESTAMPTZ;
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS risk_model_version VARCHAR(64);
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS target_hit_rate NUMERIC(8,4);
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS target_confidence_lower NUMERIC(8,4);
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS target_sample_size INTEGER;
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS market_regime VARCHAR(24);
+    ALTER TABLE gv2vpd_strategy_plans ADD COLUMN IF NOT EXISTS risk_research JSONB;
     CREATE UNIQUE INDEX IF NOT EXISTS gv2vpd_strategy_active_underlying
       ON gv2vpd_strategy_plans (underlying) WHERE status = 'ACTIVE';
     CREATE UNIQUE INDEX IF NOT EXISTS gv2vpd_strategy_active_contract
@@ -242,6 +252,7 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
             AND strategy=$1 AND option_side=$2
             AND status IN ('TARGET_HIT','STOP_LOSS_HIT')
             AND ABS(rr-$3)<=0.25
+            AND risk_model_version='GV2VPD_NSE_PRO_RISK_V1'
             AND created_at>=NOW()-INTERVAL '180 days'
         `,[strategy,optionSide,Number(targetRr)]);
         const wins=Number(result.rows?.[0]?.wins)||0,losses=Number(result.rows?.[0]?.losses)||0;

@@ -43,11 +43,14 @@ test('target hit probability requires conservative lower confidence bound after 
 });
 
 test('Pro risk plan uses structural stop, resistance-aware target and preserves at least 1:2 RR',()=>{
-  const result=buildProRiskPlan({candles:optionFixture(),entry:110,tickSize:0.05,livePremium:110.1,side:'LONG',outcomeStats:{wins:0,losses:0}});
+  const rows=optionFixture();
+  rows[26].high=130;
+  const result=buildProRiskPlan({candles:rows,entry:110,tickSize:0.05,livePremium:110.1,side:'LONG',outcomeStats:{wins:0,losses:0}});
   assert.equal(result.status,'SETUP_CONFIRMED',JSON.stringify(result));
   assert.ok(result.stopLoss<result.entry);
   assert.ok(result.target>result.entry);
   assert.ok(result.rr>=2);
+  assert.equal(result.riskResearch.model,'GV2VPD_NSE_PRO_RISK_V1');
   assert.equal(result.riskResearch.targetSource,'NEAREST_VERIFIED_OPTION_SUPPLY_PIVOT');
   assert.equal(result.riskResearch.probability.status,'UNCALIBRATED');
   assert.equal(result.riskResearch.tradePermission,'READ_ONLY_RESEARCH_ONLY_UNCALIBRATED');
