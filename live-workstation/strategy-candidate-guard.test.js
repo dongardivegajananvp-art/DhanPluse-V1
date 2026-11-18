@@ -45,7 +45,7 @@ test('option premium tick requires fresh exchange and receive timestamps plus of
 });
 
 test('option candles require 50 completed contiguous, valid and tick-aligned FYERS bars', () => {
-  const now = Date.parse('2026-11-16T04:00:00Z');
+  const now = Date.parse('2026-11-16T08:00:00Z');
   const exchangeTime = now / 1000;
   const currentBucket = Math.floor(exchangeTime / 300) * 300;
   const candles = Array.from({ length: 50 }, (_, i) => ({
@@ -70,7 +70,7 @@ test('option candles require 50 completed contiguous, valid and tick-aligned FYE
 });
 
 test('option candle gaps outside the latest 50-candle setup window do not block a verified window', () => {
-  const now = Date.parse('2026-11-16T04:00:00Z');
+  const now = Date.parse('2026-11-16T08:00:00Z');
   const exchangeTime = now / 1000;
   const currentBucket = Math.floor(exchangeTime / 300) * 300;
   const older = [{ time: currentBucket - 60 * 300, open: 100, high: 100.2, low: 99.95, close: 100.1 }];
@@ -81,7 +81,7 @@ test('option candle gaps outside the latest 50-candle setup window do not block 
   assert.equal(validateOptionCandles([...older, ...latest], { exchangeTime }, contract, now).ok, true);
 });
 test('option candle verifier rejects stale and malformed OHLC payloads', () => {
-  const now = Date.parse('2026-11-16T04:00:00Z');
+  const now = Date.parse('2026-11-16T08:00:00Z');
   const exchangeTime = now / 1000;
   const currentBucket = Math.floor(exchangeTime / 300) * 300;
   const candles = Array.from({ length: 50 }, (_, i) => ({
