@@ -255,3 +255,28 @@ test('ledger rejects invalid compact YYYYMMDD option expiry', async () => {
   assert.match(saved.reason, /malformed or expired/i);
   await store.close();
 });
+
+test('outcome calibration is isolated for every one of the nine strategies',async()=>{
+ const now=Date.parse('2026-11-16T04:00:00Z');
+ const store=createStrategyPlanStore({databaseUrl:'postgres://test',PoolClass:FakePool});
+ const strategies=[
+  'EMA20_EMA50_TREND','TOP_GAINER_MOMENTUM_BREAKOUT','DAILY_TREND_5M_PULLBACK',
+  'DAY_HIGH_LOW_BREAK_RETEST','DOUBLE_TOP_BOTTOM_NECKLINE_RETEST','BULLISH_CONTINUATION',
+  'BEARISH_CONTINUATION','FLAG_BREAKOUT_VOLUME','OPENING_RANGE_BREAKOUT'
+ ];
+ for(let i=0;i<strategies.length;i++){
+  const strategy=strategies[i],plan=fixture(now,{
+   planId:'strategy-'+i,strategy,underlying:'NSE:TEST'+i+'26NOVFUT',
+   contract:'NSE:TEST'+i+'26NOV100CE',optionSide:i%2?'PE':'CE'
+  });
+  assert.equal((await store.saveConfirmedPlan(plan,now)).ok,true,strategy);
+  assert.equal((await store.closePlan(plan.planId,'TARGET_HIT')).ok,true,strategy);
+ }
+ for(let i=0;i<strategies.length;i++){
+  const stats=await store.getNseOutcomeStats({strategy:strategies[i],optionSide:i%2?'PE':'CE',targetRr:2});
+  assert.deepEqual([stats.wins,stats.losses,stats.samples],[1,0,1],strategies[i]);
+ }
+ const wrongSide=await store.getNseOutcomeStats({strategy:'EMA20_EMA50_TREND',optionSide:'PE',targetRr:2});
+ assert.deepEqual([wrongSide.wins,wrongSide.losses,wrongSide.samples],[0,0,0]);
+ await store.close();
+});
