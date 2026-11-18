@@ -33,12 +33,19 @@ export function wilsonLowerBound(wins, losses, z=1.96) {
   const centre=p+z2/(2*total),margin=z*Math.sqrt((p*(1-p)+z2/(4*total))/total);
   return Math.max(0,(centre-margin)/denominator);
 }
-export function estimateTargetHitConfidence(stats={}) {
+export function estimateTargetHitConfidence(stats={}, targetRr=2) {
   const wins=Math.max(0,Math.trunc(Number(stats.wins)||0)),losses=Math.max(0,Math.trunc(Number(stats.losses)||0)),samples=wins+losses;
+  const rr=Number(targetRr),validRr=Number.isFinite(rr)&&rr>=2;
   const rate=samples?wins/samples:null,lower=wilsonLowerBound(wins,losses);
-  if(samples<30)return{status:'UNCALIBRATED',samples,wins,losses,hitRate:null,lowerBound:null,reason:'At least 30 completed NSE outcomes in the comparable strategy/RR bucket are required; no probability claim is made'};
-  if(lower===null||lower<0.50)return{status:'LOW_CONFIDENCE',samples,wins,losses,hitRate:Number((rate*100).toFixed(1)),lowerBound:Number(((lower||0)*100).toFixed(1)),reason:'Conservative 95% lower confidence bound does not clear the internal 50% research-confidence floor; this is not the 1:2 reward/risk break-even threshold'};
-  return{status:'CALIBRATED',samples,wins,losses,hitRate:Number((rate*100).toFixed(1)),lowerBound:Number((lower*100).toFixed(1)),reason:'Historical NSE target/stop outcomes; confidence bound, not a guarantee'};
+  const metrics=validRr&&samples>=30?{
+    breakEvenHitRate:Number((100/(1+rr)).toFixed(1)),
+    expectedValueR:Number((rate*rr-(1-rate)).toFixed(3)),
+    conservativeExpectedValueR:lower===null?null:Number((lower*rr-(1-lower)).toFixed(3))
+  }:{breakEvenHitRate:null,expectedValueR:null,conservativeExpectedValueR:null};
+  if(samples<30)return{status:'UNCALIBRATED',samples,wins,losses,hitRate:null,lowerBound:null,...metrics,reason:'At least 30 completed NSE outcomes in the comparable strategy/RR bucket are required; no probability claim is made'};
+  if(!validRr)return{status:'INVALID_RR',samples,wins,losses,hitRate:null,lowerBound:null,...metrics,reason:'A verified target RR of at least 1:2 is required for expectancy calculation'};
+  if(lower===null||lower<0.50)return{status:'LOW_CONFIDENCE',samples,wins,losses,hitRate:Number((rate*100).toFixed(1)),lowerBound:Number(((lower||0)*100).toFixed(1)),...metrics,reason:'Conservative 95% lower confidence bound does not clear the internal 50% research-confidence floor; this is not the 1:2 reward/risk break-even threshold'};
+  return{status:'CALIBRATED',samples,wins,losses,hitRate:Number((rate*100).toFixed(1)),lowerBound:Number((lower*100).toFixed(1)),...metrics,reason:'Historical NSE target/stop outcomes; expectancy is historical and the confidence bound is not a guarantee'};
 }
 
 /**
@@ -78,7 +85,7 @@ export function buildProRiskPlan({candles=[],entry,tickSize,livePremium,side='LO
   }
   const reward=target-trigger,rr=reward/risk;
   if(!(Number.isFinite(rr)&&rr>=2-1e-8))return fail('Adaptive target cannot preserve the minimum 1:2 reward/risk');
-  const probability=estimateTargetHitConfidence(outcomeStats);
+  const probability=estimateTargetHitConfidence(outcomeStats,rr);
   return{
     status:'SETUP_CONFIRMED',entry:trigger,stopLoss:stop,target,rr:Number(rr.toFixed(2)),risk,
     model:'GV2VPD_NSE_PRO_RISK_V1',

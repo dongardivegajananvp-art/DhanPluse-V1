@@ -69,3 +69,26 @@ test('Pro risk plan rejects a nearby resistance that cannot offer minimum 1:2 RR
   assert.equal(result.status,'NO_TRADE');
   assert.match(result.reason,/supply pivot is inside/);
 });
+
+test('calibrated target model reports break-even rate and observed/conservative expectancy in R',()=>{
+  const result=estimateTargetHitConfidence({wins:25,losses:5},2.25);
+  assert.equal(result.status,'CALIBRATED');
+  assert.equal(result.breakEvenHitRate,30.8);
+  assert.ok(result.expectedValueR>0);
+  assert.ok(result.conservativeExpectedValueR>0);
+});
+
+test('uncalibrated model never emits a fabricated hit rate or expectancy',()=>{
+  const result=estimateTargetHitConfidence({wins:18,losses:11},2);
+  assert.equal(result.status,'UNCALIBRATED');
+  assert.equal(result.hitRate,null);
+  assert.equal(result.lowerBound,null);
+  assert.equal(result.expectedValueR,null);
+  assert.equal(result.conservativeExpectedValueR,null);
+});
+
+test('invalid or sub-2R calibration target cannot produce expectancy',()=>{
+  const result=estimateTargetHitConfidence({wins:25,losses:5},1.5);
+  assert.equal(result.status,'INVALID_RR');
+  assert.equal(result.expectedValueR,null);
+});
