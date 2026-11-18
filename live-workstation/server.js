@@ -254,7 +254,9 @@ const fetchWithFyersBudget=createFyersDataApiBudget({
   allApiPaths:true,maxRequestsPerMinute:15,minIntervalMs:FYERS_REST_MIN_INTERVAL_MS,maxQueuedRequests:24,
   onCooldownChange:async state=>{
     if(!orderRequestPool||!(await fyersCooldownStoreReady)||!fyersRestBudgetReady)return false;
-    if(state.cooldownUntil>Date.now()){
+    if(state.cooldownPathname){
+      // Persist the in-flight probe claim even after the prior cooldown deadline has elapsed.
+      // Only a cleared circuit (no blocked endpoint) may delete the durable state row.
       const value={...state,blockedUntil:new Date(state.cooldownUntil).toISOString()};
       await orderRequestPool.query(
         `INSERT INTO gv2vpd_runtime_state (state_key,state_value,updated_at) VALUES ($1,$2::jsonb,NOW())
