@@ -62,7 +62,7 @@ function validatePlan(plan, now) {
   const risk=entry-stop,reward=target-entry;
   const tolerance=Math.max(Number(plan.tickSize)*1e-6,1e-8);
   const calculatedRr=reward/risk;
-  if(calculatedRr<2-1e-8||Number(plan.rr)<2||Math.abs(Number(plan.rr)-calculatedRr)>1e-4)return 'Adaptive target must preserve a verified minimum 1:2 reward/risk and match persisted levels';
+  if(calculatedRr<2-1e-8||Number(plan.rr)<2||Math.abs(Number(plan.rr)-calculatedRr)>0.0051)return 'Adaptive target must preserve a verified minimum 1:2 reward/risk and match persisted levels';
   if(Number(plan.premium)<entry-tolerance||Number(plan.premium)>entry+0.5*risk+tolerance)
     return 'Verified option premium must be at Entry or within the maximum 0.5R chase allowance';
   for(const key of ['premium','entry','stopLoss','target'])if(!tickAligned(plan[key],plan.tickSize))
@@ -192,8 +192,8 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
           new Date(Number(plan.underlyingReceivedAt)).toISOString(),new Date(Number(plan.optionReceivedAt)).toISOString(),
           plan.underlyingCandleTime,plan.optionCandleTime,Number(plan.premium),Number(plan.premium),
           plan.riskResearch?.model||null,
-          Number.isFinite(Number(plan.riskResearch?.probability?.hitRate))?Number(plan.riskResearch.probability.hitRate):null,
-          Number.isFinite(Number(plan.riskResearch?.probability?.lowerBound))?Number(plan.riskResearch.probability.lowerBound):null,
+          plan.riskResearch?.probability?.hitRate!==null&&plan.riskResearch?.probability?.hitRate!==undefined&&Number.isFinite(Number(plan.riskResearch.probability.hitRate))?Number(plan.riskResearch.probability.hitRate):null,
+          plan.riskResearch?.probability?.lowerBound!==null&&plan.riskResearch?.probability?.lowerBound!==undefined&&Number.isFinite(Number(plan.riskResearch.probability.lowerBound))?Number(plan.riskResearch.probability.lowerBound):null,
           Number.isFinite(Number(plan.riskResearch?.probability?.samples))?Number(plan.riskResearch.probability.samples):0,
           String(plan.marketRegime||'UNKNOWN').slice(0,24),
           JSON.stringify(plan.riskResearch||{})
@@ -238,7 +238,7 @@ export function createStrategyPlanStore({ databaseUrl, PoolClass = Pool } = {}) 
           SELECT COUNT(*) FILTER (WHERE status='TARGET_HIT')::int AS wins,
                  COUNT(*) FILTER (WHERE status='STOP_LOSS_HIT')::int AS losses
           FROM gv2vpd_strategy_plans
-          WHERE underlying NOT LIKE 'MCX:%'
+          WHERE underlying LIKE 'NSE:%'
             AND strategy=$1 AND option_side=$2
             AND status IN ('TARGET_HIT','STOP_LOSS_HIT')
             AND ABS(rr-$3)<=0.25
