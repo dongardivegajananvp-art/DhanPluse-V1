@@ -248,7 +248,8 @@ export function createFyersDataApiBudget({
 
     // Validated callers still decide whether cached candles are fresh enough.
     // A cached historical response may be served during a quote API cooldown.
-    if (cacheKey && bypassCache !== true) {
+    // Never let a cached response masquerade as a retry/probe for the endpoint whose circuit is open.
+    if (cacheKey && bypassCache !== true && !(cooldownPathname === target.pathname && cooldownBlocksPath(target.pathname, currentTime))) {
       const cached = responseCache.get(cacheKey);
       if (cached && currentTime - cached.storedAt < ttl) {
         return makeResponse(cached, currentTime - cached.storedAt, true);
