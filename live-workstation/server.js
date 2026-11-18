@@ -1069,7 +1069,7 @@ async function processPendingStrategyCandidate(candidate){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason:'Underlying strategy confirmation changed or expired while waiting for the option tick',strategy:candidate.setup.strategy});
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_underlying_recheck_failed'});return true;
   }
-  const evaluated=evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,optionCandles:optionHistory.candles,optionTick:currentOptionTick,contract:candidate.contract,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now(),researchEnabled:true,marketRegime});
+  const evaluated=evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,optionCandles:optionHistory.candles,optionTick:currentOptionTick,contract:candidate.contract,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now(),researchEnabled:true,marketRegime:candidate.marketRegime||marketRegime});
   if(evaluated.status==='WAITING_FOR_OPTION_BREAKOUT'){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:evaluated.status,reason:evaluated.reason,strategy:candidate.setup.strategy,contract:candidate.contract.symbol,updatedAt:new Date().toISOString()});
    // Keep the option subscribed and candidate pending for the existing 120-second

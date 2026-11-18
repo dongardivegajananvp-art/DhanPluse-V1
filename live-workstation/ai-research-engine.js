@@ -15,7 +15,14 @@ function ema(values,period) {
 function mean(values) { return values.length ? values.reduce((a,b)=>a+b,0)/values.length : NaN; }
 function contiguous(rows) {
   const w=rows.slice(-50);
-  return w.length===50 && w.every((c,i)=>i===0||num(c.time)-num(w[i-1].time)===300);
+  const parts=value=>{const d=new Date((num(value)+19800)*1000);return{day:d.toISOString().slice(0,10),minute:d.getUTCHours()*60+d.getUTCMinutes()};};
+  return w.length===50 && w.every((c,i)=>{
+    if(i===0)return true;
+    const previous=num(w[i-1].time),current=num(c.time);
+    if(current-previous===300)return true;
+    const a=parts(previous),b=parts(current);
+    return a.minute===925&&b.minute===555&&b.day>a.day;
+  });
 }
 function aligned(side, values, shortPeriod, longPeriod) {
   const eShort=ema(values,shortPeriod),eLong=ema(values,longPeriod),last=values.at(-1);
@@ -42,7 +49,7 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
   const closes=rows.map(c=>num(c.close)),dailyCloses=daily.map(c=>num(c.close));
   const last=rows.at(-1),prior=rows.at(-4),dailyAligned=aligned(side,dailyCloses,20,50);
   const intradayAligned=aligned(side,closes,20,50);
-  const momentum=side==='LONG'?num(last.close)>num(prior.close):num(last.close)<num(prior.close);
+  const momentum=side==='LONG'?(num(last.close)>num(prior.close)&&emaSlopeAligned):(num(last.close)<num(prior.close)&&emaSlopeAligned);
   const candleRange=Math.max(num(last.high)-num(last.low),1e-9);
   const closeLocation=(num(last.close)-num(last.low))/candleRange;
   const breakoutQuality=side==='LONG'?num(last.close)>num(setup.breakoutLevel)&&closeLocation>=0.65:
