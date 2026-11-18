@@ -83,6 +83,7 @@ export function buildProRiskPlan({candles=[],entry,tickSize,livePremium,side='LO
     status:'SETUP_CONFIRMED',entry:trigger,stopLoss:stop,target,rr:Number(rr.toFixed(2)),risk,
     model:'GV2VPD_NSE_PRO_RISK_V1',
     riskResearch:{
+      model:'GV2VPD_NSE_PRO_RISK_V1',
       atr14:Number(atr.toFixed(6)),stopDistanceAtr:Number((risk/atr).toFixed(3)),
       targetDistanceAtr:Number((reward/atr).toFixed(3)),stopSource:'TIGHTEST_CONFIRMED_5M_STRUCTURAL_PIVOT_WITH_ATR_NOISE_BUFFER',
       targetSource,structuralStopPivot:structuralLow.price,resistancePivot:resistance?.price??null,
