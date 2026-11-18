@@ -980,6 +980,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
       await refreshStrategyActivePlans(true);
       return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:cancelled.ok?'MCX selection or final exchange tick changed during ledger refresh; saved plan cancelled':'MCX selection/tick changed during ledger refresh; plan cancellation could not be confirmed and remains blocked'};
     }
+    const persistedPlanState=strategyActivePlans.find(plan=>(plan.plan_id||plan.planId)===planId)||null;
     selectedOptionSymbol=best.contract.symbol;
     syncSocketSubscriptions({reason:'mcx_best_option_selected'});
     return{
@@ -997,7 +998,10 @@ app.get('/api/mcx/scan',async(req,res)=>{
        stopLossBasis:finalEvaluation.stopLossBasis||'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',
        targetBasis:finalEvaluation.targetBasis||'EXACT_2R',
        optionConfirmation:finalEvaluation.optionConfirmation||'EARLY_LIVE_OPTION_PREMIUM_BREAK',
-       entryLifecycle:'WAITING_FOR_ENTRY',strategy:finalEvaluation.strategy,
+       entryLifecycle:persistedPlanState?.lifecycleState||'WAITING_FOR_ENTRY',
+        entryHitAt:persistedPlanState?.entry_hit_at||null,
+        entryHitPrice:persistedPlanState?.entry_hit_price===null||persistedPlanState?.entry_hit_price===undefined?null:Number(persistedPlanState.entry_hit_price),
+        strategy:finalEvaluation.strategy,
       source:'FYERS MCX Symbol Master + fresh futures/option ticks + completed 5-minute candles + nine-strategy engine + persistent plan ledger',
       verifiedAt:new Date().toISOString()
     };
