@@ -289,7 +289,13 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   }
   if(researchEnabled){
     for(const item of candidates)item.research=analyzeSetupResearch({candles:rows,dailyCandles,tick:underlyingTick,setup:item,marketRegime,now});
-    candidates.sort((a,b)=>Number(b.research?.qualityScore??-1)-Number(a.research?.qualityScore??-1)||a.confirmedAt-b.confirmedAt||STRATEGY_TIE_PRIORITY.indexOf(a.strategy)-STRATEGY_TIE_PRIORITY.indexOf(b.strategy));
+    const researchReady=candidates.filter(item=>item.research?.status==='COMPLETE'&&finite(item.research.qualityScore));
+    if(!researchReady.length){
+      const pending=candidates[0]?.research||null;
+      return{status:'DATA_UNAVAILABLE_NO_TRADE',reason:pending?.reason||'Complete fresh multi-timeframe AI research is required before an NSE setup can advance',research:pending,rejectedStrategies:candidates.map(item=>item.strategy)};
+    }
+    candidates.splice(0,candidates.length,...researchReady);
+    candidates.sort((a,b)=>Number(b.research.qualityScore)-Number(a.research.qualityScore)||a.confirmedAt-b.confirmedAt||STRATEGY_TIE_PRIORITY.indexOf(a.strategy)-STRATEGY_TIE_PRIORITY.indexOf(b.strategy));
   }else candidates.sort((a,b)=>a.confirmedAt-b.confirmedAt||STRATEGY_TIE_PRIORITY.indexOf(a.strategy)-STRATEGY_TIE_PRIORITY.indexOf(b.strategy));
   return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
 }
