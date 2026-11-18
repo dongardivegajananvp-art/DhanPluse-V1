@@ -296,3 +296,29 @@ test('unsafe or mismatched persisted probe URLs are never restored', () => {
   assert.equal(request.restoreStatus(state), true);
   assert.equal(request.getStatus().recoveryProbeUrl, null);
 });
+
+
+test('generic Cloudflare-proxied HTTP 429 is not misclassified as Cloudflare 1015', async () => {
+  let clock = 8_000_000;
+  let persisted = null;
+  const request = createFyersDataApiBudget({
+    allApiPaths: true,
+    now: () => clock,
+    sleep: async ms => { clock += ms; },
+    fetchImpl: async () => new Response('Rate limit exceeded', {
+      status: 429,
+      headers: { server: 'cloudflare', 'cf-ray': 'generic-rate-limit-ray' }
+    }),
+    onCooldownChange: async state => {
+      persisted = { ...state };
+      return true;
+    }
+  });
+
+  const response = await request('https://api-t1.fyers.in/data/options-chain-v3?symbol=NSE%3ANIFTY50-INDEX');
+  assert.equal(response.status, 429);
+  assert.equal(persisted.cooldownReason, 'HTTP_429');
+  assert.equal(persisted.cooldownUntil - clock, 60_000);
+  assert.equal(persisted.consecutiveCloudflareBlocks, 0);
+  assert.equal(persisted.consecutiveRateLimitBlocks, 1);
+});
