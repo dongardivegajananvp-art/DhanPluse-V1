@@ -1064,7 +1064,7 @@ async function processPendingStrategyCandidate(candidate){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:candleCheck.reason,strategy:candidate.setup.strategy});
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_option_candles_rejected'});return true;
   }
-  const refreshedSetup=detectNineStrategySetup({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now(),researchEnabled:true,marketRegime});
+  const refreshedSetup=detectNineStrategySetup({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now(),researchEnabled:true,marketRegime:candidate.marketRegime||marketRegime});
   if(refreshedSetup.status!=='UNDERLYING_SETUP_CONFIRMED'||!sameStrategyConfirmation(candidate.setup,refreshedSetup)){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason:'Underlying strategy confirmation changed or expired while waiting for the option tick',strategy:candidate.setup.strategy});
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_underlying_recheck_failed'});return true;
@@ -1177,7 +1177,7 @@ async function runAutomaticStrategyScan(){
     return;
    }
    strategyScanLastError='';
-   const setup=detectNineStrategySetup({underlyingCandles:history.candles,underlyingTick:currentTick,dailyCandles:daily.ok?daily.candles:[],isTopGainer,now:Date.now()});
+   const setup=detectNineStrategySetup({underlyingCandles:history.candles,underlyingTick:currentTick,dailyCandles:daily.ok?daily.candles:[],isTopGainer,now:Date.now(),researchEnabled:true,marketRegime});
    if(setup.status!=='UNDERLYING_SETUP_CONFIRMED'){
     if(setup.status==='DATA_UNAVAILABLE_NO_TRADE')setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:setup.status,reason:setup.reason,dailyDataStatus:daily.reason||'verified'});
     return;
@@ -1189,9 +1189,9 @@ async function runAutomaticStrategyScan(){
    if(!contract){setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'No active nearest-expiry ATM option contract passed FYERS Symbol Master validation',strategy:setup.strategy});return;}
    const key=strategyCandidateKey(row.underlyingSymbol,contract.symbol);
    if(strategyPendingCandidates.has(key))return;
-   strategyPendingCandidates.set(key,{key,futureSymbol,underlyingSymbol:row.underlyingSymbol,setup,contract,underlyingCandles:history.candles,dailyCandles:daily.ok?daily.candles:[],isTopGainer,createdAt:Date.now()});
+   strategyPendingCandidates.set(key,{key,futureSymbol,underlyingSymbol:row.underlyingSymbol,setup,marketRegime,contract,underlyingCandles:history.candles,dailyCandles:daily.ok?daily.candles:[],isTopGainer,createdAt:Date.now()});
    strategyOptionSymbols.add(contract.symbol);syncSocketSubscriptions({reason:'strategy_option_candidate'});
-   setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'WAITING_FOR_FRESH_OPTION_TICK',strategy:setup.strategy,optionSide,contract:contract.symbol,expiry:contract.expiry,strike:contract.strike,reason:'Underlying setup verified; waiting for fresh option exchange tick and completed option candles'});
+   setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'WAITING_FOR_FRESH_OPTION_TICK',strategy:setup.strategy,optionSide,contract:contract.symbol,expiry:contract.expiry,strike:contract.strike,research:setup.research||null,reason:'Underlying setup verified; waiting for fresh option exchange tick and completed option candles'});
    return;
   }
  }catch(error){strategyScanLastError=String(error?.message||error).slice(0,180);if(Number(error?.statusCode)!==429)console.warn('Automatic nine-strategy scan paused safely.',strategyScanLastError);}
