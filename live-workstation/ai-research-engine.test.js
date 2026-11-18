@@ -35,3 +35,11 @@ test('fails research closed when contiguous candle or daily history is insuffici
   assert.equal(result.status,'INCOMPLETE');
   assert.equal(result.qualityScore,null);
 });
+
+test('treats a neutral index regime as neutral evidence, not a conflict',()=>{
+  const now=Date.now();
+  const result=analyzeSetupResearch({candles:candles(60),dailyCandles:candles(60,{step:86400}),tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'NEUTRAL'},now});
+  const regime=result.components.find(item=>item.key==='marketRegime');
+  assert.equal(regime.points,5);
+  assert.ok(!result.riskFlags.some(flag=>flag.includes('conflicts with the index regime')));
+});

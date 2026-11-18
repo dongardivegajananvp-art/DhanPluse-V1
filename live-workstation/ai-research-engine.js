@@ -61,7 +61,8 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
   const volumeKnown=volumes.length>=10&&Number.isFinite(lastVolume)&&lastVolume>0;
   const volumeExpansion=volumeKnown&&lastVolume>=mean(volumes)*1.2;
   const regimeDirection=String(marketRegime?.direction||marketRegime?.state||'').toUpperCase();
-  const regimeKnown=Boolean(regimeDirection&&regimeDirection!=='UNAVAILABLE'&&regimeDirection!=='NONE');
+  const regimeNeutral=regimeDirection==='NEUTRAL';
+  const regimeKnown=Boolean(regimeDirection&&regimeDirection!=='UNAVAILABLE'&&regimeDirection!=='NONE'&&!regimeNeutral);
   const regimeAligned=regimeKnown&&(regimeDirection===side||regimeDirection===(side==='LONG'?'BULLISH':'BEARISH'));
   const ranges=rows.slice(-21,-1).map(c=>num(c.high)-num(c.low)).filter(x=>Number.isFinite(x)&&x>0);
   const averageRange=mean(ranges),rangeRatio=averageRange>0?candleRange/averageRange:NaN;
