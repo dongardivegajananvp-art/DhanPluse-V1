@@ -5,7 +5,7 @@ import {createSharedTokenReader} from './token-reader.js';
 import { createFyersDataApiBudget, isValidFyersRecoveryPayload } from './fyers-rest-budget.js';
 import { socketRecoveryDelayMs } from './socket-recovery-policy.js';
 import { shouldRestartSilentIndexFeed } from './socket-feed-watchdog.js';
-import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute, shouldRetryFnoUniverse, prioritizeScannerSymbols } from './scanner-schedule.js';
+import { STRATEGY_SCAN_INTERVAL_MS, FNO_ROTATION_INTERVAL_MS, estimateScannerRestRequestsPerMinute, shouldRetryFnoUniverse, prioritizeScannerSymbols, isFnoSubscriptionWindowRotation, resolveFnoSubscriptionWindowCursor } from './scanner-schedule.js';
 import { evaluateThreeCandleBreakout, getCompletedCandleWindow, isHistoryCacheFresh } from './public/chart-safety.js';
 import { historyRetryDelayMs, shouldAttemptHistoryRetry } from './history-retry-policy.js';
 import { acceptExchangeTick, exchangeTickFreshness, getScannerRuntimeState, summarizeFeedFreshness } from './market-data-integrity.js';
@@ -167,12 +167,13 @@ let strategyActivePlansLoadedAt=0;
 let strategyLedgerRuntimeReady=false;
 const FYERS_DATA_SYMBOL_LIMIT=80; // Keep 20 account-wide slots free for other active FYERS API connections and transition overlap.
 let subscriptionTransitionTimer=null;
-let fnoUniverseRows=[],fnoUniverseFetchedAt=0,fnoUniversePromise=null,fnoUniverseCursor=0,fnoScanSubscriptionSymbols=[],fnoUniverseError='Not loaded',lastFnoRotationAt=null,fnoRotationCount=0,lastFnoUniverseRetryAt=0;
+let fnoUniverseRows=[],fnoUniverseFetchedAt=0,fnoUniversePromise=null,fnoUniverseCursor=0,fnoUniverseActiveCursor=0,fnoScanSubscriptionSymbols=[],fnoUniverseError='Not loaded',lastFnoRotationAt=null,fnoRotationCount=0,lastFnoUniverseRetryAt=0;
 const BASE_SUBSCRIPTIONS=['NSE:NIFTY50-INDEX','NSE:NIFTYBANK-INDEX','BSE:SENSEX-INDEX'];
 function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!socket||!connected)return {subscribed:0,removed:0};
   let subscriptionError='';
   let pendingFnoCursor=null;
+  let pendingFnoActiveCursor=null;
   // When an MCX future is selected, isolate the live socket to that MCX future
   // and its verified option candidates. NSE indices/F&O rotation are irrelevant
   // to the MCX workstation view and can consume the Standard-plan symbol budget.
@@ -182,9 +183,11 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
   if(!mcxOnlyMode&&nseSessionActive&&fnoUniverseRows.length){
     const pinned=[selectedSymbol,selectedOptionSymbol,...strategyOptionSymbols,...strategyWarmOptionSymbols,...mcxOptionCandidateSymbols,...fnoMoversCache.rows.flatMap(x=>[x.symbol,x.underlyingSymbol])].filter(Boolean);
     try{
-      const batch=selectFairSubscriptionBatch({baseSymbols:BASE_SUBSCRIPTIONS,pinnedSymbols:pinned,universeSymbols:fnoUniverseRows.map(x=>x.futureSymbol),cursor:fnoUniverseCursor,limit:FYERS_DATA_SYMBOL_LIMIT});
+      const rotateWindow=isFnoSubscriptionWindowRotation(reason);
+      const batchCursor=resolveFnoSubscriptionWindowCursor({reason,activeCursor:fnoUniverseActiveCursor,nextCursor:fnoUniverseCursor});
+      const batch=selectFairSubscriptionBatch({baseSymbols:BASE_SUBSCRIPTIONS,pinnedSymbols:pinned,universeSymbols:fnoUniverseRows.map(x=>x.futureSymbol),cursor:batchCursor,limit:FYERS_DATA_SYMBOL_LIMIT});
       fnoScanSubscriptionSymbols=batch.fnoSymbols;
-      if(reason==='scheduled_rotation'||reason==='universe_loaded')pendingFnoCursor=batch.nextCursor;
+      if(rotateWindow){pendingFnoCursor=batch.nextCursor;pendingFnoActiveCursor=batchCursor;}
     }catch(error){
       fnoScanSubscriptionSymbols=[];
       fnoUniverseError='F&O subscription window unavailable: '+String(error?.message||error).slice(0,140);
@@ -210,7 +213,7 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
     else try{
       socket.unsubscribe(remove);
       for(const symbol of remove)subscribedSymbols.delete(symbol);
-      if(pendingFnoCursor!==null)fnoUniverseCursor=pendingFnoCursor;
+      if(pendingFnoCursor!==null){fnoUniverseActiveCursor=pendingFnoActiveCursor;fnoUniverseCursor=pendingFnoCursor;}
       console.info('FYERS subscription rotation releasing old window before adding next.',JSON.stringify({removed:remove.length,delayedAddCount:add.length,delayMs:2500,reason}));
       if(subscriptionTransitionTimer)clearTimeout(subscriptionTransitionTimer);
       subscriptionTransitionTimer=setTimeout(()=>{
@@ -230,7 +233,7 @@ function syncSocketSubscriptions({force=false,reason='state_change'}={}){
     }catch(e){subscriptionError='FYERS subscribe failed: '+String(e?.message||e).slice(0,140);console.error(subscriptionError);}
   }
   if(subscriptionError){fnoScanSubscriptionSymbols=[];fnoUniverseError=subscriptionError;return{subscribed:0,removed:remove.length,error:subscriptionError};}
-  if(pendingFnoCursor!==null)fnoUniverseCursor=pendingFnoCursor;
+  if(pendingFnoCursor!==null){fnoUniverseActiveCursor=pendingFnoActiveCursor;fnoUniverseCursor=pendingFnoCursor;}
   if(reason==='scheduled_rotation'||reason==='universe_loaded'){lastFnoRotationAt=new Date().toISOString();fnoRotationCount+=1;}
   if(!fnoUniverseError.startsWith('BSE F&O master unavailable'))fnoUniverseError='';
   return {subscribed:add.length,removed:remove.length};
