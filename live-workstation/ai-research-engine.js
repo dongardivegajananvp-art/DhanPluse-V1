@@ -175,7 +175,7 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
     status:'COMPLETE',qualityScore,grade,scoreMeaning:'Research quality score out of 100; not a win probability',
     side,strategy:setup.strategy||null,components,evidence,riskFlags,missingEvidence,
     zones,
-    zoneContext:{alignedZone:alignedZone?'DEMAND':'SUPPLY',distancePct:zoneDistance,scorePoints:zonePoints,source:'FYERS completed 5-minute OHLC pivot zones'},
+    zoneContext:{alignedZone:side==='LONG'?'DEMAND':'SUPPLY',distancePct:zoneDistance,scorePoints:zonePoints,source:'FYERS completed 5-minute OHLC pivot zones'},
     pullbackRetest:retest,
     earlyConfirmation:{triggerLevel:num(setup.breakoutLevel),invalidationReference:earlyInvalidation(rows,side),note:'Research reference only; does not modify fixed option Entry/SL/Target/RR'},
     marketRegime:regimeKnown?regimeDirection:regimeNeutral?'NEUTRAL':'UNAVAILABLE',
