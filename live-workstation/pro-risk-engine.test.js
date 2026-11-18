@@ -50,6 +50,7 @@ test('Pro risk plan uses structural stop, resistance-aware target and preserves 
   assert.ok(result.stopLoss<result.entry);
   assert.ok(result.target>result.entry);
   assert.ok(result.rr>=2);
+  assert.equal(result.riskResearch.model,'GV2VPD_NSE_PRO_RISK_V1');
   assert.equal(result.riskResearch.targetSource,'NEAREST_VERIFIED_OPTION_SUPPLY_PIVOT');
   assert.equal(result.riskResearch.probability.status,'UNCALIBRATED');
   assert.equal(result.riskResearch.tradePermission,'READ_ONLY_RESEARCH_ONLY_UNCALIBRATED');
