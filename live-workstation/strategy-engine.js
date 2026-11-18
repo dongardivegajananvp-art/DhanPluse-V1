@@ -59,11 +59,11 @@ function currentSessionRows(rows) {
   const key = istDayKey(number(rows.at(-1).time));
   return rows.filter(candle => istDayKey(number(candle.time)) === key);
 }
-function completed(candles, tick, label) {
+function completed(candles, tick, label, maxAgeSeconds = 600) {
   if (!Array.isArray(candles) || candles.some(c => !validOhlcv(c))) {
     return { error: label + ' candles are missing or malformed' };
   }
-  const window = getCompletedCandleWindow(candles, tick.exchangeTime);
+  const window = getCompletedCandleWindow(candles, tick.exchangeTime, maxAgeSeconds);
   if (!window.fresh) return { error: label + ' latest completed candle is stale' };
   if (window.completed.length < 2) return { error: label + ' requires at least two completed 5-minute candles' };
   return { rows: window.completed, last: window.lastClosed };
@@ -257,11 +257,11 @@ export function detectDailyTrendPullback(rows, dailyCandles=[]) {
   return null;
 }
 
-export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null }) {
+export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dailyCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
   if(!tickFresh(underlyingTick))return fail('Fresh FYERS underlying/futures tick is required');
-  const u=completed(underlyingCandles,underlyingTick,'Underlying');
+  const u=completed(underlyingCandles,underlyingTick,'Underlying',maxCandleAgeSeconds);
   if(u.error)return fail(u.error);
   const rows=u.rows,last=u.last;
   const candidates=[], evaluated=[], blocked=[];
@@ -304,14 +304,14 @@ export function detectNineStrategySetup({ underlyingCandles, underlyingTick, dai
   return{status:'UNDERLYING_SETUP_CONFIRMED',...candidates[0],underlyingPrice:number(underlyingTick.price),underlyingCandleTime:last.time};
 }
 
-export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null }) {
+export function evaluateNineStrategies({ underlyingCandles, underlyingTick, optionCandles, optionTick, contract, dailyCandles=[], isTopGainer=false, now=Date.now(), sessionStartMinute=555, sessionCloseMinute=930, researchEnabled=false, marketRegime=null, maxCandleAgeSeconds=600 }) {
   const fail=(reason)=>({status:'DATA_UNAVAILABLE_NO_TRADE',reason});
   const tickFresh=t=>Boolean(t&&finite(t.price)&&number(t.price)>0&&finite(t.exchangeTime)&&finite(t.receivedAt)&&now-number(t.receivedAt)>=0&&now-number(t.receivedAt)<=10000&&now/1000-number(t.exchangeTime)>=-3&&now/1000-number(t.exchangeTime)<=10);
-  const setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute,researchEnabled,marketRegime});
+  const setup=detectNineStrategySetup({underlyingCandles,underlyingTick,dailyCandles,isTopGainer,now,sessionStartMinute,sessionCloseMinute,researchEnabled,marketRegime,maxCandleAgeSeconds});
   if(setup.status!=='UNDERLYING_SETUP_CONFIRMED')return setup;
   if(!tickFresh(optionTick))return fail('Fresh FYERS option premium tick is required');
   if(!contract||!['CE','PE'].includes(contract.side)||!finite(contract.tickSize)||number(contract.tickSize)<=0)return fail('Verified active CE/PE contract and tick size are required');
-  const o=completed(optionCandles,optionTick,'Option premium');
+  const o=completed(optionCandles,optionTick,'Option premium',maxCandleAgeSeconds);
   if(o.error)return fail(o.error);
   if(!contiguousWindow(o.rows,3,sessionStartMinute,sessionCloseMinute))return fail('Option premium needs only 3 contiguous completed 5-minute candles: prior level, breakout candle, and one confirmation/retest candle');
   const chosen=setup;
