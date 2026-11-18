@@ -152,7 +152,7 @@ test('expired cooldown survives restart and still requires the original endpoint
     now: () => clock,
     fetchImpl: async () => {
       sent += 1;
-      return new Response(JSON.stringify({ s: 'ok', d: [{ n: 'NSE:NIFTY50-INDEX', v: { lp: 25000 } }] }), { status: 200 });
+      return new Response(JSON.stringify({ s: 'ok', d: [{ n: 'NSE:NIFTY50-INDEX', s: 'ok', v: { lp: 25000, tt: String(clock / 1000) } }] }), { status: 200 });
     }
   });
   assert.equal(restarted.restoreStatus(persisted), true);
@@ -172,8 +172,11 @@ test('expired cooldown survives restart and still requires the original endpoint
 
 
 test('recovery payload validation is endpoint-specific and rejects HTTP-200 error envelopes', () => {
-  assert.equal(isValidFyersRecoveryPayload('/data/quotes', { s: 'ok', d: [{ n: 'NSE:NIFTY50-INDEX', v: { lp: 25000 } }] }), true);
-  assert.equal(isValidFyersRecoveryPayload('/data/quotes', { s: 'ok', d: [] }), false);
+  const now = Date.now();
+  assert.equal(isValidFyersRecoveryPayload('/data/quotes', { s: 'ok', d: [{ n: 'NSE:NIFTY50-INDEX', s: 'ok', v: { lp: 25000, tt: String(now / 1000) } }] }, now), true);
+  assert.equal(isValidFyersRecoveryPayload('/data/quotes', { s: 'ok', d: [] }, now), false);
+  assert.equal(isValidFyersRecoveryPayload('/data/quotes', { s: 'ok', d: [{ n: 'NSE:A', s: 'ok', v: { lp: 100, tt: String(now / 1000 - 11) } }] }, now), false, 'stale quote cannot clear the recovery circuit');
+  assert.equal(isValidFyersRecoveryPayload('/data/quotes', { s: 'ok', d: [{ n: 'NSE:A', s: 'ok', v: { lp: 100, tt: String(now / 1000 + 1) } }] }, now), false, 'future-dated quote cannot clear the recovery circuit');
   assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'ok', candles: [[1, 1, 2, 1, 2]] }), true);
   assert.equal(isValidFyersRecoveryPayload('/data/history', { s: 'ok', candles: [] }), false);
   assert.equal(isValidFyersRecoveryPayload('/data/options-chain-v3', { s: 'ok', data: { optionsChain: [{ symbol: 'NSE:TESTCE' }] } }), true);
