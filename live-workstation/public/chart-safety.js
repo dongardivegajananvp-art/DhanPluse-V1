@@ -12,6 +12,16 @@ export function isHistoryCacheFresh(fetchedAt, now = Date.now(), ttlMs = HISTORY
   return Number.isFinite(stamp) && stamp <= now && now - stamp < ttlMs;
 }
 
+export function restoreMcxChartHistoryCandles(verifiedCandles, provisionalCandles = []) {
+  if (!Array.isArray(verifiedCandles) || !verifiedCandles.length) {
+    throw new TypeError('Verified FYERS MCX history candles are required');
+  }
+  return {
+    candles: verifiedCandles.map(candle => ({ ...candle })),
+    discardedProvisionalCount: Array.isArray(provisionalCandles) ? provisionalCandles.length : 0
+  };
+}
+
 export function getCompletedCandleWindow(candles, exchangeTime, maxAgeSeconds = 600, contiguousCount = 21) {
   const stamp = Number(exchangeTime);
   if (!Number.isFinite(stamp) || stamp <= 0) {
