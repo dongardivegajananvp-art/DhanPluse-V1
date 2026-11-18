@@ -1,12 +1,6 @@
-const FUTURE_SUFFIX = /^(NSE|BSE):(.+?)([0-9]{2}[A-Z]{3})FUT$/;
+import { fyersExpiryEpochSeconds as epochSeconds } from './expiry-date.js';
 
-function epochSeconds(value) {
-  if (value === null || value === undefined || value === '') return 0;
-  const numeric = Number(value);
-  if (Number.isFinite(numeric) && numeric > 0) return numeric > 1e12 ? numeric / 1000 : numeric;
-  const parsed = Date.parse(String(value));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed / 1000 : 0;
-}
+const FUTURE_SUFFIX = /^(NSE|BSE):(.+?)([0-9]{2}[A-Z]{3})FUT$/;
 
 function underlyingFor(exchange, root) {
   const normalized = String(root || '').toUpperCase();

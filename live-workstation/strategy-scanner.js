@@ -1,10 +1,4 @@
-function epochSeconds(value) {
-  if (value === null || value === undefined || value === '') return 0;
-  const n = Number(value);
-  if (Number.isFinite(n) && n > 0) return n > 1e12 ? n / 1000 : n;
-  const parsed = Date.parse(String(value));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed / 1000 : 0;
-}
+import { fyersExpiryEpochSeconds as epochSeconds } from './expiry-date.js';
 
 export function selectNearestOptionContracts(contracts, side, underlyingPrice, count = 2, now = Date.now()) {
   if (!Array.isArray(contracts) || !['CE','PE'].includes(side) ||
