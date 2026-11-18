@@ -1010,7 +1010,7 @@ async function refreshStrategyActivePlans(force=false){
  const reconciled=[];
  for(const plan of (result.plans||[])){
   const lifecycle=evaluateActivePlanLifecycle(plan,lastTicks.get(plan.contract),Date.now());
-  if(lifecycle.status==='ACTIVE'&&!String(plan.underlying||'').startsWith('MCX:')&&freshTick(lastTicks.get(plan.contract))){
+  if(lifecycle.status==='ACTIVE'&&String(plan.underlying||'').startsWith('NSE:')&&freshTick(lastTicks.get(plan.contract))){
    await strategyPlanStore.recordPlanObservation(plan.plan_id||plan.planId,lastTicks.get(plan.contract).price,Date.now());
   }
   if(['EXPIRED','STOP_LOSS_HIT','TARGET_HIT'].includes(lifecycle.status)){
