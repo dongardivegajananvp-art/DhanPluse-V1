@@ -900,7 +900,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
     const now=Date.now();
     const underlyingSetup=detectNineStrategySetup({
       underlyingCandles:underlyingHistory.candles,underlyingTick:futureTick,dailyCandles,isTopGainer:false,now,
-      sessionStartMinute:540,sessionCloseMinute:1435
+      sessionStartMinute:540,sessionCloseMinute:1435,maxCandleAgeSeconds:299
     });
     if(underlyingSetup.status!=='UNDERLYING_SETUP_CONFIRMED')return{...underlyingSetup,source:'FYERS MCX futures tick + completed 5-minute candles',dailyHistoryStatus:dailyHistory?.ok?'VERIFIED':'UNAVAILABLE'};
     const master=await loadMcxComMaster();
@@ -952,7 +952,7 @@ app.get('/api/mcx/scan',async(req,res)=>{
     const finalEvaluation=evaluateNineStrategies({
       underlyingCandles:underlyingHistory.candles,underlyingTick:finalUnderlyingTick,
       optionCandles:best.optionCandles,optionTick:finalOptionTick,contract:best.contract,dailyCandles,
-      isTopGainer:false,now:Date.now(),sessionStartMinute:540,sessionCloseMinute:1435
+      isTopGainer:false,now:Date.now(),sessionStartMinute:540,sessionCloseMinute:1435,maxCandleAgeSeconds:299
     });
     if(finalEvaluation.status!=='SETUP_CONFIRMED'||!sameStrategyConfirmation(best,finalEvaluation))
       return{status:'NO_TRADE',reason:'MCX underlying/option confirmation changed during final fresh-tick recheck'};
