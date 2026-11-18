@@ -114,3 +114,12 @@ test('80-symbol operating window reserves 20 account-wide FYERS slots', () => {
   assert.equal(batch.fnoSymbols.length,75);
   assert.ok(100-batch.symbols.length>=20);
 });
+
+
+test('builds active futures when FYERS Symbol Master expiry is compact YYYYMMDD', () => {
+  const nseMaster = {
+    'NSE:RELIANCE26NOVFUT': { tradeStatus: 1, expiryDate: '20261126' }
+  };
+  const rows = buildFnoUniverse({ nseMaster, now: Date.parse('2026-11-18T04:00:00Z') });
+  assert.deepEqual(rows.map(row => row.futureSymbol), ['NSE:RELIANCE26NOVFUT']);
+});
