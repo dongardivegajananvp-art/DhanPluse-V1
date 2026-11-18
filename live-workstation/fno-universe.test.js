@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFnoUniverse, selectFairSubscriptionBatch, selectSubscriptionBatch, summarizeFnoCoverage } from './fno-universe.js';
+import { buildFnoUniverse, buildNseFnoUniverse, selectFairSubscriptionBatch, selectSubscriptionBatch, summarizeFnoCoverage } from './fno-universe.js';
 
 const expiry = date => Math.floor(Date.parse(date + 'T00:00:00Z') / 1000);
 const now = Date.parse('2026-11-14T00:00:00Z');
@@ -14,6 +14,19 @@ test('builds one nearest active FYERS futures contract per underlying', () => {
   };
   const rows = buildFnoUniverse({ nseMaster, now });
   assert.deepEqual(rows.map(row => row.futureSymbol), ['NSE:RELIANCE25NOVFUT']);
+});
+
+test('keeps the NSE strategy universe isolated from BSE derivatives', () => {
+  const nseMaster = {
+    'NSE:AXISBANK26NOVFUT': { tradeStatus: 1, expiryDate: expiry('2026-11-26') }
+  };
+  const bseMaster = {
+    'BSE:AXISBANK26NOVFUT': { tradeStatus: 1, expiryDate: expiry('2026-11-26') },
+    'BSE:SENSEX26NOVFUT': { tradeStatus: 1, expiryDate: expiry('2026-11-26') }
+  };
+  const rows = buildNseFnoUniverse({ nseMaster, bseMaster, now });
+  assert.deepEqual(rows.map(row => row.futureSymbol), ['NSE:AXISBANK26NOVFUT']);
+  assert.ok(rows.every(row => row.exchange === 'NSE' && row.underlyingSymbol.startsWith('NSE:')));
 });
 
 test('rotates every eligible symbol in bounded windows without duplicates', () => {
