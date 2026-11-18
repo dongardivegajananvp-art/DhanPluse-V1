@@ -1,6 +1,23 @@
-export function isValidFyersRecoveryPayload(pathname, payload) {
+export function isValidFyersRecoveryPayload(pathname, payload, now = Date.now()) {
   if (!payload || typeof payload !== 'object' || payload.s !== 'ok') return false;
-  if (pathname === '/data/quotes') return Array.isArray(payload.d) && payload.d.length > 0;
+  if (pathname === '/data/quotes') {
+    const rows = Array.isArray(payload.d) ? payload.d : [];
+    const currentSeconds = now / 1000;
+    return rows.some(row => {
+      const value = row?.v && typeof row.v === 'object' ? row.v : {};
+      const symbol = String(row?.n || value.symbol || row?.symbol || '');
+      const price = Number(value.lp);
+      const exchangeTime = Number(value.tt);
+      const ageSeconds = currentSeconds - exchangeTime;
+      return Boolean(
+        symbol && row?.s === 'ok' &&
+        (!value.symbol || value.symbol === symbol) &&
+        Number.isFinite(price) && price > 0 &&
+        Number.isFinite(exchangeTime) &&
+        ageSeconds >= 0 && ageSeconds <= 10
+      );
+    });
+  }
   if (pathname === '/data/history') return Array.isArray(payload.candles) && payload.candles.length > 0;
   if (pathname === '/data/options-chain-v3') {
     return Array.isArray(payload.data?.optionsChain) && payload.data.optionsChain.length > 0;
@@ -285,7 +302,7 @@ export function createFyersDataApiBudget({
         if (response.ok && cooldownPathname === target.pathname &&
             requestCooldownGeneration === cooldownGeneration) {
           const recoveryPayload = await response.clone().json().catch(() => null);
-          recoveryResponseValid = isValidFyersRecoveryPayload(target.pathname, recoveryPayload);
+          recoveryResponseValid = isValidFyersRecoveryPayload(target.pathname, recoveryPayload, now());
         }
         if (response.status === 429) {
           const body = await response.clone().text().catch(() => '');
