@@ -12,7 +12,7 @@ function tick(now,price=112) { return {price,receivedAt:now,exchangeTime:now/100
 
 test('scores a multi-timeframe aligned long setup with transparent evidence',()=>{
   const now=Date.now(),intraday=candles(60),daily=candles(60,{step:86400,trend:1});
-  const result=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',strategy:'TOP_GAINER_MOMENTUM_BREAKOUT',breakoutLevel:111.7},marketRegime:{state:'BULLISH',direction:'BULLISH'},now});
+  const result=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',strategy:'TOP_GAINER_MOMENTUM_BREAKOUT',breakoutLevel:111.7},marketRegime:{state:'BULLISH',direction:'BULLISH',evaluatedAt:new Date(now).toISOString()},now});
   assert.equal(result.status,'COMPLETE');
   assert.ok(result.qualityScore>=85);
   assert.equal(result.grade,'A+');
@@ -22,8 +22,8 @@ test('scores a multi-timeframe aligned long setup with transparent evidence',()=
 
 test('penalizes opposing daily and index regime context',()=>{
   const now=Date.now(),intraday=candles(60),daily=candles(60,{step:86400,trend:-1});
-  const aligned=analyzeSetupResearch({candles:intraday,dailyCandles:candles(60,{step:86400}),tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'BULLISH'},now});
-  const opposed=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'BEARISH'},now});
+  const aligned=analyzeSetupResearch({candles:intraday,dailyCandles:candles(60,{step:86400}),tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'BULLISH',evaluatedAt:new Date(now).toISOString()},now});
+  const opposed=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'BEARISH',evaluatedAt:new Date(now).toISOString()},now});
   assert.ok(opposed.qualityScore<aligned.qualityScore);
   assert.ok(opposed.riskFlags.length>=2);
 });
@@ -38,8 +38,16 @@ test('fails research closed when contiguous candle or daily history is insuffici
 
 test('treats a neutral index regime as neutral evidence, not a conflict',()=>{
   const now=Date.now();
-  const result=analyzeSetupResearch({candles:candles(60),dailyCandles:candles(60,{step:86400}),tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'NEUTRAL'},now});
+  const result=analyzeSetupResearch({candles:candles(60),dailyCandles:candles(60,{step:86400}),tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'NEUTRAL',evaluatedAt:new Date(now).toISOString()},now});
   const regime=result.components.find(item=>item.key==='marketRegime');
   assert.equal(regime.points,5);
   assert.ok(!result.riskFlags.some(flag=>flag.includes('conflicts with the index regime')));
+});
+
+test('does not score stale index regime as current confluence',()=>{
+  const now=Date.now();
+  const result=analyzeSetupResearch({candles:candles(60),dailyCandles:candles(60,{step:86400}),tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'BULLISH',evaluatedAt:new Date(now-30000).toISOString()},now});
+  const regime=result.components.find(item=>item.key==='marketRegime');
+  assert.equal(regime.points,5);
+  assert.ok(result.missingEvidence.some(reason=>reason.includes('stale')));
 });

@@ -60,8 +60,10 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
   const lastVolume=num(last.volume);
   const volumeKnown=volumes.length>=10&&Number.isFinite(lastVolume)&&lastVolume>0;
   const volumeExpansion=volumeKnown&&lastVolume>=mean(volumes)*1.2;
-  const regimeDirection=String(marketRegime?.direction||marketRegime?.state||'').toUpperCase();
-  const regimeNeutral=regimeDirection==='NEUTRAL';
+  const regimeAt=Date.parse(marketRegime?.evaluatedAt||'');
+  const regimeFresh=Number.isFinite(regimeAt)&&now-regimeAt>=0&&now-regimeAt<=15_000;
+  const regimeDirection=regimeFresh?String(marketRegime?.direction||marketRegime?.state||'').toUpperCase():'';
+  const regimeNeutral=regimeFresh&&regimeDirection==='NEUTRAL';
   const regimeKnown=Boolean(regimeDirection&&regimeDirection!=='UNAVAILABLE'&&regimeDirection!=='NONE'&&!regimeNeutral);
   const regimeAligned=regimeKnown&&(regimeDirection===side||regimeDirection===(side==='LONG'?'BULLISH':'BEARISH'));
   const ranges=rows.slice(-21,-1).map(c=>num(c.high)-num(c.low)).filter(x=>Number.isFinite(x)&&x>0);
@@ -81,12 +83,12 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
   const riskFlags=components.filter(x=>!x.pass).map(x=>x.label+(x.key==='dailyTrend'?' conflicts with the setup direction':x.key==='marketRegime'&&regimeKnown?' conflicts with the index regime':' is not confirmed'));
   const missingEvidence=[];
   if(!volumeKnown)missingEvidence.push('Volume field is unavailable; volume score is neutral');
-  if(!regimeKnown)missingEvidence.push('Fresh confirmed index market regime is unavailable; regime score is neutral');
+  if(!regimeKnown)missingEvidence.push('Fresh verified index market regime is unavailable or stale; regime score is neutral');
   const grade=qualityScore>=85?'A+':qualityScore>=75?'A':qualityScore>=65?'B':qualityScore>=55?'C':'D';
   return {
     status:'COMPLETE',qualityScore,grade,scoreMeaning:'Research quality score out of 100; not a win probability',
     side,strategy:setup.strategy||null,components,evidence,riskFlags,missingEvidence,
-    marketRegime:regimeKnown?regimeDirection:'UNAVAILABLE',
+    marketRegime:regimeKnown?regimeDirection:regimeNeutral?'NEUTRAL':'UNAVAILABLE',
     evaluatedAt:new Date(now).toISOString(),source:'FYERS completed candles + fresh exchange timestamp',
     model:'GV2VPD_QUANT_RESEARCH_V1'
   };
