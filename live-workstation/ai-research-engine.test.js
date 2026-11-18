@@ -97,3 +97,11 @@ test('early watch requires fresh FYERS ticks and does not promote a trade',()=>{
   assert.equal(stale.status,'INCOMPLETE');
   assert.match(stale.reason,/Fresh exchange-timestamped/);
 });
+
+test('non-applicable retest does not create a false risk flag and score stays bounded',()=>{
+  const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400,trend:1});
+  const result=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',strategy:'TOP_GAINER_MOMENTUM_BREAKOUT',breakoutLevel:111.7},marketRegime:{direction:'BULLISH',evaluatedAt:new Date(now).toISOString()},now});
+  assert.ok(result.qualityScore>=0&&result.qualityScore<=100);
+  assert.equal(result.pullbackRetest.applicable,false);
+  assert.ok(!result.riskFlags.some(flag=>flag.includes('Pullback/retest quality')));
+});
