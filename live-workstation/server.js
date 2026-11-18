@@ -1054,7 +1054,7 @@ async function refreshStrategyActivePlans(force=false){
 }
 async function processPendingStrategyCandidate(candidate){
  const optionTick=lastTicks.get(candidate.contract.symbol),underlyingTick=lastTicks.get(candidate.futureSymbol);
- if(!claimPendingCandidateProcessing(candidate,{optionTick,underlyingTick,isFresh:freshTick}))return false;
+ if(!claimPendingCandidateProcessing(candidate,{optionTick,underlyingTick,isFresh:freshTick,nowMs:Date.now(),minIntervalMs:1000}))return false;
  try{
   const officialMaster=candidate.underlyingSymbol.startsWith('BSE:')?await loadBseFoMaster():await loadNseFoMaster();
   const officialContract=optionMeta(candidate.contract.symbol,officialMaster);
@@ -1090,7 +1090,10 @@ async function processPendingStrategyCandidate(candidate){
   }
   const evaluated=evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,optionCandles:optionHistory.candles,optionTick:currentOptionTick,contract:candidate.contract,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now(),researchEnabled:true,marketRegime:candidate.marketRegime||marketRegime});
   if(evaluated.status==='WAITING_FOR_OPTION_BREAKOUT'){
-   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:evaluated.status,reason:evaluated.reason,strategy:candidate.setup.strategy,contract:candidate.contract.symbol,updatedAt:new Date().toISOString()});
+   if(candidate.lastResultStatus!==evaluated.status||candidate.lastResultReason!==evaluated.reason){
+    candidate.lastResultStatus=evaluated.status;candidate.lastResultReason=evaluated.reason;
+    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:evaluated.status,reason:evaluated.reason,strategy:candidate.setup.strategy,contract:candidate.contract.symbol,updatedAt:new Date().toISOString()});
+   }
    // Keep the option subscribed and candidate pending for the existing 120-second
    // window. A missing breakout is a WAIT, not a failed setup; don't discard it.
    return false;
