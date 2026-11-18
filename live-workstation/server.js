@@ -990,7 +990,14 @@ app.get('/api/mcx/scan',async(req,res)=>{
       underlying:future,
       underlyingSide:finalEvaluation.underlyingSide,
       contract:{symbol:best.contract.symbol,side:best.contract.side,strike:best.contract.strike,expiry:best.contract.expiryDate,lotSize:best.contract.lotSize,tickSize:best.contract.tickSize},
-      premium:finalOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,strategy:finalEvaluation.strategy,
+      premium:finalOptionTick.price,entry:saved.entry,entryTriggerPrice:finalEvaluation.entryTriggerPrice??saved.entry,
+       stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,
+       risk:finalEvaluation.risk??Number((saved.entry-saved.stopLoss).toFixed(8)),
+       reward:finalEvaluation.reward??Number((saved.target-saved.entry).toFixed(8)),
+       stopLossBasis:finalEvaluation.stopLossBasis||'LOWER_OF_LAST_TWO_COMPLETED_OPTION_CANDLE_LOWS_MINUS_ONE_TICK',
+       targetBasis:finalEvaluation.targetBasis||'EXACT_2R',
+       optionConfirmation:finalEvaluation.optionConfirmation||'EARLY_LIVE_OPTION_PREMIUM_BREAK',
+       entryLifecycle:'WAITING_FOR_ENTRY',strategy:finalEvaluation.strategy,
       source:'FYERS MCX Symbol Master + fresh futures/option ticks + completed 5-minute candles + nine-strategy engine + persistent plan ledger',
       verifiedAt:new Date().toISOString()
     };
@@ -1003,6 +1010,25 @@ app.get('/api/mcx/scan',async(req,res)=>{
   }finally{mcxScanPromise=null;mcxScanSymbol='';}
 });
 
+
+app.get('/api/mcx/plan',async(req,res)=>{
+  res.set('Cache-Control','no-store');
+  const planId=String(req.query.planId||'').trim();
+  if(!/^[a-f0-9]{48}$/i.test(planId))return res.status(400).json({error:'Invalid MCX plan identity'});
+  if(!authReady())return res.status(401).json({error:'FYERS session unavailable'});
+  const refreshed=await refreshStrategyActivePlans(true);
+  if(!refreshed.ok)return res.status(503).json({status:'DATA_UNAVAILABLE_NO_TRADE',reason:'Persistent MCX plan ledger could not be refreshed'});
+  const plan=[...strategyActivePlans,...strategyTerminalPlans].find(item=>(item.plan_id||item.planId)===planId&&item.underlying===selectedSymbol&&mcxFutureRoot(item.underlying));
+  if(!plan)return res.status(404).json({status:'PLAN_NOT_FOUND',reason:'No active or terminal MCX plan matches the selected future'});
+  const terminal=['STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CANCELLED','CLOSED'].includes(plan.status);
+  res.json({
+    planId,underlying:plan.underlying,contract:plan.contract,
+    lifecycleState:plan.lifecycleState||(terminal?plan.status:plan.entry_hit_at?'ENTRY_HIT':'WAITING_FOR_ENTRY'),
+    entryHitAt:plan.entry_hit_at||null,entryHitPrice:plan.entry_hit_price===null||plan.entry_hit_price===undefined?null:Number(plan.entry_hit_price),
+    entry:Number(plan.entry),stopLoss:Number(plan.stop_loss??plan.stopLoss),target:Number(plan.target),rr:Number(plan.rr),
+    terminal,updatedAt:new Date().toISOString()
+  });
+});
 
 async function loadStrategyDailyHistory(symbol,{priority=10}={}){
  const cached=strategyDailyHistoryCache.get(symbol);
