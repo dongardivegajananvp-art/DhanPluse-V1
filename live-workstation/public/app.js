@@ -13,7 +13,7 @@ const mcxHistoryRetryBySymbol=new Map();let mcxHistoryRetryBusy=false;let lastFy
 const chartConfirmedPlans=new Map();
 try{restoreChartPlans(chartConfirmedPlans,localStorage.getItem('gv2vpd.chart.confirmedPlans.v1')||'')}catch{}
 let gainerScanResults=[],latestGainers=[],latestGainerError='',lastGainerScanAt=0,gainerScanBusy=false;
-let mcxScanBusy=false,mcxScanTimer=null,mcxPickerRequest=0;
+let mcxScanBusy=false,mcxScanTimer=null,mcxPickerRequest=0,mcxPlanStatusTimer=null;
 let strategyScanBusy=false,lastStrategyScanAt=0;
 const indexNames={'NSE:NIFTY50-INDEX':'NIFTY 50','NSE:NIFTYBANK-INDEX':'BANK NIFTY','BSE:SENSEX-INDEX':'SENSEX'};
 async function api(path,opts={}){const r=await fetch(path,{headers:{'content-type':'application/json'},...opts});const body=await r.text();let j={};if(body.trim()){try{j=JSON.parse(body)}catch{const error=Error('Invalid JSON response (HTTP '+r.status+')');error.status=r.status;error.retryAfterMs=Number(r.headers.get('retry-after'))*1000||0;throw error}}else if(r.ok){const error=Error('Empty response (HTTP '+r.status+')');error.status=r.status;error.retryAfterMs=Number(r.headers.get('retry-after'))*1000||0;throw error}if(!r.ok){const error=Error(j.detail||j.error||'Request failed (HTTP '+r.status+')');error.status=r.status;error.retryAfterMs=Number(j.retryAfterMs)||Number(r.headers.get('retry-after'))*1000||0;throw error}return j}
@@ -212,6 +212,7 @@ function syncOptionUnderlying(underlying){if(!underlying){clearOptionSelection('
 async function selectInstrument(symbol,label,optionUnderlyingOverride){try{if(/^MCX:(?:CRUDEOIL|NATURALGAS)\d{2}[A-Z]{3}FUT$/.test(symbol))localStorage.setItem('gv2vpd.selectedMcxInstrument',symbol)}catch{}const selectionId=++chartSelectionId;chartLoading=true;const isMcx=symbol.startsWith('MCX:');chartReady=isMcx;selected=symbol;activeChartSymbol=symbol;activeChartCandles=[];lastChartTickStamp=0;chartHasTickGap=false;chartLiveOnly=isMcx;clearChartLevels('Loading verified FYERS 5-minute candles');chartAttemptedFor=symbol;syncOptionUnderlying(optionUnderlyingOverride===undefined?inferredOptionUnderlying(symbol):optionUnderlyingOverride);$('chartTitle').textContent='CHART · '+(label||$('symbol').selectedOptions[0]?.text||symbol);$('chartInstrument').textContent=symbol;$('chartLtp').textContent='Loading FYERS quote…';$('chartLtpStatus').textContent='VERIFYING';$('chartExchangeTime').textContent='Waiting for exchange timestamp';$('chartReferenceClose').textContent='Waiting for verified candles';chartVisibleCandles=50;$('chart').textContent=isMcx?'WAITING FOR FRESH FYERS MCX WEBSOCKET TICK · PROVISIONAL 5M · NO TRADE':'Loading FYERS 5-minute history…';if(isMcx){clearChartLevels('NO TRADE · provisional MCX candle requires a fresh exchange-timestamped WebSocket tick');updateLiveChartFromTick()}try{await api('/api/select-symbol',{method:'POST',body:JSON.stringify({symbol})});if(selectionId!==chartSelectionId)return;let data=historyCache.get(symbol);if(!data||!isHistoryCacheFresh(data.fetchedAt)){data=await api('/api/history?symbol='+encodeURIComponent(symbol));historyCache.set(symbol,data)}if(selectionId!==chartSelectionId)return;activeChartCandles=data.candles.map(c=>({...c}));chartLiveOnly=false;chartRetryBySymbol.delete(symbol);mcxHistoryRetryBySymbol.delete(symbol);chartReady=true;updateLiveChartFromTick();updateChartPlan();if(symbol.startsWith('MCX:'))setTimeout(()=>scanMcxBestSetup(),1200);else{if(mcxScanTimer)clearTimeout(mcxScanTimer);mcxScanTimer=null;showMcxScanMessage('Select Crude Oil or Natural Gas to scan MCX options')}}catch(err){if(selectionId!==chartSelectionId)return;if(symbol.startsWith('MCX:')){chartLiveOnly=true;activeChartCandles=[];lastChartTickStamp=0;chartHasTickGap=false;chartReady=true;chartRetryBySymbol.delete(symbol);chartAttemptedFor=symbol;const previous=mcxHistoryRetryBySymbol.get(symbol),attempts=(previous?.attempts||0)+1,delay=boundedRetryDelayMs({attempt:attempts,retryAfterMs:err.retryAfterMs,baseMs:30000,maxMs:60*60*1000});mcxHistoryRetryBySymbol.set(symbol,{attempts,retryAt:Date.now()+delay});$('chart').textContent='FYERS REST HISTORY UNAVAILABLE · PROVISIONAL LIVE-ONLY MCX 5M CANDLE · HISTORY RETRY IN '+Math.ceil(delay/1000)+'s · NO TRADE';clearChartLevels('NO TRADE · MCX REST history unavailable; retry scheduled');updateLiveChartFromTick()}else{const previous=chartRetryBySymbol.get(symbol),attempts=(previous?.attempts||0)+1,delay=boundedRetryDelayMs({attempt:attempts,retryAfterMs:err.retryAfterMs});chartRetryBySymbol.set(symbol,{attempts,retryAt:Date.now()+delay});chartAttemptedFor='';$('chart').textContent=err.message+' · retry in '+Math.ceil(delay/1000)+'s';clearChartLevels('NO TRADE · chart history unavailable; retry scheduled')}}finally{if(selectionId===chartSelectionId)chartLoading=false}}
 function showMcxScanMessage(message){const root=$('mcxSetup');root.replaceChildren();const line=document.createElement('div');line.textContent=message;root.append(line)}
 function renderMcxSetup(data){
+ if(mcxPlanStatusTimer){clearTimeout(mcxPlanStatusTimer);mcxPlanStatusTimer=null}
  const root=$('mcxSetup');root.replaceChildren();
  const heading=document.createElement('b');heading.textContent=data.label||'STRONGEST VERIFIED MCX RULE-MATCH';root.append(heading);
  const rows=[
@@ -219,14 +220,45 @@ function renderMcxSetup(data){
   ['Direction',data.contract.side+' · '+data.underlyingSide],
   ['Expiry / Strike',data.contract.expiry+' · '+fmt(data.contract.strike)],
   ['Live premium',fmt(data.premium)],
-  ['Entry',fmt(data.entry)],
+  ['Entry trigger',fmt(data.entryTriggerPrice??data.entry)],
   ['Stop loss',fmt(data.stopLoss)],
   ['Target',fmt(data.target)],
+  ['Risk',fmt(data.risk??(data.entry-data.stopLoss))],
+  ['Reward',fmt(data.reward??(data.target-data.entry))],
   ['Risk : Reward','1 : '+Number(data.rr).toFixed(2)]
  ];
  for(const [label,value] of rows){const line=document.createElement('div');line.className='mcx-setup-row';const key=document.createElement('span');key.textContent=label;const val=document.createElement('strong');val.textContent=value;line.append(key,val);root.append(line)}
- const note=document.createElement('small');note.textContent='FYERS verified nine-strategy setup · persistent read-only plan '+(data.planId||'')+' · order gate DISABLED';root.append(note);
+ const lifecycle=document.createElement('div');lifecycle.className='mcx-setup-row';const lifecycleKey=document.createElement('span');lifecycleKey.textContent='Entry lifecycle';const lifecycleValue=document.createElement('strong');lifecycleValue.id='mcxEntryLifecycle';lifecycleValue.textContent='WAITING FOR ENTRY · NO BROKER ORDER';lifecycle.append(lifecycleKey,lifecycleValue);root.append(lifecycle);
+ const note=document.createElement('small');note.textContent='FYERS verified nine-strategy setup · '+(data.optionConfirmation||'LIVE OPTION PREMIUM BREAK')+' · SL '+(data.stopLossBasis||'VERIFIED STRUCTURAL OPTION LOW')+' · target '+(data.targetBasis||'EXACT 2R')+' · persistent read-only plan '+(data.planId||'')+' · order gate DISABLED';root.append(note);
  selectedOption={...data.contract,strategy:data.strategy||'B_EMA20_EMA50_TREND_PULLBACK'};optionContracts=[selectedOption];const contractSelect=$('contract');contractSelect.replaceChildren(new Option(data.contract.symbol+' · '+data.contract.side+' · '+fmt(data.contract.strike),data.contract.symbol));contractSelect.value=data.contract.symbol;contractSelect.disabled=true;$('qty').value=selectedOption.lotSize;$('qty').min=selectedOption.lotSize;$('qty').step=selectedOption.lotSize;$('sl').value=String(data.stopLoss);$('target').value=String(data.target);if([...$('product').options].some(o=>o.value==='MARGIN'))$('product').value='MARGIN';updatePremium();
+ if(data.planId&&selected.startsWith('MCX:'))void refreshMcxPlanStatus(data.planId,selected);
+}
+function mcxLifecycleText(state){
+ const labels={
+  WAITING_FOR_ENTRY:'WAITING FOR ENTRY · NO BROKER ORDER',
+  ENTRY_HIT:'ENTRY HIT · FIXED SL / TARGET ACTIVE · NO BROKER ORDER',
+  ENTRY_HIT_PERSIST_PENDING:'ENTRY HIT · LEDGER WRITE PENDING · NO TRADE',
+  STALE_REVALIDATION_REQUIRED:'STALE OPTION TICK · EXIT STATUS NOT VERIFIED',
+  REVALIDATION_REQUIRED:'RISK LEVELS INVALID · NO TRADE',
+  STOP_LOSS_HIT:'STOP LOSS HIT · VERIFIED',
+  TARGET_HIT:'TARGET HIT · VERIFIED',
+  EXPIRED:'CONTRACT EXPIRED',
+  CANCELLED:'PLAN CANCELLED',
+  CLOSED:'PLAN CLOSED'
+ };
+ return labels[state]||String(state||'STATUS UNAVAILABLE').replaceAll('_',' ');
+}
+async function refreshMcxPlanStatus(planId,underlying){
+ try{
+  const data=await api('/api/mcx/plan?planId='+encodeURIComponent(planId));
+  if(selected!==underlying)return;
+  const node=$('mcxEntryLifecycle');if(node)node.textContent=mcxLifecycleText(data.lifecycleState);
+  if(data.terminal){mcxPlanStatusTimer=null;return}
+ }catch(error){
+  if(selected!==underlying)return;
+  const node=$('mcxEntryLifecycle');if(node)node.textContent='LIFECYCLE UNVERIFIED · '+String(error.message||error).slice(0,90);
+ }
+ mcxPlanStatusTimer=setTimeout(()=>void refreshMcxPlanStatus(planId,underlying),10000);
 }
 async function scanMcxBestSetup(attempt=0){
  if(!selected.startsWith('MCX:')||mcxScanBusy)return;
