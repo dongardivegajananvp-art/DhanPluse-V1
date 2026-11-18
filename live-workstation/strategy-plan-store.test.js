@@ -128,7 +128,7 @@ test('SL/Target hit terminal status releases active slot but permanently retains
 test('ledger rejects plans below fixed 1:2 or with inverted Entry/SL/Target', async () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
   const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
-  assert.match((await store.saveConfirmedPlan(fixture(now,{rr:1.99}),now)).reason,/reward\/risk.*1:2/i);
+  assert.match((await store.saveConfirmedPlan(fixture(now,{rr:1.99}),now)).reason,/minimum 1:2 reward\/risk/i);
   assert.match((await store.saveConfirmedPlan(fixture(now,{entry:98,target:103}),now)).reason,/valid long-option risk plan/);
   await store.close();
 });
