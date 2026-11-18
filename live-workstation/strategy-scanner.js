@@ -42,6 +42,12 @@ export function completedDailyCandles(candles, now = Date.now(), maxAgeSeconds =
   return { candles: rows, ok: true, reason: '' };
 }
 
+export function dailyHistorySymbolForFnoRow(row) {
+  const underlying = String(row?.underlyingSymbol || '').trim();
+  if (/^(NSE|BSE):[A-Z0-9&.-]+-(?:EQ|INDEX)$/.test(underlying)) return underlying;
+  return String(row?.futureSymbol || '').trim();
+}
+
 export function strategyCandidateKey(underlying, contract) {
   return String(underlying || '') + '|' + String(contract || '');
 }
