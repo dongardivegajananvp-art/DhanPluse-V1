@@ -215,7 +215,49 @@ test('same-endpoint HTTP 200 with an FYERS error envelope does not clear the rec
   assert.equal(response.status, 200);
   assert.equal(sent, 1);
   assert.equal(request.getStatus().cooldownActive, true);
-  assert.equal(request.getStatus().recoveryProbePathname, '/data/history');
+  assert.equal(request.getStatus().recoveryProbeRequired, false, 'failed probe is deferred instead of immediately retried');
+  assert.equal(request.getStatus().recoveryProbePathname, null);
+  assert.equal(request.getStatus().retryAfterSeconds, 300);
+});
+
+
+test('a failed recovery generation sends one probe only, then retries after controlled backoff', async () => {
+  let clock = 9_000_000;
+  let sent = 0;
+  const persistedStates = [];
+  const request = createFyersDataApiBudget({
+    allApiPaths: true,
+    now: () => clock,
+    sleep: async ms => { clock += ms; },
+    fetchImpl: async () => {
+      sent += 1;
+      return new Response(JSON.stringify({ s: 'error', message: 'stale provider response' }), { status: 200 });
+    },
+    onCooldownChange: async state => { persistedStates.push({ ...state }); return true; }
+  });
+  const restored = {
+    blockedUntil: new Date(clock - 1).toISOString(),
+    cooldownReason: 'CLOUDFLARE_1015',
+    cooldownPathname: '/data/history',
+    cooldownGeneration: 20,
+    consecutiveCloudflareBlocks: 1,
+    consecutiveRateLimitBlocks: 0
+  };
+  assert.equal(request.restoreStatus(restored), true);
+  const url = 'https://api-t1.fyers.in/data/history?symbol=NSE%3ANIFTY50-INDEX';
+  assert.equal((await request(url)).status, 200);
+  assert.equal(sent, 1);
+  assert.equal(request.getStatus().retryAfterSeconds, 300);
+  assert.equal(request.getStatus().recoveryProbeRequired, false);
+  assert.equal((await request(url)).status, 429, 'same generation is blocked locally after its one probe');
+  assert.equal(sent, 1, 'no second upstream call is made in the same generation');
+  assert.equal(persistedStates.at(-1).recoveryProbeFailureCount, 1);
+  clock += 5 * 60_000 + 1;
+  assert.equal(request.getStatus().recoveryProbeRequired, true, 'a new generation becomes eligible only after backoff');
+  assert.equal((await request(url)).status, 200);
+  assert.equal(sent, 2);
+  assert.equal(request.getStatus().recoveryProbeRequired, false);
+  assert.equal(request.getStatus().retryAfterSeconds, 900, 'the next failure uses the longer backoff');
 });
 
 
