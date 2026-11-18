@@ -13,17 +13,23 @@ function ema(values,period) {
   return value;
 }
 function mean(values) { return values.length ? values.reduce((a,b)=>a+b,0)/values.length : NaN; }
-function contiguous(rows) {
-  const w=rows.slice(-50);
+function contiguousSuffixCount(rows, intervalSeconds=300) {
+  if(!Array.isArray(rows)||!rows.length)return 0;
   const parts=value=>{const d=new Date((num(value)+19800)*1000);return{day:d.toISOString().slice(0,10),minute:d.getUTCHours()*60+d.getUTCMinutes()};};
-  return w.length===50 && w.every((c,i)=>{
-    if(i===0)return true;
-    const previous=num(w[i-1].time),current=num(c.time);
-    if(current-previous===300)return true;
+  let count=1;
+  for(let i=rows.length-1;i>0;i--){
+    const previous=num(rows[i-1].time),current=num(rows[i].time);
+    if(current-previous===intervalSeconds){count++;continue;}
     const a=parts(previous),b=parts(current);
-    return a.minute===925&&b.minute===555&&b.day>a.day;
-  });
+    const sessionBoundary=intervalSeconds===300
+      ?a.minute===925&&b.minute===555&&b.day>a.day
+      :intervalSeconds===900&&a.minute===915&&b.minute===555&&b.day>a.day;
+    if(!sessionBoundary)break;
+    count++;
+  }
+  return count;
 }
+function contiguous(rows) { return contiguousSuffixCount(rows,300)>=50; }
 function sessionParts(value) {
   const d=new Date((num(value)+19800)*1000);
   return {day:d.toISOString().slice(0,10),minute:d.getUTCHours()*60+d.getUTCMinutes()};
@@ -49,16 +55,7 @@ function resample15m(rows) {
   }
   return output.sort((a,b)=>a.time-b.time);
 }
-function contiguous15m(rows) {
-  const w=rows.slice(-50);
-  return w.length===50&&w.every((c,i)=>{
-    if(i===0)return true;
-    const previous=num(w[i-1].time),current=num(c.time);
-    if(current-previous===900)return true;
-    const a=sessionParts(previous),b=sessionParts(current);
-    return a.minute===915&&b.minute===555&&b.day>a.day;
-  });
-}
+function contiguous15m(rows) { return contiguousSuffixCount(rows,900)>=50; }
 
 function nearestZones(rows, price) {
   const demand=[],supply=[];
@@ -103,8 +100,8 @@ function aligned(side, values, shortPeriod, longPeriod) {
  */
 export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,marketRegime=null,now=Date.now()}={}) {
   const fail=reason=>({status:'INCOMPLETE',qualityScore:null,grade:'PENDING',scoreMeaning:'Quality score, not win probability',reason,evidence:[],riskFlags:[],missingEvidence:[reason],model:'GV2VPD_QUANT_RESEARCH_V1'});
-  if(!Array.isArray(candles)||candles.some(c=>!validCandle(c))||candles.length<50||!contiguous(candles))
-    return fail('50 contiguous completed FYERS 5-minute candles are required');
+  if(!Array.isArray(candles)||candles.some(c=>!validCandle(c))||!contiguous(candles))
+    return fail('50 contiguous completed FYERS 5-minute candles are required; received '+(Array.isArray(candles)?candles.length:0)+' valid rows, contiguous suffix '+contiguousSuffixCount(candles,300));
   if(!Array.isArray(dailyCandles)||dailyCandles.length<50||dailyCandles.some(c=>!validCandle(c)))
     return fail('50 completed FYERS daily candles are required for multi-timeframe research');
   const dailyLastTime=num(dailyCandles.at(-1).time),dailyAge=now/1000-dailyLastTime;
@@ -119,8 +116,8 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
 
   const side=setup.side, rows=candles.slice(-50), daily=dailyCandles.slice(-50);
   const closes=rows.map(c=>num(c.close)),dailyCloses=daily.map(c=>num(c.close));
-  const fifteenRows=resample15m(candles),fifteenWindow=fifteenRows.slice(-50);
-  if(fifteenWindow.length<50||!contiguous15m(fifteenWindow))return fail('50 contiguous completed 15-minute candles derived from FYERS 5-minute data are required');
+  const fifteenRows=resample15m(candles),fifteenWindow=fifteenRows.slice(-50),fifteenSuffix=contiguousSuffixCount(fifteenRows,900);
+  if(fifteenWindow.length<50||!contiguous15m(fifteenWindow))return fail('50 contiguous completed 15-minute candles derived from FYERS 5-minute data are required; derived '+fifteenRows.length+', contiguous suffix '+fifteenSuffix);
   const fifteenCloses=fifteenWindow.map(c=>num(c.close));
   const last=rows.at(-1),prior=rows.at(-4),dailyAligned=aligned(side,dailyCloses,20,50);
   const fifteenAligned=aligned(side,fifteenCloses,20,50);
@@ -185,15 +182,15 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
 }
 export function analyzeEarlyWatch({candles=[],dailyCandles=[],tick,now=Date.now()}={}) {
   const incomplete=reason=>({status:'INCOMPLETE',reason});
-  if(!Array.isArray(candles)||candles.some(c=>!validCandle(c))||candles.length<50||!contiguous(candles))return incomplete('50 contiguous completed FYERS 5-minute candles are required for early watch');
+  if(!Array.isArray(candles)||candles.some(c=>!validCandle(c))||!contiguous(candles))return incomplete('50 contiguous completed FYERS 5-minute candles are required for early watch; received '+(Array.isArray(candles)?candles.length:0)+' valid rows, contiguous suffix '+contiguousSuffixCount(candles,300));
   if(!Array.isArray(dailyCandles)||dailyCandles.length<50||dailyCandles.some(c=>!validCandle(c)))return incomplete('50 completed FYERS daily candles are required for early watch trend context');
   const dailyAge=now/1000-num(dailyCandles.at(-1).time);
   if(dailyAge<0||dailyAge>4*86400)return incomplete('Latest completed FYERS daily candle is stale or future-dated');
   if(!tick||!finite(tick.price)||num(tick.price)<=0||!finite(tick.receivedAt)||now-num(tick.receivedAt)<0||now-num(tick.receivedAt)>10000||!finite(tick.exchangeTime)||now/1000-num(tick.exchangeTime)<-3||now/1000-num(tick.exchangeTime)>10)return incomplete('Fresh exchange-timestamped underlying tick is required for early watch');
   const rows=candles.slice(-50),closes=rows.map(c=>num(c.close)),dailyCloses=dailyCandles.slice(-50).map(c=>num(c.close));
   const e20=ema(closes,20),e50=ema(closes,50),d20=ema(dailyCloses,20),d50=ema(dailyCloses,50),price=num(tick.price);
-  const fifteenWindow=resample15m(candles).slice(-50);
-  if(fifteenWindow.length<50||!contiguous15m(fifteenWindow))return incomplete('50 contiguous completed 15-minute candles derived from FYERS 5-minute data are required for early watch');
+  const fifteenRows=resample15m(candles),fifteenWindow=fifteenRows.slice(-50),fifteenSuffix=contiguousSuffixCount(fifteenRows,900);
+  if(fifteenWindow.length<50||!contiguous15m(fifteenWindow))return incomplete('50 contiguous completed 15-minute candles derived from FYERS 5-minute data are required for early watch; derived '+fifteenRows.length+', contiguous suffix '+fifteenSuffix);
   const fifteenCloses=fifteenWindow.map(c=>num(c.close)),m20=ema(fifteenCloses,20),m50=ema(fifteenCloses,50);
   const side=price>e20&&e20>e50&&d20>d50&&fifteenCloses.at(-1)>m20&&m20>m50?'LONG':
     price<e20&&e20<e50&&d20<d50&&fifteenCloses.at(-1)<m20&&m20<m50?'SHORT':null;
