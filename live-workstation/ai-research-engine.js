@@ -49,6 +49,8 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
   const closes=rows.map(c=>num(c.close)),dailyCloses=daily.map(c=>num(c.close));
   const last=rows.at(-1),prior=rows.at(-4),dailyAligned=aligned(side,dailyCloses,20,50);
   const intradayAligned=aligned(side,closes,20,50);
+  const emaNow=ema(closes,20),emaPrior=ema(closes.slice(0,-3),20);
+  const emaSlopeAligned=Number.isFinite(emaNow)&&Number.isFinite(emaPrior)&&(side==='LONG'?emaNow>emaPrior:emaNow<emaPrior);
   const momentum=side==='LONG'?(num(last.close)>num(prior.close)&&emaSlopeAligned):(num(last.close)<num(prior.close)&&emaSlopeAligned);
   const candleRange=Math.max(num(last.high)-num(last.low),1e-9);
   const closeLocation=(num(last.close)-num(last.low))/candleRange;
@@ -64,10 +66,6 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
   const ranges=rows.slice(-21,-1).map(c=>num(c.high)-num(c.low)).filter(x=>Number.isFinite(x)&&x>0);
   const averageRange=mean(ranges),rangeRatio=averageRange>0?candleRange/averageRange:NaN;
   const volatilityDisciplined=Number.isFinite(rangeRatio)&&rangeRatio<=1.8;
-  const emaNow=ema(closes,20),emaPrior=ema(closes.slice(0,-3),20);
-  const emaSlopeAligned=Number.isFinite(emaNow)&&Number.isFinite(emaPrior)&&
-    (side==='LONG'?emaNow>emaPrior:emaNow<emaPrior);
-
   const components=[
     {key:'dailyTrend',label:'Daily trend alignment',weight:20,points:dailyAligned?20:0,pass:dailyAligned},
     {key:'intradayTrend',label:'5-minute EMA20/EMA50 alignment',weight:20,points:intradayAligned?20:0,pass:intradayAligned},
