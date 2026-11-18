@@ -1180,7 +1180,8 @@ async function runAutomaticStrategyScan(){
    strategyScanLastError='';
    const setup=detectNineStrategySetup({underlyingCandles:history.candles,underlyingTick:currentTick,dailyCandles:daily.ok?daily.candles:[],isTopGainer,now:Date.now(),researchEnabled:true,marketRegime});
    if(setup.status!=='UNDERLYING_SETUP_CONFIRMED'){
-    if(setup.status==='DATA_UNAVAILABLE_NO_TRADE')setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:setup.status,reason:setup.reason,dailyDataStatus:daily.reason||'verified'});
+    if(setup.status==='EARLY_WATCH')setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'EARLY_WATCH',strategy:'PRE_BREAKOUT_RESEARCH_WATCH',side:setup.side,breakoutLevel:setup.breakoutLevel,triggerDistancePct:setup.triggerDistancePct,invalidationReference:setup.invalidationReference,research:setup.research,reason:'Research watch only; breakout and option confirmation are not complete'});
+    else if(setup.status==='DATA_UNAVAILABLE_NO_TRADE')setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:setup.status,reason:setup.reason,dailyDataStatus:daily.reason||'verified'});
     return;
    }
    if(strategyActivePlans.length+strategyPendingCandidates.size>=2){setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'NO_TRADE',reason:'Maximum of two active or pending strategy plans reached',strategy:setup.strategy});return;}
