@@ -19,7 +19,7 @@ import { buildFyersHistoryRange, normalizeCompletedFyersCandles } from './resear
 import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy-plan-store.js';
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
 import { evaluateIndexMarketRegime, unavailableMarketRegime } from './market-regime.js';
-import { rankResearchResults } from './ai-research-engine.js';
+import { getResearchHistoryDiagnostics, rankResearchResults } from './ai-research-engine.js';
 import { buildProRiskPlan } from './pro-risk-engine.js';
 import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
 import 'dotenv/config';
@@ -1269,7 +1269,7 @@ async function loadGainerHistory(symbol,{force=false,priority=20}={}){
   const normalized=normalizeCompletedFyersCandles(payload.candles,now);
   const candles=normalized.candles;
   if(!candles.length)throw Object.assign(new Error('FYERS returned no valid completed 5-minute OHLC rows'),{statusCode:502});
-  const result={symbol,candles,source:'FYERS Data API',cachedAt:Date.now(),fetchedAt:new Date().toISOString(),historyDiagnostics:{lookbackDays:range.lookbackDays,candleCount:candles.length,invalidCount:normalized.invalidCount,partialCount:normalized.partialCount,duplicateCount:normalized.duplicateCount,firstCandleTime:candles[0].time,lastCandleTime:candles.at(-1).time}};
+  const result={symbol,candles,source:'FYERS Data API',cachedAt:Date.now(),fetchedAt:new Date().toISOString(),historyDiagnostics:{lookbackDays:range.lookbackDays,candleCount:candles.length,invalidCount:normalized.invalidCount,partialCount:normalized.partialCount,duplicateCount:normalized.duplicateCount,firstCandleTime:candles[0].time,lastCandleTime:candles.at(-1).time,researchContinuity:getResearchHistoryDiagnostics(candles)}};
   console.info('FYERS NSE research history normalized.',JSON.stringify({symbol,...result.historyDiagnostics}));
   gainerHistoryCache.set(symbol,result);gainerHistoryRetry.delete(symbol);gainerHistoryFailures.delete(symbol);return result;
  }catch(error){
