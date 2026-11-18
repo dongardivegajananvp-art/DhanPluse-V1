@@ -37,7 +37,7 @@ export function estimateTargetHitConfidence(stats={}) {
   const wins=Math.max(0,Math.trunc(Number(stats.wins)||0)),losses=Math.max(0,Math.trunc(Number(stats.losses)||0)),samples=wins+losses;
   const rate=samples?wins/samples:null,lower=wilsonLowerBound(wins,losses);
   if(samples<30)return{status:'UNCALIBRATED',samples,wins,losses,hitRate:null,lowerBound:null,reason:'At least 30 completed NSE outcomes in the comparable strategy/RR bucket are required; no probability claim is made'};
-  if(lower===null||lower<0.35)return{status:'LOW_CONFIDENCE',samples,wins,losses,hitRate:Number((rate*100).toFixed(1)),lowerBound:Number(((lower||0)*100).toFixed(1)),reason:'Conservative 95% lower confidence bound does not clear the 35% minimum for a 1:2+ reward/risk setup'};
+  if(lower===null||lower<0.50)return{status:'LOW_CONFIDENCE',samples,wins,losses,hitRate:Number((rate*100).toFixed(1)),lowerBound:Number(((lower||0)*100).toFixed(1)),reason:'Conservative 95% lower confidence bound does not clear the 50% minimum for a 1:2+ reward/risk setup'};
   return{status:'CALIBRATED',samples,wins,losses,hitRate:Number((rate*100).toFixed(1)),lowerBound:Number((lower*100).toFixed(1)),reason:'Historical NSE target/stop outcomes; confidence bound, not a guarantee'};
 }
 
