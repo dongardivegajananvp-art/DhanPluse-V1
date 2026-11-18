@@ -22,7 +22,7 @@ import { evaluateIndexMarketRegime, unavailableMarketRegime } from './market-reg
 import { getResearchHistoryDiagnostics, rankResearchResults } from './ai-research-engine.js';
 import { claimPendingCandidateProcessing, releasePendingCandidateProcessing } from './pending-option-dispatch.js';
 import { buildProRiskPlan } from './pro-risk-engine.js';
-import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
+import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, dailyHistorySymbolForFnoRow, strategyCandidateKey } from './strategy-scanner.js';
 import 'dotenv/config';
 import express from 'express';
 import helmet from 'helmet';
@@ -962,6 +962,7 @@ async function loadStrategyDailyHistory(symbol,{priority=10}={}){
  const candles=payload.candles.filter(c=>Array.isArray(c)&&c.length>=5&&c.slice(0,5).every(v=>Number.isFinite(Number(v)))&&Number(c[0])>0&&Number(c[1])>0&&Number(c[2])>=Math.max(Number(c[1]),Number(c[4]),Number(c[3]))&&Number(c[3])<=Math.min(Number(c[1]),Number(c[4]))).map(c=>({time:Number(c[0]),open:Number(c[1]),high:Number(c[2]),low:Number(c[3]),close:Number(c[4]),volume:Number(c[5]||0)}));
  const verified=completedDailyCandles(candles,Date.now());
  const result={symbol,candles:verified.candles,ok:verified.ok,reason:verified.reason,cachedAt:Date.now(),source:'FYERS Data API daily candles'};
+ console.info('FYERS daily trend history verified.',JSON.stringify({symbol,candleCount:verified.candles.length,ok:verified.ok,reason:verified.reason||null,source:result.source}));
  strategyDailyHistoryCache.set(symbol,result);return result;
 }
 async function loadStrategyOptionContracts(underlying){
@@ -1222,7 +1223,8 @@ async function runAutomaticStrategyScan(){
    if(Date.now()-(strategyScanLastAttempt.get(futureSymbol)||0)<retryInterval)continue;
    const futureTick=lastTicks.get(futureSymbol);if(!freshTick(futureTick))continue;
    strategyScanLastAttempt.set(futureSymbol,Date.now());strategyScanLastAt=new Date().toISOString();strategyScanLastSymbol=futureSymbol;
-   const [history,daily]=await Promise.all([loadGainerHistory(futureSymbol,{priority:10}),loadStrategyDailyHistory(futureSymbol,{priority:10}).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}))]);
+   const dailySymbol=dailyHistorySymbolForFnoRow(row);
+   const [history,daily]=await Promise.all([loadGainerHistory(futureSymbol,{priority:10}),loadStrategyDailyHistory(dailySymbol,{priority:10}).catch(error=>({ok:false,candles:[],reason:String(error?.message||error).slice(0,120)}))]);
    const currentTick=lastTicks.get(futureSymbol);
    if(!freshTick(currentTick)){
     // History is cached for five minutes; retry this same future after one scanner interval
