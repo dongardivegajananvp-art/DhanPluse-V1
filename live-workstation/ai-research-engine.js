@@ -201,6 +201,9 @@ export function analyzeEarlyWatch({candles=[],dailyCandles=[],tick,now=Date.now(
   const prior=rows.slice(-21,-1);
   const level=side==='LONG'?Math.max(...prior.map(c=>num(c.high))):Math.min(...prior.map(c=>num(c.low)));
   const distance=side==='LONG'?(level-price)/level*100:(price-level)/level*100;
+  const lastCompletedClose=num(rows.at(-1).close);
+  if(side==='LONG'&&lastCompletedClose>=level||side==='SHORT'&&lastCompletedClose<=level)
+    return {status:'NONE',reason:'Latest completed candle has already crossed the watch trigger; confirmed setup logic must decide next'};
   if(!(distance>=0&&distance<=0.35))return {status:'NONE',reason:'Price is not within 0.35% of a verified 20-candle breakout level'};
   const zones=nearestZones(rows,price);
   return {status:'WATCH',side,breakoutLevel:level,triggerDistancePct:Number(distance.toFixed(3)),
