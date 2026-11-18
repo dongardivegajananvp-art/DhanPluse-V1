@@ -29,3 +29,9 @@ test('rejects non-ok rows and malformed response envelopes', () => {
   assert.deepEqual(parseFyersQuoteTicks({ s: 'error', d: [row('NSE:A')] }, ['NSE:A'], now), []);
   assert.deepEqual(parseFyersQuoteTicks({ s: 'ok', d: [{ ...row('NSE:A'), v: { ...row('NSE:A').v, symbol: 'NSE:OTHER' } }] }, ['NSE:A'], now), []);
 });
+
+
+test('rejects quote snapshots older than the workstation 10-second live tick gate', () => {
+  const rows = parseFyersQuoteTicks({ s: 'ok', d: [row('NSE:A', 9), row('NSE:B', 11)] }, ['NSE:A', 'NSE:B'], now);
+  assert.deepEqual(rows.map(tick => tick.symbol), ['NSE:A']);
+});
