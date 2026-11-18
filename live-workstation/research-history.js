@@ -11,10 +11,10 @@ export function buildFyersHistoryRange({ nowSeconds = Math.floor(Date.now() / 10
   return { rangeFrom: rangeTo - days * 86400, rangeTo, lookbackDays: days, candleSeconds: interval };
 }
 
-export function normalizeCompletedFyersCandles(rows, nowSeconds = Math.floor(Date.now() / 1000)) {
+export function normalizeCompletedFyersCandles(rows, nowSeconds = Math.floor(Date.now() / 1000), { sessionStartMinute = 555, sessionEndMinute = 925 } = {}) {
   const currentBucket = Math.floor(Number(nowSeconds) / FYERS_CANDLE_SECONDS) * FYERS_CANDLE_SECONDS;
   const byTime = new Map(), conflicted = new Set();
-  let invalidCount = 0, partialCount = 0, duplicateCount = 0;
+  let invalidCount = 0, partialCount = 0, duplicateCount = 0, outsideSessionCount = 0;
   for (const row of Array.isArray(rows) ? rows : []) {
     if (!Array.isArray(row) || row.length < 5) { invalidCount++; continue; }
     const [time, open, high, low, close] = row.slice(0, 5).map(Number);
@@ -26,6 +26,9 @@ export function normalizeCompletedFyersCandles(rows, nowSeconds = Math.floor(Dat
       invalidCount++; continue;
     }
     if (time >= currentBucket) { partialCount++; continue; }
+    const ist = new Date((time + 19800) * 1000);
+    const sessionMinute = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+    if (sessionMinute < sessionStartMinute || sessionMinute > sessionEndMinute) { outsideSessionCount++; continue; }
     if (conflicted.has(time)) { duplicateCount++; continue; }
     const candle = { time, open, high, low, close, volume: Number.isFinite(volume) && volume >= 0 ? volume : 0 };
     const previous = byTime.get(time);
@@ -40,5 +43,5 @@ export function normalizeCompletedFyersCandles(rows, nowSeconds = Math.floor(Dat
     byTime.set(time, candle);
   }
   const candles = [...byTime.values()].sort((a, b) => a.time - b.time);
-  return { candles, invalidCount, partialCount, duplicateCount, currentBucket };
+  return { candles, invalidCount, partialCount, duplicateCount, outsideSessionCount, currentBucket, sessionStartMinute, sessionEndMinute };
 }
