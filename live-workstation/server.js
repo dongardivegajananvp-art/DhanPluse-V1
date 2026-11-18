@@ -20,6 +20,7 @@ import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
 import { evaluateIndexMarketRegime, unavailableMarketRegime } from './market-regime.js';
 import { getResearchHistoryDiagnostics, rankResearchResults } from './ai-research-engine.js';
+import { claimPendingCandidateProcessing, releasePendingCandidateProcessing } from './pending-option-dispatch.js';
 import { buildProRiskPlan } from './pro-risk-engine.js';
 import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
 import 'dotenv/config';
@@ -425,6 +426,11 @@ function ensureSocket(){
         const tickAcceptance=acceptExchangeTick(lastTicks.get(symbol),tick);
         if(!tickAcceptance.accepted){if(tickAcceptance.reason==='OUT_OF_ORDER_EXCHANGE_TIMESTAMP'||tickAcceptance.reason==='FUTURE_EXCHANGE_TIMESTAMP'){console.warn('FYERS tick rejected by monotonic timestamp guard.',JSON.stringify({symbol,reason:tickAcceptance.reason,exchangeTimestamp:new Date(stamp*1000).toISOString()}));}continue;}
         lastTicks.set(symbol,tick);
+        if(strategyPendingCandidates.size){
+          for(const candidate of strategyPendingCandidates.values()){
+            if(candidate.contract?.symbol===symbol||candidate.futureSymbol===symbol)void processPendingStrategyCandidate(candidate);
+          }
+        }
         const previousSymbolGap=symbolTickGapSamples.get(symbol)||{lastReceivedAt:0,samples:[]};
         const symbolReceiveGap=previousSymbolGap.lastReceivedAt?tick.receivedAt-previousSymbolGap.lastReceivedAt:null;
         const symbolSamples=symbolReceiveGap!==null&&symbolReceiveGap>=0?[...previousSymbolGap.samples,symbolReceiveGap].slice(-20):previousSymbolGap.samples;
@@ -1047,7 +1053,7 @@ async function refreshStrategyActivePlans(force=false){
 }
 async function processPendingStrategyCandidate(candidate){
  const optionTick=lastTicks.get(candidate.contract.symbol),underlyingTick=lastTicks.get(candidate.futureSymbol);
- if(!freshTick(optionTick)||!freshTick(underlyingTick))return false;
+ if(!claimPendingCandidateProcessing(candidate,{optionTick,underlyingTick,isFresh:freshTick}))return false;
  try{
   const officialMaster=candidate.underlyingSymbol.startsWith('BSE:')?await loadBseFoMaster():await loadNseFoMaster();
   const officialContract=optionMeta(candidate.contract.symbol,officialMaster);
@@ -1139,6 +1145,8 @@ async function processPendingStrategyCandidate(candidate){
   if(Number(error?.statusCode)===429){strategyScanLastError='FYERS REST cooldown; scanner paused without another upstream request';return false;}
   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:String(error?.message||error).slice(0,160),strategy:candidate.setup.strategy});
   strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_error'});return true;
+ }finally{
+  releasePendingCandidateProcessing(candidate);
  }
 }
 async function refreshIndexMarketRegime(){
