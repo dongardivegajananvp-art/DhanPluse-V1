@@ -12,15 +12,17 @@ class FakePool {
       return { rows: found.map(p => ({ plan_id: p.planId })) };
     }
     if (sql.includes('INSERT INTO gv2vpd_strategy_plans')) {
-      const [planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,underlyingCandleTime,optionCandleTime] = values;
+      const [planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,entryHitAt,entryHitPrice,underlyingCandleTime,optionCandleTime] = values;
       if (this.plans.some(p => p.status === 'ACTIVE' && (p.underlying === underlying || p.contract === contract))) {
         const error = new Error('duplicate active plan'); error.code = '23505'; throw error;
       }
-      this.plans.push({ planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,underlyingCandleTime,optionCandleTime,status:'ACTIVE' });
+      this.plans.push({ planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,entryHitAt,entryHitPrice,underlyingCandleTime,optionCandleTime,status:'ACTIVE' });
       return { rows: [] };
     }
-    if (sql.includes('SELECT plan_id,strategy') && sql.includes('status IN')) return { rows: this.plans.filter(p => ['STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CLOSED','CANCELLED'].includes(p.status)).slice(0,20).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
-    if (sql.includes('SELECT plan_id,strategy')) return { rows: this.plans.filter(p => p.status === 'ACTIVE').slice(0,2).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
+    if (sql.includes('SELECT plan_id,strategy') && sql.includes('status IN')) return { rows: this.plans.filter(p => ['STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CLOSED','CANCELLED'].includes(p.status)).slice(0,20).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, entry_hit_at:p.entryHitAt, entry_hit_price:p.entryHitPrice, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
+    if (sql.includes('SELECT plan_id,strategy')) return { rows: this.plans.filter(p => p.status === 'ACTIVE').slice(0,2).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, entry_hit_at:p.entryHitAt, entry_hit_price:p.entryHitPrice, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
+    if (sql.includes('UPDATE gv2vpd_strategy_plans') && sql.includes('entry_hit_at')) { const p=this.plans.find(x=>x.planId===values[0]&&x.status==='ACTIVE'&&!x.entryHitAt); if(!p)return{rows:[]}; p.entryHitAt=values[1];p.entryHitPrice=values[2];return{rows:[{plan_id:p.planId,entry_hit_at:p.entryHitAt,entry_hit_price:p.entryHitPrice}]}; }
+    if (sql.includes('SELECT plan_id,entry_hit_at')) { const p=this.plans.find(x=>x.planId===values[0]&&x.status==='ACTIVE'&&x.entryHitAt);return{rows:p?[{plan_id:p.planId,entry_hit_at:p.entryHitAt,entry_hit_price:p.entryHitPrice}]:[]}; }
     if (sql.includes('UPDATE gv2vpd_strategy_plans')) {
       const p = this.plans.find(x => x.planId === values[0] && x.status === 'ACTIVE');
       if (!p) return { rows: [] };
@@ -82,6 +84,9 @@ test('ledger persists fixed Entry/SL/Target once and lists the same immutable pl
   assert.equal(listed.plans.length,1);
   assert.deepEqual([Number(listed.plans[0].premium),Number(listed.plans[0].entry),Number(listed.plans[0].stop_loss),Number(listed.plans[0].target)],[100.05,100.05,98.5,103.15]);
   assert.equal(Number(listed.plans[0].tickSize),0.05);
+  assert.equal(listed.plans[0].entry_hit_at,null);
+  assert.equal(listed.plans[0].entry_hit_price,null);
+  assert.equal(evaluateActivePlanLifecycle({...listed.plans[0],entry_hit_at:null},{price:100,receivedAt:now,exchangeTime:now/1000},now).status,'WAITING_FOR_ENTRY');
   assert.ok(listed.plans[0].underlying_received_at);
   assert.ok(listed.plans[0].option_received_at);
   assert.equal(typeof store.updatePlan, 'undefined');
@@ -98,6 +103,22 @@ test('ledger allows at most two active plans and rejects duplicate underlying or
   await store.close();
 });
 
+test('legacy active plan persists first Entry-hit tick exactly once', async () => {
+  const now=Date.parse('2026-11-16T04:00:00Z');
+  class LegacyPool extends FakePool { constructor(){super();LegacyPool.instance=this;} }
+  const store=createStrategyPlanStore({databaseUrl:'postgres://test',PoolClass:LegacyPool});
+  const saved=await store.saveConfirmedPlan(fixture(now),now);
+  LegacyPool.instance.plans[0].entryHitAt=null;
+  LegacyPool.instance.plans[0].entryHitPrice=null;
+  const result=await store.markEntryHit(saved.planId,100.10,now+1000);
+  assert.equal(result.ok,true);
+  assert.equal(result.entryHitPrice,100.10);
+  const again=await store.markEntryHit(saved.planId,100.15,now+2000);
+  assert.equal(again.ok,true);
+  assert.equal(again.alreadyRecorded,true);
+  assert.equal(again.entryHitPrice,100.10);
+  await store.close();
+});
 test('SL/Target hit terminal status releases active slot but permanently retains fixed Entry/SL/Target/RR', async () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
   const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
@@ -145,18 +166,20 @@ test('ledger rejects expired contracts, unknown strategies and stale confirmatio
 
 test('active plan lifecycle remains pending on stale or missing option ticks', () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
-  const plan = { expiry: '2026-11-26', stop_loss: 98.5, target: 103.15 };
+  const plan = { expiry: '2026-11-26', entry:100.05, stop_loss: 98.5, target: 103.15 };
   assert.equal(evaluateActivePlanLifecycle(plan, null, now).status, 'STALE_REVALIDATION_REQUIRED');
   assert.equal(evaluateActivePlanLifecycle(plan, { price: 97, receivedAt: now - 11_000, exchangeTime: now / 1000 }, now).status, 'STALE_REVALIDATION_REQUIRED');
 });
 
 test('active plan lifecycle closes only on a fresh exact-contract stop or target quote', () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
-  const plan = { expiry: '2026-11-26', stop_loss: 98.5, target: 103.15 };
+  const plan = { expiry: '2026-11-26', entry:100.05, stop_loss: 98.5, target: 103.15, entry_hit_at: new Date(now).toISOString() };
   const tick = price => ({ price, receivedAt: now, exchangeTime: now / 1000 });
   assert.equal(evaluateActivePlanLifecycle(plan, tick(98.5), now).status, 'STOP_LOSS_HIT');
   assert.equal(evaluateActivePlanLifecycle(plan, tick(103.2), now).status, 'TARGET_HIT');
-  assert.equal(evaluateActivePlanLifecycle(plan, tick(101), now).status, 'ACTIVE');
+  assert.equal(evaluateActivePlanLifecycle(plan, tick(101), now).status, 'ENTRY_HIT');
+  assert.equal(evaluateActivePlanLifecycle({...plan,entry_hit_at:null}, tick(100), now).status, 'WAITING_FOR_ENTRY');
+  assert.equal(evaluateActivePlanLifecycle({...plan,entry_hit_at:null}, tick(100.05), now).status, 'ENTRY_HIT');
 });
 
 test('active plan lifecycle closes expired contracts even without a live quote', () => {

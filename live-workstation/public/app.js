@@ -161,15 +161,15 @@ function updateChartPlan(){
  if(!activeChartCandles.length){retainOrClearChartPlan('CHART HISTORY UNAVAILABLE · DISPLAY ONLY','Waiting for verified 5-minute candles');return}
  const tick=marketSnapshot.find(x=>x.symbol===activeChartSymbol);
  if(!tick||tickAge(tick)!=='Fresh exchange tick'){retainOrClearChartPlan('UNDERLYING TICK STALE · DISPLAY ONLY','NO TRADE · underlying exchange tick is not fresh');return}
- const {completed,fresh,contiguous}=getCompletedCandleWindow(activeChartCandles,tick.exchangeTime,600,3);
+ const {completed,fresh,contiguous}=getCompletedCandleWindow(activeChartCandles,tick.exchangeTime,600,2);
  if(!fresh){retainOrClearChartPlan('COMPLETED CANDLE STALE · DISPLAY ONLY','NO TRADE · latest completed 5-minute candle is stale');return}
- if(completed.length<3){retainOrClearChartPlan('WAITING FOR NEW CANDLE CONFIRMATION · DISPLAY ONLY','WAIT · need reference + breakout + one confirmation candle');return}
- if(!contiguous){retainOrClearChartPlan('CANDLE GAP · DISPLAY ONLY','NO TRADE · latest three breakout candles are not contiguous');return}
+ if(completed.length<2){retainOrClearChartPlan('WAITING FOR BREAKOUT CANDLE · DISPLAY ONLY','WAIT · need reference + one completed breakout candle');return}
+ if(!contiguous){retainOrClearChartPlan('CANDLE GAP · DISPLAY ONLY','NO TRADE · latest two reference/breakout candles are not contiguous');return}
  const plan=evaluateThreeCandleBreakout(completed,Number(tick.price));
  if(plan.status!=='SETUP_CONFIRMED'||plan.target<=0){retainOrClearChartPlan('CURRENT BREAKOUT NOT RECONFIRMED · DISPLAY ONLY','WAIT · '+(plan.reason||'no one-candle breakout confirmation')+' · NO TRADE');return}
  const confirmed=rememberChartPlan(chartConfirmedPlans,activeChartSymbol,{side:plan.side,entry:plan.entry,stopLoss:plan.stopLoss,target:plan.target,confirmationType:plan.confirmationType},Date.now());try{localStorage.setItem('gv2vpd.chart.confirmedPlans.v1',serializeChartPlans(chartConfirmedPlans))}catch{}
  $('entryLine').textContent=fmt(confirmed.entry);$('slLine').textContent=fmt(confirmed.stopLoss);$('targetLine').textContent=fmt(confirmed.target);
- $('chartSignal').textContent='FYERS 5-MIN '+confirmed.side+' BREAKOUT · '+confirmed.confirmationType.replaceAll('_',' ')+' · RR 1:2 · CONFIRMED '+new Date(confirmed.confirmedAt).toLocaleTimeString('en-IN');
+ $('chartSignal').textContent='FYERS 5-MIN '+confirmed.side+' '+confirmed.confirmationType.replaceAll('_',' ')+' · '+confirmed.confirmationType.replaceAll('_',' ')+' · RR 1:2 · CONFIRMED '+new Date(confirmed.confirmedAt).toLocaleTimeString('en-IN');
  drawCandles(activeChartCandles,{side:confirmed.side,entry:confirmed.entry,sl:confirmed.stopLoss,target:confirmed.target});
 }
 function updateLiveChartFromTick(){if(!chartReady||activeChartSymbol!==selected)return;const tick=marketSnapshot.find(x=>x.symbol===activeChartSymbol);if(!tick||tickAge(tick)!=='Fresh exchange tick'||Number(tick.exchangeTime)<=lastChartTickStamp)return;const stamp=Number(tick.exchangeTime),bucket=Math.floor(stamp/300)*300,price=Number(tick.price);if(!Number.isFinite(price)||price<=0)return;const receiveGap=lastChartTickStamp>0?stamp-lastChartTickStamp:0;if(chartLiveOnly&&receiveGap>10)chartHasTickGap=true;let last=activeChartCandles[activeChartCandles.length-1];if(!last){if(!chartLiveOnly)return;activeChartCandles=[{time:bucket,open:price,high:price,low:price,close:price,volume:0}];last=activeChartCandles[0]}if(bucket<last.time)return;if(bucket===last.time){last.high=Math.max(last.high,price);last.low=Math.min(last.low,price);last.close=price;}else{if(chartLiveOnly&&bucket>last.time+300)chartHasTickGap=true;activeChartCandles.push({time:bucket,open:price,high:price,low:price,close:price,volume:0});if(activeChartCandles.length>300)activeChartCandles.shift();}lastChartTickStamp=stamp;updateChartPlan();}
