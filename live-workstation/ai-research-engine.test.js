@@ -13,6 +13,7 @@ function tick(now,price=112) { return {price,receivedAt:now,exchangeTime:now/100
 
 test('scores a multi-timeframe aligned long setup with transparent evidence',()=>{
   const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400,trend:1});
+  const final=intraday.at(-1);final.low=final.close-0.35;final.high=final.close+0.1;
   const result=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',strategy:'TOP_GAINER_MOMENTUM_BREAKOUT',breakoutLevel:111.7},marketRegime:{state:'BULLISH',direction:'BULLISH',evaluatedAt:new Date(now).toISOString()},now});
   assert.equal(result.status,'COMPLETE');
   assert.ok(result.qualityScore>=85);
