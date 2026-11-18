@@ -1248,6 +1248,8 @@ async function runAutomaticStrategyScan(){
    strategyPendingCandidates.set(key,{key,futureSymbol,underlyingSymbol:row.underlyingSymbol,setup,marketRegime,contract,underlyingCandles:history.candles,dailyCandles:daily.ok?daily.candles:[],isTopGainer,createdAt:Date.now()});
    strategyOptionSymbols.add(contract.symbol);syncSocketSubscriptions({reason:'strategy_option_candidate'});
    setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'WAITING_FOR_FRESH_OPTION_TICK',strategy:setup.strategy,optionSide,contract:contract.symbol,expiry:contract.expiry,strike:contract.strike,research:setup.research||null,reason:'Underlying setup verified; waiting for fresh option exchange tick and completed option candles'});
+   const pendingCandidate=strategyPendingCandidates.get(key);
+   if(pendingCandidate&&freshTick(lastTicks.get(contract.symbol))&&freshTick(lastTicks.get(futureSymbol)))void processPendingStrategyCandidate(pendingCandidate);
    return;
   }
  }catch(error){strategyScanLastError=String(error?.message||error).slice(0,180);if(Number(error?.statusCode)!==429)console.warn('Automatic nine-strategy scan paused safely.',strategyScanLastError);}
