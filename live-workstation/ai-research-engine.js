@@ -13,21 +13,24 @@ function ema(values,period) {
   return value;
 }
 function mean(values) { return values.length ? values.reduce((a,b)=>a+b,0)/values.length : NaN; }
-function contiguousSuffixCount(rows, intervalSeconds=300) {
-  if(!Array.isArray(rows)||!rows.length)return 0;
-  const parts=value=>{const d=new Date((num(value)+19800)*1000);return{day:d.toISOString().slice(0,10),minute:d.getUTCHours()*60+d.getUTCMinutes()};};
-  let count=1;
+function contiguousSuffixDiagnostics(rows, intervalSeconds=300) {
+  if(!Array.isArray(rows)||!rows.length)return{count:0,gap:null};
+  const parts=value=>{const d=new Date((num(value)+19800)*1000);return{day:d.toISOString().slice(0,10),minute:d.getUTCHours()*60+d.getUTCMinutes(),label:d.toISOString().replace('T',' ').slice(0,16)+' UTC+05:30'};};
   for(let i=rows.length-1;i>0;i--){
     const previous=num(rows[i-1].time),current=num(rows[i].time);
-    if(current-previous===intervalSeconds){count++;continue;}
+    if(current-previous===intervalSeconds)continue;
     const a=parts(previous),b=parts(current);
     const sessionBoundary=intervalSeconds===300
       ?a.minute===925&&b.minute===555&&b.day>a.day
       :intervalSeconds===900&&a.minute===915&&b.minute===555&&b.day>a.day;
-    if(!sessionBoundary)break;
-    count++;
+    if(sessionBoundary)continue;
+    return{count:rows.length-i,gap:{previousTime:previous,currentTime:current,gapSeconds:current-previous,previousIst:a.label,currentIst:b.label}};
   }
-  return count;
+  return{count:rows.length,gap:null};
+}
+function contiguousSuffixCount(rows, intervalSeconds=300) { return contiguousSuffixDiagnostics(rows,intervalSeconds).count; }
+function describeHistoryGap(gap) {
+  return gap?'; latest gap '+gap.previousIst+' -> '+gap.currentIst+' ('+gap.gapSeconds+'s)':'';
 }
 function contiguous(rows) { return contiguousSuffixCount(rows,300)>=50; }
 function sessionParts(value) {
@@ -100,8 +103,10 @@ function aligned(side, values, shortPeriod, longPeriod) {
  */
 export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,marketRegime=null,now=Date.now()}={}) {
   const fail=reason=>({status:'INCOMPLETE',qualityScore:null,grade:'PENDING',scoreMeaning:'Quality score, not win probability',reason,evidence:[],riskFlags:[],missingEvidence:[reason],model:'GV2VPD_QUANT_RESEARCH_V1'});
-  if(!Array.isArray(candles)||candles.some(c=>!validCandle(c))||!contiguous(candles))
-    return fail('50 contiguous completed FYERS 5-minute candles are required; received '+(Array.isArray(candles)?candles.length:0)+' valid rows, contiguous suffix '+contiguousSuffixCount(candles,300));
+  if(!Array.isArray(candles)||candles.some(c=>!validCandle(c))||!contiguous(candles)){
+    const diagnostic=contiguousSuffixDiagnostics(candles,300);
+    return fail('50 contiguous completed FYERS 5-minute candles are required; received '+(Array.isArray(candles)?candles.length:0)+' valid rows, contiguous suffix '+diagnostic.count+describeHistoryGap(diagnostic.gap));
+  }
   if(!Array.isArray(dailyCandles)||dailyCandles.length<50||dailyCandles.some(c=>!validCandle(c)))
     return fail('50 completed FYERS daily candles are required for multi-timeframe research');
   const dailyLastTime=num(dailyCandles.at(-1).time),dailyAge=now/1000-dailyLastTime;
@@ -116,8 +121,8 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
 
   const side=setup.side, rows=candles.slice(-50), daily=dailyCandles.slice(-50);
   const closes=rows.map(c=>num(c.close)),dailyCloses=daily.map(c=>num(c.close));
-  const fifteenRows=resample15m(candles),fifteenWindow=fifteenRows.slice(-50),fifteenSuffix=contiguousSuffixCount(fifteenRows,900);
-  if(fifteenWindow.length<50||!contiguous15m(fifteenWindow))return fail('50 contiguous completed 15-minute candles derived from FYERS 5-minute data are required; derived '+fifteenRows.length+', contiguous suffix '+fifteenSuffix);
+  const fifteenRows=resample15m(candles),fifteenWindow=fifteenRows.slice(-50),fifteenDiagnostic=contiguousSuffixDiagnostics(fifteenRows,900);
+  if(fifteenWindow.length<50||!contiguous15m(fifteenWindow))return fail('50 contiguous completed 15-minute candles derived from FYERS 5-minute data are required; derived '+fifteenRows.length+', contiguous suffix '+fifteenDiagnostic.count+describeHistoryGap(fifteenDiagnostic.gap));
   const fifteenCloses=fifteenWindow.map(c=>num(c.close));
   const last=rows.at(-1),prior=rows.at(-4),dailyAligned=aligned(side,dailyCloses,20,50);
   const fifteenAligned=aligned(side,fifteenCloses,20,50);
@@ -182,7 +187,10 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
 }
 export function analyzeEarlyWatch({candles=[],dailyCandles=[],tick,now=Date.now()}={}) {
   const incomplete=reason=>({status:'INCOMPLETE',reason});
-  if(!Array.isArray(candles)||candles.some(c=>!validCandle(c))||!contiguous(candles))return incomplete('50 contiguous completed FYERS 5-minute candles are required for early watch; received '+(Array.isArray(candles)?candles.length:0)+' valid rows, contiguous suffix '+contiguousSuffixCount(candles,300));
+  if(!Array.isArray(candles)||candles.some(c=>!validCandle(c))||!contiguous(candles)){
+    const diagnostic=contiguousSuffixDiagnostics(candles,300);
+    return incomplete('50 contiguous completed FYERS 5-minute candles are required for early watch; received '+(Array.isArray(candles)?candles.length:0)+' valid rows, contiguous suffix '+diagnostic.count+describeHistoryGap(diagnostic.gap));
+  }
   if(!Array.isArray(dailyCandles)||dailyCandles.length<50||dailyCandles.some(c=>!validCandle(c)))return incomplete('50 completed FYERS daily candles are required for early watch trend context');
   const dailyAge=now/1000-num(dailyCandles.at(-1).time);
   if(dailyAge<0||dailyAge>4*86400)return incomplete('Latest completed FYERS daily candle is stale or future-dated');
