@@ -132,3 +132,13 @@ test('global ranking orders early watches by distance to the trigger without tre
   assert.equal(ranked[1].triggerDistancePct,0.07);
   assert.equal(ranked[2].triggerDistancePct,0.28);
 });
+
+
+test('reports exact recent 5-minute contiguous suffix when research history has a gap',()=>{
+  const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400});
+  intraday[170]={...intraday[170],time:intraday[170].time+300};
+  const result=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},now});
+  assert.equal(result.status,'INCOMPLETE');
+  assert.match(result.reason,/received 180 valid rows, contiguous suffix \d+/);
+  assert.ok(Number(result.reason.match(/contiguous suffix (\d+)/)?.[1])<50);
+});
