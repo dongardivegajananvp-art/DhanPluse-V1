@@ -59,6 +59,39 @@ function contiguous15m(rows) {
     return a.minute===915&&b.minute===555&&b.day>a.day;
   });
 }
+
+function nearestZones(rows, price) {
+  const demand=[],supply=[];
+  for(let i=2;i<rows.length-2;i++){
+    const candle=rows[i],bodyLow=Math.min(num(candle.open),num(candle.close)),bodyHigh=Math.max(num(candle.open),num(candle.close));
+    const pivotLow=rows.slice(i-2,i+3).every((x,j)=>j===2||num(candle.low)<num(x.low));
+    const pivotHigh=rows.slice(i-2,i+3).every((x,j)=>j===2||num(candle.high)>num(x.high));
+    if(pivotLow)demand.push({low:num(candle.low),high:bodyHigh,mid:(num(candle.low)+bodyHigh)/2});
+    if(pivotHigh)supply.push({low:bodyLow,high:num(candle.high),mid:(bodyLow+num(candle.high))/2});
+  }
+  const below=demand.filter(z=>z.mid<=price).sort((a,b)=>b.mid-a.mid)[0]||null;
+  const above=supply.filter(z=>z.mid>=price).sort((a,b)=>a.mid-b.mid)[0]||null;
+  const pct=z=>z?Number((Math.abs(price-z.mid)/price*100).toFixed(3)):null;
+  return {demand:below?{...below,distancePct:pct(below)}:null,supply:above?{...above,distancePct:pct(above)}:null};
+}
+function pullbackRetestEvidence(rows, setup) {
+  const strategy=String(setup?.strategy||'');
+  const required=/RETEST|PULLBACK|OPENING_RANGE/.test(strategy);
+  if(!required)return {applicable:false,score:5,quality:'NOT_REQUIRED',reason:'This strategy does not require a separate retest/pullback'};
+  const level=num(setup.breakoutLevel),side=setup.side,window=rows.slice(-9,-1);
+  const held=window.some(c=>side==='LONG'
+    ?num(c.low)<=level*1.003&&num(c.close)>=level*0.995
+    :num(c.high)>=level*0.997&&num(c.close)<=level*1.005);
+  const invalidated=window.some(c=>side==='LONG'?num(c.close)<level*0.992:num(c.close)>level*1.008);
+  if(held&&!invalidated)return {applicable:true,score:10,quality:'RETEST_HELD',reason:'Breakout level was retested and held on completed candles'};
+  if(held&&invalidated)return {applicable:true,score:2,quality:'RETEST_INVALIDATED',reason:'A retest occurred but a completed candle invalidated the level'};
+  return {applicable:true,score:3,quality:'RETEST_NOT_CONFIRMED',reason:'No clean completed-candle retest/hold was found'};
+}
+function earlyInvalidation(rows, side) {
+  const recent=rows.slice(-5);
+  return side==='LONG'?Math.min(...recent.map(c=>num(c.low))):Math.max(...recent.map(c=>num(c.high)));
+}
+
 function aligned(side, values, shortPeriod, longPeriod) {
   const eShort=ema(values,shortPeriod),eLong=ema(values,longPeriod),last=values.at(-1);
   return Number.isFinite(eShort)&&Number.isFinite(eLong)&&
@@ -112,29 +145,74 @@ export function analyzeSetupResearch({candles=[],dailyCandles=[],tick,setup,mark
   const ranges=rows.slice(-21,-1).map(c=>num(c.high)-num(c.low)).filter(x=>Number.isFinite(x)&&x>0);
   const averageRange=mean(ranges),rangeRatio=averageRange>0?candleRange/averageRange:NaN;
   const volatilityDisciplined=Number.isFinite(rangeRatio)&&rangeRatio<=1.8;
+  const zones=nearestZones(rows,num(tick.price));
+  const alignedZone=side==='LONG'?zones.demand:zones.supply;
+  const zoneDistance=alignedZone?.distancePct??null;
+  const zonePoints=zoneDistance===null?5:zoneDistance<=1?10:zoneDistance<=2?7:3;
+  const retest=pullbackRetestEvidence(rows,setup);
   const components=[
-    {key:'dailyTrend',label:'Daily trend alignment',weight:15,points:dailyAligned?15:0,pass:dailyAligned},
-    {key:'fifteenMinuteTrend',label:'15-minute EMA20/EMA50 alignment',weight:15,points:fifteenAligned?15:0,pass:fifteenAligned},
-    {key:'intradayTrend',label:'5-minute EMA20/EMA50 alignment',weight:15,points:intradayAligned?15:0,pass:intradayAligned},
-    {key:'momentum',label:'Recent 5-minute momentum confirmation',weight:15,points:momentum?15:0,pass:momentum},
-    {key:'breakout',label:'Breakout close quality',weight:15,points:breakoutQuality?15:0,pass:breakoutQuality},
-    {key:'volume',label:'Volume expansion',weight:10,points:!volumeKnown?5:volumeExpansion?10:2,pass:volumeExpansion},
-    {key:'marketRegime',label:'Index market-regime alignment',weight:10,points:!regimeKnown?5:regimeAligned?10:0,pass:regimeAligned},
-    {key:'volatility',label:'Candle volatility discipline',weight:5,points:volatilityDisciplined?5:Number.isFinite(rangeRatio)&&rangeRatio<=2.5?3:1,pass:volatilityDisciplined}
+    {key:'dailyTrend',label:'Daily trend alignment',weight:12,points:dailyAligned?12:0,pass:dailyAligned},
+    {key:'fifteenMinuteTrend',label:'15-minute EMA20/EMA50 alignment',weight:12,points:fifteenAligned?12:0,pass:fifteenAligned},
+    {key:'intradayTrend',label:'5-minute EMA20/EMA50 alignment',weight:12,points:intradayAligned?12:0,pass:intradayAligned},
+    {key:'momentum',label:'Recent 5-minute momentum confirmation',weight:12,points:momentum?12:0,pass:momentum},
+    {key:'breakout',label:'Breakout close quality',weight:12,points:breakoutQuality?12:0,pass:breakoutQuality},
+    {key:'volume',label:'Volume expansion',weight:8,points:!volumeKnown?4:volumeExpansion?8:1,pass:volumeExpansion},
+    {key:'marketRegime',label:'Index market-regime alignment',weight:8,points:!regimeKnown?4:regimeAligned?8:0,pass:regimeAligned},
+    {key:'volatility',label:'Candle volatility discipline',weight:4,points:volatilityDisciplined?4:Number.isFinite(rangeRatio)&&rangeRatio<=2.5?2:0,pass:volatilityDisciplined},
+    {key:'supplyDemand',label:'Supply/demand zone context',weight:10,points:zonePoints,pass:zoneDistance!==null&&zoneDistance<=1},
+    {key:'pullbackRetest',label:'Pullback/retest quality',weight:10,points:retest.score,pass:retest.quality==='RETEST_HELD'}
   ];
   const qualityScore=components.reduce((sum,item)=>sum+item.points,0);
   const evidence=components.filter(x=>x.pass).map(x=>x.label);
-  const riskFlags=components.filter(x=>!x.pass).map(x=>x.label+(x.key==='dailyTrend'?' conflicts with the setup direction':x.key==='marketRegime'&&regimeKnown?' conflicts with the index regime':' is not confirmed'));
+  const riskFlags=components.filter(x=>!x.pass&&!(x.key==='pullbackRetest'&&!retest.applicable)).map(x=>x.label+(x.key==='dailyTrend'?' conflicts with the setup direction':x.key==='marketRegime'&&regimeKnown?' conflicts with the index regime':' is not confirmed'));
   const missingEvidence=[];
   if(!volumeKnown)missingEvidence.push('Volume field is unavailable; volume score is neutral');
   if(!regimeKnown)missingEvidence.push('Fresh verified index market regime is unavailable or stale; regime score is neutral');
+  if(!alignedZone)missingEvidence.push('No confirmed nearby '+(side==='LONG'?'demand':'supply')+' pivot zone in the available FYERS candle window');
+  if(retest.applicable&&retest.quality!=='RETEST_HELD')missingEvidence.push(retest.reason);
   const grade=qualityScore>=85?'A+':qualityScore>=75?'A':qualityScore>=65?'B':qualityScore>=55?'C':'D';
   return {
     status:'COMPLETE',qualityScore,grade,scoreMeaning:'Research quality score out of 100; not a win probability',
     side,strategy:setup.strategy||null,components,evidence,riskFlags,missingEvidence,
+    zones,
+    zoneContext:{alignedZone:side==='LONG'?'DEMAND':'SUPPLY',distancePct:zoneDistance,scorePoints:zonePoints,source:'FYERS completed 5-minute OHLC pivot zones'},
+    pullbackRetest:retest,
+    earlyConfirmation:{triggerLevel:num(setup.breakoutLevel),invalidationReference:earlyInvalidation(rows,side),note:'Research reference only; does not modify fixed option Entry/SL/Target/RR'},
     marketRegime:regimeKnown?regimeDirection:regimeNeutral?'NEUTRAL':'UNAVAILABLE',
     evaluatedAt:new Date(now).toISOString(),source:'FYERS completed candles + fresh exchange timestamp',
-    model:'GV2VPD_QUANT_RESEARCH_V1'
+    model:'GV2VPD_QUANT_RESEARCH_V2'
+  };
+}
+export function analyzeEarlyWatch({candles=[],dailyCandles=[],tick,now=Date.now()}={}) {
+  const incomplete=reason=>({status:'INCOMPLETE',reason});
+  if(!Array.isArray(candles)||candles.some(c=>!validCandle(c))||candles.length<50||!contiguous(candles))return incomplete('50 contiguous completed FYERS 5-minute candles are required for early watch');
+  if(!Array.isArray(dailyCandles)||dailyCandles.length<50||dailyCandles.some(c=>!validCandle(c)))return incomplete('50 completed FYERS daily candles are required for early watch trend context');
+  const dailyAge=now/1000-num(dailyCandles.at(-1).time);
+  if(dailyAge<0||dailyAge>4*86400)return incomplete('Latest completed FYERS daily candle is stale or future-dated');
+  if(!tick||!finite(tick.price)||num(tick.price)<=0||!finite(tick.receivedAt)||now-num(tick.receivedAt)<0||now-num(tick.receivedAt)>10000||!finite(tick.exchangeTime)||now/1000-num(tick.exchangeTime)<-3||now/1000-num(tick.exchangeTime)>10)return incomplete('Fresh exchange-timestamped underlying tick is required for early watch');
+  const rows=candles.slice(-50),closes=rows.map(c=>num(c.close)),dailyCloses=dailyCandles.slice(-50).map(c=>num(c.close));
+  const e20=ema(closes,20),e50=ema(closes,50),d20=ema(dailyCloses,20),d50=ema(dailyCloses,50),price=num(tick.price);
+  const fifteenWindow=resample15m(candles).slice(-50);
+  if(fifteenWindow.length<50||!contiguous15m(fifteenWindow))return incomplete('50 contiguous completed 15-minute candles derived from FYERS 5-minute data are required for early watch');
+  const fifteenCloses=fifteenWindow.map(c=>num(c.close)),m20=ema(fifteenCloses,20),m50=ema(fifteenCloses,50);
+  const side=price>e20&&e20>e50&&d20>d50&&fifteenCloses.at(-1)>m20&&m20>m50?'LONG':
+    price<e20&&e20<e50&&d20<d50&&fifteenCloses.at(-1)<m20&&m20<m50?'SHORT':null;
+  if(!side)return {status:'NONE',reason:'No aligned daily and 5-minute trend for an early watch'};
+  const prior=rows.slice(-21,-1);
+  const level=side==='LONG'?Math.max(...prior.map(c=>num(c.high))):Math.min(...prior.map(c=>num(c.low)));
+  const distance=side==='LONG'?(level-price)/level*100:(price-level)/level*100;
+  const lastCompletedClose=num(rows.at(-1).close);
+  if(side==='LONG'&&lastCompletedClose>=level||side==='SHORT'&&lastCompletedClose<=level)
+    return {status:'NONE',reason:'Latest completed candle has already crossed the watch trigger; confirmed setup logic must decide next'};
+  if(!(distance>=0&&distance<=0.35))return {status:'NONE',reason:'Price is not within 0.35% of a verified 20-candle breakout level'};
+  const zones=nearestZones(rows,price);
+  return {status:'WATCH',side,breakoutLevel:level,triggerDistancePct:Number(distance.toFixed(3)),
+    invalidationReference:earlyInvalidation(rows,side),zones,
+    research:{status:'WATCH',grade:'EARLY',qualityScore:null,scoreMeaning:'Early watch only; not a confirmed setup or win probability',
+      evidence:['Fresh exchange-timestamped underlying tick','Daily, 15-minute and 5-minute EMA20/EMA50 alignment','Price within 0.35% of prior 20-candle range'],
+      riskFlags:['Breakout and option confirmation are not complete'],missingEvidence:['Completed-candle breakout confirmation','Fresh verified option quote and option candles'],
+      model:'GV2VPD_QUANT_RESEARCH_V2',source:'FYERS completed candles + fresh exchange timestamp',
+      earlyConfirmation:{triggerLevel:level,invalidationReference:earlyInvalidation(rows,side),triggerDistancePct:Number(distance.toFixed(3))},zones}
   };
 }
 
@@ -152,6 +230,9 @@ export function rankResearchResults(results = []) {
     if (quality) return quality;
     const confirmed = Number(b?.status === 'PLAN_CONFIRMED_READ_ONLY') - Number(a?.status === 'PLAN_CONFIRMED_READ_ONLY');
     if (confirmed) return confirmed;
+    const watchDistance = item => item?.status === 'EARLY_WATCH' && finite(item.triggerDistancePct) ? num(item.triggerDistancePct) : Infinity;
+    const watchOrder = watchDistance(a) - watchDistance(b);
+    if (Number.isFinite(watchOrder) && watchOrder) return watchOrder;
     const rr = (Number(b?.rr) || 0) - (Number(a?.rr) || 0);
     if (rr) return rr;
     return String(b?.verifiedAt || b?.updatedAt || '').localeCompare(String(a?.verifiedAt || a?.updatedAt || ''));

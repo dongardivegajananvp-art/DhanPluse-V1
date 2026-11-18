@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeSetupResearch, rankResearchResults } from './ai-research-engine.js';
+import { analyzeEarlyWatch, analyzeSetupResearch, rankResearchResults } from './ai-research-engine.js';
 
 function candles(count,{start=Date.UTC(2026,10,16,3,45)/1000,step=300,trend=1,volume=100}={}) {
   return Array.from({length:count},(_,i)=>{
@@ -13,6 +13,7 @@ function tick(now,price=112) { return {price,receivedAt:now,exchangeTime:now/100
 
 test('scores a multi-timeframe aligned long setup with transparent evidence',()=>{
   const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400,trend:1});
+  const final=intraday.at(-1);final.low=final.close-0.35;final.high=final.close+0.1;
   const result=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',strategy:'TOP_GAINER_MOMENTUM_BREAKOUT',breakoutLevel:111.7},marketRegime:{state:'BULLISH',direction:'BULLISH',evaluatedAt:new Date(now).toISOString()},now});
   assert.equal(result.status,'COMPLETE');
   assert.ok(result.qualityScore>=85);
@@ -41,7 +42,7 @@ test('treats a neutral index regime as neutral evidence, not a conflict',()=>{
   const now=Date.UTC(2026,10,18,6,15);
   const result=analyzeSetupResearch({candles:candles(180),dailyCandles:candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400}),tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'NEUTRAL',evaluatedAt:new Date(now).toISOString()},now});
   const regime=result.components.find(item=>item.key==='marketRegime');
-  assert.equal(regime.points,5);
+  assert.equal(regime.points,4);
   assert.ok(!result.riskFlags.some(flag=>flag.includes('conflicts with the index regime')));
 });
 
@@ -49,7 +50,7 @@ test('does not score stale index regime as current confluence',()=>{
   const now=Date.UTC(2026,10,18,6,15);
   const result=analyzeSetupResearch({candles:candles(180),dailyCandles:candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400}),tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'BULLISH',evaluatedAt:new Date(now-30000).toISOString()},now});
   const regime=result.components.find(item=>item.key==='marketRegime');
-  assert.equal(regime.points,5);
+  assert.equal(regime.points,4);
   assert.ok(result.missingEvidence.some(reason=>reason.includes('stale')));
 });
 
@@ -77,4 +78,57 @@ test('global scanner ranking puts higher complete research quality before plan l
   assert.equal(ranked[0].research.qualityScore,88);
   assert.equal(ranked[1].research.qualityScore,61);
   assert.equal(ranked[2].research.status,'INCOMPLETE');
+});
+
+test('research v2 reports independently derived supply/demand zones, retest evidence and non-trading early levels',()=>{
+  const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400,trend:1});
+  const result=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',strategy:'DAY_HIGH_LOW_BREAK_RETEST',breakoutLevel:111.7},marketRegime:{direction:'BULLISH',evaluatedAt:new Date(now).toISOString()},now});
+  assert.equal(result.status,'COMPLETE');
+  assert.ok(result.zones);
+  assert.ok(result.zoneContext);
+  assert.ok(['RETEST_HELD','RETEST_NOT_CONFIRMED','RETEST_INVALIDATED'].includes(result.pullbackRetest.quality));
+  assert.equal(result.earlyConfirmation.triggerLevel,111.7);
+  assert.match(result.earlyConfirmation.note,/does not modify fixed option Entry\/SL\/Target\/RR/);
+  assert.equal(result.model,'GV2VPD_QUANT_RESEARCH_V2');
+});
+
+test('early watch requires fresh FYERS ticks and does not promote a trade',()=>{
+  const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400,trend:1});
+  const stale=analyzeEarlyWatch({candles:intraday,dailyCandles:daily,tick:tick(now),now:now+20000});
+  assert.equal(stale.status,'INCOMPLETE');
+  assert.match(stale.reason,/Fresh exchange-timestamped/);
+});
+
+test('non-applicable retest does not create a false risk flag and score stays bounded',()=>{
+  const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400,trend:1});
+  const result=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',strategy:'TOP_GAINER_MOMENTUM_BREAKOUT',breakoutLevel:111.7},marketRegime:{direction:'BULLISH',evaluatedAt:new Date(now).toISOString()},now});
+  assert.ok(result.qualityScore>=0&&result.qualityScore<=100);
+  assert.equal(result.pullbackRetest.applicable,false);
+  assert.ok(!result.riskFlags.some(flag=>flag.includes('Pullback/retest quality')));
+});
+
+test('early watch reports a near-breakout candidate without creating a trade setup',()=>{
+  const now=Date.UTC(2026,10,18,6,15),intraday=candles(180),daily=candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400,trend:1});
+  const level=Math.max(...intraday.slice(-21,-1).map(c=>c.high));
+  const last=intraday.at(-1);
+  last.open=level-0.25;last.high=level-0.05;last.low=level-0.35;last.close=level-0.1;
+  const result=analyzeEarlyWatch({candles:intraday,dailyCandles:daily,tick:{price:level-0.1,receivedAt:now,exchangeTime:now/1000},now});
+  assert.equal(result.status,'WATCH',JSON.stringify(result));
+  assert.equal(result.side,'LONG');
+  assert.ok(result.triggerDistancePct>=0&&result.triggerDistancePct<=0.35);
+  assert.equal(result.research.status,'WATCH');
+  assert.equal(result.research.qualityScore,null);
+  assert.ok(result.research.missingEvidence.some(x=>x.includes('option quote')));
+});
+
+test('global ranking orders early watches by distance to the trigger without treating them as confirmed',()=>{
+  const rows=[
+    {status:'EARLY_WATCH',triggerDistancePct:0.28,research:{status:'WATCH',qualityScore:null}},
+    {status:'EARLY_WATCH',triggerDistancePct:0.07,research:{status:'WATCH',qualityScore:null}},
+    {status:'WAITING_FOR_FRESH_OPTION_TICK',research:{status:'COMPLETE',qualityScore:72}}
+  ];
+  const ranked=rankResearchResults(rows);
+  assert.equal(ranked[0].research.qualityScore,72);
+  assert.equal(ranked[1].triggerDistancePct,0.07);
+  assert.equal(ranked[2].triggerDistancePct,0.28);
 });
