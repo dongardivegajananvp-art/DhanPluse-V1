@@ -119,3 +119,15 @@ test('early watch reports a near-breakout candidate without creating a trade set
   assert.equal(result.research.qualityScore,null);
   assert.ok(result.research.missingEvidence.some(x=>x.includes('option quote')));
 });
+
+test('global ranking orders early watches by distance to the trigger without treating them as confirmed',()=>{
+  const rows=[
+    {status:'EARLY_WATCH',triggerDistancePct:0.28,research:{status:'WATCH',qualityScore:null}},
+    {status:'EARLY_WATCH',triggerDistancePct:0.07,research:{status:'WATCH',qualityScore:null}},
+    {status:'WAITING_FOR_FRESH_OPTION_TICK',research:{status:'COMPLETE',qualityScore:72}}
+  ];
+  const ranked=rankResearchResults(rows);
+  assert.equal(ranked[0].research.qualityScore,72);
+  assert.equal(ranked[1].triggerDistancePct,0.07);
+  assert.equal(ranked[2].triggerDistancePct,0.28);
+});
