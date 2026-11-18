@@ -25,3 +25,13 @@ test('does not claim when either exchange tick is stale or missing', () => {
   assert.equal(claimPendingCandidateProcessing(candidate, { optionTick: null, underlyingTick: { fresh: true }, isFresh: fresh }), false);
   assert.equal(candidate.processing, undefined);
 });
+
+
+test('throttles repeated exchange events to one processing attempt per second', () => {
+  const candidate = { processing: false };
+  const ticks = { optionTick: { fresh: true }, underlyingTick: { fresh: true }, isFresh: fresh, minIntervalMs: 1000 };
+  assert.equal(claimPendingCandidateProcessing(candidate, { ...ticks, nowMs: 1000 }), true);
+  releasePendingCandidateProcessing(candidate);
+  assert.equal(claimPendingCandidateProcessing(candidate, { ...ticks, nowMs: 1500 }), false);
+  assert.equal(claimPendingCandidateProcessing(candidate, { ...ticks, nowMs: 2000 }), true);
+});
