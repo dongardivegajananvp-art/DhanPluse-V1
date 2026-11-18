@@ -60,6 +60,20 @@ function resample15m(rows) {
 }
 function contiguous15m(rows) { return contiguousSuffixCount(rows,900)>=50; }
 
+export function getResearchHistoryDiagnostics(candles=[]) {
+  const fiveMinute=contiguousSuffixDiagnostics(candles,300);
+  const fifteenMinuteRows=resample15m(candles);
+  const fifteenMinute=contiguousSuffixDiagnostics(fifteenMinuteRows,900);
+  return {
+    fiveMinuteCount:Array.isArray(candles)?candles.length:0,
+    fiveMinuteContiguousSuffix:fiveMinute.count,
+    fiveMinuteLatestGap:fiveMinute.gap,
+    derivedFifteenMinuteCount:fifteenMinuteRows.length,
+    fifteenMinuteContiguousSuffix:fifteenMinute.count,
+    fifteenMinuteLatestGap:fifteenMinute.gap
+  };
+}
+
 function nearestZones(rows, price) {
   const demand=[],supply=[];
   for(let i=2;i<rows.length-2;i++){

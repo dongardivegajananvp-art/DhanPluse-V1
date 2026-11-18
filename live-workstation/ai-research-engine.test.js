@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeEarlyWatch, analyzeSetupResearch, rankResearchResults } from './ai-research-engine.js';
+import { analyzeEarlyWatch, analyzeSetupResearch, getResearchHistoryDiagnostics, rankResearchResults } from './ai-research-engine.js';
 
 function candles(count,{start=Date.UTC(2026,10,16,3,45)/1000,step=300,trend=1,volume=100}={}) {
   return Array.from({length:count},(_,i)=>{
@@ -142,4 +142,17 @@ test('reports exact recent 5-minute contiguous suffix when research history has 
   assert.match(result.reason,/received 180 valid rows, contiguous suffix \d+/);
   assert.match(result.reason,/latest gap .* -> .* \(\d+s\)/);
   assert.ok(Number(result.reason.match(/contiguous suffix (\d+)/)?.[1])<50);
+});
+
+
+test('reports actual 5-minute and derived 15-minute history continuity gaps',()=>{
+  const rows=candles(180);
+  rows[170]={...rows[170],time:rows[170].time+300};
+  const diagnostic=getResearchHistoryDiagnostics(rows);
+  assert.equal(diagnostic.fiveMinuteCount,180);
+  assert.ok(diagnostic.fiveMinuteContiguousSuffix<50);
+  assert.ok(diagnostic.fiveMinuteLatestGap);
+  assert.equal(diagnostic.fiveMinuteLatestGap.gapSeconds,0);
+  assert.ok(diagnostic.derivedFifteenMinuteCount>0);
+  assert.ok(diagnostic.fifteenMinuteContiguousSuffix>=0);
 });
