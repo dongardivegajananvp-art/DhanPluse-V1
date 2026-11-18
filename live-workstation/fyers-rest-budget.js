@@ -168,9 +168,11 @@ export function createFyersDataApiBudget({
   async function activateCooldown(response, body, pathname, requestUrl, method) {
     const server = String(response.headers?.get?.('server') || '');
     const cfRay = String(response.headers?.get?.('cf-ray') || '');
+    // A Cloudflare edge header / cf-ray only identifies the proxy, not the
+    // specific 1015 rule. Generic provider 429s must use normal Retry-After /
+    // rate-limit backoff rather than being escalated to the 1-hour 1015 hold.
     const cloudflare1015 =
-      /error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body) ||
-      (/cloudflare/i.test(server) && Boolean(cfRay));
+      /error\s*1015|cloudflare.{0,120}1015|1015.{0,120}cloudflare/i.test(body);
     const retryMs = Math.min(maxCooldownMs, retryAfterMs(response));
     let backoffMs;
     if (cloudflare1015) {
