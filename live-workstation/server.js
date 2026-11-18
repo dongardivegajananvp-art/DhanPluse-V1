@@ -563,7 +563,7 @@ async function recoverStaleSubscriptionsViaQuotes(staleSymbols) {
   }
   if (accepted) lastAcceptedTickAt = new Date().toISOString();
   console.info('FYERS REST quote recovery completed.', JSON.stringify({
-    requested: unique.length, acceptedFreshExchangeTicks: accepted, rejectedOrStale: rejected,
+    requested: unique.length, symbols:unique, acceptedFreshExchangeTicks: accepted, rejectedOrStale: rejected,
     at: new Date().toISOString(), cooldownActive: fetchWithFyersBudget.getStatus().cooldownActive
   }));
 }
@@ -1190,7 +1190,14 @@ async function runAutomaticStrategyScan(){
   let expired=false;
   for(const candidate of strategyPendingCandidates.values()){
    if(Date.now()-candidate.createdAt>120000){strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason:'Option tick did not become fresh within 120 seconds',strategy:candidate.setup.strategy});expired=true;continue;}
-   if(freshTick(lastTicks.get(candidate.contract.symbol))){await processPendingStrategyCandidate(candidate);return;}
+   const pendingSymbols=[candidate.contract.symbol,candidate.futureSymbol].filter(symbol=>!freshTick(lastTicks.get(symbol)));
+   if(pendingSymbols.length){
+    // One targeted FYERS quote snapshot can recover a quiet option/future while
+    // preserving the exchange-time freshness gate. The shared 30s REST throttle
+    // and global cooldown still apply; no symbol fanout or stale quote promotion.
+    await recoverStaleSubscriptionsViaQuotes(pendingSymbols);
+   }
+   if(freshTick(lastTicks.get(candidate.contract.symbol))&&freshTick(lastTicks.get(candidate.futureSymbol))){await processPendingStrategyCandidate(candidate);return;}
   }
   if(expired)syncSocketSubscriptions({reason:'strategy_candidate_timeout'});
   const freshGainerWindow=fnoMoversCache.updatedAt>0&&Date.now()-fnoMoversCache.updatedAt<60*1000?fnoMoversCache.rows:[];
