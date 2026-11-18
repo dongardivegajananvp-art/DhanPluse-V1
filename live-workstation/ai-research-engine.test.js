@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { analyzeSetupResearch } from './ai-research-engine.js';
+import { analyzeSetupResearch, rankResearchResults } from './ai-research-engine.js';
 
 function candles(count,{start=Date.UTC(2026,10,16,3,45)/1000,step=300,trend=1,volume=100}={}) {
   return Array.from({length:count},(_,i)=>{
@@ -64,4 +64,17 @@ test('rejects stale or future-dated candle history before assigning a research s
   const future=analyzeSetupResearch({candles:candles(180),dailyCandles:futureDaily,tick:tick(now),setup:{side:'LONG',breakoutLevel:100},now});
   assert.equal(future.status,'INCOMPLETE');
   assert.ok(future.reason.includes('daily candle'));
+});
+
+
+test('global scanner ranking puts higher complete research quality before plan lifecycle status',()=>{
+  const rows=[
+    {status:'PLAN_CONFIRMED_READ_ONLY',research:{status:'COMPLETE',qualityScore:61},rr:2},
+    {status:'WAITING_FOR_FRESH_OPTION_TICK',research:{status:'COMPLETE',qualityScore:88},rr:2},
+    {status:'PLAN_CONFIRMED_READ_ONLY',research:{status:'INCOMPLETE',qualityScore:null},rr:2}
+  ];
+  const ranked=rankResearchResults(rows);
+  assert.equal(ranked[0].research.qualityScore,88);
+  assert.equal(ranked[1].research.qualityScore,61);
+  assert.equal(ranked[2].research.status,'INCOMPLETE');
 });

@@ -17,6 +17,7 @@ import { buildFnoUniverse, buildLiveFnoMovers, selectFairSubscriptionBatch, summ
 import { createStrategyPlanStore, evaluateActivePlanLifecycle } from './strategy-plan-store.js';
 import { detectNineStrategySetup, evaluateNineStrategies } from './strategy-engine.js';
 import { evaluateIndexMarketRegime, unavailableMarketRegime } from './market-regime.js';
+import { rankResearchResults } from './ai-research-engine.js';
 import { selectNearestOptionContract, selectNearestOptionContracts, completedDailyCandles, strategyCandidateKey } from './strategy-scanner.js';
 import 'dotenv/config';
 import express from 'express';
@@ -997,7 +998,7 @@ async function refreshTopGainerOptionWatches(rows){
 function setStrategyScanResult(item){
  if(item.futureSymbol)console.info('GV2VPD strategy candidate decision.',JSON.stringify({underlying:item.underlying||null,futureSymbol:item.futureSymbol,status:item.status||'UNKNOWN',strategy:item.strategy||null,contract:item.contract||null,reason:item.reason||null,entry:item.entry??null,stopLoss:item.stopLoss??null,target:item.target??null,rr:item.rr??null,updatedAt:item.updatedAt||new Date().toISOString()}));
  const key=item.underlying||item.futureSymbol||'scanner';
- strategyScanLastResults=[item,...strategyScanLastResults.filter(x=>(x.underlying||x.futureSymbol)!==key)].sort((a,b)=>Number(b.status==='PLAN_CONFIRMED_READ_ONLY')-Number(a.status==='PLAN_CONFIRMED_READ_ONLY')||Number(b.research?.qualityScore??-1)-Number(a.research?.qualityScore??-1)||Number(b.rr||0)-Number(a.rr||0)||String(b.verifiedAt||b.updatedAt||'').localeCompare(String(a.verifiedAt||a.updatedAt||''))).slice(0,3);
+ strategyScanLastResults=rankResearchResults([item,...strategyScanLastResults.filter(x=>(x.underlying||x.futureSymbol)!==key)]).slice(0,3);
 }
 async function refreshStrategyActivePlans(force=false){
  if(!strategyPlanStore){strategyLedgerRuntimeReady=false;return{ok:false,plans:[]};}

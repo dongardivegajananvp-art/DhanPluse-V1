@@ -65,11 +65,11 @@ function renderStrategyScanner(data){
  for(let index=0;index<rows.length;index++){
   const item=rows[index];
   const card=document.createElement('article');card.className='strategy-result';
-  const title=document.createElement('b');title.textContent=(index===0&&item.status==='PLAN_CONFIRMED_READ_ONLY'?'#1 BEST SETUP · ':'#'+(index+1)+' · ')+(item.strategy||'STRATEGY CHECK').replaceAll('_',' ')+' · '+String(item.status||'WAIT').replaceAll('_',' ');
+  const title=document.createElement('b');title.textContent=(index===0&&item.research?.status==='COMPLETE'?'#1 AI RESEARCH LEADER · ':'#'+(index+1)+' · ')+(item.strategy||'STRATEGY CHECK').replaceAll('_',' ')+' · '+String(item.status||'WAIT').replaceAll('_',' ');
   const detail=document.createElement('span');
   const contract=item.contract?item.contract+' · '+(item.optionSide||'')+' · '+(item.expiry||'')+' · STRIKE '+(item.strike??'—'):'';
   const levels=item.entry!==undefined?'PREMIUM '+fmt(item.premium)+' · ENTRY '+fmt(item.entry)+' · SL '+fmt(item.stopLoss)+' · TARGET '+fmt(item.target)+' · RR '+item.rr+(item.verifiedAt?' · '+new Date(item.verifiedAt).toLocaleTimeString('en-IN'):''):'';
-  const research=item.research?(item.research.status==='COMPLETE'?'AI RESEARCH '+item.research.grade+' · '+item.research.qualityScore+'/100 · QUALITY SCORE, NOT WIN PROBABILITY · '+(item.research.evidence||[]).slice(0,3).join(', ')+(item.research.riskFlags?.length?' · RISKS: '+item.research.riskFlags.slice(0,2).join(', '):''):'AI RESEARCH PENDING · '+(item.research.reason||'Full verified research context unavailable')):'';
+  const research=item.research?(item.research.status==='COMPLETE'?'AI RESEARCH '+item.research.grade+' · '+item.research.qualityScore+'/100 · QUALITY SCORE, NOT WIN PROBABILITY · '+(item.research.evidence||[]).slice(0,3).join(', ')+(item.research.riskFlags?.length?' · RISKS: '+item.research.riskFlags.slice(0,2).join(', '):'')+(item.research.missingEvidence?.length?' · MISSING: '+item.research.missingEvidence.slice(0,1).join(', '):''):'AI RESEARCH PENDING · '+(item.research.reason||'Full verified research context unavailable')):'';
   detail.textContent=[item.underlying||item.futureSymbol||'',contract,levels,research,item.reason||''].filter(Boolean).join(' | ');
   card.append(title,detail);results.append(card);
  }

@@ -59,3 +59,6 @@ The workstation reads and writes the existing AES-256-GCM encrypted `dhanpulse_f
 - Ranks eligible NSE strategy candidates using completed FYERS daily candles, 15-minute bars derived only from complete contiguous 5-minute FYERS candles, and fresh exchange ticks, fresh exchange ticks, momentum, breakout candle quality, volume expansion and the verified index regime when available.
 - Displays a 0–100 research-quality score, grade, supporting evidence and risk flags. The score is not a probability of profit and never overrides the fresh-data, option-contract, Entry/SL/Target, minimum 1:2 RR or order-safety gates.
 - If research inputs are incomplete, the layer reports RESEARCH PENDING and does not manufacture a score. Existing strategy behavior remains the fallback when the research layer is not enabled.
+
+
+- NSE automatic scanner hardening: a candidate cannot advance to option verification unless the fresh daily/15-minute/5-minute research result is COMPLETE. Incomplete research is reported as DATA UNAVAILABLE / NO TRADE. Scanner-wide Top 3 ordering is led by research quality; confirmed-plan status is only a tie-breaker. MCX remains on its separate unchanged path.
