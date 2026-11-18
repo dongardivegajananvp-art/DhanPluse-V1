@@ -140,5 +140,6 @@ test('reports exact recent 5-minute contiguous suffix when research history has 
   const result=analyzeSetupResearch({candles:intraday,dailyCandles:daily,tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},now});
   assert.equal(result.status,'INCOMPLETE');
   assert.match(result.reason,/received 180 valid rows, contiguous suffix \d+/);
+  assert.match(result.reason,/latest gap .* -> .* \(\d+s\)/);
   assert.ok(Number(result.reason.match(/contiguous suffix (\d+)/)?.[1])<50);
 });
