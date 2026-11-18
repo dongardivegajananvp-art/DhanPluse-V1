@@ -14,7 +14,7 @@ function optionFixture(){
   rows[23]={...rows[23],open:109.2,high:111,low:108.1,close:110.2};
   rows[24]={...rows[24],open:110,high:112,low:108.8,close:111};
   rows[25]={...rows[25],open:111,high:114,low:110,close:112.5};
-  rows[26]={...rows[26],open:112,high:116,low:111,close:113};
+  rows[26]={...rows[26],open:112,high:117.5,low:111,close:113};
   rows[27]={...rows[27],open:112,high:114,low:110,close:111.5};
   rows[28]={...rows[28],open:111,high:113,low:109,close:110.5};
   rows[29]={...rows[29],open:110,high:112,low:109,close:110.4};
