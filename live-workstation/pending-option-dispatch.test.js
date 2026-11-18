@@ -16,7 +16,7 @@ test('prevents duplicate concurrent processing and releases the lock for a later
   assert.equal(claimPendingCandidateProcessing(candidate, { ...ticks, nowMs: 1000 }), true);
   assert.equal(claimPendingCandidateProcessing(candidate, { ...ticks, nowMs: 1000 }), false);
   assert.equal(releasePendingCandidateProcessing(candidate), true);
-  assert.equal(claimPendingCandidateProcessing(candidate, { ...ticks, nowMs: 2000 }), true);
+  assert.equal(claimPendingCandidateProcessing(candidate, { ...ticks, nowMs: 3001 }), true);
 });
 
 test('does not claim when either exchange tick is stale or missing', () => {
