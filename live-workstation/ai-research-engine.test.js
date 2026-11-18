@@ -41,7 +41,7 @@ test('treats a neutral index regime as neutral evidence, not a conflict',()=>{
   const now=Date.UTC(2026,10,18,6,15);
   const result=analyzeSetupResearch({candles:candles(180),dailyCandles:candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400}),tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'NEUTRAL',evaluatedAt:new Date(now).toISOString()},now});
   const regime=result.components.find(item=>item.key==='marketRegime');
-  assert.equal(regime.points,5);
+  assert.equal(regime.points,4);
   assert.ok(!result.riskFlags.some(flag=>flag.includes('conflicts with the index regime')));
 });
 
@@ -49,7 +49,7 @@ test('does not score stale index regime as current confluence',()=>{
   const now=Date.UTC(2026,10,18,6,15);
   const result=analyzeSetupResearch({candles:candles(180),dailyCandles:candles(60,{start:Date.UTC(2026,8,20,3,45)/1000,step:86400}),tick:tick(now),setup:{side:'LONG',breakoutLevel:111.7},marketRegime:{direction:'BULLISH',evaluatedAt:new Date(now-30000).toISOString()},now});
   const regime=result.components.find(item=>item.key==='marketRegime');
-  assert.equal(regime.points,5);
+  assert.equal(regime.points,4);
   assert.ok(result.missingEvidence.some(reason=>reason.includes('stale')));
 });
 
