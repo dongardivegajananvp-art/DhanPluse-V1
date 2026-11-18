@@ -52,3 +52,10 @@ The workstation reads and writes the existing AES-256-GCM encrypted `dhanpulse_f
 - The service worker caches only the static app shell and offline fallback. All `/api/` requests bypass the cache; quotes, exchange timestamps, candles, option premiums, signals, positions and orders are never stored for offline display.
 - When offline, the fallback explicitly displays `NO LIVE DATA · NO TRADE`. Reconnect is required before FYERS data can be verified.
 - No new backend, site, login, FYERS session or order capability is introduced by the PWA shell.
+
+
+## NSE AI research upgrade (read-only)
+- Adds a deterministic, explainable quantitative research layer over the existing nine-strategy engine; it does not replace strategy rules or use a paid external AI API.
+- Ranks eligible NSE strategy candidates using completed FYERS daily candles, 15-minute bars derived only from complete contiguous 5-minute FYERS candles, and fresh exchange ticks, fresh exchange ticks, momentum, breakout candle quality, volume expansion and the verified index regime when available.
+- Displays a 0–100 research-quality score, grade, supporting evidence and risk flags. The score is not a probability of profit and never overrides the fresh-data, option-contract, Entry/SL/Target, minimum 1:2 RR or order-safety gates.
+- If research inputs are incomplete, the layer reports RESEARCH PENDING and does not manufacture a score. Existing strategy behavior remains the fallback when the research layer is not enabled.

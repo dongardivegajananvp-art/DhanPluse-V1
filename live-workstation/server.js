@@ -997,7 +997,7 @@ async function refreshTopGainerOptionWatches(rows){
 function setStrategyScanResult(item){
  if(item.futureSymbol)console.info('GV2VPD strategy candidate decision.',JSON.stringify({underlying:item.underlying||null,futureSymbol:item.futureSymbol,status:item.status||'UNKNOWN',strategy:item.strategy||null,contract:item.contract||null,reason:item.reason||null,entry:item.entry??null,stopLoss:item.stopLoss??null,target:item.target??null,rr:item.rr??null,updatedAt:item.updatedAt||new Date().toISOString()}));
  const key=item.underlying||item.futureSymbol||'scanner';
- strategyScanLastResults=[item,...strategyScanLastResults.filter(x=>(x.underlying||x.futureSymbol)!==key)].sort((a,b)=>Number(b.status==='PLAN_CONFIRMED_READ_ONLY')-Number(a.status==='PLAN_CONFIRMED_READ_ONLY')||Number(b.rr||0)-Number(a.rr||0)||String(b.verifiedAt||b.updatedAt||'').localeCompare(String(a.verifiedAt||a.updatedAt||''))).slice(0,3);
+ strategyScanLastResults=[item,...strategyScanLastResults.filter(x=>(x.underlying||x.futureSymbol)!==key)].sort((a,b)=>Number(b.status==='PLAN_CONFIRMED_READ_ONLY')-Number(a.status==='PLAN_CONFIRMED_READ_ONLY')||Number(b.research?.qualityScore??-1)-Number(a.research?.qualityScore??-1)||Number(b.rr||0)-Number(a.rr||0)||String(b.verifiedAt||b.updatedAt||'').localeCompare(String(a.verifiedAt||a.updatedAt||''))).slice(0,3);
 }
 async function refreshStrategyActivePlans(force=false){
  if(!strategyPlanStore){strategyLedgerRuntimeReady=false;return{ok:false,plans:[]};}
@@ -1064,12 +1064,12 @@ async function processPendingStrategyCandidate(candidate){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:candleCheck.reason,strategy:candidate.setup.strategy});
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_option_candles_rejected'});return true;
   }
-  const refreshedSetup=detectNineStrategySetup({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now()});
+  const refreshedSetup=detectNineStrategySetup({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now(),researchEnabled:true,marketRegime:candidate.marketRegime||marketRegime});
   if(refreshedSetup.status!=='UNDERLYING_SETUP_CONFIRMED'||!sameStrategyConfirmation(candidate.setup,refreshedSetup)){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'NO_TRADE',reason:'Underlying strategy confirmation changed or expired while waiting for the option tick',strategy:candidate.setup.strategy});
    strategyPendingCandidates.delete(candidate.key);strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_underlying_recheck_failed'});return true;
   }
-  const evaluated=evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,optionCandles:optionHistory.candles,optionTick:currentOptionTick,contract:candidate.contract,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now()});
+  const evaluated=evaluateNineStrategies({underlyingCandles:underlyingHistory.candles,underlyingTick:currentUnderlyingTick,optionCandles:optionHistory.candles,optionTick:currentOptionTick,contract:candidate.contract,dailyCandles:candidate.dailyCandles,isTopGainer:candidate.isTopGainer,now:Date.now(),researchEnabled:true,marketRegime:candidate.marketRegime||marketRegime});
   if(evaluated.status==='WAITING_FOR_OPTION_BREAKOUT'){
    setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:evaluated.status,reason:evaluated.reason,strategy:candidate.setup.strategy,contract:candidate.contract.symbol,updatedAt:new Date().toISOString()});
    // Keep the option subscribed and candidate pending for the existing 120-second
@@ -1092,7 +1092,7 @@ async function processPendingStrategyCandidate(candidate){
   const saved=await strategyPlanStore.saveConfirmedPlan({planId,strategy:evaluated.strategy,underlying:candidate.underlyingSymbol,contract:candidate.contract.symbol,optionSide:candidate.contract.side,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:finalOptionTick.price,tickSize:candidate.contract.tickSize,entry:evaluated.entry,stopLoss:evaluated.stopLoss,target:evaluated.target,rr:evaluated.rr,underlyingExchangeTime:finalUnderlyingTick.exchangeTime,optionExchangeTime:finalOptionTick.exchangeTime,underlyingReceivedAt:finalUnderlyingTick.receivedAt,optionReceivedAt:finalOptionTick.receivedAt,underlyingCandleTime:String(evaluated.confirmedAt),optionCandleTime:String(evaluated.optionCandleTime)});
   if(saved.ok){
    await refreshStrategyActivePlans(true);
-   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'PLAN_CONFIRMED_READ_ONLY',strategy:evaluated.strategy,optionSide:candidate.contract.side,contract:candidate.contract.symbol,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:finalOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,planId:saved.planId,verifiedAt:new Date().toISOString()});
+   setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:'PLAN_CONFIRMED_READ_ONLY',strategy:evaluated.strategy,optionSide:candidate.contract.side,contract:candidate.contract.symbol,expiry:candidate.contract.expiry,strike:candidate.contract.strike,premium:finalOptionTick.price,entry:saved.entry,stopLoss:saved.stopLoss,target:saved.target,rr:saved.rr,planId:saved.planId,research:evaluated.research||candidate.setup.research||null,verifiedAt:new Date().toISOString()});
   }else setStrategyScanResult({underlying:candidate.underlyingSymbol,futureSymbol:candidate.futureSymbol,status:saved.status||'NO_TRADE',reason:saved.reason,strategy:evaluated.strategy});
   strategyPendingCandidates.delete(candidate.key);if(!strategyActivePlans.some(plan=>plan.contract===candidate.contract.symbol))strategyOptionSymbols.delete(candidate.contract.symbol);syncSocketSubscriptions({reason:'strategy_candidate_processed'});return true;
  }catch(error){
@@ -1177,7 +1177,7 @@ async function runAutomaticStrategyScan(){
     return;
    }
    strategyScanLastError='';
-   const setup=detectNineStrategySetup({underlyingCandles:history.candles,underlyingTick:currentTick,dailyCandles:daily.ok?daily.candles:[],isTopGainer,now:Date.now()});
+   const setup=detectNineStrategySetup({underlyingCandles:history.candles,underlyingTick:currentTick,dailyCandles:daily.ok?daily.candles:[],isTopGainer,now:Date.now(),researchEnabled:true,marketRegime});
    if(setup.status!=='UNDERLYING_SETUP_CONFIRMED'){
     if(setup.status==='DATA_UNAVAILABLE_NO_TRADE')setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:setup.status,reason:setup.reason,dailyDataStatus:daily.reason||'verified'});
     return;
@@ -1189,9 +1189,9 @@ async function runAutomaticStrategyScan(){
    if(!contract){setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'DATA_UNAVAILABLE_NO_TRADE',reason:'No active nearest-expiry ATM option contract passed FYERS Symbol Master validation',strategy:setup.strategy});return;}
    const key=strategyCandidateKey(row.underlyingSymbol,contract.symbol);
    if(strategyPendingCandidates.has(key))return;
-   strategyPendingCandidates.set(key,{key,futureSymbol,underlyingSymbol:row.underlyingSymbol,setup,contract,underlyingCandles:history.candles,dailyCandles:daily.ok?daily.candles:[],isTopGainer,createdAt:Date.now()});
+   strategyPendingCandidates.set(key,{key,futureSymbol,underlyingSymbol:row.underlyingSymbol,setup,marketRegime,contract,underlyingCandles:history.candles,dailyCandles:daily.ok?daily.candles:[],isTopGainer,createdAt:Date.now()});
    strategyOptionSymbols.add(contract.symbol);syncSocketSubscriptions({reason:'strategy_option_candidate'});
-   setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'WAITING_FOR_FRESH_OPTION_TICK',strategy:setup.strategy,optionSide,contract:contract.symbol,expiry:contract.expiry,strike:contract.strike,reason:'Underlying setup verified; waiting for fresh option exchange tick and completed option candles'});
+   setStrategyScanResult({underlying:row.underlyingSymbol,futureSymbol,status:'WAITING_FOR_FRESH_OPTION_TICK',strategy:setup.strategy,optionSide,contract:contract.symbol,expiry:contract.expiry,strike:contract.strike,research:setup.research||null,reason:'Underlying setup verified; waiting for fresh option exchange tick and completed option candles'});
    return;
   }
  }catch(error){strategyScanLastError=String(error?.message||error).slice(0,180);if(Number(error?.statusCode)!==429)console.warn('Automatic nine-strategy scan paused safely.',strategyScanLastError);}
