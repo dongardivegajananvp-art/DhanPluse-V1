@@ -6,18 +6,28 @@ class FakePool {
   constructor() { this.plans = []; this.closed = false; }
   async query(sql, values = []) {
     if (sql.includes('CREATE TABLE') || sql.includes('CREATE UNIQUE INDEX') || sql.includes('CREATE INDEX') || sql.includes('ALTER TABLE')) return { rows: [] };
-    if (sql.includes('SELECT COUNT(*)')) return { rows: [{ count: this.plans.filter(p => p.status === 'ACTIVE').length }] };
+    if (sql.includes('SELECT COUNT(*)::int AS count')) return { rows: [{ count: this.plans.filter(p => p.status === 'ACTIVE').length }] };
     if (sql.includes('SELECT plan_id FROM')) {
       const found = this.plans.filter(p => p.status === 'ACTIVE' && (p.underlying === values[0] || p.contract === values[1]));
       return { rows: found.map(p => ({ plan_id: p.planId })) };
     }
     if (sql.includes('INSERT INTO gv2vpd_strategy_plans')) {
-      const [planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,underlyingCandleTime,optionCandleTime] = values;
+      const [planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,underlyingCandleTime,optionCandleTime,maxFavorablePrice,maxAdversePrice,riskModelVersion,targetHitRate,targetConfidenceLower,targetSampleSize,marketRegime,riskResearch] = values;
       if (this.plans.some(p => p.status === 'ACTIVE' && (p.underlying === underlying || p.contract === contract))) {
         const error = new Error('duplicate active plan'); error.code = '23505'; throw error;
       }
-      this.plans.push({ planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,underlyingCandleTime,optionCandleTime,status:'ACTIVE' });
+      this.plans.push({ planId,strategy,underlying,contract,optionSide,expiry,strike,premium,tickSize,entry,stopLoss,target,rr,underlyingExchangeTime,optionExchangeTime,underlyingReceivedAt,optionReceivedAt,underlyingCandleTime,optionCandleTime,maxFavorablePrice,maxAdversePrice,riskModelVersion,targetHitRate,targetConfidenceLower,targetSampleSize,marketRegime,riskResearch:JSON.parse(riskResearch),observedTicks:1,status:'ACTIVE' });
       return { rows: [] };
+    }
+    if (sql.includes('COUNT(*) FILTER')) {
+      const [strategy,side,targetRr]=values;
+      const rows=this.plans.filter(p=>p.underlying?.startsWith('NSE:')&&p.strategy===strategy&&p.optionSide===side&&Math.abs(Number(p.rr)-Number(targetRr))<=0.25);
+      return {rows:[{wins:rows.filter(p=>p.status==='TARGET_HIT').length,losses:rows.filter(p=>p.status==='STOP_LOSS_HIT').length}]};
+    }
+    if (sql.includes('UPDATE gv2vpd_strategy_plans') && sql.includes('max_favorable_price')) {
+      const [id,price]=values;const p=this.plans.find(x=>x.planId===id&&x.status==='ACTIVE');
+      if(p){p.maxFavorablePrice=Math.max(Number(p.maxFavorablePrice??price),price);p.maxAdversePrice=Math.min(Number(p.maxAdversePrice??price),price);p.observedTicks=(p.observedTicks||0)+1;}
+      return{rows:p?[{plan_id:id}]:[]};
     }
     if (sql.includes('SELECT plan_id,strategy') && sql.includes('status IN')) return { rows: this.plans.filter(p => ['STOP_LOSS_HIT','TARGET_HIT','EXPIRED','CLOSED','CANCELLED'].includes(p.status)).slice(0,20).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
     if (sql.includes('SELECT plan_id,strategy')) return { rows: this.plans.filter(p => p.status === 'ACTIVE').slice(0,2).map(p => ({ ...p, stop_loss:p.stopLoss, option_side:p.optionSide, tick_size:p.tickSize, underlying_exchange_time:p.underlyingExchangeTime, option_exchange_time:p.optionExchangeTime, underlying_received_at:p.underlyingReceivedAt, option_received_at:p.optionReceivedAt, underlying_candle_time:p.underlyingCandleTime, option_candle_time:p.optionCandleTime })) };
@@ -118,18 +128,18 @@ test('SL/Target hit terminal status releases active slot but permanently retains
 test('ledger rejects plans below fixed 1:2 or with inverted Entry/SL/Target', async () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
   const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
-  assert.match((await store.saveConfirmedPlan(fixture(now,{rr:1.99}),now)).reason,/reward\/risk.*1:2/i);
+  assert.match((await store.saveConfirmedPlan(fixture(now,{rr:1.99}),now)).reason,/minimum 1:2 reward\/risk/i);
   assert.match((await store.saveConfirmedPlan(fixture(now,{entry:98,target:103}),now)).reason,/valid long-option risk plan/);
   await store.close();
 });
 
 
-test('ledger independently rejects chase beyond 0.5R, inconsistent 2R math and off-tick prices', async () => {
+test('ledger independently rejects chase beyond 0.5R, inconsistent adaptive RR math and off-tick prices', async () => {
   const now = Date.parse('2026-11-16T04:00:00Z');
   const store = createStrategyPlanStore({ databaseUrl: 'postgres://test', PoolClass: FakePool });
   assert.match((await store.saveConfirmedPlan(fixture(now,{premium:100.85}),now)).reason,/0.5R chase/i);
-  assert.match((await store.saveConfirmedPlan(fixture(now,{target:103.20}),now)).reason,/exactly two times/i);
-  assert.match((await store.saveConfirmedPlan(fixture(now,{rr:3}),now)).reason,/match the persisted/i);
+  assert.equal((await store.saveConfirmedPlan(fixture(now,{planId:'adaptive-target',underlying:'NSE:SBIN26NOVFUT',contract:'NSE:SBIN26NOV1000CE',target:103.20,rr:Number(((103.20-100.05)/(100.05-98.5)).toFixed(2))}),now)).status,'PLAN_PERSISTED');
+  assert.match((await store.saveConfirmedPlan(fixture(now,{target:104,rr:3}),now)).reason,/match persisted levels/i);
   assert.match((await store.saveConfirmedPlan(fixture(now,{premium:100.06}),now)).reason,/tick size/i);
   await store.close();
 });
@@ -188,4 +198,30 @@ test('ledger persists a verified MCX option plan with fixed 1:2 risk values', as
   assert.equal(listed.plans[0].contract,'MCX:CRUDEOIL26NOV7500CE');
   assert.deepEqual([saved.entry,saved.stopLoss,saved.target,saved.rr],[100.05,98.5,103.15,2]);
   await store.close();
+});
+
+test('NSE outcome calibration excludes MCX and only counts comparable target/stop outcomes',async()=>{
+ const now=Date.parse('2026-11-16T04:00:00Z');
+ const store=createStrategyPlanStore({databaseUrl:'postgres://test',PoolClass:FakePool});
+ const a=fixture(now,{planId:'nse-win',underlying:'NSE:INFY26NOVFUT',contract:'NSE:INFY26NOV1600CE'});
+ const b=fixture(now,{planId:'mcx-win',underlying:'MCX:CRUDEOIL26NOVFUT',contract:'MCX:CRUDEOIL26NOV7500CE'});
+ await store.saveConfirmedPlan(a,now);await store.saveConfirmedPlan(b,now);
+ await store.closePlan('nse-win','TARGET_HIT');await store.closePlan('mcx-win','TARGET_HIT');
+ const stats=await store.getNseOutcomeStats({strategy:a.strategy,optionSide:'CE',targetRr:2});
+ assert.deepEqual([stats.wins,stats.losses,stats.samples],[1,0,1]);
+ await store.close();
+});
+
+test('NSE plan observation records favourable/adverse option excursion without touching MCX plans',async()=>{
+ const now=Date.parse('2026-11-16T04:00:00Z');
+ const store=createStrategyPlanStore({databaseUrl:'postgres://test',PoolClass:FakePool});
+ const plan=fixture(now);await store.saveConfirmedPlan(plan,now);
+ const observed=await store.recordPlanObservation(plan.planId,101,now+1000);
+ assert.equal(observed.ok,true);
+ const [active]= (await store.listActivePlans()).plans;
+ assert.equal(active.max_favorable_price,undefined);
+ assert.equal(active.maxFavorablePrice,101);
+ assert.equal(active.maxAdversePrice,100.05);
+ assert.equal(active.observedTicks,2);
+ await store.close();
 });
